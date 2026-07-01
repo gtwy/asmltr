@@ -175,7 +175,7 @@ async function moderate(userMessage, resolved, meta = {}) {
 
 /** Send an admin/security alert via a configured command ($ASMLTR_ADMIN_ALERT_CMD).
  *  `{msg}` in the template is replaced with the message (else it's appended as one arg).
- *  No-op when unset. Example: ASMLTR_ADMIN_ALERT_CMD='message-owner {msg}'. */
+ *  No-op when unset. Example: ASMLTR_ADMIN_ALERT_CMD='notify-admin {msg}'. */
 // Parse ASMLTR_ADMIN_ALERT_SEND: JSON `{channel|instance_id, target?}`, or the shorthand
 // "channel" / "channel|target" (e.g. "telegram", "discord|<channelId>").
 function parseAlertRoute(s) {

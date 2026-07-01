@@ -18,6 +18,7 @@ const SCHEMA_VERSION = 1;
 const SURFACES = Object.freeze([
   'discord',
   'telegram',
+  'voice',       // voice-channel sessions (e.g. Discord voice / meetings)
   'eve-assistant-web',
   'eve-assistant-native',
   'mcp',
@@ -40,7 +41,7 @@ const EVENT_TYPES = Object.freeze([
   'session-start',       // a session began
   'session-end',         // a session ended
   'system-sample',       // a CPU/RAM/disk/load sample
-  'notification',        // an outbound notification was sent (notify-owner, etc.)
+  'notification',        // an outbound notification was sent (notify-admin, etc.)
   'control',             // a privileged control action (kill/stop/resume/claim/release)
 ]);
 

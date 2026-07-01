@@ -3,8 +3,8 @@
  * asmltr connector type: TELEGRAM (thin adapter — the eve-messaging replacement).
  *
  * Transport stays here (it's HOW Telegram works): polling, photo download,
- * sendMessage/Photo/Document, and the :3008 HTTP endpoints that message-owner,
- * send-photo-to-owner and asmltr-core's block-alert depend on. Everything else
+ * sendMessage/Photo/Document, and the :3008 HTTP endpoints that outbound helper scripts and
+ * asmltr-core's block-alert depend on. Everything else
  * (sessions, identity, moderation, system prompt) is the core's job: we just
  * build an envelope and render the reply.
  *

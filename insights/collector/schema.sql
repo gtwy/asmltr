@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS usage_rollup (
 );
 
 -- ---------------------------------------------------------------------------
--- Notifications feed (mirrors what notify-owner / message-* sent).
+-- Notifications feed (mirrors what an admin-notify hook sent).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS notifications (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -12,9 +12,9 @@
  * prompt (the MCP warning + client/owner boundary blocks) and POSTs the query
  * proxy. Instead it builds a normalized envelope and calls ctx.core.handle().
  * The core's trust framework + channel-awareness now own identity/authz/medium-
- * context, so NO systemPrompt is sent at all. The OAuth client→userId mapping is
- * preserved verbatim (owner-claude-web-2025 → owner, etc.) so that userId flows
- * through as the envelope sender and the core resolves trust from it.
+ * context, so NO systemPrompt is sent at all. Each OAuth client maps to a userId
+ * (via its `identity` in clients.json) which flows through as the envelope sender
+ * so the core resolves trust from it.
  *
  * conversation_key = mcp:<instanceId>:user:<userId>
  *
