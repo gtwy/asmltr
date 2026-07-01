@@ -25,6 +25,13 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // Self-gating sentinel: in a multi-agent channel the model emits ONLY this token when a
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
+// Control commands that change the bot's behavior — restricted to the bot's owner.
+const OWNER_ONLY_CMDS = new Set([
+  'silence', 'be quiet', 'quiet', 'shush', 'speak', 'unsilence', 'wake up', 'resume',
+  'mute', 'mute here', 'mute this channel', 'ignore this channel',
+  'unmute', 'unmute here', 'listen here', 'unmute this channel',
+  'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
+]);
 
 const meta = {
   type: 'discord',
@@ -175,6 +182,19 @@ async function start(ctx) {
   // Control commands are @-mention driven (universal — no hardcoded name). We strip the
   // mention; if what remains is a recognized command word we run it, otherwise we return
   // false and it's handled as a normal message. A bare @-mention is a normal message too.
+  // Is this author THIS bot's owner? = a full-trust (bypass_moderation) principal in the bot's
+  // own trust store (resolved via the core). Fail-secure: any error → not owner.
+  async function isOwner(message) {
+    try {
+      const r = await ctx.core.resolve({
+        channel: 'discord',
+        sender: { raw_id: String(message.author.id), raw_username: message.author.username },
+        context: { scope_id: message.guild ? `guild:${message.guild.id}` : `dm:${message.author.id}` },
+      });
+      return !!(r && r.bypass_moderation);
+    } catch (e) { ctx.log('owner check failed: ' + e.message); return false; }
+  }
+
   async function handleControlCommands(message) {
     // Addressed if @-mentioned directly OR via a role this bot holds (e.g. an "@agents"
     // role, so one ping can command every bot in a group chat at once).
@@ -184,6 +204,10 @@ async function start(ctx) {
     const cmd = message.content.replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
     const cid = message.channel.id;
     const me = client.user.username;
+    // State-changing commands are OWNER-ONLY (status/help stay open to anyone addressed).
+    if (OWNER_ONLY_CMDS.has(cmd) && !(await isOwner(message))) {
+      await message.channel.send('🔒 Only my owner can run that command.'); return true;
+    }
     switch (cmd) {
       case 'silence': case 'be quiet': case 'quiet': case 'shush':
         silenced = true; await message.channel.send(`🤐 Mention-only mode — I'll stay quiet unless @-mentioned. \`@${me} speak\` to restore.`); return true;

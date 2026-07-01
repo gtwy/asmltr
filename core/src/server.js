@@ -334,6 +334,9 @@ app.post('/v2/release', (req, res) => {
 });
 
 // --- trust framework CRUD (the dashboard Access page drives these) -----------
+// Read-only identity resolution (connectors use this to authorize owner-only actions).
+// Body: an envelope-shaped { channel, sender:{raw_id,raw_username,api_key}, context:{scope_id} }.
+app.post('/trust/resolve', (req, res) => { try { res.json(trust.resolve(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/trust/principals', (req, res) => res.json({ principals: trust.principals.list() }));
 app.get('/trust/principals/:id', (req, res) => { const p = trust.principals.get(req.params.id); return p ? res.json(p) : res.status(404).json({ error: 'not found' }); });
 app.post('/trust/principals', (req, res) => res.json(trust.principals.create(req.body)));

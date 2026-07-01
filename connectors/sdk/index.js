@@ -66,6 +66,32 @@ function makeCoreClient(coreUrl) {
         req.end();
       });
     },
+    // Read-only trust resolution (for connector-side authorization, e.g. owner-only commands).
+    resolve(envelope) {
+      return new Promise((resolve, reject) => {
+        const payload = JSON.stringify(envelope);
+        const req = lib.request({
+          hostname: u.hostname,
+          port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: '/trust/resolve',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+        }, (res) => {
+          let data = '';
+          res.setEncoding('utf8');
+          res.on('data', (c) => { data += c; });
+          res.on('end', () => {
+            let j = {};
+            try { j = data ? JSON.parse(data) : {}; } catch (_) {}
+            if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(j.error || `core ${res.statusCode}`));
+            resolve(j);
+          });
+        });
+        req.on('error', reject);
+        req.write(payload);
+        req.end();
+      });
+    },
   };
 }
 
