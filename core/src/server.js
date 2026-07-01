@@ -353,10 +353,18 @@ app.delete('/trust/grants/:gid', (req, res) => res.json({ ok: trust.grants.remov
 app.post('/trust/resolve', (req, res) => res.json(trust.resolve(req.body)));
 
 if (require.main === module) {
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
     console.log('substrate: local Agent SDK on Max subscription (NO ANTHROPIC_API_KEY path)');
   });
+  // Agent turns (research, tool loops) can run many minutes. Node's default 5-min
+  // server.requestTimeout would cut the connector→core call mid-turn (surfacing as
+  // "I hit an error processing that" on the channel), so we lift it. Localhost-only,
+  // and /v2/abort still allows a manual kill. Configurable via ASMLTR_CORE_REQUEST_TIMEOUT_MS
+  // (0 = unlimited, the default).
+  server.requestTimeout = Number(process.env.ASMLTR_CORE_REQUEST_TIMEOUT_MS || 0);
+  server.headersTimeout = 0;
+  server.timeout = 0;
 }
 
 module.exports = { app, handle, dispatch, bus };
