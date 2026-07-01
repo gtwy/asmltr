@@ -10,9 +10,11 @@
 const path = require('path');
 
 const CHIME = path.join(__dirname, 'assets', 'chime.ogg');
+const DRONE = path.join(__dirname, 'assets', 'drone.ogg');
 let V = null;
 const lib = () => (V || (V = require('@discordjs/voice')));
 const connections = new Map(); // guildId -> VoiceConnection
+const dronePlayers = new Map(); // guildId -> looping "working" drone player
 
 async function joinChannel(voiceChannel) {
   const { joinVoiceChannel, entersState, VoiceConnectionStatus } = lib();
@@ -123,6 +125,28 @@ async function speak(guildId, mp3Buffer) {
 
 function stopListening(guildId) { listening.delete(guildId); }
 
+// Soft looping "I'm working on it" drone — played while a turn is being generated, so the
+// speaker knows something is happening between the chime and the spoken reply.
+function startDrone(guildId) {
+  const conn = connections.get(guildId);
+  if (!conn) return;
+  stopDrone(guildId);
+  const { createAudioPlayer, createAudioResource, NoSubscriberBehavior, AudioPlayerStatus } = lib();
+  const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+  const loop = () => { try { player.play(createAudioResource(DRONE)); } catch (_) {} };
+  player.on(AudioPlayerStatus.Idle, loop); // re-play on end → loops until stopped
+  player.on('error', () => {});
+  loop();
+  conn.subscribe(player);
+  dronePlayers.set(guildId, player);
+}
+function stopDrone(guildId) {
+  const p = dronePlayers.get(guildId);
+  if (!p) return;
+  try { p.removeAllListeners(); p.stop(true); } catch (_) {}
+  dronePlayers.delete(guildId);
+}
+
 function leave(guildId) {
   const c = connections.get(guildId);
   if (!c) return false;
@@ -134,4 +158,4 @@ function leave(guildId) {
 
 const isConnected = (guildId) => connections.has(guildId);
 
-module.exports = { joinChannel, playChime, speak, leave, isConnected, startListening, stopListening };
+module.exports = { joinChannel, playChime, speak, leave, isConnected, startListening, stopListening, startDrone, stopDrone };
