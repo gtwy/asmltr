@@ -31,6 +31,7 @@ const OWNER_ONLY_CMDS = new Set([
   'mute', 'mute here', 'mute this channel', 'ignore this channel',
   'unmute', 'unmute here', 'listen here', 'unmute this channel',
   'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
+  'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
 ]);
 
 const meta = {
@@ -221,10 +222,14 @@ async function start(ctx) {
         engageAllBots = true; saveSettings(); await message.channel.send(`🤝 Engaging **all bots** — I'll now hear every bot in my channels, not just my allowlist. \`@${me} disengage-all-bots\` to revert.`); return true;
       case 'disengage-all-bots': case 'disengage all bots': case 'disengage all':
         engageAllBots = false; saveSettings(); await message.channel.send('🙅 Disengaged — back to my configured bot allowlist only.'); return true;
+      case 'join-voice': case 'join voice': case 'join vc': case 'join the voice':
+        await doJoinVoice(message); return true;
+      case 'leave-voice': case 'leave voice': case 'leave vc': case 'leave the voice':
+        await doLeaveVoice(message); return true;
       case 'status':
         await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**Muted here:** ${mutedChannels.has(cid) ? 'yes' : 'no'}`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`mute\` / \`unmute\` (this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`status\``); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`mute\` / \`unmute\` (this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`status\``); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
@@ -440,32 +445,33 @@ RESPONSE RULES:
 
   // Voice commands: "the assistant, join" (joins the author's voice channel + chimes + listens) / "the assistant, leave".
   // All voice work is sandboxed so it can never crash the text presence.
-  async function handleVoiceCommands(message) {
-    if (!message.guild) return false;
-    const c = (message.content || '').toLowerCase().trim();
-    const joinCmd = new RegExp(`^${WAKE}[,:]?\\s+(join|come)\\b`).test(c) || new RegExp(`\\b${WAKE}\\b[^.!?]*\\bjoin\\b[^.!?]*\\b(voice|call|channel|me|us|here)\\b`).test(c);
-    const leaveCmd = new RegExp(`^${WAKE}[,:]?\\s+leave\\b`).test(c) || new RegExp(`\\b${WAKE}\\b[^.!?]*\\bleave\\b[^.!?]*\\b(voice|call|channel)\\b`).test(c);
-    if (!joinCmd && !leaveCmd) return false;
+  // Join the requester's voice channel + start listening. Triggered by the `join-voice`
+  // command (@mention driven, in handleControlCommands).
+  async function doJoinVoice(message) {
+    if (!message.guild) return;
     let voice;
-    try { voice = require('./voice'); } catch (e) { ctx.log(`voice module load failed: ${e.message}`); return false; }
-    if (joinCmd) {
-      const vc = message.member?.voice?.channel;
-      if (!vc) { message.channel.send(`🎙️ Hop into a voice channel first, then say **"${NAME}, join"**.`).catch(() => {}); return true; }
-      try {
-        await voice.joinChannel(vc);
-        await voice.playChime(message.guild.id);
-        voiceText.set(message.guild.id, message.channel);
-        voice.startListening(message.guild.id, client, {
-          transcribe: sttTranscribe,
-          onUtterance: (name, text) => handleVoiceUtterance(message.guild.id, name, text),
-          log: (m) => ctx.log(`[voice] ${m}`),
-        });
-        message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. I'll transcribe everyone here as \`🗣️ name: …\`, and if you say **"${NAME}, …"** I'll chime and answer out loud. Say **"${NAME}, leave"** to disconnect.`).catch(() => {});
-      } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }
-      return true;
-    }
-    try { voiceText.delete(message.guild.id); const left = voice.leave(message.guild.id); message.channel.send(left ? '👋 Left the voice channel.' : "I'm not in a voice channel.").catch(() => {}); } catch (_) {}
-    return true;
+    try { voice = require('./voice'); } catch (e) { ctx.log(`voice module load failed: ${e.message}`); message.channel.send('⚠️ Voice module unavailable.').catch(() => {}); return; }
+    const vc = message.member?.voice?.channel;
+    if (!vc) { message.channel.send(`🎙️ Hop into a voice channel first, then \`@${client.user.username} join-voice\`.`).catch(() => {}); return; }
+    try {
+      await voice.joinChannel(vc);
+      await voice.playChime(message.guild.id);
+      voiceText.set(message.guild.id, message.channel);
+      voice.startListening(message.guild.id, client, {
+        transcribe: sttTranscribe,
+        onUtterance: (name, text) => handleVoiceUtterance(message.guild.id, name, text),
+        log: (m) => ctx.log(`[voice] ${m}`),
+      });
+      message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. I'll transcribe everyone here as \`🗣️ name: …\`, and if you say **"${NAME}, …"** out loud I'll chime and answer by voice. \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
+    } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }
+  }
+
+  async function doLeaveVoice(message) {
+    if (!message.guild) return;
+    let voice; try { voice = require('./voice'); } catch (_) { return; }
+    voiceText.delete(message.guild.id);
+    const left = voice.leave(message.guild.id);
+    message.channel.send(left ? '👋 Left the voice channel.' : "I'm not in a voice channel.").catch(() => {});
   }
 
   client.on('messageCreate', async (message) => {
@@ -473,8 +479,11 @@ RESPONSE RULES:
     if (message.author.bot && !isAllowedBot(message.author.username)) return;
     saveMemory(message, message.author.username, message.content);
     if (await handleControlCommands(message)) return;
-    if (await handleVoiceCommands(message)) return;
     if (mutedChannels.has(message.channel.id)) return; // channel muted — ignore normal traffic (mention-commands above still work)
+    // While in an active voice session for this guild, answer by VOICE only — don't ALSO run
+    // autonomous text participation (that caused a doubled reply: spoken + a text-channel reply).
+    // Direct @mentions still get a text reply; the voice path handles spoken utterances.
+    if (message.guild && voiceText.has(message.guild.id) && !message.mentions.has(client.user)) return;
     // Drop messages @-directed at OTHER specific users/bots (there ARE user mentions but none
     // is us) — those aren't for us. Passive name-drops (no @mention) and @us still flow through
     // to shouldRespondTo, so autonomous participation is preserved. No typing on discarded msgs.
