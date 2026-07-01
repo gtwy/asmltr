@@ -20,7 +20,12 @@ function run(BASE, CORE_BASE, TOKEN, A) {
   const CONTROL_TOKEN = process.env.ASMLTR_INSIGHTS_CONTROL_TOKEN || '';
   function ctlHeaders() { const h = { 'Content-Type': 'application/json' }; const tk = CONTROL_TOKEN || TOKEN; if (tk) h.Authorization = 'Bearer ' + tk; return h; }
 
-  const screen = blessed.screen({ smartCSR: true, title: 'asmltr' });
+  // alacritty's terminfo carries label caps (e.g. plab_norm) that blessed's
+  // terminfo compiler mis-parses and dumps to stderr as "Error on alacritty.<cap>".
+  // xterm-256color renders this dashboard identically and compiles clean, so map
+  // alacritty onto it; every other TERM is left untouched.
+  const term = /alacritty/.test(process.env.TERM || '') ? 'xterm-256color' : undefined;
+  const screen = blessed.screen({ smartCSR: true, title: 'asmltr', terminal: term });
   const grid = new contrib.grid({ rows: 12, cols: 12, screen });
 
   const sessTable = grid.set(0, 0, 8, 8, contrib.table, {
