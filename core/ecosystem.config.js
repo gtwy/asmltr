@@ -15,6 +15,7 @@ module.exports = {
         NODE_ENV: 'production',
         ASMLTR_CORE_PORT: process.env.ASMLTR_CORE_PORT || '3023',
         ASMLTR_COLLECTOR_URL: process.env.ASMLTR_COLLECTOR_URL || 'http://127.0.0.1:3017/ingest',
+        ASMLTR_MANAGER_URL: process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024',
         // NOTE: do NOT set ANTHROPIC_API_KEY here — execution must use the local Claude subscription.
       },
       // logs default to ~/.pm2/logs/asmltr-core-{out,error}.log

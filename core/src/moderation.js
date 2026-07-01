@@ -141,14 +141,38 @@ async function moderate(userMessage, resolved, meta = {}) {
 /** Send an admin/security alert via a configured command ($ASMLTR_ADMIN_ALERT_CMD).
  *  `{msg}` in the template is replaced with the message (else it's appended as one arg).
  *  No-op when unset. Example: ASMLTR_ADMIN_ALERT_CMD='message-owner {msg}'. */
+// Parse ASMLTR_ADMIN_ALERT_SEND: JSON `{channel|instance_id, target?}`, or the shorthand
+// "channel" / "channel|target" (e.g. "telegram", "discord|<channelId>").
+function parseAlertRoute(s) {
+  s = String(s || '').trim();
+  if (!s) return null;
+  if (s.startsWith('{')) { try { return JSON.parse(s); } catch { return null; } }
+  const [ch, target] = s.split('|');
+  return { channel: ch.trim(), ...(target ? { target: target.trim() } : {}) };
+}
+
+// Deliver an admin/security alert via ANY configured sink (each set one fires):
+//   1. ASMLTR_ADMIN_ALERT_SEND — route through a connector (any that advertises `outbound`)
+//      using the manager's /send. This reuses the channels you've already configured.
+//   2. ASMLTR_ADMIN_ALERT_CMD — a shell command ({msg} = text); good for email/webhooks/etc.
+// No-op when neither is set.
 function adminAlert(text) {
+  const route = parseAlertRoute(process.env.ASMLTR_ADMIN_ALERT_SEND);
+  if (route) {
+    const mgr = (process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024').replace(/\/$/, '');
+    const headers = { 'Content-Type': 'application/json' };
+    if (process.env.ASMLTR_MANAGER_TOKEN) headers.Authorization = 'Bearer ' + process.env.ASMLTR_MANAGER_TOKEN;
+    fetch(`${mgr}/send`, { method: 'POST', headers, body: JSON.stringify({ kind: 'text', text, ...route }) })
+      .catch((e) => console.error('[moderation] alert send failed:', e.message));
+  }
   const tmpl = process.env.ASMLTR_ADMIN_ALERT_CMD;
-  if (!tmpl) return;
-  try {
-    const safe = String(text).replace(/'/g, "'\\''");
-    const cmd = tmpl.includes('{msg}') ? tmpl.replace(/\{msg\}/g, `'${safe}'`) : `${tmpl} '${safe}'`;
-    execFile('sh', ['-c', cmd], () => {});
-  } catch (_) { /* best-effort */ }
+  if (tmpl) {
+    try {
+      const safe = String(text).replace(/'/g, "'\\''");
+      const cmd = tmpl.includes('{msg}') ? tmpl.replace(/\{msg\}/g, `'${safe}'`) : `${tmpl} '${safe}'`;
+      execFile('sh', ['-c', cmd], () => {});
+    } catch (_) { /* best-effort */ }
+  }
 }
 
 /** Notify the admin that an unauthorized request was blocked. */
