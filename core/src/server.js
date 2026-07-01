@@ -22,10 +22,14 @@ require('../../shared/loadenv'); // load <repo>/.env before anything reads confi
 // Headless-spawn env hygiene (mirrors eve-query-proxy's working recipe): allow
 // the SDK to spawn `claude` even when launched from inside a Claude session, and
 // keep nested spawning unblocked. Harmless under PM2 (these are usually unset).
-// NOTE: deliberately NO ANTHROPIC_API_KEY — execution stays on the Max subscription.
+// NOTE: deliberately NO ANTHROPIC_API_KEY — execution stays on the Claude subscription.
+// We STRIP it from the env so agent execution can never silently go metered, even if an
+// Anthropic key is configured for the moderation classifier (which resolves its key from
+// the secrets provider, not this env var — see core/src/moderation.js + docs/MODERATION.md).
 process.env.IS_SANDBOX = process.env.IS_SANDBOX || 'true';
 delete process.env.CLAUDECODE;
 delete process.env.CLAUDE_CODE_ENTRYPOINT;
+delete process.env.ANTHROPIC_API_KEY;
 
 const express = require('express');
 const { EventEmitter } = require('events');

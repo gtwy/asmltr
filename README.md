@@ -141,7 +141,7 @@ Each connector's full config schema is discoverable at `GET /types` on the manag
 - **Trust is default-deny.** Only principals seeded into the trust store (or added via the Access UI)
   get access; each carries capability grants. `bypass_moderation` = full trust. See `core/src/trust/`.
 - **Moderation** — every inbound message gets an LLM security screen before execution (strict mode for
-  low-trust principals). Configure the alert hook with `ASMLTR_ADMIN_ALERT_CMD`.
+  low-trust principals). Provider/model/key and alert routing are all configurable — see [docs/MODERATION.md](docs/MODERATION.md).
 - **Output redaction** — `shared/redact.js` masks tokens/keys/passwords/private-keys from replies on
   **public** surfaces (and for any non-full-trust recipient). Private DMs with a full-trust owner see raw output.
 - **Secrets never live in the repo.** They resolve at runtime through the pluggable provider

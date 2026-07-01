@@ -18,14 +18,57 @@ const OpenAI = require('openai');
 
 const MOD_LOG_DIR = process.env.ASMLTR_MOD_LOG_DIR || path.join(__dirname, '..', 'data', 'moderation-logs');
 
+// --- moderation model provider (configurable: openai | anthropic) ------------
+// The moderation LLM is a lightweight security CLASSIFIER, SEPARATE from the agent's
+// execution (which is always the local Claude subscription). So an Anthropic key MAY be
+// used here — but it must NOT be exposed as the ANTHROPIC_API_KEY env var (the core strips
+// that so agent execution never goes metered). Store the moderation key via the secrets
+// file/command, or point ASMLTR_MODERATION_KEY at a non-ANTHROPIC_API_KEY var. See docs/MODERATION.md.
+const MOD_PROVIDER = (process.env.ASMLTR_MODERATION_PROVIDER || 'openai').toLowerCase();
+const MOD_MODEL = process.env.ASMLTR_MODERATION_MODEL
+  || (MOD_PROVIDER === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-5-nano');
+const MOD_KEY_NAME = process.env.ASMLTR_MODERATION_KEY
+  || (MOD_PROVIDER === 'anthropic' ? 'anthropic_api_key' : 'openai_api_key');
+
+const getModKey = () => require('../../shared/secrets').get(MOD_KEY_NAME);
+
 let _openai = null;
 async function getOpenAIClient() {
-  if (!_openai) {
-    const secrets = require('../../shared/secrets');
-    const apiKey = (await secrets.get('openai_api_key')) || process.env.OPENAI_API_KEY;
-    _openai = new OpenAI({ apiKey });
-  }
+  if (!_openai) _openai = new OpenAI({ apiKey: await getModKey() });
   return _openai;
+}
+
+// pull the JSON object out of a model reply (tolerates code fences / surrounding prose)
+function extractJson(t) {
+  const s = t.indexOf('{'), e = t.lastIndexOf('}');
+  return JSON.parse(s >= 0 && e > s ? t.slice(s, e + 1) : t);
+}
+
+// Run the moderation classifier via the configured provider; returns the parsed assessment.
+async function runModeration(systemPrompt, userPrompt) {
+  if (MOD_PROVIDER === 'anthropic') {
+    const key = await getModKey();
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: MOD_MODEL,
+        max_tokens: 512,
+        system: systemPrompt + '\n\nReturn ONLY the JSON object — no prose, no code fences.',
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    });
+    if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const j = await r.json();
+    return extractJson((j.content || []).map((b) => b.text || '').join('').trim());
+  }
+  // openai (default)
+  const client = await getOpenAIClient();
+  const completion = await client.chat.completions.create({
+    model: MOD_MODEL,
+    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+  });
+  return extractJson(completion.choices[0].message.content.trim());
 }
 
 const NAME = process.env.ASSISTANT_NAME || 'the assistant';
@@ -96,15 +139,7 @@ async function moderate(userMessage, resolved, meta = {}) {
     : `USER: ${resolved.display_name}\nALLOWED: ${JSON.stringify(resolved.permissions)}\nREQUIRES APPROVAL: ${JSON.stringify(resolved.requires_approval)}\nFORBIDDEN: ${JSON.stringify(resolved.forbidden)}\n\nUSER'S ACTUAL MESSAGE:\n"${userMessage}"\n\nEvaluate ONLY this user message. Questions about past discussions = SAFE. Their own project = SAFE. Only block actual violations.`;
 
   try {
-    const client = await getOpenAIClient();
-    const completion = await client.chat.completions.create({
-      model: 'gpt-5-nano',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    });
-    const assessment = JSON.parse(completion.choices[0].message.content.trim());
+    const assessment = await runModeration(systemPrompt, userPrompt);
     const allowed = assessment.riskLevel <= 6;
     const monitored = assessment.riskLevel >= 4 && assessment.riskLevel <= 6;
 
