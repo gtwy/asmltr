@@ -11,6 +11,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const Database = require('better-sqlite3');
 
 const DB_PATH = process.env.ASMLTR_CORE_DB || path.join(__dirname, '..', 'data', 'eve-core.db');
@@ -43,11 +44,14 @@ const _insert = db.prepare(`
   INSERT INTO sessions (conversation_key, channel, idle_policy, created_at, last_activity_at, turn_count, working_dir)
   VALUES (@conversation_key, @channel, @idle_policy, @now, @now, 0, @working_dir)
 `);
-// Spawn/resume cwd for a session. Neutral default (/root) so general channel
-// the SDK loads the host's project context (CLAUDE.md) but NOT whatever project the core
-// process happens to live in. Resume must use the SAME cwd the session was born
-// in (that's how `claude --resume` locates it), so this is stored per-session.
-const DEFAULT_CWD = process.env.ASMLTR_SESSION_CWD || '/root';
+// Spawn/resume cwd for a session. Neutral default: the running user's home
+// (os.homedir()), so the SDK loads the host's project context (CLAUDE.md) but NOT
+// whatever project the core process happens to live in. That resolves to /root when
+// the core runs as root (the prior hardcoded value) and to the user's home otherwise.
+// A hardcoded /root made spawn() fail with EACCES for any non-root user, who can't
+// chdir into it. Override with ASMLTR_SESSION_CWD. Resume must use the SAME cwd the
+// session was born in (that's how `claude --resume` locates it), so it's per-session.
+const DEFAULT_CWD = process.env.ASMLTR_SESSION_CWD || os.homedir();
 const _setEngineId = db.prepare('UPDATE sessions SET engine_session_id = ?, last_activity_at = ? WHERE conversation_key = ?');
 const _touch = db.prepare('UPDATE sessions SET last_activity_at = ?, turn_count = turn_count + 1 WHERE conversation_key = ?');
 const _setClaim = db.prepare('UPDATE sessions SET claim_state = ?, claimed_by = ? WHERE conversation_key = ?');

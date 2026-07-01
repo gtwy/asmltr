@@ -18,7 +18,14 @@ try {
     if (eq < 0) continue;
     const k = line.slice(0, eq).trim();
     let v = line.slice(eq + 1).trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1); // quoted: literal, keep any '#' as part of the value
+    } else {
+      // unquoted: a '#' at the start or after whitespace begins an inline comment, so
+      // `.env.example` lines like `KEY=   # note` resolve to '' rather than the comment.
+      const c = v.search(/(^|\s)#/);
+      if (c >= 0) v = v.slice(0, c).trim();
+    }
     if (k && process.env[k] === undefined) process.env[k] = v;
   }
 } catch (_) { /* no .env — fine, rely on real environment */ }
