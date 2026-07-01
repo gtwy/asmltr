@@ -510,10 +510,18 @@ RESPONSE RULES:
     // autonomous text participation (that caused a doubled reply: spoken + a text-channel reply).
     // Direct @mentions still get a text reply; the voice path handles spoken utterances.
     if (message.guild && voiceText.has(message.guild.id) && !message.mentions.has(client.user)) return;
-    // Drop messages @-directed at OTHER specific users/bots (there ARE user mentions but none
-    // is us) — those aren't for us. Passive name-drops (no @mention) and @us still flow through
-    // to shouldRespondTo, so autonomous participation is preserved. No typing on discarded msgs.
-    if (ignoreOtherMentions && message.guild && message.mentions.users.size > 0 && !message.mentions.has(client.user)) return;
+    // Drop messages directed at ANOTHER specific agent — either an @-mention of another user/bot,
+    // OR a message that LEADS with another agent's name ("Moneo, …" — a plain name Discord does
+    // NOT turn into a real @-mention). Passive mid-sentence name-drops + anything addressing US
+    // still flow through to shouldRespondTo, so autonomous participation is preserved.
+    if (ignoreOtherMentions && message.guild) {
+      const c = (message.content || '').toLowerCase();
+      const addressesMe = message.mentions.has(client.user) || new RegExp(`^\\s*@?${WAKE}\\b`).test(c);
+      const escaped = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const leadsOtherAgent = allowedBotNames.some((n) => new RegExp(`^\\s*@?${escaped(n)}\\b`).test(c));
+      const directedElsewhere = (message.mentions.users.size > 0 && !message.mentions.has(client.user)) || leadsOtherAgent;
+      if (directedElsewhere && !addressesMe) return;
+    }
     if (silenced) { if (message.mentions.has(client.user)) await handleMessage(message, true); return; }
     if (shouldRespondTo(message)) await handleMessage(message, false);
   });
