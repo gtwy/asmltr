@@ -1,0 +1,57 @@
+# Serves the SPA and proxies API/socket to the host collector.
+# ${ASMLTR_INSIGHTS_TOKEN} is substituted at container start (envsubst) — the read
+# bearer stays server-side. Control routes need the separate control token + an
+# admins group; the read dashboard never calls them.
+# ${ASMLTR_MANAGER_TOKEN} is the connector-manager bearer (write/control plane,
+# host :3024) — also injected server-side so it never reaches the browser.
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # REST: inject the read bearer; forward the Authelia-resolved user.
+    location /api/ {
+        proxy_pass http://host.docker.internal:3017;
+        proxy_set_header Authorization "Bearer ${ASMLTR_INSIGHTS_TOKEN}";
+        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header Host $host;
+    }
+
+    # Connector manager (control plane). The manager serves at the root, so the
+    # trailing slash on proxy_pass strips the /manager/ prefix. Inject the
+    # manager bearer; forward the Authelia-resolved user for audit/authorization.
+    location /manager/ {
+        proxy_pass http://host.docker.internal:3024/;
+        proxy_set_header Authorization "Bearer ${ASMLTR_MANAGER_TOKEN}";
+        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header Host $host;
+    }
+
+    # Trust framework (the Access control plane) on the CORE. Like /api/, the
+    # core serves its routes at the root under /trust/... (e.g. /trust/principals)
+    # so there is NO trailing slash on proxy_pass — the /trust/ prefix is kept.
+    # Forward the Authelia-resolved user for audit/authorization. The core runs
+    # open on localhost today; when it grows a bearer, set ${ASMLTR_CORE_TOKEN}
+    # and uncomment the Authorization line below (injected server-side).
+    location /trust/ {
+        proxy_pass http://host.docker.internal:3023;
+        # proxy_set_header Authorization "Bearer ${ASMLTR_CORE_TOKEN}";
+        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header Host $host;
+    }
+
+    # socket.io (websocket upgrade)
+    location /socket.io/ {
+        proxy_pass http://host.docker.internal:3017;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Authorization "Bearer ${ASMLTR_INSIGHTS_TOKEN}";
+    }
+
+    # SPA history fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

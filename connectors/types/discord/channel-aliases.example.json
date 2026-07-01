@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy to channel-aliases.json (gitignored). Maps friendly names → Discord channel IDs for the outbound /send target. Optional.",
+  "aliases": {
+    "general": "000000000000000000",
+    "alerts": "111111111111111111"
+  },
+  "channels": {
+    "000000000000000000": { "server": "My Server", "channel": "general", "description": "Team general channel" }
+  }
+}

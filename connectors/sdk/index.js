@@ -1,0 +1,106 @@
+'use strict';
+/**
+ * asmltr connector SDK — the contract + context every connector type plugin uses.
+ *
+ * A TYPE plugin (connectors/types/<type>/index.js) exports:
+ *   module.exports = {
+ *     meta: { type, displayName, supportsMultiple, capabilities, credentialKeys, configSchema },
+ *     async start(ctx) -> { stop():Promise, health():object }   // long-running connector instance
+ *   }
+ *
+ * The runtime harness builds `ctx` and calls start(); the manager runs one OS
+ * process per INSTANCE (isolation — one connector crashing can't take others down).
+ *
+ * ctx = {
+ *   instanceId, instanceName, config,
+ *   core:    { handle(envelope) -> actions[] },   // posts to asmltr-core /v2/handle
+ *   secrets: { get(bwsKey) -> value },            // Bitwarden, cached
+ *   emit(partialEvent),                           // telemetry to the collector
+ *   log(...args),
+ *   signal,                                       // AbortSignal, fired on shutdown
+ * }
+ */
+
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileP = promisify(execFile);
+const http = require('http');
+const https = require('https');
+const { buildEvent } = require('../../shared/events');
+
+/**
+ * Client to asmltr-core. handle() runs one turn and returns outbound actions.
+ *
+ * Uses raw http(s), NOT global fetch: a single turn (deep research, tool-heavy
+ * GitHub issues) can hold the connection open for many minutes, but Node's fetch
+ * (undici) aborts with "fetch failed" at its ~300s headers timeout while the core
+ * keeps running — the GitHub 5-min freeze / MCP long-research cutoff (2026-06-24).
+ * http.request imposes no response timeout, so long turns complete.
+ */
+function makeCoreClient(coreUrl) {
+  const u = new URL(coreUrl);
+  const lib = u.protocol === 'https:' ? https : http;
+  return {
+    handle(envelope) {
+      return new Promise((resolve, reject) => {
+        const payload = JSON.stringify(envelope);
+        const req = lib.request({
+          hostname: u.hostname,
+          port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: u.pathname + u.search,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+        }, (res) => {
+          let data = '';
+          res.setEncoding('utf8');
+          res.on('data', (c) => { data += c; });
+          res.on('end', () => {
+            let j = {};
+            try { j = data ? JSON.parse(data) : {}; } catch (_) {}
+            if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(j.error || `core ${res.statusCode}`));
+            resolve(j.actions || []);
+          });
+        });
+        req.on('error', reject);
+        req.write(payload);
+        req.end();
+      });
+    },
+  };
+}
+
+/** Secret accessor — pluggable provider (env / file / command). See shared/secrets.js. */
+function makeSecrets() {
+  return require('../../shared/secrets');
+}
+
+/** Telemetry emitter → collector /ingest (best-effort, never blocks the connector). */
+function makeEmitter(collectorUrl, token, defaults) {
+  return function emit(partial) {
+    let evt;
+    try { evt = buildEvent({ ...defaults, ...partial }); } catch (e) { return; }
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2000);
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    fetch(collectorUrl, { method: 'POST', headers, body: JSON.stringify(evt), signal: ctrl.signal })
+      .catch(() => {}).finally(() => clearTimeout(t));
+  };
+}
+
+/** Build the ctx handed to a plugin's start(). */
+function buildContext({ instanceId, instanceName, type, config, coreUrl, collectorUrl, token, signal }) {
+  const emit = makeEmitter(collectorUrl, token, { surface: type, source: `connector:${instanceId}` });
+  return {
+    instanceId,
+    instanceName,
+    config: config || {},
+    core: makeCoreClient(coreUrl),
+    secrets: makeSecrets(),
+    emit,
+    log: (...a) => console.log(`[${type}:${instanceName || instanceId}]`, ...a),
+    signal,
+  };
+}
+
+module.exports = { makeCoreClient, makeSecrets, makeEmitter, buildContext };

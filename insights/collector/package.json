@@ -1,0 +1,16 @@
+{
+  "name": "asmltr-insights-collector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "asmltr-insights telemetry collector — ingest, reconcile, sample, serve",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check db.js && node --check reconcile.js && node --check sampler.js && node --check tailer.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "express": "^4.22.2",
+    "socket.io": "^4.7.0"
+  }
+}

@@ -1,0 +1,36 @@
+# asmltr-insights dashboard — Docker, behind Traefik + Authelia 2FA.
+# The collector runs on the HOST under PM2 (not here): it signals host pids and
+# spawns claude. This compose is ONLY the static dashboard + its nginx proxy.
+#
+# Bring-up is a go-live step (see ../CUTOVER.md): needs DNS for the subdomain,
+# the Authelia access rule, and ASMLTR_INSIGHTS_TOKEN in the environment.
+services:
+  asmltr-insights-dashboard:
+    build: ./dashboard
+    image: asmltr-insights-dashboard:latest
+    container_name: asmltr-insights-dashboard
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - traefik-network
+    environment:
+      # read service bearer — must match the collector's ASMLTR_INSIGHTS_TOKEN (from BWS)
+      - ASMLTR_INSIGHTS_TOKEN=${ASMLTR_INSIGHTS_TOKEN:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-network"
+      - "traefik.http.routers.asmltr-insights.rule=Host(`insights.example.com`)"
+      - "traefik.http.routers.asmltr-insights.entrypoints=websecure"
+      - "traefik.http.routers.asmltr-insights.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.asmltr-insights.middlewares=authelia@docker"
+      - "traefik.http.services.asmltr-insights.loadbalancer.server.port=80"
+
+networks:
+  traefik-network:
+    external: true

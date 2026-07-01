@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to clients.json (gitignored) to pre-register OAuth clients. Clients may also self-register at runtime via Dynamic Client Registration (RFC 7591). Each client's `identity` maps its OAuth login to a trust principal (see core/src/trust).",
+  "clients": [
+    {
+      "client_id": "my-claude-web",
+      "client_secret": "CHANGE-ME-long-random-string",
+      "client_name": "My Claude Web",
+      "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+      "identity": { "userId": "owner", "username": "owner" }
+    },
+    {
+      "client_id": "my-claude-code-cli",
+      "client_secret": "CHANGE-ME-another-random-string",
+      "client_name": "My Claude Code CLI",
+      "redirect_uris": ["http://localhost/callback", "http://127.0.0.1/callback"],
+      "identity": { "userId": "teammate", "username": "teammate" }
+    }
+  ]
+}

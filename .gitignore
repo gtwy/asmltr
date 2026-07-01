@@ -1,0 +1,29 @@
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
+
+# Local data stores (SQLite + JSONL event logs) — never commit
+core/data/
+insights/collector/data/
+connectors/manager/data/
+*.db
+*.db-wal
+*.db-shm
+events-*.jsonl
+
+# build output
+insights/dashboard/dist/
+
+# MCP pre-registered OAuth clients (secrets) — commit only clients.example.json
+connectors/types/mcp/clients.json
+
+# Trust store seed (may contain personal identifiers) — commit only seed.example.json
+core/src/trust/seed.json
+
+# Discord channel aliases (real channel ids) — commit only the example
+connectors/types/discord/channel-aliases.json
+
+# Private per-install working notes
+CLAUDE.local.md
