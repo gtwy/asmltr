@@ -50,6 +50,7 @@ const meta = {
       allowed_bot_names: { type: 'array', title: 'Bot usernames to engage (else all bots ignored)', items: { type: 'string' }, default: [] },
       presence_text: { type: 'string', title: 'Presence/activity text', default: '' },
       elevenlabs_key_name: { type: 'string', title: 'Secret key name for ElevenLabs (voice)', default: 'elevenlabs_api_key' },
+      stt_language: { type: 'string', title: 'Voice STT language (ISO code; empty = auto-detect)', default: 'en' },
     },
   },
 };
@@ -294,6 +295,9 @@ RESPONSE RULES:
     const fd = new FormData();
     fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'utt.wav');
     fd.append('model', 'gpt-4o-transcribe');
+    const lang = cfg.stt_language === undefined ? 'en' : cfg.stt_language;
+    if (lang) fd.append('language', lang); // constrain output → stops foreign-character hallucinations
+    fd.append('prompt', `Casual voice-chat speech; the speaker may address an assistant named ${NAME}.`); // bias toward the wake word
     const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: fd });
     if (!r.ok) throw new Error(`stt ${r.status}`);
     const j = await r.json();

@@ -54,6 +54,20 @@ function pcmToWav(pcm, rate = 48000, channels = 2) {
   return Buffer.concat([h, pcm]);
 }
 
+// RMS amplitude of 16-bit PCM — used to skip near-silent chunks. Discord's VAD flags
+// brief noises as "speech"; handed near-silence, STT models hallucinate "." / stray chars.
+function rmsInt16(buf) {
+  const n = buf.length >> 1; if (!n) return 0;
+  let sum = 0;
+  for (let i = 0; i + 1 < buf.length; i += 2) { const s = buf.readInt16LE(i); sum += s * s; }
+  return Math.sqrt(sum / n);
+}
+// Reject transcripts with no real content (pure punctuation / a single stray char).
+function meaningful(t) {
+  if (!t) return false;
+  return t.replace(/[\s\p{P}\p{S}]/gu, '').length >= 2;
+}
+
 // transcribe = async (wavBuffer) -> text ; onUtterance = (speakerName, text) => {}
 function startListening(guildId, client, { transcribe, onUtterance, log = () => {} }) {
   const conn = connections.get(guildId);
@@ -76,12 +90,14 @@ function startListening(guildId, client, { transcribe, onUtterance, log = () => 
     decoder.on('end', async () => {
       active.delete(userId);
       const pcm = Buffer.concat(chunks);
-      if (pcm.length < 48000 * 2 * 2 * 0.4) return; // < ~0.4s → skip blips/noise
+      if (pcm.length < 48000 * 2 * 2 * 0.3) return; // < ~0.3s → too short (still keeps a crisp "Eve")
+      if (rmsInt16(pcm) < 300) return;              // near-silent → skip (kills STT silence-hallucinations)
       try {
-        const text = await transcribe(pcmToWav(pcm));
+        const text = (await transcribe(pcmToWav(pcm)) || '').trim();
+        if (!meaningful(text)) return;              // drop ".", single chars, empty
         const u = client.users.cache.get(userId);
         const name = (u && (u.globalName || u.username)) || userId;
-        if (text && text.trim()) onUtterance(name, text.trim());
+        onUtterance(name, text);
       } catch (e) { log(`stt failed: ${e.message}`); }
     });
   });
