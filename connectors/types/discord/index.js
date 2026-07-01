@@ -378,9 +378,10 @@ RESPONSE RULES:
   // for ambiguous "the assistant" mentions. Conservative on purpose to avoid interrupting.
   function addressesEve(text) {
     const t = text.trim().toLowerCase();
-    return new RegExp(`^(hey |hi |ok |okay |yo |so |well |um+ |uh+ |,|\\s)*${WAKE}\\b`).test(t) // opens by addressing the assistant
+    return new RegExp(`^(hey |hi |ok |okay |yo |so |well |um+ |uh+ |,|\\s)*${WAKE}\\b`).test(t) // LEADS with the name ("<name>, do X")
         || new RegExp(`\\b(hey|ok|okay|hi|yo) ${WAKE}\\b`).test(t)                              // "hey <name>" anywhere
-        || new RegExp(`\\b${WAKE}\\s*[,?]`).test(t);                                            // "<name>," / "<name>?"
+        || new RegExp(`\\b${WAKE}\\s*[,?!.]`).test(t)                                           // "<name>," / "<name>?" / "<name>!"
+        || new RegExp(`\\b${WAKE}\\b[\\s.?!,]*$`).test(t);                                      // TRAILS with the name ("do X, <name>")
   }
 
   const VOICE_GUIDANCE = [
@@ -476,6 +477,9 @@ RESPONSE RULES:
 
   client.on('messageCreate', async (message) => {
     if (message.author.id === client.user.id) return;
+    // Ignore voice transcript / spoken-reply mirror lines (🗣️ / 🔊) that ANY agent posts for
+    // its own voice session — they're artifacts, never conversation for another agent to answer.
+    if (/^\s*(?:🗣️|🔊)/u.test(message.content || '')) return;
     if (message.author.bot && !isAllowedBot(message.author.username)) return;
     saveMemory(message, message.author.username, message.content);
     if (await handleControlCommands(message)) return;

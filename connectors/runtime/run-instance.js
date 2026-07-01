@@ -57,6 +57,10 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     ctx.log(`shutting down (${sig})`);
+    // Hard deadline: never hang on a stuck handle.stop() (e.g. an HTTP server that won't
+    // close because of open keep-alive sockets). Orphaned children hold the channel
+    // connection with STALE code after a restart, which strands updates.
+    setTimeout(() => process.exit(0), 2000).unref();
     abort.abort();
     try { if (handle && handle.stop) await handle.stop(); } catch (e) { /* ignore */ }
     process.exit(0);

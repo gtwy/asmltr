@@ -68,11 +68,20 @@ function makeSupervisor(env) {
     logLine(rec, `spawned pid ${child.pid}`);
   }
 
+  // SIGTERM, then SIGKILL any child that hasn't exited within the grace window — so a
+  // hung connector can never survive a stop/restart as a stale-code orphan.
+  function killChild(child, graceMs = 4000) {
+    let exited = false;
+    child.once('exit', () => { exited = true; });
+    try { child.kill('SIGTERM'); } catch (_) {}
+    setTimeout(() => { if (!exited) { try { child.kill('SIGKILL'); } catch (_) {} } }, graceMs).unref();
+  }
+
   function stopInstance(id) {
     const rec = procs.get(id);
     if (!rec || !rec.child) { if (rec) rec.status = 'stopped'; return false; }
     rec.intentionalStop = true;
-    rec.child.kill('SIGTERM');
+    killChild(rec.child);
     return true;
   }
 
@@ -81,7 +90,7 @@ function makeSupervisor(env) {
     if (rec && rec.child) {
       rec.intentionalStop = true;
       rec.child.once('exit', () => { rec.intentionalStop = false; rec.restartTimes = []; spawnInstance(instance); });
-      rec.child.kill('SIGTERM');
+      killChild(rec.child);
     } else {
       spawnInstance(instance);
     }

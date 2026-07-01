@@ -56,13 +56,31 @@ done
 
 ---
 
-## 4. Restart the services
+## 4. Restart the services (and confirm the connectors actually reloaded)
 
 ```bash
 pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector
+sleep 3
 ```
 
-Connectors restart with the manager (it reloads each instance's config from its own store).
+The manager stops + respawns its connector **child processes** on restart, so they pick up the new
+code. **Verify no stale-code orphan survived** (a connector child that didn't exit and is still
+holding the channel connection with OLD code — this is the #1 reason an update "runs" but the new
+behavior doesn't appear):
+
+```bash
+# any run-instance process older than the restart you just did is a stale orphan:
+ps -o pid,etimes,args -C node | grep 'connectors/runtime/run-instance.js'
+```
+
+If you see one that predates the restart, clear the orphans and let the manager respawn them fresh:
+
+```bash
+pkill -f 'connectors/runtime/run-instance.js'; sleep 2; pm2 restart asmltr-connector-manager
+```
+
+(Installs from this version on won't orphan — the child now hard-exits on restart — but older
+installs need this one-time clear to land the update.)
 
 ---
 
