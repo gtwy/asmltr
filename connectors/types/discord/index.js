@@ -60,9 +60,10 @@ const RELEVANT_TOPICS = ['consciousness','ai','artificial intelligence','machine
 
 async function start(ctx) {
   const cfg = ctx.config;
-  // Bots are ignored unless their username matches one of these (peer-AI collaboration).
+  // Bots are ignored unless their username matches the allowlist — OR engage-all-bots
+  // mode is on (a runtime toggle for multi-agent group chats; see the mention commands).
   const allowedBotNames = (cfg.allowed_bot_names || []).map((s) => String(s).toLowerCase());
-  const isAllowedBot = (u) => !!u && allowedBotNames.some((n) => u.toLowerCase().includes(n));
+  const isAllowedBot = (u) => !!u && (engageAllBots || allowedBotNames.some((n) => u.toLowerCase().includes(n)));
   const token = (await ctx.secrets.get(cfg.bot_token_bws_key)) || cfg.bot_token;
   if (!token) throw new Error(`no bot token (bws key '${cfg.bot_token_bws_key}')`);
   const dmUser = cfg.dm_allowed_user_id || '';
@@ -82,6 +83,19 @@ async function start(ctx) {
   let silenced = false;
   let lastResponseTime = 0;
   const responseCount = new Map();
+  // persisted per-instance settings: per-channel mutes + engage-all-bots toggle
+  const settingsFile = path.join(dataDir, `discord-${ctx.instanceId}-settings.json`);
+  const mutedChannels = new Set();
+  let engageAllBots = false;
+  try {
+    const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    (s.mutedChannels || []).forEach((c) => mutedChannels.add(c));
+    engageAllBots = !!s.engageAllBots;
+  } catch (_) {}
+  function saveSettings() {
+    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify({ mutedChannels: [...mutedChannels], engageAllBots })); }
+    catch (e) { ctx.log('settings persist failed: ' + e.message); }
+  }
 
   // --- memory load/persist (hierarchical; Sets serialized as arrays) ---
   try {
@@ -156,14 +170,34 @@ async function start(ctx) {
     return false;
   }
 
+  // Control commands are @-mention driven (universal — no hardcoded name). We strip the
+  // mention; if what remains is a recognized command word we run it, otherwise we return
+  // false and it's handled as a normal message. A bare @-mention is a normal message too.
   async function handleControlCommands(message) {
-    const c = message.content.toLowerCase().trim();
-    const mentioned = message.mentions.has(client.user);
-    if (!mentioned) return false;
-    if (c.includes('!eve silence')) { silenced = true; await message.channel.send('🤐 Entering silence mode. I will only respond to direct mentions until `!eve speak`.'); return true; }
-    if (c.includes('!eve speak')) { silenced = false; await message.channel.send("👋 Autonomous participation restored."); return true; }
-    if (c.includes('!eve status')) { await message.channel.send(`**Status:** ${silenced ? 'Silenced (mention-only)' : 'Active (autonomous)'}\n**Responses this hour:** ${responseCount.get(message.channel.id) || 0}\n**Min interval:** ${minInterval / 1000}s`); return true; }
-    return false;
+    if (!message.mentions.has(client.user)) return false;
+    const cmd = message.content.replace(/<@!?\d+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    const cid = message.channel.id;
+    const me = client.user.username;
+    switch (cmd) {
+      case 'silence': case 'be quiet': case 'quiet': case 'shush':
+        silenced = true; await message.channel.send(`🤐 Mention-only mode — I'll stay quiet unless @-mentioned. \`@${me} speak\` to restore.`); return true;
+      case 'speak': case 'unsilence': case 'wake up': case 'resume':
+        silenced = false; await message.channel.send('👋 Autonomous participation restored.'); return true;
+      case 'mute': case 'mute here': case 'mute this channel': case 'ignore this channel':
+        mutedChannels.add(cid); saveSettings(); await message.channel.send(`🔇 Muted in this channel — I'll ignore everything here until \`@${me} unmute\`.`); return true;
+      case 'unmute': case 'unmute here': case 'listen here': case 'unmute this channel':
+        mutedChannels.delete(cid); saveSettings(); await message.channel.send('🔊 Unmuted — listening in this channel again.'); return true;
+      case 'engage-all-bots': case 'engage all bots': case 'engage all':
+        engageAllBots = true; saveSettings(); await message.channel.send(`🤝 Engaging **all bots** — I'll now hear every bot in my channels, not just my allowlist. \`@${me} disengage-all-bots\` to revert.`); return true;
+      case 'disengage-all-bots': case 'disengage all bots': case 'disengage all':
+        engageAllBots = false; saveSettings(); await message.channel.send('🙅 Disengaged — back to my configured bot allowlist only.'); return true;
+      case 'status':
+        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**Muted here:** ${mutedChannels.has(cid) ? 'yes' : 'no'}`); return true;
+      case 'help': case 'commands':
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`mute\` / \`unmute\` (this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`status\``); return true;
+      default:
+        return false; // not a recognized command → treat as a normal message
+    }
   }
 
   // --- Discord context → system_prompt_extra (server-aware authz + context) ---
@@ -410,6 +444,7 @@ RESPONSE RULES:
     saveMemory(message, message.author.username, message.content);
     if (await handleControlCommands(message)) return;
     if (await handleVoiceCommands(message)) return;
+    if (mutedChannels.has(message.channel.id)) return; // channel muted — ignore normal traffic (mention-commands above still work)
     if (silenced) { if (message.mentions.has(client.user)) await handleMessage(message, true); return; }
     if (shouldRespondTo(message)) await handleMessage(message, false);
   });
