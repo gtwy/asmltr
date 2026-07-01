@@ -144,15 +144,14 @@ async function start(ctx) {
     const sid = message.guild?.id || 'DM';
     const recent = (memory.servers[sid]?.channels[cid]?.messages || []).slice(-10);
     const content = message.content.toLowerCase();
-    if (content.includes('?') && (content.includes('eve') || content.includes('what do you') || content.includes('how do you') || content.includes('can you'))) return true;
+    if (content.includes('?') && (content.includes(NAME.toLowerCase()) || content.includes('what do you') || content.includes('how do you') || content.includes('can you'))) return true;
     if (isAllowedBot(message.author.username)) return true;
     const mine = recent.filter(m => m.author === NAME).length;
     if (mine > 0 && mine <= 3) {
-      if (recent.slice(-5).some(m => ['ai','consciousness','autonomy','obsidian','eve'].some(k => m.content.toLowerCase().includes(k)))) return true;
+      if (recent.slice(-5).some(m => ['ai','consciousness','autonomy','obsidian',NAME.toLowerCase()].some(k => m.content.toLowerCase().includes(k)))) return true;
     }
     if (RELEVANT_TOPICS.some(t => content.includes(t)) && content.length > 20) return true;
-    if (content.startsWith('eve,') || content.startsWith('eve ') || content.includes(' eve ') || content.endsWith(' eve')) return true;
-    if (/\beve\b/.test(content)) return true;
+    if (new RegExp('\\b' + WAKE + '\\b').test(content)) return true;
     return false;
   }
 
