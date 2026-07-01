@@ -51,7 +51,7 @@ const meta = {
       presence_text: { type: 'string', title: 'Presence/activity text', default: '' },
       elevenlabs_key_name: { type: 'string', title: 'Secret key name for ElevenLabs (voice)', default: 'elevenlabs_api_key' },
       stt_language: { type: 'string', title: 'Voice STT language (ISO code; empty = auto-detect)', default: 'en' },
-      require_mention: { type: 'boolean', title: 'Only engage on a direct @mention (no autonomous participation)', default: false },
+      ignore_other_mentions: { type: 'boolean', title: 'Ignore messages @-directed at other specific users/bots (keeps passive name-drops)', default: true },
     },
   },
 };
@@ -68,7 +68,7 @@ async function start(ctx) {
   const token = (await ctx.secrets.get(cfg.bot_token_bws_key)) || cfg.bot_token;
   if (!token) throw new Error(`no bot token (bws key '${cfg.bot_token_bws_key}')`);
   const dmUser = cfg.dm_allowed_user_id || '';
-  const requireMention = !!cfg.require_mention; // mention-only: ignore anything not directly @-mentioning this bot
+  const ignoreOtherMentions = cfg.ignore_other_mentions !== false; // drop msgs @-directed at OTHER specific users/bots
   const minInterval = cfg.min_response_interval_ms || 10000;
   const maxPerHour = cfg.max_responses_per_hour || 20;
   const dataDir = cfg.data_dir || path.join(__dirname, '..', '..', 'manager', 'data');
@@ -451,9 +451,10 @@ RESPONSE RULES:
     if (await handleControlCommands(message)) return;
     if (await handleVoiceCommands(message)) return;
     if (mutedChannels.has(message.channel.id)) return; // channel muted — ignore normal traffic (mention-commands above still work)
-    // mention-only mode: in a guild, drop anything that doesn't directly @-mention THIS bot's
-    // user (messages aimed at other users/bots, or no one) BEFORE any typing indicator / turn.
-    if (requireMention && message.guild && !message.mentions.has(client.user)) return;
+    // Drop messages @-directed at OTHER specific users/bots (there ARE user mentions but none
+    // is us) — those aren't for us. Passive name-drops (no @mention) and @us still flow through
+    // to shouldRespondTo, so autonomous participation is preserved. No typing on discarded msgs.
+    if (ignoreOtherMentions && message.guild && message.mentions.users.size > 0 && !message.mentions.has(client.user)) return;
     if (silenced) { if (message.mentions.has(client.user)) await handleMessage(message, true); return; }
     if (shouldRespondTo(message)) await handleMessage(message, false);
   });
