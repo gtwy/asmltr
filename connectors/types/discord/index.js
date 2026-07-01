@@ -174,8 +174,12 @@ async function start(ctx) {
   // mention; if what remains is a recognized command word we run it, otherwise we return
   // false and it's handled as a normal message. A bare @-mention is a normal message too.
   async function handleControlCommands(message) {
-    if (!message.mentions.has(client.user)) return false;
-    const cmd = message.content.replace(/<@!?\d+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    // Addressed if @-mentioned directly OR via a role this bot holds (e.g. an "@agents"
+    // role, so one ping can command every bot in a group chat at once).
+    const botMember = message.guild ? (message.guild.members.me || message.guild.members.cache.get(client.user.id)) : null;
+    const roleAddressed = !!botMember && message.mentions.roles.some((r) => botMember.roles.cache.has(r.id));
+    if (!message.mentions.has(client.user) && !roleAddressed) return false;
+    const cmd = message.content.replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
     const cid = message.channel.id;
     const me = client.user.username;
     switch (cmd) {
