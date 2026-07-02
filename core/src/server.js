@@ -167,6 +167,14 @@ async function handle(envelope) {
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
   }
 
+  // Remember where an out-of-band operator inject should reply (via the manager's /send):
+  // instance id = 2nd segment of the conversation_key; target = the channel/chat id.
+  try {
+    const outInstance = String(e.conversation_key).split(':')[1] || null;
+    const outTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || null;
+    if (outInstance && outTarget) sessions.setOutboundRoute(e.conversation_key, outInstance, outTarget);
+  } catch (_) {}
+
   const abortController = new AbortController();
   inFlight.set(e.conversation_key, abortController);
   let result;
@@ -313,7 +321,7 @@ app.post('/v2/claim', (req, res) => {
   res.json({ conversation_key, engine_session_id: row.engine_session_id, working_dir: row.working_dir || process.cwd(), claim_state: 'terminal-claimed' });
 });
 
-// Real-time kill: abort an in-flight turn for a conversation.
+// Real-time stop: abort the in-flight turn (the session survives + is resumable).
 app.post('/v2/abort', (req, res) => {
   const key = req.body && req.body.conversation_key;
   const ctrl = inFlight.get(key);
@@ -321,6 +329,54 @@ app.post('/v2/abort', (req, res) => {
   ctrl.abort();
   record({ surface: 'core', session_id: key, event_type: 'control', identity: 'operator', source: 'core', payload: { action: 'abort' } });
   res.json({ ok: true, aborted: key });
+});
+
+// Operator STEER: inject a message into a live session — resume it with the operator's text, then
+// route the reply back to the origin channel via the manager's /send (works for ANY connector,
+// since /send is unified). Stops any in-flight turn first (steer replaces the current generation).
+// Bypasses moderation (the operator is trusted). Redacts on the way out like any public reply.
+app.post('/v2/inject', (req, res) => {
+  const { conversation_key: key, text, by } = req.body || {};
+  if (!key || !text) return res.status(400).json({ error: 'need conversation_key + text' });
+  const row = sessions.get(key);
+  if (!row) return res.status(404).json({ error: 'unknown session' });
+  const cur = inFlight.get(key);
+  if (cur) { try { cur.abort(); } catch (_) {} } // steer replaces the current turn
+
+  withKeyLock(key, async () => {
+    record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core', payload: { action: 'inject', text: truncate(text, 500) } });
+    const { resume } = sessions.resolveForTurn(key, row.channel);
+    const ac = new AbortController(); inFlight.set(key, ac);
+    let result;
+    try {
+      result = await runTurn({ prompt: text, resume, cwd: row.working_dir || undefined, abortController: ac,
+        onEvent: (sdkEvt) => {
+          const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
+          if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
+            if (c.type === 'tool_use') record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } });
+            else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
+          } else if (sdkEvt.type === 'user') for (const c of sdkEvt.message?.content || []) {
+            if (c.type === 'tool_result') record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } });
+          }
+        } });
+    } finally { inFlight.delete(key); }
+    if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
+    sessions.touch(key);
+    const reply = redactSecrets((result.text || '').trim()).text;
+    record({ surface: row.channel, session_id: key, event_type: 'outbound', identity: by || 'operator', source: 'core', payload: { text: truncate(reply, 500), injected: true } });
+
+    let delivered = false, deliverErr = null;
+    if (reply && row.outbound_instance_id && row.outbound_target) {
+      try {
+        const mgr = (process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024').replace(/\/$/, '');
+        const headers = { 'Content-Type': 'application/json' };
+        if (process.env.ASMLTR_MANAGER_TOKEN) headers.Authorization = 'Bearer ' + process.env.ASMLTR_MANAGER_TOKEN;
+        const r = await fetch(`${mgr}/send`, { method: 'POST', headers, body: JSON.stringify({ instance_id: row.outbound_instance_id, target: row.outbound_target, text: reply }) });
+        delivered = r.ok; if (!r.ok) deliverErr = `send ${r.status}`;
+      } catch (e) { deliverErr = e.message; }
+    } else if (reply) { deliverErr = 'no stored outbound route for this session'; }
+    if (!res.headersSent) res.json({ ok: true, reply, delivered, deliverErr, route: { instance_id: row.outbound_instance_id, target: row.outbound_target } });
+  }).catch((e) => { if (!res.headersSent) res.status(500).json({ error: e.message }); });
 });
 
 app.post('/v2/release', (req, res) => {

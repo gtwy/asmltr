@@ -31,13 +31,17 @@ db.exec(`
     turn_count         INTEGER NOT NULL DEFAULT 0,
     claim_state        TEXT NOT NULL DEFAULT 'free',       -- free|channel-running|terminal-claimed|paused
     claimed_by         TEXT,
-    working_dir        TEXT                                -- where to resume/attach (worktree or default)
+    working_dir        TEXT,                               -- where to resume/attach (worktree or default)
+    outbound_instance_id TEXT,                             -- connector instance to reply THROUGH for an out-of-band inject
+    outbound_target    TEXT                                -- channel/chat id to reply TO
   );
 `);
 
-// Migration: add working_dir to a pre-existing table (created before this column).
+// Migrations: add columns to a pre-existing table (created before they existed).
 const _cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
-if (!_cols.includes('working_dir')) db.exec('ALTER TABLE sessions ADD COLUMN working_dir TEXT');
+for (const col of ['working_dir', 'outbound_instance_id', 'outbound_target']) {
+  if (!_cols.includes(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
+}
 
 const _get = db.prepare('SELECT * FROM sessions WHERE conversation_key = ?');
 const _insert = db.prepare(`
@@ -55,6 +59,7 @@ const DEFAULT_CWD = process.env.ASMLTR_SESSION_CWD || os.homedir();
 const _setEngineId = db.prepare('UPDATE sessions SET engine_session_id = ?, last_activity_at = ? WHERE conversation_key = ?');
 const _touch = db.prepare('UPDATE sessions SET last_activity_at = ?, turn_count = turn_count + 1 WHERE conversation_key = ?');
 const _setClaim = db.prepare('UPDATE sessions SET claim_state = ?, claimed_by = ? WHERE conversation_key = ?');
+const _setRoute = db.prepare('UPDATE sessions SET outbound_instance_id = ?, outbound_target = ? WHERE conversation_key = ?');
 
 function nowMs() { return Date.now(); }
 
@@ -103,4 +108,9 @@ function setClaim(conversation_key, claim_state, claimed_by = null) {
 
 function get(conversation_key) { return _get.get(conversation_key); }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, get, DB_PATH };
+/** Remember where to send an out-of-band reply (operator inject) for this session. */
+function setOutboundRoute(conversation_key, instance_id, target) {
+  _setRoute.run(instance_id || null, target != null ? String(target) : null, conversation_key);
+}
+
+module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, get, DB_PATH };

@@ -60,6 +60,14 @@ function run(BASE, CORE_BASE, TOKEN, A) {
     style: { border: { fg: 'red' } },
   });
 
+  // steer input — type a message that gets injected into the watched session (the reply
+  // routes back out to its origin channel via /v2/inject). Shown at the bottom on `i`.
+  const steerInput = blessed.textbox({
+    parent: screen, hidden: true, bottom: 0, left: 0, width: '100%', height: 3,
+    border: { type: 'line' }, label: ' steer — type a message, ENTER to send · ESC cancel ',
+    style: { border: { fg: 'cyan' } }, inputOnFocus: true, keys: true, mouse: true,
+  });
+
   function ageOf(ms) {
     if (!ms) return '?'; const s = Math.floor((Date.now() - ms) / 1000);
     return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
@@ -119,7 +127,7 @@ function run(BASE, CORE_BASE, TOKEN, A) {
   async function openWatch(sessionId) {
     if (!sessionId || watchSessionId === sessionId) return; // guard double-fire (select + enter)
     watchSessionId = sessionId;
-    watchBox.setLabel(` watch: ${sessionId}  (↑↓/PgUp/PgDn scroll · ESC back · k = kill turn) `);
+    watchBox.setLabel(` watch: ${sessionId}  (↑↓ scroll · i steer · k stop turn · ESC back) `);
     watchBox.setContent('');
     watchBox.show(); watchBox.focus();
     screen.render();
@@ -167,14 +175,32 @@ function run(BASE, CORE_BASE, TOKEN, A) {
   sessTable.rows.key(['enter'], () => openWatch(sessionIds[sessTable.rows.selected]));
   sessTable.rows.key(['k', 'x'], killSelected); // kill the selected session (with confirm)
   watchBox.key(['escape'], closeWatch);
-  watchBox.key(['k'], async () => { // real-time kill of the watched session's in-flight turn
+  watchBox.key(['k'], async () => { // stop the watched session's in-flight turn (session survives)
     if (!watchSessionId) return;
-    watchBox.log('{red-fg}⏹ killing in-flight turn…{/red-fg}'); screen.render();
+    watchBox.log('{red-fg}⏹ stopping in-flight turn…{/red-fg}'); screen.render();
     try {
       const r = await fetch(CORE_BASE + '/v2/abort', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_key: watchSessionId }) });
       const j = await r.json();
-      watchBox.log(j.ok ? '{red-fg}⏹ aborted{/red-fg}' : `{yellow-fg}⏹ ${j.error || 'nothing in flight'}{/yellow-fg}`);
-    } catch (e) { watchBox.log('{red-fg}kill failed: ' + e.message + '{/red-fg}'); }
+      watchBox.log(j.ok ? '{red-fg}⏹ stopped (session still resumable){/red-fg}' : `{yellow-fg}⏹ ${j.error || 'nothing in flight'}{/yellow-fg}`);
+    } catch (e) { watchBox.log('{red-fg}stop failed: ' + e.message + '{/red-fg}'); }
+    screen.render();
+  });
+  watchBox.key(['i'], () => { // open the steer input for the watched session
+    if (!watchSessionId) return;
+    steerInput.clearValue(); steerInput.show(); steerInput.focus(); screen.render();
+  });
+  steerInput.key(['escape'], () => { steerInput.hide(); watchBox.focus(); screen.render(); });
+  steerInput.on('submit', async (value) => {
+    const text = String(value || '').trim();
+    steerInput.hide(); watchBox.focus(); screen.render();
+    if (!text || !watchSessionId) return;
+    watchBox.log(`{cyan-fg}✎ steering: ${text}{/cyan-fg}`); screen.render();
+    try {
+      const r = await fetch(CORE_BASE + '/v2/inject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_key: watchSessionId, text, by: 'tui' }) });
+      const j = await r.json();
+      if (j.ok) watchBox.log(`{green-fg}◀ steered reply${j.delivered ? ' {gray-fg}(sent to channel){/gray-fg}' : (j.deliverErr ? ' {yellow-fg}[not delivered: ' + j.deliverErr + ']{/yellow-fg}' : '')}{/green-fg}: ${String(j.reply || '').slice(0, 400)}`);
+      else watchBox.log(`{red-fg}steer failed: ${j.error}{/red-fg}`);
+    } catch (e) { watchBox.log(`{red-fg}steer failed: ${e.message}{/red-fg}`); }
     screen.render();
   });
   screen.key(['q', 'C-c'], () => { socket.close(); process.exit(0); });
