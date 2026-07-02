@@ -119,22 +119,50 @@ app.delete('/instances/:id', requireToken, (req, res) => {
 
 // --- unified outbound: route a message OUT through a connector instance --------
 // POST /send { channel|instance_id, target, kind?, text?, path?, caption? }
-app.post('/send', requireToken, async (req, res) => {
-  const { channel, instance_id, target, kind = 'text', text, path: filePath, caption } = req.body || {};
-  let inst = instance_id ? registry.get(instance_id)
+async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption }) {
+  const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
     : null;
-  if (!inst) return res.status(404).json({ error: 'no connector instance for that channel/instance_id' });
+  if (!inst) return { ok: false, status: 404, error: 'no connector instance for that channel/instance_id' };
   const meta = TYPES[inst.type];
-  if (!meta || !meta.outbound) return res.status(400).json({ error: `type '${inst.type}' has no outbound capability` });
+  if (!meta || !meta.outbound) return { ok: false, status: 400, error: `type '${inst.type}' has no outbound capability` };
   const port = inst.config && inst.config.http_port;
-  if (!port) return res.status(400).json({ error: `instance '${inst.name}' has no http_port` });
+  if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port` };
   try {
     const r = await fetch(`http://127.0.0.1:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption }) });
     const j = await r.json().catch(() => ({}));
-    return res.status(r.ok ? 200 : 502).json({ ...j, via: `${inst.type}:${inst.name}` });
-  } catch (e) { return res.status(502).json({ error: `connector unreachable: ${e.message}` }); }
+    return { ok: r.ok, status: r.ok ? 200 : 502, via: `${inst.type}:${inst.name}`, ...j };
+  } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }
+}
+app.post('/send', requireToken, async (req, res) => { const r = await deliver(req.body || {}); res.status(r.status).json(r); });
+
+// --- deferred announcements: queued now, delivered AFTER the next (re)start once the target
+// connector reconnects. Lets an agent that just triggered its OWN update (over a channel)
+// confirm completion in-channel, even though the restart killed the turn that issued it.
+// POST /announce { channel|instance_id, target, text }
+const ANNOUNCE_FILE = path.join(__dirname, 'data', 'announcements.json');
+app.post('/announce', requireToken, (req, res) => {
+  const { channel, instance_id, target, text } = req.body || {};
+  if (!text || (!channel && !instance_id)) return res.status(400).json({ error: 'need text + channel or instance_id' });
+  let queue = [];
+  try { queue = JSON.parse(fs.readFileSync(ANNOUNCE_FILE, 'utf8')); } catch (_) {}
+  if (!Array.isArray(queue)) queue = [];
+  queue.push({ channel, instance_id, target, kind: 'text', text });
+  try { fs.mkdirSync(path.dirname(ANNOUNCE_FILE), { recursive: true }); fs.writeFileSync(ANNOUNCE_FILE, JSON.stringify(queue)); }
+  catch (e) { return res.status(500).json({ error: e.message }); }
+  res.json({ ok: true, queued: queue.length });
 });
+async function drainAnnouncements() {
+  let queue;
+  try { queue = JSON.parse(fs.readFileSync(ANNOUNCE_FILE, 'utf8')); } catch (_) { return; }
+  if (!Array.isArray(queue) || !queue.length) return;
+  try { fs.writeFileSync(ANNOUNCE_FILE, '[]'); } catch (_) {} // clear first so a crash-loop can't re-spam
+  for (const a of queue) {
+    let sent = false;
+    for (let i = 0; i < 6 && !sent; i++) { const r = await deliver(a).catch(() => ({ ok: false })); sent = !!r.ok; if (!sent) await new Promise((res) => setTimeout(res, 3000)); }
+    console.log(`[manager] announcement ${sent ? 'delivered' : 'FAILED'}: ${String(a.text || '').slice(0, 60)}`);
+  }
+}
 // list outbound-capable destinations (for the skill / dashboard)
 app.get('/send/targets', requireToken, (req, res) => {
   const dests = registry.list().filter((i) => TYPES[i.type] && TYPES[i.type].outbound)
@@ -149,6 +177,8 @@ const server = app.listen(PORT, HOST, () => {
   for (const inst of registry.list()) {
     if (inst.enabled) { console.log(`[manager] starting enabled instance ${inst.type}:${inst.name}`); supervisor.spawnInstance(inst); }
   }
+  // deliver any announcement queued before a restart, once the connectors have reconnected
+  setTimeout(drainAnnouncements, Number(process.env.ASMLTR_ANNOUNCE_DELAY_MS || 12000));
 });
 
 process.on('SIGTERM', () => { supervisor.stopAll(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000); });

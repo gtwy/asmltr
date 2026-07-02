@@ -64,17 +64,30 @@ done
 > partway (npm install/connector-cycle/verify never finish). This is the #1 reason an update
 > "runs" but the new behavior never appears.
 
-Launch a **detached, delayed** restart that survives your turn ending and runs *after* you've
+First, **queue a completion announcement** so the assistant confirms success *in the channel* once
+it's back up (the manager holds it and delivers it after the restart, so it survives your turn dying):
+
+```bash
+# target = the channel/chat you were invoked from. For Discord it's the channel id, shown in your
+# DISCORD CONTEXT as "Channel: #name (id …)". For other channels use the appropriate target.
+curl -s -X POST 127.0.0.1:3024/announce -H 'Content-Type: application/json' \
+  -d '{"channel":"discord","target":"<CHANNEL_ID>","text":"✅ Update complete — back online on the latest."}'
+```
+
+Then launch a **detached, delayed** restart that survives your turn ending and runs *after* you've
 replied. It also clears any stale connector child (which would otherwise keep old code):
 
 ```bash
 setsid bash -c 'sleep 8; pkill -f "connectors/runtime/run-instance.js" 2>/dev/null; sleep 2; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager' >/tmp/asmltr-update.log 2>&1 </dev/null &
 ```
 
-Then **finish your reply** (e.g. "Pulled + installed the update — services will cycle in ~10s").
-The detached script does the actual restart independently, so your turn completes cleanly and every
-connector comes back on the new code. Verification (step 5) happens on the *next* turn / after the
-restart, not this one.
+Then **finish your reply** (e.g. "Pulled + installed the update — restarting now; I'll confirm here
+when it's back"). The detached script does the actual restart independently, so your turn completes
+cleanly and every connector comes back on the new code; the queued announcement then posts the ✅
+confirmation to the channel.
+
+> Tip: on Discord you can skip all of this — just have the owner run **`@<assistant> update-asmltr`**,
+> which does the whole pull → install → detached-restart → confirm flow as a built-in command.
 
 **Running the update from a plain shell** (a human, not through the assistant)? Then just restart directly:
 

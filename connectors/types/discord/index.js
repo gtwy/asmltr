@@ -32,6 +32,7 @@ const OWNER_ONLY_CMDS = new Set([
   'unmute', 'unmute here', 'listen here', 'unmute this channel',
   'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
   'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
+  'update-asmltr', 'update asmltr', 'self-update', 'update yourself',
 ]);
 
 const meta = {
@@ -226,12 +227,14 @@ async function start(ctx) {
         engageAllBots = false; saveSettings(); await message.channel.send('🙅 Disengaged — back to my configured bot allowlist only.'); return true;
       case 'join-voice': case 'join voice': case 'join vc': case 'join the voice':
         await doJoinVoice(message); return true;
+      case 'update-asmltr': case 'update asmltr': case 'self-update': case 'update yourself':
+        await doUpdateAsmltr(message); return true;
       case 'leave-voice': case 'leave voice': case 'leave vc': case 'leave the voice':
         await doLeaveVoice(message); return true;
       case 'status':
         await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**Muted here:** ${mutedChannels.has(cid) ? 'yes' : 'no'}`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`mute\` / \`unmute\` (this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`status\``); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`mute\` / \`unmute\` (this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`update-asmltr\` · \`status\``); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
@@ -254,7 +257,7 @@ async function start(ctx) {
       : (others.length ? `It @-mentions ${others.join(', ')} — NOT you.` : 'It @-mentions no one specifically.');
     return `DISCORD CONTEXT
 - You are **${NAME}**. In this message text, "@${NAME}" (and the id <@${client.user.id}>) refer to YOU, not any other bot.
-- Server: ${context.location.serverName} · Channel: #${context.location.channelName} · Participants: ${context.location.participants.join(', ')}
+- Server: ${context.location.serverName} · Channel: #${context.location.channelName} (id ${message.channel.id}) · Participants: ${context.location.participants.join(', ')}
 - ${mode}
 - THIS message is from **${message.author.username}**. ${mentionLine} Address your reply to ${message.author.username}. Do NOT greet or address anyone else unless THIS message is literally from them — a mention of someone is not that person speaking.
 
@@ -505,6 +508,36 @@ RESPONSE RULES:
     voiceText.delete(message.guild.id);
     const left = voice.leave(message.guild.id);
     message.channel.send(left ? '👋 Left the voice channel.' : "I'm not in a voice channel.").catch(() => {});
+  }
+
+  // Queue a channel message to be delivered AFTER the next restart (drained by the manager
+  // once this connector reconnects). dataDir === the manager's data dir, so we write its queue.
+  function queueAnnouncement(channelId, text) {
+    const f = path.join(dataDir, 'announcements.json');
+    let q = []; try { q = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (_) {}
+    if (!Array.isArray(q)) q = [];
+    q.push({ channel: 'discord', instance_id: ctx.instanceId, target: channelId, kind: 'text', text });
+    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(f, JSON.stringify(q)); } catch (e) { ctx.log('announce queue failed: ' + e.message); }
+  }
+
+  // `update-asmltr` command: pull the latest code, reinstall deps, and restart — DETACHED so the
+  // restart survives this very connector being cycled — then confirm in-channel after it's back up.
+  async function doUpdateAsmltr(message) {
+    const { exec, spawn, execSync } = require('child_process');
+    const repo = path.join(__dirname, '..', '..', '..'); // connectors/types/discord → repo root
+    await message.channel.send('🔄 Updating asmltr — pulling latest + reinstalling. I\'ll confirm here once the restart completes (~15s).').catch(() => {});
+    exec('git fetch origin && git reset --hard origin/main', { cwd: repo, timeout: 120000 }, (e1, o1, s1) => {
+      if (e1) { message.channel.send(`⚠️ Update failed (git): ${String(s1 || e1.message).slice(0, 400)}`).catch(() => {}); return; }
+      exec('for d in core connectors insights/collector cli; do (cd "$d" && npm install) || exit 1; done', { cwd: repo, timeout: 600000, shell: '/bin/bash' }, (e2, o2, s2) => {
+        if (e2) { message.channel.send(`⚠️ Update failed (npm install): ${String(s2 || e2.message).slice(0, 400)}`).catch(() => {}); return; }
+        let commit = '';
+        try { commit = execSync('git rev-parse --short HEAD', { cwd: repo }).toString().trim(); } catch (_) {}
+        queueAnnouncement(message.channel.id, `✅ asmltr updated${commit ? ` to \`${commit}\`` : ''} and restarted — all systems back online.`);
+        const script = 'sleep 5; pkill -f "connectors/runtime/run-instance.js"; sleep 2; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager';
+        try { spawn('setsid', ['bash', '-c', script], { detached: true, stdio: 'ignore', cwd: repo }).unref(); }
+        catch (e3) { message.channel.send(`⚠️ Update installed but restart-launch failed: ${e3.message}`).catch(() => {}); }
+      });
+    });
   }
 
   client.on('messageCreate', async (message) => {
