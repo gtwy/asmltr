@@ -133,9 +133,9 @@ curl -s -X POST 127.0.0.1:3024/instances -H 'Content-Type: application/json' -d 
 Each connector's full config schema is discoverable at `GET /types` on the manager, or in its
 `meta.configSchema` (`connectors/types/<type>/index.js`). Highlights:
 
-- **discord** — mention/DM + optional autonomous participation. Optional **voice mode**: `"<Name>, join"`
-  a voice channel → live transcription (OpenAI STT) → soft wake-word gatekeeper → spoken replies (ElevenLabs).
-  Key config: `bot_token_bws_key`, `dm_allowed_user_id`, `allowed_bot_names`, `voice_id`, `elevenlabs_key_name`.
+- **discord** — mention/DM + autonomous participation, an `@mention` command system, multi-agent group
+  chats, and an optional **voice mode** (join a voice channel → live transcription → spoken replies).
+  **Full guide: [docs/DISCORD.md](docs/DISCORD.md).**
 - **telegram** — 1:1 bot with photo→vision. Key config: `bot_token_bws_key`, `allowed_chat_ids`.
 - **mcp** — OAuth 2.1 MCP server exposing an `ask_<assistant>` tool (SSE + Streamable HTTP). Pre-register
   clients in `connectors/types/mcp/clients.json` (see `clients.example.json`); each client maps to a trust principal.

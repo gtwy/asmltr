@@ -56,31 +56,32 @@ done
 
 ---
 
-## 4. Restart the services (and confirm the connectors actually reloaded)
+## 4. Restart the services — **detached** (do NOT restart inline)
+
+> ⚠️ **Critical if you were asked to update yourself over a channel (Discord/Telegram/etc.).**
+> Your work is running *as a turn inside this very asmltr install*. Restarting `asmltr-core`
+> **kills the process executing this turn** — so an inline `pm2 restart` cuts the update off
+> partway (npm install/connector-cycle/verify never finish). This is the #1 reason an update
+> "runs" but the new behavior never appears.
+
+Launch a **detached, delayed** restart that survives your turn ending and runs *after* you've
+replied. It also clears any stale connector child (which would otherwise keep old code):
 
 ```bash
-pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector
-sleep 3
+setsid bash -c 'sleep 8; pkill -f "connectors/runtime/run-instance.js" 2>/dev/null; sleep 2; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager' >/tmp/asmltr-update.log 2>&1 </dev/null &
 ```
 
-The manager stops + respawns its connector **child processes** on restart, so they pick up the new
-code. **Verify no stale-code orphan survived** (a connector child that didn't exit and is still
-holding the channel connection with OLD code — this is the #1 reason an update "runs" but the new
-behavior doesn't appear):
+Then **finish your reply** (e.g. "Pulled + installed the update — services will cycle in ~10s").
+The detached script does the actual restart independently, so your turn completes cleanly and every
+connector comes back on the new code. Verification (step 5) happens on the *next* turn / after the
+restart, not this one.
+
+**Running the update from a plain shell** (a human, not through the assistant)? Then just restart directly:
 
 ```bash
-# any run-instance process older than the restart you just did is a stale orphan:
-ps -o pid,etimes,args -C node | grep 'connectors/runtime/run-instance.js'
+pkill -f 'connectors/runtime/run-instance.js' 2>/dev/null; sleep 2
+pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager
 ```
-
-If you see one that predates the restart, clear the orphans and let the manager respawn them fresh:
-
-```bash
-pkill -f 'connectors/runtime/run-instance.js'; sleep 2; pm2 restart asmltr-connector-manager
-```
-
-(Installs from this version on won't orphan — the child now hard-exits on restart — but older
-installs need this one-time clear to land the update.)
 
 ---
 
