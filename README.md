@@ -31,18 +31,26 @@ Download https://raw.githubusercontent.com/jarethmt/asmltr/main/UPDATE-WITH-AGEN
 
 ## How it works
 
-```
-   Discord ┐
-  Telegram ┤   thin adapter        normalized          the core pipeline
-       MCP ┤ ──(connector)──▶  ┌── envelope ──▶  resolve identity/trust
-    GitHub ┘                   │                 → build system prompt
-                               │                 → moderate (LLM security screen)
-                               │                 → map conversation_key → session
-                               │                 → run turn via local Agent SDK
-                               │                 → redact secrets on public output
-                               └──▶ outbound actions ──▶ back to the channel
-                                        │
-                                        └──▶ event stream ──▶ collector ──▶ dashboard / CLI
+```mermaid
+flowchart LR
+  D[Discord]:::ch --> CONN
+  T[Telegram]:::ch --> CONN
+  M[MCP]:::ch --> CONN
+  G[GitHub]:::ch --> CONN
+
+  CONN(["connector<br/>(thin adapter)"]) --> ENV[/normalized envelope/]
+  ENV --> CORE
+
+  subgraph CORE ["core pipeline"]
+    direction TB
+    R["resolve identity / trust"] --> SP["build system prompt"] --> MOD["moderate<br/>(LLM security screen)"] --> SESS["conversation_key → session"] --> RUN["run turn<br/>(local Agent SDK)"] --> RED["redact secrets on public output"]
+  end
+
+  CORE --> OUT["outbound actions"]
+  OUT -->|back to the channel| CONN
+  CORE -. event stream .-> COL["collector"] --> UI["dashboard / CLI"]
+
+  classDef ch fill:#8B5CF6,stroke:#6D28D9,color:#fff;
 ```
 
 A **connector** is thin I/O: it knows *how* its channel works (tokens, polling, message shapes) and
