@@ -94,6 +94,7 @@ async function start(ctx) {
   let silenced = false;
   let lastResponseTime = 0;
   const responseCount = new Map();
+  const recentReplies = new Map(); // cid -> last few reply texts (dedup verbatim repeats)
   // persisted per-instance settings: per-channel mutes + engage-all-bots toggle
   const settingsFile = path.join(dataDir, `discord-${ctx.instanceId}-settings.json`);
   const mutedChannels = new Set();
@@ -342,6 +343,11 @@ RESPONSE RULES:
       const gated = replyText.toUpperCase().includes(NO_REPLY.toUpperCase())
         || replyText.toLowerCase() === 'no response';
       if (!replyText || gated) { ctx.log(`suppressed reply (not addressed to ${NAME})`); return; }
+      // Dedup: never re-post a message verbatim-identical to one of the last few we sent here.
+      // Long resumed sessions (esp. AI-to-AI loops) can occasionally replay an earlier reply.
+      const recents = recentReplies.get(cid) || [];
+      if (recents.includes(replyText)) { ctx.log('suppressed duplicate reply (verbatim repeat of a recent message)'); return; }
+      recents.push(replyText); if (recents.length > 6) recents.shift(); recentReplies.set(cid, recents);
       for (const chunk of splitResponse(formatCodeBlocks(replyText))) await message.channel.send(chunk);
       saveMemory(message, NAME, replyText);
       lastResponseTime = Date.now();
