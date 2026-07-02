@@ -246,12 +246,16 @@ async function start(ctx) {
     const cross = context.crossContext.length ? `\n\nCROSS-CONTEXT (other servers/channels, reference only):\n${context.crossContext.map(m => `- [${m.serverName}/#${m.channelName}] ${m.author}: ${m.content.substring(0, 100)}...`).join('\n')}` : '';
     // NOTE: authorization/trust is now the core's trust framework (data-driven,
     // scoped per server) — NOT hardcoded here. This preamble is Discord CONTEXT only.
-    const mentionedUsers = [...message.mentions.users.values()].map((u) => u.username).filter((n) => n !== client.user.username).join(', ');
+    const iAmMentioned = message.mentions.has(client.user);
+    const others = [...message.mentions.users.values()].filter((u) => u.id !== client.user.id).map((u) => '@' + u.username);
+    const mentionLine = iAmMentioned
+      ? `It **@-mentions YOU (${NAME})**${others.length ? `, along with ${others.join(', ')}` : ''} — so it IS addressed to you; answer it.`
+      : (others.length ? `It @-mentions ${others.join(', ')} — NOT you.` : 'It @-mentions no one specifically.');
     return `DISCORD CONTEXT
-- You are **${NAME}**. Your Discord user id is <@${client.user.id}> — that tag means YOU (not any other bot).
+- You are **${NAME}**. In this message text, "@${NAME}" (and the id <@${client.user.id}>) refer to YOU, not any other bot.
 - Server: ${context.location.serverName} · Channel: #${context.location.channelName} · Participants: ${context.location.participants.join(', ')}
 - ${mode}
-- THIS message is from **${message.author.username}**${mentionedUsers ? ` (it mentions: ${mentionedUsers})` : ''}. Address your reply to ${message.author.username}. Do NOT greet or address anyone else unless THIS message is literally from them — a mention of someone is not that person speaking.
+- THIS message is from **${message.author.username}**. ${mentionLine} Address your reply to ${message.author.username}. Do NOT greet or address anyone else unless THIS message is literally from them — a mention of someone is not that person speaking.
 
 MULTI-AGENT CHANNEL — CRITICAL:
 This channel may contain OTHER AI assistants and bots besides you. A message is FOR YOU only if it @-mentions you, addresses you by name ("${NAME}"), directly continues/answers something YOU said, or is an open question to the room that you are clearly the right one to answer. A message is NOT for you if it addresses a DIFFERENT agent or bot by name (e.g. someone saying "moneo, ..." or testing another bot), is a reply aimed at another agent, or simply isn't directed at you. **If the message is not for you, you MUST NOT reply — output ONLY the token ${NO_REPLY} and nothing else.** When unsure in a busy multi-agent channel, choose ${NO_REPLY}.
@@ -293,7 +297,7 @@ RESPONSE RULES:
       // context bleed — e.g. resuming a Moneo-heavy guild session in a different
       // channel and continuing to address Moneo.
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
-      let text = message.content;
+      let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
       // Vision: download supported image attachments and pass them as real image
       // content (base64) so the assistant actually SEES them — not a CDN URL she can't open.
       // Non-image / oversized / unsupported attachments stay as a text URL mention.
