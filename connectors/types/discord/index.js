@@ -28,8 +28,8 @@ const NO_REPLY = '[[NO_REPLY]]';
 // Control commands that change the bot's behavior — restricted to the bot's owner.
 const OWNER_ONLY_CMDS = new Set([
   'silence', 'be quiet', 'quiet', 'shush', 'speak', 'unsilence', 'wake up', 'resume',
-  'mute', 'mute here', 'mute this channel', 'ignore this channel',
-  'unmute', 'unmute here', 'listen here', 'unmute this channel',
+  'mute', 'mute here', 'mute this channel', 'ignore this channel', 'disable', 'disable here',
+  'unmute', 'unmute here', 'listen here', 'unmute this channel', 'enable', 'enable here',
   'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
   'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
   'update-asmltr', 'update asmltr', 'self-update', 'update yourself',
@@ -244,7 +244,7 @@ async function start(ctx) {
       case 'status':
         await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`mute\` / \`unmute\` (this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`update-asmltr\` · \`status\``); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`update-asmltr\` · \`status\``); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
