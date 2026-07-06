@@ -30,7 +30,7 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
   const grid = new contrib.grid({ rows: 12, cols: 12, screen });
 
   const sessTable = grid.set(0, 0, 8, 8, contrib.table, {
-    keys: true, label: ' active sessions  (↑↓ select · ENTER watch · k kill · c channels · q quit) ', interactive: true,
+    keys: true, label: ' active sessions  (↑↓ select · ENTER watch · k kill · s settings · q quit) ', interactive: true,
     columnSpacing: 2, columnWidth: [14, 11, 6, 7, 8, 6],
     border: { type: 'line' }, fg: 'white', selectedFg: 'black', selectedBg: 'magenta',
   });
@@ -69,17 +69,23 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
     style: { border: { fg: 'cyan' } }, inputOnFocus: true, keys: true, mouse: true,
   });
 
-  // channels overlay — enable/disable per-channel relay across connector instances.
-  // A disabled channel is fully ignored by its connector (no relay to core, no usage).
-  const channelsBox = blessed.list({
+  // connector-settings overlay — a small drill-down framework:
+  //   instances → one connector's settings (config fields + interactive panels) → a panel (e.g. Channels).
+  // Config comes from each type's meta.configSchema; panels from meta.panels (a connector extends the
+  // UI just by declaring one + serving its endpoint). One list box renders all three levels.
+  const settingsBox = blessed.list({
     parent: screen, hidden: true, top: 0, left: 0, width: '100%', height: '100%',
-    label: ' channels ', border: { type: 'line' }, tags: true, keys: true, mouse: true,
+    label: ' connector settings ', border: { type: 'line' }, tags: true, keys: true, mouse: true,
     style: { border: { fg: 'cyan' }, selected: { bg: 'cyan', fg: 'black' } },
     scrollable: true, scrollbar: { ch: ' ', style: { bg: 'cyan' } },
   });
-  let channelRows = []; // index-aligned with channelsBox items: {header?, instance_id, channel_id, enabled, default_enabled}
-  let channelsOpen = false;
+  let settingsMode = null;   // null(closed) | 'instances' | 'instance' | 'panel'
+  let settingsRows = [];     // index-aligned metadata for the current list
+  let sTypes = {};           // type meta by type name (configSchema + panels)
+  let curInst = null;        // the instance being edited
+  let curPanel = null;       // the panel being viewed
   function mgrHeaders() { const h = { 'Content-Type': 'application/json' }; if (MGR.token) h.Authorization = 'Bearer ' + MGR.token; return h; }
+  async function mgrGet(p) { try { const r = await fetch(MGR.base + p, { headers: mgrHeaders() }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
 
   function ageOf(ms) {
     if (!ms) return '?'; const s = Math.floor((Date.now() - ms) / 1000);
@@ -123,7 +129,7 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
         headers: ['session', 'kind', 'age', 'idle', 'tok', 'mux'],
         data: sessions.map((s) => [String(s.session_id).slice(0, 14), s.kind, ageOf(s.started_unix), ageOf(s.last_activity_unix), String(s.tokens_total || 0), s.multiplexer || '-']),
       });
-      sessTable.setLabel(` active sessions (${sessions.length})  (↑↓ select · ENTER watch · k kill · q quit) `);
+      sessTable.setLabel(` active sessions (${sessions.length})  (↑↓ select · ENTER watch · k kill · s settings · q quit) `);
       if (!watchSessionId) screen.render();
     } catch (e) { log.log('{red-fg}sessions fetch failed: ' + e.message + '{/red-fg}'); }
   }
@@ -216,64 +222,121 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
     } catch (e) { watchBox.log(`{red-fg}steer failed: ${e.message}{/red-fg}`); }
     screen.render();
   });
-  // --- channels view: list every channel each connector can reach + toggle its relay ---
-  async function loadChannels() {
-    channelRows = [];
+  // --- connector settings framework (instances → instance → panel) --------------------
+  // text input for editing a scalar config field
+  const cfgInput = blessed.textbox({
+    parent: screen, hidden: true, bottom: 0, left: 0, width: '100%', height: 3,
+    border: { type: 'line' }, label: ' edit value — ENTER to save · ESC cancel ',
+    style: { border: { fg: 'cyan' } }, inputOnFocus: true, keys: true, mouse: true,
+  });
+  const fmtVal = (v) => typeof v === 'boolean' ? (v ? '{green-fg}on{/green-fg}' : '{red-fg}off{/red-fg}')
+    : (v === '' || v == null ? '{gray-fg}—{/gray-fg}' : '{cyan-fg}' + String(v) + '{/cyan-fg}');
+
+  // Level 1 — every connector instance.
+  async function renderInstances() {
+    settingsMode = 'instances'; curInst = null; curPanel = null; settingsRows = [];
+    settingsBox.setLabel(' connector settings — pick a connector  (↑↓ · ENTER open · r reload · ESC close) ');
     const items = [];
-    try {
-      const res = await fetch(MGR.base + '/instances', { headers: mgrHeaders() });
-      const { instances } = await res.json();
-      for (const inst of (instances || [])) {
-        let data;
-        try {
-          const r = await fetch(MGR.base + `/instances/${inst.id}/channels`, { headers: mgrHeaders() });
-          if (!r.ok) continue; // connector has no /channels (non-discord today) or is down
-          data = await r.json();
-        } catch (_) { continue; }
-        if (!data || !Array.isArray(data.channels)) continue;
-        const dflt = data.default_enabled;
-        items.push(`{bold}${inst.name}{/bold} {gray-fg}(${inst.type}){/gray-fg}  default: ${dflt ? '{green-fg}listen{/green-fg}' : '{red-fg}ignore{/red-fg}'}  {gray-fg}· d = toggle default{/gray-fg}`);
-        channelRows.push({ header: true, instance_id: inst.id, default_enabled: dflt });
+    const [inst, types] = await Promise.all([mgrGet('/instances'), mgrGet('/types')]);
+    sTypes = {}; for (const t of ((types && types.types) || [])) sTypes[t.type] = t;
+    for (const i of ((inst && inst.instances) || [])) {
+      const meta = sTypes[i.type] || {};
+      items.push(`${i.enabled ? '{green-fg}●{/green-fg}' : '{gray-fg}○{/gray-fg}'} {bold}${i.name}{/bold} {gray-fg}(${meta.displayName || i.type}){/gray-fg}`);
+      settingsRows.push({ kind: 'instance', instance: i });
+    }
+    if (!items.length) items.push('{red-fg}no connectors (manager unreachable?){/red-fg}');
+    settingsBox.setItems(items); settingsBox.select(0); screen.render();
+  }
+  // Level 2 — one connector's panels + config fields.
+  function renderInstance() {
+    settingsMode = 'instance'; curPanel = null; settingsRows = [];
+    const i = curInst, meta = sTypes[i.type] || {};
+    const schema = (meta.configSchema && meta.configSchema.properties) || {};
+    const items = [`{gray-fg}${meta.displayName || i.type} · ${i.enabled ? '{green-fg}enabled{/green-fg}{gray-fg}' : 'disabled'}{/gray-fg}`, ''];
+    settingsRows.push({ kind: 'sep' }, { kind: 'sep' });
+    for (const p of (meta.panels || [])) { items.push(`  ▸ {bold}${p.title}{/bold}`); settingsRows.push({ kind: 'panel', panel: p }); }
+    items.push('', '{gray-fg}  — config  (SPACE toggle · ENTER edit · ⟳ change restarts the connector) —{/gray-fg}');
+    settingsRows.push({ kind: 'sep' }, { kind: 'sep' });
+    for (const [key, spec] of Object.entries(schema)) {
+      const cur = (i.config && i.config[key] !== undefined) ? i.config[key] : spec.default;
+      const box = spec.type === 'boolean' ? (cur ? '[{green-fg}x{/green-fg}]' : '[ ]') : '   ';
+      items.push(`  ${box} ${spec.title || key} {gray-fg}={/gray-fg} ${fmtVal(cur)}`);
+      settingsRows.push({ kind: 'config', key, spec, value: cur });
+    }
+    settingsBox.setLabel(` ${i.name} — settings  (↑↓ · SPACE/ENTER · ESC back) `);
+    settingsBox.setItems(items); settingsBox.select(2); screen.render();
+  }
+  // Level 3 — a panel (currently: channels, a live per-channel enable/disable).
+  async function renderPanel() {
+    settingsMode = 'panel'; settingsRows = [];
+    const p = curPanel, id = curInst.id;
+    const items = [];
+    if (p.kind === 'channels') {
+      settingsBox.setLabel(` ${curInst.name} · ${p.title}  (SPACE/ENTER toggle · d default · r reload · ESC back) `);
+      const data = await mgrGet(`/instances/${id}/${p.endpoint}`);
+      if (!data || !Array.isArray(data.channels)) { items.push('{red-fg}panel unavailable (connector down?){/red-fg}'); settingsRows.push({ kind: 'sep' }); }
+      else {
+        items.push(`{gray-fg}default:{/gray-fg} ${data.default_enabled ? '{green-fg}listen everywhere{/green-fg}' : '{red-fg}ignore (allowlist){/red-fg}'}  {gray-fg}· d flips it{/gray-fg}`, '');
+        settingsRows.push({ kind: 'chan-default', enabled: data.default_enabled }, { kind: 'sep' });
         for (const ch of data.channels) {
           const mark = ch.enabled ? '{green-fg}✓ on {/green-fg}' : '{red-fg}✗ off{/red-fg}';
-          items.push(`   ${mark}  ${ch.guild} {cyan-fg}#${ch.name}{/cyan-fg}${ch.explicit ? '' : ' {gray-fg}(default){/gray-fg}'}`);
-          channelRows.push({ instance_id: inst.id, channel_id: ch.channel_id, enabled: ch.enabled });
+          items.push(`  ${mark}  ${ch.guild} {cyan-fg}#${ch.name}{/cyan-fg}${ch.explicit ? '' : ' {gray-fg}(default){/gray-fg}'}`);
+          settingsRows.push({ kind: 'channel', channel_id: ch.channel_id, enabled: ch.enabled });
         }
       }
-    } catch (e) { items.push('{red-fg}failed to reach manager: ' + e.message + '{/red-fg}'); }
-    if (!channelRows.length) items.push('{gray-fg}no channel-controllable connectors running{/gray-fg}');
-    channelsBox.setItems(items);
-    if (channelsBox.selected >= items.length) channelsBox.select(Math.max(0, items.length - 1));
+    }
+    settingsBox.setItems(items);
+    if (settingsBox.selected >= items.length) settingsBox.select(Math.max(0, items.length - 1));
     screen.render();
   }
-  function openChannels() {
-    channelsOpen = true; channelsBox.show(); channelsBox.focus();
-    channelsBox.setLabel(' channels  (↑↓ · SPACE/ENTER toggle channel · d toggle default · r reload · ESC back) ');
-    channelsBox.setItems(['{gray-fg}loading…{/gray-fg}']); screen.render(); loadChannels();
+
+  function openSettings() { settingsMode = 'instances'; settingsBox.show(); settingsBox.focus(); settingsBox.setItems(['{gray-fg}loading…{/gray-fg}']); screen.render(); renderInstances(); }
+  function closeSettings() { settingsMode = null; settingsBox.hide(); sessTable.focus(); screen.render(); }
+  function settingsBack() {
+    if (settingsMode === 'panel') return renderInstance();
+    if (settingsMode === 'instance') return renderInstances();
+    return closeSettings();
   }
-  function closeChannels() { channelsOpen = false; channelsBox.hide(); sessTable.focus(); screen.render(); }
-  async function toggleSelectedChannel() {
-    const row = channelRows[channelsBox.selected];
-    if (!row || row.header) return;
-    try { await fetch(MGR.base + `/instances/${row.instance_id}/channels`, { method: 'POST', headers: mgrHeaders(), body: JSON.stringify({ channel_id: row.channel_id, enabled: !row.enabled }) }); } catch (_) {}
-    await loadChannels();
+  async function settingsActivate() { // SPACE/ENTER on the selected row
+    const row = settingsRows[settingsBox.selected];
+    if (!row) return;
+    if (row.kind === 'instance') { curInst = row.instance; return renderInstance(); }
+    if (row.kind === 'panel') { curPanel = row.panel; settingsBox.setItems(['{gray-fg}loading…{/gray-fg}']); screen.render(); return renderPanel(); }
+    if (row.kind === 'config') {
+      if (row.spec.type === 'boolean') return patchConfig(row.key, !row.value);
+      cfgInput.setValue(row.value == null ? '' : String(row.value)); cfgInput._editKey = row.key; cfgInput._editSpec = row.spec;
+      cfgInput.show(); cfgInput.focus(); screen.render(); return;
+    }
+    if (row.kind === 'channel') { await mgrPost(`/instances/${curInst.id}/${curPanel.endpoint}`, { channel_id: row.channel_id, enabled: !row.enabled }); return renderPanel(); }
+    if (row.kind === 'chan-default') { await mgrPost(`/instances/${curInst.id}/${curPanel.endpoint}`, { default_enabled: !row.enabled }); return renderPanel(); }
   }
-  async function toggleDefaultForSelected() {
-    let i = channelsBox.selected; // walk up to the governing instance header
-    while (i >= 0 && !(channelRows[i] && channelRows[i].header)) i--;
-    const h = channelRows[i];
-    if (!h) return;
-    try { await fetch(MGR.base + `/instances/${h.instance_id}/channels`, { method: 'POST', headers: mgrHeaders(), body: JSON.stringify({ default_enabled: !h.default_enabled }) }); } catch (_) {}
-    await loadChannels();
+  async function mgrPost(p, body) { try { await fetch(MGR.base + p, { method: 'POST', headers: mgrHeaders(), body: JSON.stringify(body) }); } catch (_) {} }
+  async function patchConfig(key, value) { // full merged config (validated + restarts the connector)
+    const merged = { ...(curInst.config || {}), [key]: value };
+    try {
+      const r = await fetch(MGR.base + `/instances/${curInst.id}`, { method: 'PATCH', headers: mgrHeaders(), body: JSON.stringify({ config: merged }) });
+      const j = await r.json();
+      if (r.ok && j.config) curInst = j; else log.log(`{red-fg}config update failed: ${(j && j.error) || r.status}{/red-fg}`);
+    } catch (e) { log.log(`{red-fg}config update failed: ${e.message}{/red-fg}`); }
+    renderInstance();
   }
-  channelsBox.key(['space', 'enter'], toggleSelectedChannel);
-  channelsBox.key(['d'], toggleDefaultForSelected);
-  channelsBox.key(['r'], loadChannels);
-  channelsBox.key(['escape'], closeChannels);
-  screen.key(['c'], () => { if (!watchSessionId && !channelsOpen) openChannels(); });
+  settingsBox.key(['space', 'enter'], settingsActivate);
+  settingsBox.key(['d'], async () => { if (settingsMode === 'panel' && curPanel && curPanel.kind === 'channels') { const r = settingsRows.find((x) => x.kind === 'chan-default'); if (r) { await mgrPost(`/instances/${curInst.id}/${curPanel.endpoint}`, { default_enabled: !r.enabled }); renderPanel(); } } });
+  settingsBox.key(['r'], () => { if (settingsMode === 'instances') renderInstances(); else if (settingsMode === 'instance') renderInstance(); else if (settingsMode === 'panel') renderPanel(); });
+  settingsBox.key(['escape'], settingsBack);
+  cfgInput.key(['escape'], () => { cfgInput.hide(); settingsBox.focus(); screen.render(); });
+  cfgInput.on('submit', (value) => {
+    cfgInput.hide(); settingsBox.focus();
+    const key = cfgInput._editKey, spec = cfgInput._editSpec || {};
+    let v = String(value == null ? '' : value);
+    let coerced = spec.type === 'integer' || spec.type === 'number' ? Number(v) : v;
+    if ((spec.type === 'integer' || spec.type === 'number') && Number.isNaN(coerced)) { screen.render(); return; }
+    patchConfig(key, coerced);
+  });
+  screen.key(['s'], () => { if (!watchSessionId && settingsMode === null) openSettings(); });
 
   screen.key(['q', 'C-c'], () => { socket.close(); process.exit(0); });
-  screen.key(['escape'], () => { if (channelsOpen || watchSessionId) return; socket.close(); process.exit(0); });
+  screen.key(['escape'], () => { if (settingsMode !== null || watchSessionId) return; socket.close(); process.exit(0); });
 
   refreshSessions(); seedCpu();
   const timer = setInterval(refreshSessions, 2500);

@@ -65,6 +65,13 @@ const meta = {
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
     },
   },
+  // Interactive settings panels this connector exposes beyond plain config — the TUI/GUI
+  // renders each generically (a connector adds a panel by declaring it here + serving its
+  // HTTP endpoint). `kind` selects the client-side renderer; `endpoint` is proxied by the
+  // manager as /instances/<id>/<endpoint>. Channel toggles are LIVE (no restart).
+  panels: [
+    { id: 'channels', title: 'Channels — which channels I listen to', kind: 'channels', endpoint: 'channels' },
+  ],
 };
 
 const STOP_WORDS = new Set(['the','a','an','and','or','but','is','are','was','were','in','on','at','to','for','of','with','by','from','as','that','this','it','be','have','has','had','do','does','did','will','would','can','could','should','may','might']);
