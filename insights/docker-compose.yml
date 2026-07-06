@@ -17,6 +17,14 @@ services:
     environment:
       # read service bearer — must match the collector's ASMLTR_INSIGHTS_TOKEN (from BWS)
       - ASMLTR_INSIGHTS_TOKEN=${ASMLTR_INSIGHTS_TOKEN:-}
+      # connector-manager bearer (control plane) — injected server-side by nginx
+      - ASMLTR_MANAGER_TOKEN=${ASMLTR_MANAGER_TOKEN:-}
+      # nginx listen directive (default :80 for the traefik-network model; a host-network
+      # deploy can set e.g. ASMLTR_NGINX_LISTEN=172.18.0.1:8091)
+      - NGINX_LISTEN=${ASMLTR_NGINX_LISTEN:-80}
+      # where nginx reaches the HOST services (collector/manager/core). host.docker.internal
+      # works on Docker Desktop; a Linux host-network deploy sets ASMLTR_UPSTREAM_HOST=127.0.0.1
+      - ASMLTR_UPSTREAM_HOST=${ASMLTR_UPSTREAM_HOST:-host.docker.internal}
     logging:
       driver: json-file
       options:
@@ -25,7 +33,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-network"
-      - "traefik.http.routers.asmltr-insights.rule=Host(`insights.example.com`)"
+      - "traefik.http.routers.asmltr-insights.rule=Host(`${ASMLTR_INSIGHTS_HOST:-insights.example.com}`)"
       - "traefik.http.routers.asmltr-insights.entrypoints=websecure"
       - "traefik.http.routers.asmltr-insights.tls.certresolver=letsencrypt"
       - "traefik.http.routers.asmltr-insights.middlewares=authelia@docker"

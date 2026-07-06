@@ -5,14 +5,14 @@
 # ${ASMLTR_MANAGER_TOKEN} is the connector-manager bearer (write/control plane,
 # host :3024) — also injected server-side so it never reaches the browser.
 server {
-    listen 80;
+    listen ${NGINX_LISTEN};
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
 
     # REST: inject the read bearer; forward the Authelia-resolved user.
     location /api/ {
-        proxy_pass http://host.docker.internal:3017;
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;
         proxy_set_header Authorization "Bearer ${ASMLTR_INSIGHTS_TOKEN}";
         proxy_set_header X-Remote-User $http_remote_user;
         proxy_set_header Host $host;
@@ -22,7 +22,7 @@ server {
     # trailing slash on proxy_pass strips the /manager/ prefix. Inject the
     # manager bearer; forward the Authelia-resolved user for audit/authorization.
     location /manager/ {
-        proxy_pass http://host.docker.internal:3024/;
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3024/;
         proxy_set_header Authorization "Bearer ${ASMLTR_MANAGER_TOKEN}";
         proxy_set_header X-Remote-User $http_remote_user;
         proxy_set_header Host $host;
@@ -35,7 +35,7 @@ server {
     # open on localhost today; when it grows a bearer, set ${ASMLTR_CORE_TOKEN}
     # and uncomment the Authorization line below (injected server-side).
     location /trust/ {
-        proxy_pass http://host.docker.internal:3023;
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
         # proxy_set_header Authorization "Bearer ${ASMLTR_CORE_TOKEN}";
         proxy_set_header X-Remote-User $http_remote_user;
         proxy_set_header Host $host;
@@ -43,7 +43,7 @@ server {
 
     # socket.io (websocket upgrade)
     location /socket.io/ {
-        proxy_pass http://host.docker.internal:3017;
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
