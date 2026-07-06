@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy to keys.json (gitignored). Each key authorizes an OpenAI-compatible caller and maps it to a TRUST IDENTITY — seed that identity as a principal in the trust store so moderation/authorization apply. The client sends it as `Authorization: Bearer <key>`.",
+  "keys": [
+    { "key": "sk-asmltr-CHANGE-ME-long-random-string", "identity": "owner", "username": "openai-client" }
+  ]
+}

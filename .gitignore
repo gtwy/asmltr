@@ -28,3 +28,4 @@ connectors/types/discord/channel-aliases.json
 # Private per-install working notes
 CLAUDE.local.md
 insights/docker-compose.eve.yml
+connectors/types/openai/keys.json

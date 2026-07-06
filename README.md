@@ -3,7 +3,7 @@
 **One channel-agnostic backend behind every chat surface for a single AI assistant — with a live insights dashboard.**
 
 Run *one* assistant (backed by your Claude subscription via the local Agent SDK) and let people
-reach it from **Discord, Telegram, an MCP client, and GitHub issues** — all through the same brain,
+reach it from **Discord, Telegram, an MCP client, GitHub issues, or any OpenAI-compatible client** — all through the same brain,
 with shared memory, a unified trust/permission model, moderation, and per-secret output redaction.
 A collector + dashboard give you one pane of glass over everything the assistant is doing.
 
@@ -65,7 +65,7 @@ renders a reply.
 | Dir | What | Runs as |
 |---|---|---|
 | `core/` | **asmltr-core** — the channel-agnostic backend: envelope pipeline, sessions, trust, moderation, execution, redaction. | Host process (PM2), `127.0.0.1` |
-| `connectors/` | The connector **manager** (supervisor + config API) and the four connector **types** (`discord`, `telegram`, `mcp`, `github`). Each enabled instance runs as its own child process. | Host process (PM2), `127.0.0.1` |
+| `connectors/` | The connector **manager** (supervisor + config API) and the connector **types** (`discord`, `telegram`, `mcp`, `github`, `openai`). Each enabled instance runs as its own child process. | Host process (PM2), `127.0.0.1` |
 | `insights/collector/` | Telemetry collector — ingests the shared event stream, samples metrics, serves REST + socket.io. | Host process (PM2), `127.0.0.1` |
 | `insights/dashboard/` | Vue 3 dashboard: live sessions, cross-surface timeline, usage, the trust **Access** page. | Static build (front with your own proxy/auth) |
 | `cli/` | **`asmltr`** — terminal client + TUI over the collector API. | Host CLI |
@@ -141,6 +141,10 @@ Each connector's full config schema is discoverable at `GET /types` on the manag
   clients in `connectors/types/mcp/clients.json` (see `clients.example.json`); each client maps to a trust principal.
 - **github** — mention-driven, repo-aware issue assistant: clones the repo, answers in a live-updating
   comment, authenticates as its own PAT account. Key config: `mention`, `pat_bws_key`, `repos`, `dry_run`.
+- **openai** — an **OpenAI-compatible REST API** (`POST /v1/chat/completions`, `GET /v1/models`, streaming
+  supported). Point any OpenAI-style client (SDKs, chat UIs, OpenRouter-style routers) at the install and it's
+  answered by the local SDK through the core — trust + moderation still apply. Bearer keys map to trust
+  identities in a gitignored `keys.json` (see `keys.example.json`). Key config: `port`, `model_name`, `require_key`.
 
 ---
 

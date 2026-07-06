@@ -23,6 +23,7 @@ const SURFACES = Object.freeze([
   'eve-assistant-native',
   'mcp',
   'github',
+  'openai',      // OpenAI-compatible REST API (external clients / OpenRouter-style)
   'claude-code', // interactive sessions tracked via hooks
   'system',      // the metrics sampler
   'core',        // asmltr-core itself (lifecycle / internal)
