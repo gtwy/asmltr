@@ -152,6 +152,10 @@ Each connector's full config schema is discoverable at `GET /types` on the manag
   low-trust principals). Provider/model/key and alert routing are all configurable — see [docs/MODERATION.md](docs/MODERATION.md).
 - **Output redaction** — `shared/redact.js` masks tokens/keys/passwords/private-keys from replies on
   **public** surfaces (and for any non-full-trust recipient). Private DMs with a full-trust owner see raw output.
+- **Steer & takeover** — reach into a live background session from the TUI or dashboard: stop its
+  in-flight turn, or inject a message to redirect it. Channel sessions resume via the SDK and the reply
+  routes back to the origin channel; `asmltr claude` sessions get keys typed into their tmux pane (or you
+  attach it). See [docs/INJECTION.md](docs/INJECTION.md).
 - **Secrets never live in the repo.** They resolve at runtime through the pluggable provider
   (`shared/secrets.js`): env → secrets file → command. Config files that hold secrets
   (`.env`, `clients.json`, `seed.json`, `channel-aliases.json`) are gitignored; commit only their `.example` twins.
