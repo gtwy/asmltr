@@ -128,7 +128,7 @@ const summary = computed(() => {
         :disabled="isBusy"
         title="enable / disable (start / stop)"
         class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50"
-        :class="enabled ? 'bg-eve-gradient' : 'bg-white/10'"
+        :class="enabled ? 'bg-brand-gradient' : 'bg-white/10'"
         @click="emit('toggle', instance)"
       >
         <span

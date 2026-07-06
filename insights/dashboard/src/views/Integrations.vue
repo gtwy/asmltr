@@ -169,7 +169,7 @@ onUnmounted(() => {
 
           <button
             type="button"
-            class="mt-auto rounded-xl bg-eve-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-eve-violet/30 transition-opacity hover:opacity-90"
+            class="mt-auto rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity hover:opacity-90"
             @click="openAdd(t)"
           >
             + Add {{ t.displayName }}

@@ -197,6 +197,6 @@ async function removeGrant(gid) {
   @apply rounded-lg border border-rose-500/20 bg-rose-500/5 px-2.5 py-1 text-xs font-medium text-rose-400/80 transition-colors hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-50;
 }
 .link-btn {
-  @apply rounded-md border border-eve-violet/30 bg-eve-violet/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 transition-colors hover:bg-eve-violet/20 disabled:cursor-not-allowed disabled:opacity-50;
+  @apply rounded-md border border-brand-violet/30 bg-brand-violet/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 transition-colors hover:bg-brand-violet/20 disabled:cursor-not-allowed disabled:opacity-50;
 }
 </style>

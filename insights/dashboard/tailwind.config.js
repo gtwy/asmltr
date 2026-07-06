@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        eve: {
+        brand: {
           violet: '#8B5CF6',
           pink: '#EC4899'
         }
@@ -14,7 +14,7 @@ export default {
         mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace']
       },
       backgroundImage: {
-        'eve-gradient': 'linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)'
+        'brand-gradient': 'linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)'
       },
       borderRadius: {
         '2xl': '1rem'

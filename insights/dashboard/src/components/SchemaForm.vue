@@ -134,7 +134,7 @@ function toNum(raw) {
         role="switch"
         :aria-checked="!!modelValue[field.key]"
         class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors"
-        :class="modelValue[field.key] ? 'bg-eve-gradient' : 'bg-white/10'"
+        :class="modelValue[field.key] ? 'bg-brand-gradient' : 'bg-white/10'"
         @click="setValue(field.key, !modelValue[field.key])"
       >
         <span
@@ -197,10 +197,10 @@ function toNum(raw) {
 <style scoped>
 .field-input {
   @apply w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors;
-  @apply placeholder:text-slate-600 focus:border-eve-violet/60 focus:bg-white/[0.06];
+  @apply placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06];
 }
 .row-add {
-  @apply self-start rounded-lg border border-eve-violet/30 bg-eve-violet/10 px-3 py-1.5 text-xs font-medium text-violet-300 transition-colors hover:bg-eve-violet/20;
+  @apply self-start rounded-lg border border-brand-violet/30 bg-brand-violet/10 px-3 py-1.5 text-xs font-medium text-violet-300 transition-colors hover:bg-brand-violet/20;
 }
 .row-remove {
   @apply shrink-0 rounded-lg border border-rose-500/20 bg-rose-500/5 px-2.5 py-2 text-xs text-rose-400/80 transition-colors hover:bg-rose-500/15;

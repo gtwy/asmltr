@@ -33,7 +33,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between px-4 py-4 lg:flex-col lg:items-stretch lg:gap-6">
         <!-- Brand -->
         <div class="flex items-center gap-3">
-          <div class="h-9 w-9 rounded-2xl bg-eve-gradient shadow-lg shadow-eve-violet/30"></div>
+          <div class="h-9 w-9 rounded-2xl bg-brand-gradient shadow-lg shadow-brand-violet/30"></div>
           <div class="leading-tight">
             <div class="text-sm font-bold tracking-tight">
               <span class="gradient-text">asmltr</span> insights

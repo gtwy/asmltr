@@ -157,7 +157,7 @@ async function onSubmit() {
       <button
         type="button"
         :disabled="!canSubmit || submitting"
-        class="rounded-xl bg-eve-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-eve-violet/30 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+        class="rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         @click="onSubmit"
       >
         {{ submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create user' }}
@@ -169,6 +169,6 @@ async function onSubmit() {
 <style scoped>
 .field-input {
   @apply w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors;
-  @apply placeholder:text-slate-600 focus:border-eve-violet/60 focus:bg-white/[0.06];
+  @apply placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06];
 }
 </style>

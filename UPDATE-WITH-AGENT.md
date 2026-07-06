@@ -110,7 +110,36 @@ Then have the user send a real test message on one channel and confirm a reply.
 
 ---
 
-## 6. If something broke — roll back
+## 6. Web GUI — rebuild it if present, or OFFER it if not
+
+The optional web dashboard (`insights/dashboard`) isn't part of every install. Check whether it's deployed:
+
+```bash
+docker ps -a --format '{{.Names}}' | grep -q '^asmltr-insights-dashboard$' && echo PRESENT || echo ABSENT
+```
+
+**If PRESENT** — rebuild it so the GUI picks up this update, using the same compose/env/override the
+install used:
+```bash
+(cd insights/dashboard && npm install)
+docker compose -f insights/docker-compose.yml up -d --build   # + any -f override / env vars the install used
+```
+Then confirm it still loads — and, if it's public, that an unauthenticated request still redirects to the
+login portal (auth didn't regress).
+
+**If ABSENT** — the user has no web GUI. **⛏ ASK USER:** "You don't have the asmltr web dashboard set up —
+want me to set it up now? Either **local-only** (SSH tunnel) or **public on a domain behind
+authentication**." If yes, follow **§9 "Web GUI" in `INSTALL-WITH-AGENT.md`** (detect any reverse proxy +
+auth layer already on the box, set up domain/DNS + TLS, and restrict access to their identity). If no,
+continue and just remind them it can be enabled anytime.
+
+> 🔒 Never bring the GUI up on a public interface without an authenticator in front restricting it to the
+> specific user(s) — it also proxies the connector-manager + trust **control plane**. If you can't put auth
+> in front of it, deploy local-only instead.
+
+---
+
+## 7. If something broke — roll back
 
 ```bash
 git reset --hard <recorded-commit>          # from step 0

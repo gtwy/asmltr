@@ -14,7 +14,7 @@ onMounted(() => {
 
 <template>
   <div>
-    <PageHeader title="Notifications" subtitle="Outbound alerts Eve has surfaced to [REDACTED]">
+    <PageHeader title="Notifications" subtitle="Outbound alerts the assistant has surfaced">
       <template #actions>
         <button
           class="glass glass-hover px-3 py-1.5 text-sm text-slate-300"

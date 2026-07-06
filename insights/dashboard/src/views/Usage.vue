@@ -141,7 +141,7 @@ onMounted(() => {
 
 <template>
   <div>
-    <PageHeader title="Token usage + attribution" subtitle="Where Eve's tokens go, by surface and identity" />
+    <PageHeader title="Token usage + attribution" subtitle="Where tokens go, by surface and identity" />
 
     <!-- framing note -->
     <div class="glass mb-5 flex items-start gap-3 p-3 text-sm">

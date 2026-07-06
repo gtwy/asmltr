@@ -94,7 +94,7 @@ async function onSubmit() {
         <input
           v-model="form.name"
           type="text"
-          class="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-eve-violet/60 focus:bg-white/[0.06]"
+          class="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
           placeholder="e.g. 3dprintpittsburgh"
         />
       </div>
@@ -110,7 +110,7 @@ async function onSubmit() {
           role="switch"
           :aria-checked="form.enabled"
           class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors"
-          :class="form.enabled ? 'bg-eve-gradient' : 'bg-white/10'"
+          :class="form.enabled ? 'bg-brand-gradient' : 'bg-white/10'"
           @click="form.enabled = !form.enabled"
         >
           <span
@@ -149,7 +149,7 @@ async function onSubmit() {
       <button
         type="button"
         :disabled="!canSubmit || submitting"
-        class="rounded-xl bg-eve-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-eve-violet/30 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+        class="rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         @click="onSubmit"
       >
         {{ submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create connector' }}

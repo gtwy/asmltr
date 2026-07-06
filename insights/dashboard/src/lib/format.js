@@ -4,8 +4,8 @@
 export const SURFACE_META = {
   discord: { label: 'Discord', color: '#5865F2', icon: '💬' },
   telegram: { label: 'Telegram', color: '#229ED9', icon: '✈️' },
-  'eve-assistant-web': { label: 'Assistant·web', color: '#8B5CF6', icon: '🌐' },
-  'eve-assistant-native': { label: 'Assistant·native', color: '#A855F7', icon: '📱' },
+  'assistant-web': { label: 'Assistant·web', color: '#8B5CF6', icon: '🌐' },
+  'assistant-native': { label: 'Assistant·native', color: '#A855F7', icon: '📱' },
   mcp: { label: 'MCP', color: '#10B981', icon: '🔌' },
   github: { label: 'GitHub', color: '#94A3B8', icon: '🐙' },
   'claude-code': { label: 'Claude Code', color: '#EC4899', icon: '⌨️' },

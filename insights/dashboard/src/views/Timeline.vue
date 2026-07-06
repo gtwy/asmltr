@@ -71,7 +71,7 @@ onMounted(() => {
         v-model="search"
         type="search"
         placeholder="Search events, payloads, identities…"
-        class="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-eve-violet/50 focus:outline-none focus:ring-1 focus:ring-eve-violet/40"
+        class="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-brand-violet/50 focus:outline-none focus:ring-1 focus:ring-brand-violet/40"
       />
 
       <div v-if="store.knownSurfaces.length" class="flex flex-col gap-2">
@@ -100,7 +100,7 @@ onMounted(() => {
             class="pill border font-mono"
             :class="
               selectedIdentities.has(id)
-                ? 'border-eve-pink bg-eve-pink/30 text-white'
+                ? 'border-brand-pink bg-brand-pink/30 text-white'
                 : 'border-white/10 bg-white/5 text-slate-400'
             "
             @click="toggle(selectedIdentities, id)"

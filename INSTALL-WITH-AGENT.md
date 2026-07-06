@@ -190,6 +190,90 @@ Then have the user send a real message on one channel (from their owner identity
 
 ---
 
+## 9. Web GUI (insights dashboard) — OFFER IT; help set up authenticated access
+
+`insights/dashboard` is a Vue observability GUI over the collector (live sessions, events, tokens,
+system). **You must raise this with the user — do not silently skip it.**
+
+**⛏ ASK USER:** "Do you want the web dashboard? If so — **local-only** (you reach it over an SSH tunnel),
+or **public access on a domain**? Public access will be put behind authentication so only you can reach it."
+
+If they decline, skip this section (the `asmltr` TUI from step 7 already gives full local monitoring) and
+note in your final report that the GUI is **not enabled** — it can be turned on later.
+
+### 🔒 Non-negotiable security rule
+The dashboard's nginx also reverse-proxies the **control plane** — the connector **manager** (`/manager`
+→ 3024) and the core **trust/access** API (`/trust` → 3023). Exposing it to the internet WITHOUT
+authentication hands anyone your control plane. **If it is reachable publicly, it MUST sit behind an
+authenticator that restricts access to the specific user(s).** If you cannot set that up, deploy local-only.
+
+### Build the SPA (both options need this)
+```bash
+(cd insights/dashboard && npm install && npm run build)
+```
+
+### Option A — local-only (no domain, no proxy)
+Run the dashboard bound to loopback and have the user tunnel in. Simplest, always available:
+```bash
+# serve dist/ on 127.0.0.1 only, e.g. via the container with a loopback publish, or any static server:
+ASMLTR_NGINX_LISTEN=127.0.0.1:8091 ASMLTR_UPSTREAM_HOST=127.0.0.1 \
+  docker compose -f insights/docker-compose.yml up -d --build   # (see note below on the compose)
+```
+Tell the user to reach it via: `ssh -L 8091:127.0.0.1:8091 <server>` then open `http://localhost:8091`.
+
+### Option B — public, authenticated (walk the user through it)
+
+**1. Detect what's already on the box — don't assume.**
+```bash
+docker ps --format '{{.Names}}\t{{.Image}}' | grep -iE 'traefik|nginx|caddy|authelia|oauth2-proxy|authentik'
+```
+Determine: is there a **reverse proxy** (Traefik / nginx / Caddy / none) and an **auth layer** (Authelia /
+Authentik / oauth2-proxy / Cloudflare Access / nginx basic-auth / none)?
+
+**2. ⛏ ASK USER** for the **domain/subdomain** (e.g. `asmltr.example.com`) and **which identity** should be
+allowed in. If there is **no reverse proxy or no auth layer**, ask whether they want you to **install and
+configure one** (Traefik + Authelia is a common pairing), or to **fall back to local-only (Option A)**.
+Follow their choice — do not expose it publicly without auth.
+
+**3. DNS.** Point the hostname at this server's public IP (`curl -s https://api.ipify.org`). If you hold
+credentials for their DNS provider, offer to create the record; otherwise give them the exact record and
+wait until it resolves (`dig +short <host>`). If DNS is behind a proxying CDN, use **DNS-only** (or an
+origin cert) so the TLS/ACME challenge can complete.
+
+**4. Mind the network reachability gotcha.** The host services bind `127.0.0.1`, so a reverse-proxy
+*container* cannot reach them directly. Pick one:
+   - **Host-network dashboard (recommended when services are 127.0.0.1-only):** run the dashboard with
+     `network_mode: host`, set `ASMLTR_NGINX_LISTEN` to a private interface the proxy can reach (e.g. the
+     docker-bridge gateway like `172.18.0.1:8091`, **not** the public NIC) and `ASMLTR_UPSTREAM_HOST=127.0.0.1`.
+     Point the proxy at `http://172.18.0.1:8091` via a file/dynamic route.
+   - **`host.docker.internal`:** works on Docker Desktop; on Linux only if the services also listen on the
+     bridge. Then the shipped compose's traefik-network + labels model works as-is.
+
+**5. Configure env + run.** The compose/nginx read these (all optional, sane defaults):
+`ASMLTR_INSIGHTS_HOST` (router hostname), `ASMLTR_NGINX_LISTEN`, `ASMLTR_UPSTREAM_HOST`,
+`ASMLTR_INSIGHTS_TOKEN` + `ASMLTR_MANAGER_TOKEN` (only if you set tokens on the collector/manager).
+The shipped `insights/docker-compose.yml` carries **Traefik docker-provider labels** (edit the Host rule or
+set `ASMLTR_INSIGHTS_HOST`). If you chose host-network, or use a different proxy, don't fight the labels —
+run the container your way and add a **proxy route** by hand instead.
+
+**6. Auth — restrict to the user.**
+   - **Authelia:** add its forward-auth middleware to the router, and an `access_control` rule allowing
+     only the user's `subject` (with `two_factor`) **plus a deny for that domain otherwise**, placed
+     **above** any broad catch-all so it matches first. Validate (`authelia validate-config`) and restart.
+   - **oauth2-proxy / Authentik / Cloudflare Access / nginx basic-auth:** use that tool's allow-list for
+     the single user. The requirement is the same: unauthenticated and other users must be denied.
+
+**7. TLS.** Let the proxy issue the cert (Traefik `certresolver`, Caddy auto-HTTPS, Certbot for nginx).
+
+**8. Verify end-to-end:** `dig +short <host>` resolves; `curl -sI https://<host>` **redirects to the login
+portal** (not the app) when unauthenticated; after logging in as the allowed user you reach the dashboard;
+any other/no user is denied.
+
+**Record what you set up** (URL, proxy, auth tool, allowed identity) in your final report and in the
+install's local notes, so the update guide can detect later whether public authenticated access exists.
+
+---
+
 ## Completion checklist — do NOT report success until every box is true
 
 - [ ] `node_modules` present in **core, connectors, insights/collector, cli** (step 1 verify)
@@ -199,8 +283,10 @@ Then have the user send a real message on one channel (from their owner identity
 - [ ] one instance per requested channel created, and its logs show started/online (step 8)
 - [ ] **`asmltr ls` runs** (the CLI/TUI is installed and on PATH, or the fallback command is documented for the user)
 - [ ] a real test message got a reply
+- [ ] **web GUI decision made** (step 9): either deployed (local-only or public-behind-auth) or the user
+      explicitly declined — never left publicly reachable without authentication
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 - **Connector logs "no bot token" / secret is null** → the secret key name in the instance config
   doesn't resolve. Check the matching `*_KEY`/token is in `.env` (UPPER_SNAKE of the key), or that

@@ -103,7 +103,7 @@ onMounted(() => {
           ↻ Refresh
         </button>
         <button
-          class="rounded-xl bg-eve-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-eve-violet/30 transition-opacity hover:opacity-90"
+          class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity hover:opacity-90"
           @click="openAddUser"
         >
           + Add user
@@ -163,7 +163,7 @@ onMounted(() => {
         </span>
         <button
           type="button"
-          class="rounded-lg border border-eve-violet/30 bg-eve-violet/10 px-2.5 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-eve-violet/20"
+          class="rounded-lg border border-brand-violet/30 bg-brand-violet/10 px-2.5 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-brand-violet/20"
           @click="openAddRole"
         >
           + Add role

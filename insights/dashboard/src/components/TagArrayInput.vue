@@ -55,7 +55,7 @@ function remove(idx) {
 
 <template>
   <div
-    class="flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-2 py-1.5 transition-colors focus-within:border-eve-violet/60 focus-within:bg-white/[0.06]"
+    class="flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-2 py-1.5 transition-colors focus-within:border-brand-violet/60 focus-within:bg-white/[0.06]"
   >
     <span
       v-for="(tag, idx) in tags"
