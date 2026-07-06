@@ -113,4 +113,32 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
   return { text: text.trim(), segments: segments.filter(Boolean), engineSessionId, tools, usage, isError };
 }
 
-module.exports = { runTurn };
+/**
+ * Generate a short session title from conversation text — a minimal, fast, no-tools,
+ * no-resume SDK call on a cheap model (rides the same subscription; no API key). Used by
+ * the collector to label session cards. Returns a cleaned ≤60-char Title Case string, or ''.
+ */
+async function generateTitle(text) {
+  const model = process.env.ASMLTR_TITLE_MODEL || 'haiku';
+  const prompt =
+    'Give a concise 3-6 word title in Title Case that summarizes what the following conversation is about. ' +
+    'Reply with ONLY the title — no quotes, no trailing punctuation, no preamble.\n\n---\n' +
+    String(text || '').slice(0, 4000);
+  // Mirror the known-good runTurn option set (stream + bypass perms), just on a cheap model.
+  // A title is a single plain-text answer — no tools, no thinking needed.
+  const options = {
+    stream: true,
+    permissionMode: 'bypassPermissions',
+    extraArgs: { 'dangerously-skip-permissions': true, model },
+    maxTurns: 1,
+  };
+  let out = '';
+  const response = await query({ prompt, options });
+  for await (const ev of response) {
+    if (ev.type === 'assistant') for (const c of ev.message?.content || []) if (c.type === 'text') out += c.text;
+    else if (ev.type === 'result' && ev.result && !out) out += ev.result;
+  }
+  return out.replace(/["'`]+/g, '').replace(/\s+/g, ' ').trim().split('\n')[0].replace(/[.:;,\s]+$/, '').slice(0, 60);
+}
+
+module.exports = { runTurn, generateTitle };

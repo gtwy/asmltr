@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   context            TEXT,                      -- general|client-work|personal-project|infrastructure|opensource
   working_dir        TEXT,
   task               TEXT,
+  title              TEXT,                      -- short generated label for the session card
   status             TEXT,                      -- active|idle|ended|paused
   started_unix       INTEGER,
   last_activity_unix INTEGER,

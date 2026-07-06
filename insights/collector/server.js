@@ -70,6 +70,42 @@ function requireControl(req, res, next) {
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-insights-collector' }));
 
+// --- session titles ----------------------------------------------------------
+// Label each session card with a short generated title. On the FIRST inbound for a
+// session (and every ASMLTR_TITLE_REFRESH_TURNS after) we ask the core to summarize the
+// conversation into a title (a cheap, no-tools SDK call). Gen is serialized (one at a
+// time) so it never floods; titles aren't urgent.
+const CORE_BASE = process.env.ASMLTR_CORE_BASE || 'http://127.0.0.1:3023';
+const TITLE_EVERY = Math.max(1, Number(process.env.ASMLTR_TITLE_REFRESH_TURNS || 15));
+const _inboundCounts = new Map(); // session_id -> inbound events seen this process
+let _titleChain = Promise.resolve();
+function payloadText(e) { try { const p = typeof e.payload === 'string' ? JSON.parse(e.payload) : (e.payload || {}); return p.text || ''; } catch { return ''; } }
+function recentConvo(sid) {
+  try {
+    const rows = dbmod.db.prepare("SELECT event_type, payload FROM events WHERE session_id=? AND event_type IN ('inbound','outbound') ORDER BY ts DESC LIMIT 12").all(sid);
+    return rows.reverse().map((r) => { let p = {}; try { p = JSON.parse(r.payload); } catch {} const t = String(p.text || '').slice(0, 300); return t ? `${r.event_type === 'inbound' ? 'User' : 'Assistant'}: ${t}` : ''; }).filter(Boolean).join('\n');
+  } catch { return ''; }
+}
+function queueTitle(session_id, text) {
+  if (!text) return;
+  _titleChain = _titleChain.then(async () => {
+    try {
+      const r = await fetch(CORE_BASE + '/v2/title', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j && j.title) { dbmod.setTitle(session_id, j.title); io.emit('sessions-changed', {}); }
+    } catch (_) {}
+  }).catch(() => {});
+}
+function maybeTitle(e) {
+  if (!e || e.event_type !== 'inbound' || !e.session_id || e.surface === 'system') return;
+  const sid = e.session_id;
+  const n = (_inboundCounts.get(sid) || 0) + 1;
+  _inboundCounts.set(sid, n);
+  if (!dbmod.getTitle(sid)) queueTitle(sid, payloadText(e));             // first inbound → title it now
+  else if (n % TITLE_EVERY === 0) queueTitle(sid, recentConvo(sid) || payloadText(e)); // periodic refresh
+}
+
 // --- ingest ------------------------------------------------------------------
 app.post('/ingest', requireToken, (req, res) => {
   const body = req.body;
@@ -79,6 +115,7 @@ app.post('/ingest', requireToken, (req, res) => {
     try {
       const stored = dbmod.ingestEvent(e);
       io.emit('event', stored);
+      maybeTitle(stored);
       ok++;
     } catch (err) {
       return res.status(400).json({ error: err.message, ingested: ok });

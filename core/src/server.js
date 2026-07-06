@@ -39,7 +39,7 @@ const env = require('./envelope');
 const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
 const moderation = require('./moderation');
 const sessions = require('./sessions');
-const { runTurn } = require('./runner');
+const { runTurn, generateTitle } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
 
@@ -332,6 +332,21 @@ app.post('/v2/claim', (req, res) => {
 });
 
 // Real-time stop: abort the in-flight turn (the session survives + is resumable).
+// Generate a short session title from conversation text (cheap, fast, no-tools SDK call).
+// Serialized behind a small limiter by the caller (the collector); one at a time here is fine.
+let _titleBusy = false;
+app.post('/v2/title', async (req, res) => {
+  const text = req.body && req.body.text;
+  if (!text) return res.status(400).json({ error: 'need text' });
+  if (_titleBusy) return res.status(429).json({ error: 'busy' });
+  _titleBusy = true;
+  try {
+    const title = await generateTitle(text);
+    res.json({ ok: true, title });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+  finally { _titleBusy = false; }
+});
+
 app.post('/v2/abort', (req, res) => {
   const key = req.body && req.body.conversation_key;
   const ctrl = inFlight.get(key);

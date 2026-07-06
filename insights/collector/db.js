@@ -19,6 +19,12 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
 
+// Migrations: add columns to a pre-existing sessions table (created before they existed).
+{
+  const cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
+  if (!cols.includes('title')) db.exec('ALTER TABLE sessions ADD COLUMN title TEXT');
+}
+
 const _insEvent = db.prepare(`
   INSERT INTO events (ts, surface, session_id, identity, event_type, tokens_in, tokens_out, cost_usd, payload, source)
   VALUES (@ts, @surface, @session_id, @identity, @event_type, @tokens_in, @tokens_out, @cost_usd, @payload, @source)
@@ -146,6 +152,11 @@ const _reconcileUpsert = db.prepare(`
 `);
 function reconcileUpsert(s) { _reconcileUpsert.run({ tmux_target: null, ...s }); }
 
+const _setTitle = db.prepare('UPDATE sessions SET title = ? WHERE session_id = ?');
+function setTitle(session_id, title) { _setTitle.run(title || null, session_id); }
+const _getTitle = db.prepare('SELECT title FROM sessions WHERE session_id = ?');
+function getTitle(session_id) { const r = _getTitle.get(session_id); return r ? r.title : null; }
+
 // --- system sample (sampler.js): write metrics table + a timeline event ------
 const _insMetric = db.prepare(`
   INSERT OR REPLACE INTO system_metrics (ts, cpu_pct, load1, load5, mem_used_mb, mem_total_mb, disk_used_pct, disk_free_gb)
@@ -161,4 +172,4 @@ const insertSystemSample = db.transaction((s) => {
   });
 });
 
-module.exports = { db, ingestEvent, reconcileUpsert, insertSystemSample, q, DB_PATH };
+module.exports = { db, ingestEvent, reconcileUpsert, setTitle, getTitle, insertSystemSample, q, DB_PATH };

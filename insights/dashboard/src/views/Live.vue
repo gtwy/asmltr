@@ -23,11 +23,16 @@ const latestBySession = computed(() => {
   return map
 })
 
+// click a surface pill to filter the lists to that connector (click again to clear)
+const surfaceFilter = ref(null)
+function toggleSurface(s) { surfaceFilter.value = surfaceFilter.value === s ? null : s }
+const matchFilter = (s) => !surfaceFilter.value || s.surface === surfaceFilter.value
+
 const ephemeral = computed(() =>
-  store.sessions.filter((s) => s.kind === 'ephemeral').sort(byActivity)
+  store.sessions.filter((s) => s.kind === 'ephemeral' && matchFilter(s)).sort(byActivity)
 )
 const persistent = computed(() =>
-  store.sessions.filter((s) => s.kind === 'persistent').sort(byActivity)
+  store.sessions.filter((s) => s.kind === 'persistent' && matchFilter(s)).sort(byActivity)
 )
 
 function byActivity(a, b) {
@@ -78,20 +83,32 @@ onUnmounted(() => clearInterval(ticker))
       />
     </div>
 
-    <!-- surface distribution -->
-    <div v-if="surfacesActive.length" class="mb-6 flex flex-wrap gap-2">
-      <span
+    <!-- surface distribution — click to filter by connector -->
+    <div v-if="surfacesActive.length" class="mb-6 flex flex-wrap items-center gap-2">
+      <button
         v-for="[surface, count] in surfacesActive"
         :key="surface"
-        class="pill border"
+        type="button"
+        class="pill border transition-all"
+        :class="surfaceFilter && surfaceFilter !== surface ? 'opacity-40 hover:opacity-70' : 'hover:brightness-125'"
         :style="{
           color: surfaceMeta(surface).color,
-          borderColor: surfaceMeta(surface).color + '40',
-          backgroundColor: surfaceMeta(surface).color + '1a'
+          borderColor: surfaceMeta(surface).color + (surfaceFilter === surface ? 'cc' : '40'),
+          backgroundColor: surfaceMeta(surface).color + (surfaceFilter === surface ? '33' : '1a')
         }"
+        :title="surfaceFilter === surface ? 'Click to clear filter' : 'Filter to ' + surfaceMeta(surface).label"
+        @click="toggleSurface(surface)"
       >
         {{ surfaceMeta(surface).icon }} {{ surfaceMeta(surface).label }} · {{ count }}
-      </span>
+      </button>
+      <button
+        v-if="surfaceFilter"
+        type="button"
+        class="pill border border-white/15 bg-white/5 text-slate-400 hover:text-slate-200"
+        @click="surfaceFilter = null"
+      >
+        ✕ clear
+      </button>
     </div>
 
     <!-- ephemeral -->

@@ -71,23 +71,30 @@ const claimLabel = computed(() => {
       </div>
     </div>
 
-    <!-- identity / context -->
+    <!-- title / identity / live activity -->
     <div class="min-w-0">
-      <div class="truncate font-mono text-xs text-slate-400" :title="session.session_id">
+      <div
+        v-if="session.title"
+        class="truncate text-sm font-semibold text-slate-100"
+        :title="session.title"
+      >
+        {{ session.title }}
+      </div>
+      <div class="truncate font-mono text-[11px] text-slate-500" :title="session.session_id">
         {{ session.identity || session.session_id }}
       </div>
       <!-- live activity preview (falls back to task/context, then a hint) -->
       <div
         v-if="previewLine"
-        class="mt-1 flex items-start gap-1.5 text-sm leading-snug text-slate-200"
+        class="mt-1 flex items-start gap-1.5 text-[13px] leading-snug text-slate-300"
         :title="previewLine.text"
       >
         <span class="shrink-0 select-none opacity-80">{{ previewLine.icon }}</span>
         <span class="min-w-0 truncate">{{ truncate(previewLine.text, 84) }}</span>
       </div>
       <div
-        v-else
-        class="mt-1 text-sm leading-snug text-slate-400"
+        v-else-if="!session.title"
+        class="mt-1 text-[13px] leading-snug text-slate-400"
         :title="session.task || session.context || ''"
       >
         {{ truncate(session.task || session.context || 'no recent activity', 90) }}
