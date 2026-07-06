@@ -3,12 +3,25 @@ import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
 import PageHeader from '@/components/PageHeader.vue'
 import SessionCard from '@/components/SessionCard.vue'
+import SessionDetail from '@/components/SessionDetail.vue'
 import StatTile from '@/components/StatTile.vue'
 import { fmtNum, surfaceMeta } from '@/lib/format'
 
 const store = useCollectorStore()
 const now = ref(Date.now())
 let ticker = null
+
+// which session's details pane is open (a snapshot — its history streams live)
+const selected = ref(null)
+
+// latest event per session (store.events is newest-first) → live card previews
+const latestBySession = computed(() => {
+  const map = {}
+  for (const e of store.events) {
+    if (e.session_id && !map[e.session_id]) map[e.session_id] = e
+  }
+  return map
+})
 
 const ephemeral = computed(() =>
   store.sessions.filter((s) => s.kind === 'ephemeral').sort(byActivity)
@@ -34,6 +47,7 @@ const surfacesActive = computed(() => {
 onMounted(() => {
   store.fetchSessions()
   store.fetchBrief()
+  store.fetchEvents({ limit: 300 }) // seed the buffer so card previews render immediately
   ticker = setInterval(() => (now.value = Date.now()), 1000)
 })
 onUnmounted(() => clearInterval(ticker))
@@ -91,7 +105,7 @@ onUnmounted(() => clearInterval(ticker))
         v-if="ephemeral.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" />
+        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" @open="selected = $event" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No ephemeral sessions right now.
@@ -109,11 +123,14 @@ onUnmounted(() => clearInterval(ticker))
         v-if="persistent.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" />
+        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" @open="selected = $event" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No persistent daemons registered.
       </p>
     </section>
+
+    <!-- conversation details + takeover pane -->
+    <SessionDetail v-if="selected" :session="selected" :now="now" @close="selected = null" />
   </div>
 </template>

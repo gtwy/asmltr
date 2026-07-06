@@ -5,10 +5,26 @@ import { statusMeta, fmtAge, fmtNum, truncate } from '@/lib/format'
 
 const props = defineProps({
   session: { type: Object, required: true },
-  now: { type: Number, default: () => Date.now() }
+  now: { type: Number, default: () => Date.now() },
+  preview: { type: Object, default: null } // latest event for this session (live)
 })
+defineEmits(['open'])
 
 const st = computed(() => statusMeta(props.session.status))
+
+// Live one-line preview of the most recent conversation/tool activity — replaces
+// the static "no active task" line so the card breathes.
+const ICON = { inbound: '▶', outbound: '◀', thinking: '💭', tool: '🔧', tool_result: '📥', moderation_decision: '🛡', control: '⚙', 'token-usage': '∑', 'session-start': '●' }
+const previewLine = computed(() => {
+  const e = props.preview
+  if (!e) return null
+  const p = e._payload || {}
+  let text = ''
+  if (e.event_type === 'tool') text = `${p.tool || 'tool'} ${typeof p.input === 'object' ? JSON.stringify(p.input) : (p.input || '')}`
+  else if (e.event_type === 'tool_result') text = typeof p.output === 'object' ? JSON.stringify(p.output) : (p.output || 'result')
+  else text = p.text || p.decision || p.action || e.event_type
+  return { icon: ICON[e.event_type] || '·', text: String(text).replace(/\s+/g, ' ').trim() }
+})
 const age = computed(() => fmtAge(props.session.started_unix, props.now))
 const lastSeen = computed(() => fmtAge(props.session.last_activity_unix, props.now))
 
@@ -26,7 +42,14 @@ const claimLabel = computed(() => {
 </script>
 
 <template>
-  <div class="glass glass-hover flex flex-col gap-3 p-4">
+  <div
+    class="glass glass-hover flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:border-brand-violet/30"
+    role="button"
+    tabindex="0"
+    title="Open conversation details + takeover"
+    @click="$emit('open', session)"
+    @keydown.enter="$emit('open', session)"
+  >
     <!-- header row -->
     <div class="flex items-start justify-between gap-2">
       <div class="flex flex-wrap items-center gap-2">
@@ -53,11 +76,21 @@ const claimLabel = computed(() => {
       <div class="truncate font-mono text-xs text-slate-400" :title="session.session_id">
         {{ session.identity || session.session_id }}
       </div>
+      <!-- live activity preview (falls back to task/context, then a hint) -->
       <div
-        class="mt-1 text-sm leading-snug text-slate-100"
+        v-if="previewLine"
+        class="mt-1 flex items-start gap-1.5 text-sm leading-snug text-slate-200"
+        :title="previewLine.text"
+      >
+        <span class="shrink-0 select-none opacity-80">{{ previewLine.icon }}</span>
+        <span class="min-w-0 truncate">{{ truncate(previewLine.text, 84) }}</span>
+      </div>
+      <div
+        v-else
+        class="mt-1 text-sm leading-snug text-slate-400"
         :title="session.task || session.context || ''"
       >
-        {{ truncate(session.task || session.context || 'no active task', 90) }}
+        {{ truncate(session.task || session.context || 'no recent activity', 90) }}
       </div>
       <div
         v-if="session.working_dir"
@@ -112,15 +145,14 @@ const claimLabel = computed(() => {
       </span>
     </div>
 
-    <!-- control plane (disabled stub) -->
+    <!-- open the conversation details + takeover pane -->
     <div class="mt-1 flex items-center justify-end border-t border-white/5 pt-3">
       <button
         type="button"
-        disabled
-        title="control plane — coming in Phase 4"
-        class="cursor-not-allowed rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-1 text-xs font-medium text-rose-400/50"
+        class="rounded-lg border border-brand-violet/30 bg-brand-violet/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-brand-violet/20"
+        @click.stop="$emit('open', session)"
       >
-        KILL
+        Details + takeover →
       </button>
     </div>
   </div>

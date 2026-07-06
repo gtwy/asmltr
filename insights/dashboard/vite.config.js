@@ -37,6 +37,12 @@ export default defineConfig({
         target: TRUST,
         changeOrigin: true
       },
+      // core control plane (/v2/inject, /v2/abort) — session takeover. Served at
+      // the root on the core, so no prefix to strip. Open on localhost in dev.
+      '/v2': {
+        target: TRUST,
+        changeOrigin: true
+      },
       '/socket.io': {
         target: COLLECTOR,
         changeOrigin: true,

@@ -27,6 +27,25 @@ export const api = {
   brief: () => get('/brief')
 }
 
+// Control plane on the CORE (served at root under /v2/...). Used by the live
+// "conversation details" pane to take over a session: abort the in-flight turn,
+// or inject an operator message (the reply routes back to the origin channel).
+async function postCore(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body || {})
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(json.error || `POST ${path} -> ${res.status} ${res.statusText}`)
+  return json
+}
+
+export const control = {
+  abort: (conversation_key) => postCore('/v2/abort', { conversation_key }),
+  inject: (conversation_key, text) => postCore('/v2/inject', { conversation_key, text, by: 'dashboard' })
+}
+
 // payload arrives as a JSON *string* over REST. Be defensive.
 export function parsePayload(payload) {
   if (payload == null) return null
