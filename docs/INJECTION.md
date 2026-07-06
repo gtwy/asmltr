@@ -49,7 +49,10 @@ outbound_target       ← the channel/chat id       (from channel_context.channe
 
 ```jsonc
 // request
-{ "conversation_key": "discord:<instanceId>:channel:<id>", "text": "actually, summarize instead", "by": "dashboard" }
+{ "conversation_key": "discord:<instanceId>:channel:<id>",
+  "text": "also cover the pricing angle",
+  "by": "dashboard",
+  "interrupt": false }               // optional; default false — see step 1
 
 // response
 { "ok": true,
@@ -61,20 +64,26 @@ outbound_target       ← the channel/chat id       (from channel_context.channe
 
 What it does, in order:
 
-1. **Stop the current turn.** If a generation is in flight for this key, abort it — a steer *replaces*
-   the current turn (the SDK can't inject mid-generation).
-2. **Serialize per session** (`withKeyLock`) so a steer and a normal turn never overlap.
-3. **Resume + run.** `resolveForTurn(key)` gives the `resume` id; `runTurn({ prompt: text, resume, cwd })`
-   runs your text as the next turn of that same session, in its original working dir. Tool / thinking /
-   tool-result events are emitted to the collector so the details pane stays live.
-4. **Redact + record.** The reply is passed through `redactSecrets()` (same masking as any public output)
-   and logged as an `outbound` event with `injected: true`.
-5. **Route it home.** If the session has a stored outbound route, the core POSTs the reply to the manager
+1. **Queue behind the current turn (default) — don't abandon in-progress work.** A steer does **not**
+   abort a running turn by default: `withKeyLock` serializes per session, so the current turn *finishes*
+   and the steer runs *next*, continuing from it. That's why you don't lose in-progress research. Pass
+   **`interrupt: true`** to abort the running turn first and redirect immediately (abandoning it).
+2. **Resume + run, framed as steering.** `resolveForTurn(key)` gives the `resume` id. When the session was
+   mid-task, the text is wrapped as *operator steering* — "incorporate this into the work you're already
+   doing and continue; don't restart or answer it in isolation" — so the model course-corrects instead of
+   treating your note as a brand-new question. `runTurn({ prompt, resume, cwd })` runs it as the next turn
+   of that same session. Tool / thinking / tool-result events stream to the collector so the pane stays live.
+3. **Redact + record.** The reply passes through `redactSecrets()` (same masking as any public output) and
+   is logged as an `outbound` event with `injected: true`.
+4. **Route it home.** If the session has a stored outbound route, the core POSTs the reply to the manager
    `POST /send { instance_id, target, text }`, which forwards to that connector's `/out` — so it lands in
    the original Discord channel / Telegram chat / etc. `delivered` reports whether that succeeded.
 
 > The operator is trusted, so an inject **bypasses moderation** — but the reply is still redacted on the
 > way out, exactly like a normal channel reply.
+>
+> Because a default steer waits for the current turn, the HTTP call can take a while (it returns the
+> steered reply when it's done). Use `interrupt: true`, or the **Stop** button, when you need *now*.
 
 ### `POST /v2/abort` (core)
 
@@ -84,6 +93,10 @@ What it does, in order:
 
 Aborts the in-flight turn for that key. **The session is not killed** — its `engine_session_id` is
 untouched, so the next message (or a later inject) resumes it. `404` if nothing is in flight.
+
+The aborted turn is **silent**: `handle()` sees its own `AbortController` fire, recognizes the operator
+stopped it, and returns **no actions** — so the connector posts *nothing* to the channel (no
+"I hit an error"). The same is true for a steer sent with `interrupt: true`.
 
 ---
 

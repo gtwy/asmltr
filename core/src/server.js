@@ -205,6 +205,16 @@ async function handle(envelope) {
         }
       },
     });
+  } catch (err) {
+    // If the operator stopped or steered this turn (Stop button / a steer with interrupt),
+    // its AbortController fires and the SDK throws. That's not a failure — stay SILENT so the
+    // connector posts nothing (the steer, if any, delivers the real reply). Re-throw anything else.
+    if (abortController.signal.aborted) {
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+        identity: resolved.user_key, source: 'core', payload: { action: 'aborted', silent: true } });
+      return []; // no actions → connector drops it (no "I hit an error")
+    }
+    throw err;
   } finally {
     inFlight.delete(e.conversation_key);
   }
@@ -336,20 +346,29 @@ app.post('/v2/abort', (req, res) => {
 // since /send is unified). Stops any in-flight turn first (steer replaces the current generation).
 // Bypasses moderation (the operator is trusted). Redacts on the way out like any public reply.
 app.post('/v2/inject', (req, res) => {
-  const { conversation_key: key, text, by } = req.body || {};
+  const { conversation_key: key, text, by, interrupt } = req.body || {};
   if (!key || !text) return res.status(400).json({ error: 'need conversation_key + text' });
   const row = sessions.get(key);
   if (!row) return res.status(404).json({ error: 'unknown session' });
-  const cur = inFlight.get(key);
-  if (cur) { try { cur.abort(); } catch (_) {} } // steer replaces the current turn
+  // A steer QUEUES behind any in-flight turn (withKeyLock serializes per key) so the current
+  // work finishes and the steer CONTINUES it — you don't lose in-progress research and the model
+  // treats the text as guidance, not a fresh question. `interrupt:true` aborts the running turn
+  // first (redirect immediately, abandoning the current turn).
+  const wasRunning = inFlight.has(key);
+  if (interrupt && wasRunning) { try { inFlight.get(key).abort(); } catch (_) {} }
 
   withKeyLock(key, async () => {
-    record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core', payload: { action: 'inject', text: truncate(text, 500) } });
+    record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
     const { resume } = sessions.resolveForTurn(key, row.channel);
+    // Mid-task steer → frame the text so the model continues its current work with this guidance
+    // rather than answering it in isolation. Idle session → deliver it as a normal message.
+    const prompt = (wasRunning || interrupt)
+      ? `[Operator steering — you are mid-task. Incorporate the following guidance into the work you are ALREADY doing and continue it. Do NOT restart from scratch, and do NOT treat it as a standalone question to answer in isolation.]\n\n${text}`
+      : text;
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
     try {
-      result = await runTurn({ prompt: text, resume, cwd: row.working_dir || undefined, abortController: ac,
+      result = await runTurn({ prompt, resume, cwd: row.working_dir || undefined, abortController: ac,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
