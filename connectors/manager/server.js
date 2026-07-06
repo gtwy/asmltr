@@ -111,6 +111,24 @@ app.post('/instances/:id/restart', requireToken, (req, res) => {
   const i = registry.get(req.params.id); if (!i) return res.status(404).json({ error: 'not found' });
   supervisor.restartInstance(i); res.json({ ok: true });
 });
+// --- per-channel enable/disable: proxy to the connector's own /channels endpoint (no restart).
+// Lets the TUI/GUI see every channel a connector can reach and toggle whether it relays to core.
+async function proxyChannels(id, method, body) {
+  const inst = registry.get(id);
+  if (!inst) return { status: 404, json: { ok: false, error: 'not found' } };
+  const port = inst.config && inst.config.http_port;
+  if (!port) return { status: 400, json: { ok: false, error: `instance '${inst.name}' has no http_port` } };
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/channels`, {
+      method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => ({}));
+    return { status: r.status, json: { instance_id: id, type: inst.type, name: inst.name, ...j } };
+  } catch (e) { return { status: 502, json: { ok: false, error: `connector unreachable: ${e.message}` } }; }
+}
+app.get('/instances/:id/channels', requireToken, async (req, res) => { const r = await proxyChannels(req.params.id, 'GET'); res.status(r.status).json(r.json); });
+app.post('/instances/:id/channels', requireToken, async (req, res) => { const r = await proxyChannels(req.params.id, 'POST', req.body || {}); res.status(r.status).json(r.json); });
+
 app.delete('/instances/:id', requireToken, (req, res) => {
   supervisor.stopInstance(req.params.id);
   registry.remove(req.params.id);

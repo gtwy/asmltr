@@ -22,6 +22,8 @@ const os = require('os');
 
 const BASE = process.env.ASMLTR_COLLECTOR_BASE || 'http://127.0.0.1:3017';
 const CORE_BASE = process.env.ASMLTR_CORE_BASE || 'http://127.0.0.1:3023';
+const MANAGER_BASE = process.env.ASMLTR_MANAGER_BASE || 'http://127.0.0.1:3024';
+const MANAGER_TOKEN = process.env.ASMLTR_MANAGER_TOKEN || '';
 const TOKEN = process.env.ASMLTR_INSIGHTS_TOKEN || '';
 const CONTROL_TOKEN = process.env.ASMLTR_INSIGHTS_CONTROL_TOKEN || '';
 const authHeaders = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
@@ -236,7 +238,7 @@ function cmdHelp() {
   try {
     switch (cmd) {
       case undefined:
-      case 'top': return require('./tui').run(BASE, CORE_BASE, TOKEN, A);
+      case 'top': return require('./tui').run(BASE, CORE_BASE, TOKEN, A, { base: MANAGER_BASE, token: MANAGER_TOKEN });
       case 'ls': return await cmdLs();
       case 'brief': return await cmdBrief();
       case 'events': return await cmdEvents(f);

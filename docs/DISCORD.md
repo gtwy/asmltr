@@ -20,7 +20,8 @@ order explains all the behavior:
    (or `engage-all-bots` mode is on). Humans always pass.
 4. **Commands** (`handleControlCommands`) → if the message `@mentions` the bot (or a role it holds)
    and the text is a recognized command, run it and stop. See [Commands](#commands).
-5. **Muted channel** → if this channel was `mute`d, ignore everything except the commands above.
+5. **Disabled channel** → if this channel is disabled (via `mute`, the TUI, or an allowlist default),
+   ignore everything except the commands above. See [Channel enable/disable](#channel-enabledisable--control-what-she-listens-to).
 6. **Voice-session suppression** → while she's in an active voice session in this guild, she answers
    by *voice* only; non-`@mention` text is dropped (prevents a doubled spoken + text reply).
 7. **Directed at another agent** → if `ignore_other_mentions` (default on) and the message `@mentions`
@@ -49,16 +50,37 @@ role at once). Anything after the mention that isn't a recognized command is tre
 | Command | Effect | Who |
 |---|---|---|
 | `silence` / `speak` | mention-only mode ↔ autonomous | owner |
-| `mute` / `unmute` | ignore **this channel** entirely ↔ resume (persisted) | owner |
+| `mute` / `unmute` (aka `disable` / `enable`) | ignore **this channel** entirely ↔ resume (persisted) | owner |
 | `engage-all-bots` / `disengage-all-bots` | hear **all** bots ↔ only the `allowed_bot_names` list (persisted) | owner |
 | `join-voice` / `leave-voice` | join *your* voice channel + listen ↔ disconnect | owner |
-| `status` | show silenced / bot-mode / muted-here | anyone |
+| `status` | show silenced / bot-mode / this-channel state | anyone |
 | `help` | list commands | anyone |
 
 **Owner** = a principal with `bypass_moderation` (full trust) in *this bot's own trust store* —
 resolved live via the core's `/trust/resolve`. So each agent knows its own owner; nobody else can
 run the state-changing commands. State (`mute`, `engage-all-bots`) persists in
 `connectors/manager/data/discord-<id>-settings.json`.
+
+## Channel enable/disable — control what she listens to
+
+By default the bot processes every text channel it can see in every server it's in. In a busy
+server that's wasteful: each surfaced message that passes the gauntlet becomes a core turn (usage).
+Two ways to scope it, both **per-channel and persisted**, both meaning *fully ignored — no relay to
+core, no usage* (owner `@mention` commands still work in a disabled channel so you can re-enable it):
+
+- **Blocklist (default):** `channels_default: true` — listen everywhere, disable the noisy ones.
+- **Allowlist:** set `channels_default: false` in the instance config — ignore *every* channel except
+  the ones you explicitly enable. Best when the bot sits in a big server but only a couple of
+  channels matter.
+
+**From the TUI/GUI (no restart):** in `asmltr` press **`c`** for the channels view — every channel
+each connector can reach, grouped by instance, with its on/off state. `SPACE`/`ENTER` toggles the
+selected channel, `d` flips that instance's default (blocklist ↔ allowlist), `r` reloads, `ESC` exits.
+
+**Over HTTP:** the connector exposes `GET /channels` and `POST /channels {channel_id, enabled}` (or
+`{channel_id, clear:true}` to drop an override back to default, or `{default_enabled}` to flip the
+mode) on its `http_port`; the manager proxies these as `GET|POST /instances/<id>/channels` so the
+TUI/dashboard can drive any connector uniformly. Changes take effect immediately — no reconnect.
 
 ---
 

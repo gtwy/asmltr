@@ -62,6 +62,7 @@ const meta = {
       stt_language: { type: 'string', title: 'Voice STT language (ISO code; empty = auto-detect)', default: 'en' },
       voice_followup_ms: { type: 'integer', title: 'Voice follow-up window (ms) — no wake word needed after being addressed', default: 45000 },
       ignore_other_mentions: { type: 'boolean', title: 'Ignore messages @-directed at other specific users/bots (keeps passive name-drops)', default: true },
+      channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
     },
   },
 };
@@ -96,17 +97,26 @@ async function start(ctx) {
   let lastResponseTime = 0;
   const responseCount = new Map();
   const recentReplies = new Map(); // cid -> last few reply texts (dedup verbatim repeats)
-  // persisted per-instance settings: per-channel mutes + engage-all-bots toggle
+  // persisted per-instance settings: per-channel enable/disable + engage-all-bots toggle.
+  // channelStates holds EXPLICIT per-channel overrides (cid -> bool); channelsDefault decides
+  // any channel without an override. default=true → "listen everywhere except disabled" (blocklist);
+  // set channels_default:false in config → "ignore everywhere except enabled" (allowlist), for
+  // bots sitting in big servers where only a couple of channels matter. A disabled channel is
+  // fully ignored — no relay to core, no usage (mention-commands still work so you can re-enable).
   const settingsFile = path.join(dataDir, `discord-${ctx.instanceId}-settings.json`);
-  const mutedChannels = new Set();
+  const channelStates = new Map(); // channel_id -> boolean (explicit override)
+  let channelsDefault = cfg.channels_default !== false; // unlisted channels: enabled unless config says otherwise
   let engageAllBots = false;
   try {
     const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-    (s.mutedChannels || []).forEach((c) => mutedChannels.add(c));
+    (s.mutedChannels || []).forEach((c) => channelStates.set(String(c), false)); // migrate legacy mutes
+    if (s.channels && typeof s.channels === 'object') for (const [c, on] of Object.entries(s.channels)) channelStates.set(String(c), !!on);
+    if (typeof s.channelsDefault === 'boolean') channelsDefault = s.channelsDefault;
     engageAllBots = !!s.engageAllBots;
   } catch (_) {}
+  function channelEnabled(cid) { return channelStates.has(String(cid)) ? channelStates.get(String(cid)) : channelsDefault; }
   function saveSettings() {
-    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify({ mutedChannels: [...mutedChannels], engageAllBots })); }
+    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify({ channels: Object.fromEntries(channelStates), channelsDefault, engageAllBots })); }
     catch (e) { ctx.log('settings persist failed: ' + e.message); }
   }
 
@@ -217,10 +227,10 @@ async function start(ctx) {
         silenced = true; await message.channel.send(`🤐 Mention-only mode — I'll stay quiet unless @-mentioned. \`@${me} speak\` to restore.`); return true;
       case 'speak': case 'unsilence': case 'wake up': case 'resume':
         silenced = false; await message.channel.send('👋 Autonomous participation restored.'); return true;
-      case 'mute': case 'mute here': case 'mute this channel': case 'ignore this channel':
-        mutedChannels.add(cid); saveSettings(); await message.channel.send(`🔇 Muted in this channel — I'll ignore everything here until \`@${me} unmute\`.`); return true;
-      case 'unmute': case 'unmute here': case 'listen here': case 'unmute this channel':
-        mutedChannels.delete(cid); saveSettings(); await message.channel.send('🔊 Unmuted — listening in this channel again.'); return true;
+      case 'mute': case 'mute here': case 'mute this channel': case 'ignore this channel': case 'disable': case 'disable here':
+        channelStates.set(cid, false); saveSettings(); await message.channel.send(`🔇 Disabled in this channel — I'll ignore everything here until \`@${me} unmute\`.`); return true;
+      case 'unmute': case 'unmute here': case 'listen here': case 'unmute this channel': case 'enable': case 'enable here':
+        channelStates.set(cid, true); saveSettings(); await message.channel.send('🔊 Enabled — listening in this channel again.'); return true;
       case 'engage-all-bots': case 'engage all bots': case 'engage all':
         engageAllBots = true; saveSettings(); await message.channel.send(`🤝 Engaging **all bots** — I'll now hear every bot in my channels, not just my allowlist. \`@${me} disengage-all-bots\` to revert.`); return true;
       case 'disengage-all-bots': case 'disengage all bots': case 'disengage all':
@@ -232,7 +242,7 @@ async function start(ctx) {
       case 'leave-voice': case 'leave voice': case 'leave vc': case 'leave the voice':
         await doLeaveVoice(message); return true;
       case 'status':
-        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**Muted here:** ${mutedChannels.has(cid) ? 'yes' : 'no'}`); return true;
+        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})`); return true;
       case 'help': case 'commands':
         await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`mute\` / \`unmute\` (this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`update-asmltr\` · \`status\``); return true;
       default:
@@ -548,7 +558,7 @@ RESPONSE RULES:
     if (message.author.bot && !isAllowedBot(message.author.username)) return;
     saveMemory(message, message.author.username, message.content);
     if (await handleControlCommands(message)) return;
-    if (mutedChannels.has(message.channel.id)) return; // channel muted — ignore normal traffic (mention-commands above still work)
+    if (!channelEnabled(message.channel.id)) return; // channel disabled — no relay to core, no usage (mention-commands above still work)
     // While in an active voice session for this guild, answer by VOICE only — don't ALSO run
     // autonomous text participation (that caused a doubled reply: spoken + a text-channel reply).
     // Direct @mentions still get a text reply; the voice path handles spoken utterances.
@@ -591,6 +601,35 @@ RESPONSE RULES:
       if (!channel || !channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
       const m = kind === 'photo' ? await channel.send({ content: caption || '', files: [filePath] }) : await channel.send(text);
       res.json({ ok: true, messageId: m.id });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+  // --- channel enable/disable control (TUI/GUI drive this) -------------------------------
+  // GET → every text channel the bot can see, with its effective enabled state.
+  app.get('/channels', (req, res) => {
+    try {
+      const rows = [];
+      for (const g of client.guilds.cache.values()) {
+        for (const ch of g.channels.cache.values()) {
+          if (![0, 5].includes(ch.type)) continue; // GuildText(0) + Announcement(5) only
+          rows.push({ guild_id: g.id, guild: g.name, channel_id: ch.id, name: ch.name, enabled: channelEnabled(ch.id), explicit: channelStates.has(ch.id) });
+        }
+      }
+      rows.sort((a, b) => (a.guild + '#' + a.name).localeCompare(b.guild + '#' + b.name));
+      res.json({ ok: true, default_enabled: channelsDefault, channels: rows });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+  // POST { channel_id, enabled } → set an override; { channel_id, clear:true } → drop to default;
+  // { default_enabled } → flip the blocklist/allowlist default. Takes effect immediately (no restart).
+  app.post('/channels', (req, res) => {
+    try {
+      const { channel_id, enabled, clear, default_enabled } = req.body || {};
+      if (typeof default_enabled === 'boolean') channelsDefault = default_enabled;
+      if (channel_id != null) {
+        if (clear) channelStates.delete(String(channel_id));
+        else channelStates.set(String(channel_id), !!enabled);
+      }
+      saveSettings();
+      res.json({ ok: true, default_enabled: channelsDefault, channel_id: channel_id != null ? String(channel_id) : null, enabled: channel_id != null ? channelEnabled(channel_id) : null });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   const httpServer = app.listen(cfg.http_port || 3016, '127.0.0.1', () => ctx.log(`send-message API on 127.0.0.1:${cfg.http_port || 3016}`));

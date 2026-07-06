@@ -6,7 +6,8 @@
  * (its own event stream); ESC returns to the dashboard.
  */
 
-function run(BASE, CORE_BASE, TOKEN, A) {
+function run(BASE, CORE_BASE, TOKEN, A, MGR) {
+  MGR = MGR || { base: 'http://127.0.0.1:3024', token: '' };
   let blessed, contrib, io;
   try {
     blessed = require('blessed');
@@ -29,7 +30,7 @@ function run(BASE, CORE_BASE, TOKEN, A) {
   const grid = new contrib.grid({ rows: 12, cols: 12, screen });
 
   const sessTable = grid.set(0, 0, 8, 8, contrib.table, {
-    keys: true, label: ' active sessions  (↑↓ select · ENTER watch · k kill · q quit) ', interactive: true,
+    keys: true, label: ' active sessions  (↑↓ select · ENTER watch · k kill · c channels · q quit) ', interactive: true,
     columnSpacing: 2, columnWidth: [14, 11, 6, 7, 8, 6],
     border: { type: 'line' }, fg: 'white', selectedFg: 'black', selectedBg: 'magenta',
   });
@@ -67,6 +68,18 @@ function run(BASE, CORE_BASE, TOKEN, A) {
     border: { type: 'line' }, label: ' steer — type a message, ENTER to send · ESC cancel ',
     style: { border: { fg: 'cyan' } }, inputOnFocus: true, keys: true, mouse: true,
   });
+
+  // channels overlay — enable/disable per-channel relay across connector instances.
+  // A disabled channel is fully ignored by its connector (no relay to core, no usage).
+  const channelsBox = blessed.list({
+    parent: screen, hidden: true, top: 0, left: 0, width: '100%', height: '100%',
+    label: ' channels ', border: { type: 'line' }, tags: true, keys: true, mouse: true,
+    style: { border: { fg: 'cyan' }, selected: { bg: 'cyan', fg: 'black' } },
+    scrollable: true, scrollbar: { ch: ' ', style: { bg: 'cyan' } },
+  });
+  let channelRows = []; // index-aligned with channelsBox items: {header?, instance_id, channel_id, enabled, default_enabled}
+  let channelsOpen = false;
+  function mgrHeaders() { const h = { 'Content-Type': 'application/json' }; if (MGR.token) h.Authorization = 'Bearer ' + MGR.token; return h; }
 
   function ageOf(ms) {
     if (!ms) return '?'; const s = Math.floor((Date.now() - ms) / 1000);
@@ -203,8 +216,64 @@ function run(BASE, CORE_BASE, TOKEN, A) {
     } catch (e) { watchBox.log(`{red-fg}steer failed: ${e.message}{/red-fg}`); }
     screen.render();
   });
+  // --- channels view: list every channel each connector can reach + toggle its relay ---
+  async function loadChannels() {
+    channelRows = [];
+    const items = [];
+    try {
+      const res = await fetch(MGR.base + '/instances', { headers: mgrHeaders() });
+      const { instances } = await res.json();
+      for (const inst of (instances || [])) {
+        let data;
+        try {
+          const r = await fetch(MGR.base + `/instances/${inst.id}/channels`, { headers: mgrHeaders() });
+          if (!r.ok) continue; // connector has no /channels (non-discord today) or is down
+          data = await r.json();
+        } catch (_) { continue; }
+        if (!data || !Array.isArray(data.channels)) continue;
+        const dflt = data.default_enabled;
+        items.push(`{bold}${inst.name}{/bold} {gray-fg}(${inst.type}){/gray-fg}  default: ${dflt ? '{green-fg}listen{/green-fg}' : '{red-fg}ignore{/red-fg}'}  {gray-fg}· d = toggle default{/gray-fg}`);
+        channelRows.push({ header: true, instance_id: inst.id, default_enabled: dflt });
+        for (const ch of data.channels) {
+          const mark = ch.enabled ? '{green-fg}✓ on {/green-fg}' : '{red-fg}✗ off{/red-fg}';
+          items.push(`   ${mark}  ${ch.guild} {cyan-fg}#${ch.name}{/cyan-fg}${ch.explicit ? '' : ' {gray-fg}(default){/gray-fg}'}`);
+          channelRows.push({ instance_id: inst.id, channel_id: ch.channel_id, enabled: ch.enabled });
+        }
+      }
+    } catch (e) { items.push('{red-fg}failed to reach manager: ' + e.message + '{/red-fg}'); }
+    if (!channelRows.length) items.push('{gray-fg}no channel-controllable connectors running{/gray-fg}');
+    channelsBox.setItems(items);
+    if (channelsBox.selected >= items.length) channelsBox.select(Math.max(0, items.length - 1));
+    screen.render();
+  }
+  function openChannels() {
+    channelsOpen = true; channelsBox.show(); channelsBox.focus();
+    channelsBox.setLabel(' channels  (↑↓ · SPACE/ENTER toggle channel · d toggle default · r reload · ESC back) ');
+    channelsBox.setItems(['{gray-fg}loading…{/gray-fg}']); screen.render(); loadChannels();
+  }
+  function closeChannels() { channelsOpen = false; channelsBox.hide(); sessTable.focus(); screen.render(); }
+  async function toggleSelectedChannel() {
+    const row = channelRows[channelsBox.selected];
+    if (!row || row.header) return;
+    try { await fetch(MGR.base + `/instances/${row.instance_id}/channels`, { method: 'POST', headers: mgrHeaders(), body: JSON.stringify({ channel_id: row.channel_id, enabled: !row.enabled }) }); } catch (_) {}
+    await loadChannels();
+  }
+  async function toggleDefaultForSelected() {
+    let i = channelsBox.selected; // walk up to the governing instance header
+    while (i >= 0 && !(channelRows[i] && channelRows[i].header)) i--;
+    const h = channelRows[i];
+    if (!h) return;
+    try { await fetch(MGR.base + `/instances/${h.instance_id}/channels`, { method: 'POST', headers: mgrHeaders(), body: JSON.stringify({ default_enabled: !h.default_enabled }) }); } catch (_) {}
+    await loadChannels();
+  }
+  channelsBox.key(['space', 'enter'], toggleSelectedChannel);
+  channelsBox.key(['d'], toggleDefaultForSelected);
+  channelsBox.key(['r'], loadChannels);
+  channelsBox.key(['escape'], closeChannels);
+  screen.key(['c'], () => { if (!watchSessionId && !channelsOpen) openChannels(); });
+
   screen.key(['q', 'C-c'], () => { socket.close(); process.exit(0); });
-  screen.key(['escape'], () => { if (!watchSessionId) { socket.close(); process.exit(0); } });
+  screen.key(['escape'], () => { if (channelsOpen || watchSessionId) return; socket.close(); process.exit(0); });
 
   refreshSessions(); seedCpu();
   const timer = setInterval(refreshSessions, 2500);
