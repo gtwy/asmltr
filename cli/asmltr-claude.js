@@ -1,0 +1,84 @@
+#!/usr/bin/env node
+'use strict';
+/**
+ * `asmltr claude [args…]` — launch an interactive `claude` session inside tmux so it is
+ * monitored in the asmltr dashboard (live conversation history) and can be steered
+ * (inject), interrupted, or attached ("taken over") from the dashboard/TUI.
+ *
+ * How it works:
+ *   1. Start `claude <args>` in a DETACHED tmux session (attach/detachable, survives you).
+ *   2. Register it in a tracker JSON the collector reconciles → it appears as a
+ *      `claude-code` session card in the dashboard.
+ *   3. Spawn a detached transcript tailer that streams the session's ~/.claude jsonl into
+ *      the collector as inbound/thinking/tool/outbound events (so the details pane is live).
+ *   4. Attach you to the tmux session. Detach (Ctrl-b d) leaves it running + monitored;
+ *      quitting claude ends it. Others can take over with `tmux attach -t <target>`.
+ */
+const { spawnSync, spawn, execFileSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+try { require('../shared/loadenv'); } catch (_) {}
+
+const HOME = os.homedir();
+const TRACKER = process.env.ASMLTR_CLI_TRACKER_PATH || path.join(HOME, '.asmltr', 'cli-sessions.json');
+const IDENTITY = process.env.ASMLTR_CLI_IDENTITY || (os.userInfo().username || 'cli');
+
+function haveTmux() { try { execFileSync('tmux', ['-V'], { stdio: 'ignore' }); return true; } catch { return false; } }
+function readTracker() { try { return JSON.parse(fs.readFileSync(TRACKER, 'utf8')); } catch { return { sessions: [] }; } }
+function writeTracker(t) { fs.mkdirSync(path.dirname(TRACKER), { recursive: true }); fs.writeFileSync(TRACKER, JSON.stringify(t)); }
+function upsert(entry) {
+  const t = readTracker();
+  const i = t.sessions.findIndex((s) => s.session_id === entry.session_id);
+  if (i >= 0) t.sessions[i] = { ...t.sessions[i], ...entry }; else t.sessions.push(entry);
+  writeTracker(t);
+}
+function tmuxAlive(name) { return spawnSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' }).status === 0; }
+
+function main() {
+  if (!haveTmux()) { console.error('asmltr claude: tmux is required (e.g. `apt install tmux`).'); process.exit(1); }
+  const args = process.argv.slice(2);
+  const cwd = process.cwd();
+  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const name = `asmltr-cli-${stamp}`;
+  const launchTs = Date.now();
+
+  // Detached tmux session running claude. When claude exits, the session ends on its own.
+  const claudeBin = process.env.ASMLTR_CLAUDE_BIN || 'claude';
+  const create = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, claudeBin, ...args], { stdio: 'inherit' });
+  if (create.status !== 0) { console.error('asmltr claude: failed to start tmux session'); process.exit(1); }
+
+  const pid = (() => { const r = spawnSync('tmux', ['list-panes', '-t', name, '-F', '#{pane_pid}'], { encoding: 'utf8' }); return Number((r.stdout || '').trim()) || null; })();
+  upsert({
+    session_id: name, surface: 'claude-code', identity: IDENTITY,
+    multiplexer: 'tmux', tmux_target: name, pid,
+    cwd, working_dir: cwd, task: `claude — ${path.basename(cwd)}`,
+    started_unix: Math.floor(launchTs / 1000), last_activity_unix: Math.floor(launchTs / 1000),
+    tool_count: 0, status: 'active',
+  });
+
+  // Detached transcript tailer: discovers the session's jsonl + streams events to the collector.
+  const tailer = path.join(__dirname, 'lib', 'claude-tailer.js');
+  const child = spawn(process.execPath, [tailer, name, cwd, name, String(launchTs)], {
+    detached: true, stdio: 'ignore', env: process.env,
+  });
+  child.unref();
+
+  console.log(`▶ asmltr: monitoring this claude session as \x1b[36m${name}\x1b[0m (dashboard → Live).`);
+  console.log(`  detach with Ctrl-b d (keeps running + monitored) · re-attach: tmux attach -t ${name}\n`);
+
+  // Attach (foreground). Returns on detach or when claude exits.
+  spawnSync('tmux', ['attach', '-t', name], { stdio: 'inherit' });
+
+  if (!tmuxAlive(name)) {
+    // claude exited → mark ended (the tailer also notices and flushes).
+    const t = readTracker();
+    const s = t.sessions.find((x) => x.session_id === name);
+    if (s) { s.status = 'ended'; s.last_activity_unix = Math.floor(Date.now() / 1000); writeTracker(t); }
+    console.log(`\n✓ session ${name} ended.`);
+  } else {
+    console.log(`\n↩ detached — ${name} still running and monitored. Re-attach: tmux attach -t ${name}`);
+  }
+}
+
+main();

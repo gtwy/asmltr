@@ -82,9 +82,31 @@ function makeControl(db) {
     });
   }
 
+  // Inject into a multiplexer-backed interactive session (an `asmltr claude` tmux/screen
+  // session) by sending keys to its pane — the CLI equivalent of steer/interrupt.
+  //   { text, enter }  → type a literal string (optionally press Enter after)
+  //   { keys: 'Escape' | 'C-c' } → send a named key (interrupt the current turn)
+  function sendKeys(session_id, { text, keys, enter = true } = {}, actor) {
+    const row = getSession(session_id);
+    if (!row) { audit({ actor, action: 'send-keys', target: session_id, result: 'failure', detail: 'no such session' }); return { ok: false, error: 'no such session' }; }
+    const target = row.tmux_target;
+    if (!target || row.multiplexer !== 'tmux') { audit({ actor, action: 'send-keys', target: session_id, result: 'denied', detail: 'not a tmux session' }); return { ok: false, error: 'session has no tmux target (can only inject into `asmltr claude` sessions)' }; }
+    try {
+      if (keys) {
+        execFile('tmux', ['send-keys', '-t', target, keys], () => {});
+      } else if (text != null) {
+        execFile('tmux', ['send-keys', '-t', target, '-l', '--', String(text)], (e1) => {
+          if (!e1 && enter) execFile('tmux', ['send-keys', '-t', target, 'Enter'], () => {});
+        });
+      } else { return { ok: false, error: 'nothing to send' }; }
+    } catch (e) { audit({ actor, action: 'send-keys', target: session_id, result: 'failure', detail: e.message }); return { ok: false, error: e.message }; }
+    audit({ actor, action: 'send-keys', target: session_id, result: 'success', detail: keys ? `keys ${keys}` : `text (${String(text).length} chars)` });
+    return { ok: true, target };
+  }
+
   const recentAudit = (limit = 50) => db.db.prepare('SELECT * FROM control_audit ORDER BY ts DESC LIMIT ?').all(limit);
 
-  return { kill, stop, diff, restartDaemon, recentAudit };
+  return { kill, stop, diff, restartDaemon, sendKeys, recentAudit };
 }
 
 module.exports = { makeControl };

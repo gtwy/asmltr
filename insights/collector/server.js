@@ -145,6 +145,13 @@ app.post('/api/control/stop', requireControl, (req, res) => {
   io.emit('control', { action: 'stop', target: req.body.session_id, ok: r.ok });
   res.status(r.ok ? 200 : 400).json(r);
 });
+// inject into a tmux-backed `asmltr claude` session (steer / interrupt)
+app.post('/api/control/send-keys', requireControl, (req, res) => {
+  const { session_id, text, keys, enter } = req.body || {};
+  const r = control.sendKeys(session_id, { text, keys, enter }, req.actor);
+  io.emit('control', { action: 'send-keys', target: session_id, ok: r.ok });
+  res.status(r.ok ? 200 : 400).json(r);
+});
 app.get('/api/control/diff', requireControl, (req, res) => {
   control.diff(req.query.session_id, (_e, r) => res.status(r.ok ? 200 : 400).json(r));
 });

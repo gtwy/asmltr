@@ -11,9 +11,21 @@
  */
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
-// Optional integration: a host session-tracker JSON to mirror. Unset → skipped.
+// Tracker sources to mirror. Each entry becomes a session row. A source sets the
+// DEFAULTS for its entries (fields on the entry itself win). Both are optional.
+//  - ASMLTR_TRACKER_PATH: the host hook tracker (e.g. Eve's) — screen-based, one identity.
+//  - ASMLTR_CLI_TRACKER_PATH: `asmltr claude` wrapped sessions — tmux, per-entry identity.
 const TRACKER_PATH = process.env.ASMLTR_TRACKER_PATH || '';
+const CLI_TRACKER_PATH = process.env.ASMLTR_CLI_TRACKER_PATH || path.join(os.homedir(), '.asmltr', 'cli-sessions.json');
+const HOOK_IDENTITY = process.env.ASMLTR_TRACKER_IDENTITY || 'cli';
+
+const SOURCES = [
+  { path: TRACKER_PATH, defaults: { surface: 'claude-code', identity: HOOK_IDENTITY, multiplexer: 'screen' } },
+  { path: CLI_TRACKER_PATH, defaults: { surface: 'claude-code', identity: HOOK_IDENTITY, multiplexer: 'tmux' } },
+];
 
 /** Is this pid alive? signal 0 = existence check. */
 function pidAlive(pid) {
@@ -22,41 +34,46 @@ function pidAlive(pid) {
   catch (err) { return err.code === 'EPERM'; } // EPERM => exists but not ours
 }
 
-/** Run one reconcile pass. Returns the number of rows upserted. */
-function reconcileOnce(db) {
-  let raw;
-  try { raw = fs.readFileSync(TRACKER_PATH, 'utf8'); }
-  catch (_) { return 0; } // tracker file absent → nothing to mirror yet
-  let parsed;
-  try { parsed = JSON.parse(raw); }
-  catch (_) { return 0; }
+function toMs(t) { return t ? t * (t < 1e12 ? 1000 : 1) : null; }
 
+/** Mirror one tracker source's sessions into the table. Returns rows upserted. */
+function reconcileSource(db, src) {
+  if (!src.path) return 0;
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(src.path, 'utf8')); }
+  catch (_) { return 0; } // absent/unparseable → nothing to mirror
   const list = Array.isArray(parsed.sessions) ? parsed.sessions : [];
   let n = 0;
   for (const s of list) {
     const pid = s.current_pid || s.pid || null;
     let status = s.status || 'active';
-    // LIVENESS CORRECTION
-    if (status === 'active' && !pidAlive(pid)) status = 'ended';
-
+    if (status === 'active' && !pidAlive(pid)) status = 'ended'; // LIVENESS CORRECTION
     db.reconcileUpsert({
       sid: String(s.session_id),
-      surface: 'claude-code',
-      kind: 'ephemeral',
+      surface: s.surface || src.defaults.surface,
+      kind: s.kind || 'ephemeral',
       pid: pid || null,
-      identity: 'eve',
+      identity: s.identity || src.defaults.identity,
       context: s.context || null,
-      working_dir: s.working_dir || null,
+      working_dir: s.working_dir || s.cwd || null,
       task: s.task || null,
       status,
-      started_unix: s.started_unix ? s.started_unix * (s.started_unix < 1e12 ? 1000 : 1) : null,
-      last_activity_unix: s.last_activity_unix ? s.last_activity_unix * (s.last_activity_unix < 1e12 ? 1000 : 1) : null,
+      started_unix: toMs(s.started_unix),
+      last_activity_unix: toMs(s.last_activity_unix),
       tool_count: s.tool_count || 0,
-      multiplexer: 'screen', // CC sessions live in screen (tracked via $STY)
+      multiplexer: s.multiplexer || src.defaults.multiplexer,
+      tmux_target: s.tmux_target || null,
       now: Date.now(),
     });
     n++;
   }
+  return n;
+}
+
+/** Run one reconcile pass across all tracker sources. Returns rows upserted. */
+function reconcileOnce(db) {
+  let n = 0;
+  for (const src of SOURCES) n += reconcileSource(db, src);
   return n;
 }
 

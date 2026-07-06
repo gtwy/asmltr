@@ -19,6 +19,8 @@ services:
       - ASMLTR_INSIGHTS_TOKEN=${ASMLTR_INSIGHTS_TOKEN:-}
       # connector-manager bearer (control plane) — injected server-side by nginx
       - ASMLTR_MANAGER_TOKEN=${ASMLTR_MANAGER_TOKEN:-}
+      # collector control-plane bearer (kill/stop/send-keys) — injected server-side by nginx
+      - ASMLTR_CONTROL_TOKEN=${ASMLTR_INSIGHTS_CONTROL_TOKEN:-}
       # nginx listen directive (default :80 for the traefik-network model; a host-network
       # deploy can set e.g. ASMLTR_NGINX_LISTEN=172.18.0.1:8091)
       - NGINX_LISTEN=${ASMLTR_NGINX_LISTEN:-80}

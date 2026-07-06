@@ -81,14 +81,23 @@ function view(e) {
 }
 
 // ---- takeover ---------------------------------------------------------------
+// Two flavours: SDK/channel sessions steer via the core (/v2), while interactive
+// `asmltr claude` tmux sessions are driven by sending keys to their pane.
+const isCli = computed(() => props.session.multiplexer === 'tmux')
+const attachCmd = computed(() => (isCli.value && props.session.tmux_target ? `tmux attach -t ${props.session.tmux_target}` : null))
 const steer = ref('')
 const busy = ref(false)
 const notice = ref(null) // { ok, text }
 async function doAbort() {
   busy.value = true; notice.value = null
   try {
-    const r = await control.abort(key.value)
-    notice.value = { ok: !!r.ok, text: r.ok ? 'Stopped the in-flight turn (session still resumable).' : (r.error || 'nothing in flight') }
+    if (isCli.value) {
+      await control.sendKey(key.value, 'Escape')
+      notice.value = { ok: true, text: 'Sent an interrupt (Escape) to the session.' }
+    } else {
+      const r = await control.abort(key.value)
+      notice.value = { ok: !!r.ok, text: r.ok ? 'Stopped the in-flight turn (session still resumable).' : (r.error || 'nothing in flight') }
+    }
   } catch (e) { notice.value = { ok: false, text: e.message } }
   finally { busy.value = false }
 }
@@ -97,11 +106,17 @@ async function doInject() {
   if (!text) return
   busy.value = true; notice.value = null
   try {
-    const r = await control.inject(key.value, text)
-    if (r.ok) {
+    if (isCli.value) {
+      await control.sendText(key.value, text)
       steer.value = ''
-      notice.value = { ok: true, text: `Steered${r.delivered ? ' — reply sent to the channel' : (r.deliverErr ? ` (reply not delivered: ${r.deliverErr})` : '')}.` }
-    } else notice.value = { ok: false, text: r.error || 'inject failed' }
+      notice.value = { ok: true, text: 'Typed into the session + pressed Enter.' }
+    } else {
+      const r = await control.inject(key.value, text)
+      if (r.ok) {
+        steer.value = ''
+        notice.value = { ok: true, text: `Steered${r.delivered ? ' — reply sent to the channel' : (r.deliverErr ? ` (reply not delivered: ${r.deliverErr})` : '')}.` }
+      } else notice.value = { ok: false, text: r.error || 'inject failed' }
+    }
   } catch (e) { notice.value = { ok: false, text: e.message } }
   finally { busy.value = false }
 }
@@ -150,19 +165,23 @@ async function doInject() {
     <!-- takeover -->
     <template #footer>
       <div class="w-full">
+        <div v-if="attachCmd" class="mb-2 flex items-center gap-2 text-[11px] text-slate-400">
+          <span>Take over in your terminal:</span>
+          <code class="rounded bg-black/40 px-1.5 py-0.5 font-mono text-brand-violet/90">{{ attachCmd }}</code>
+        </div>
         <div v-if="notice" class="mb-2 text-xs" :class="notice.ok ? 'text-emerald-300' : 'text-rose-300'">{{ notice.text }}</div>
         <div class="flex items-end gap-2">
           <button
             type="button"
             :disabled="busy"
-            title="Abort the in-flight turn — the session survives and stays resumable"
+            :title="isCli ? 'Send an interrupt (Escape) to the session' : 'Abort the in-flight turn — the session survives and stays resumable'"
             class="shrink-0 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/20 disabled:opacity-40"
             @click="doAbort"
-          >⏹ Stop</button>
+          >{{ isCli ? '⎋ Interrupt' : '⏹ Stop' }}</button>
           <textarea
             v-model="steer"
             rows="1"
-            placeholder="Take over — type a message to steer this conversation, then Send (reply goes back to the channel)…"
+            :placeholder="isCli ? 'Type a message to send into the session (Enter)…' : 'Take over — type a message to steer this conversation, then Send (reply goes back to the channel)…'"
             class="min-h-[38px] flex-1 resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
             @keydown.enter.exact.prevent="doInject"
           ></textarea>

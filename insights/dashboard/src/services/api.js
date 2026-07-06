@@ -42,8 +42,12 @@ async function postCore(path, body) {
 }
 
 export const control = {
+  // SDK/channel sessions → the core control plane
   abort: (conversation_key) => postCore('/v2/abort', { conversation_key }),
-  inject: (conversation_key, text) => postCore('/v2/inject', { conversation_key, text, by: 'dashboard' })
+  inject: (conversation_key, text) => postCore('/v2/inject', { conversation_key, text, by: 'dashboard' }),
+  // interactive `asmltr claude` (tmux) sessions → collector send-keys (steer / interrupt)
+  sendText: (session_id, text) => postCore('/api/control/send-keys', { session_id, text, enter: true }),
+  sendKey: (session_id, keys) => postCore('/api/control/send-keys', { session_id, keys })
 }
 
 // payload arrives as a JSON *string* over REST. Be defensive.

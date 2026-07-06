@@ -10,6 +10,15 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Control plane (kill/stop/send-keys) needs the STRONGER control bearer, and the
+    # Authelia-resolved user becomes the audit actor. More specific than /api/ so it wins.
+    location /api/control/ {
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;
+        proxy_set_header Authorization "Bearer ${ASMLTR_CONTROL_TOKEN}";
+        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header Host $host;
+    }
+
     # REST: inject the read bearer; forward the Authelia-resolved user.
     location /api/ {
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;

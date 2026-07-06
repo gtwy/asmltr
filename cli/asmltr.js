@@ -239,6 +239,10 @@ function cmdHelp() {
     switch (cmd) {
       case undefined:
       case 'top': return require('./tui').run(BASE, CORE_BASE, TOKEN, A, { base: MANAGER_BASE, token: MANAGER_TOKEN });
+      case 'claude': { // launch an interactive claude session wrapped for monitoring + takeover
+        const r = spawnSync(process.execPath, [require('path').join(__dirname, 'asmltr-claude.js'), ...rest], { stdio: 'inherit' });
+        return process.exit(r.status || 0);
+      }
       case 'ls': return await cmdLs();
       case 'brief': return await cmdBrief();
       case 'events': return await cmdEvents(f);

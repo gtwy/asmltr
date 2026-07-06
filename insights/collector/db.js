@@ -135,15 +135,16 @@ const q = {
 // --- session upsert used by reconcile.js (richer column set) -----------------
 const _reconcileUpsert = db.prepare(`
   INSERT INTO sessions (session_id, surface, kind, pid, identity, context, working_dir, task, status,
-                        started_unix, last_activity_unix, tool_count, multiplexer, updated_unix)
+                        started_unix, last_activity_unix, tool_count, multiplexer, tmux_target, updated_unix)
   VALUES (@sid, @surface, @kind, @pid, @identity, @context, @working_dir, @task, @status,
-          @started_unix, @last_activity_unix, @tool_count, @multiplexer, @now)
+          @started_unix, @last_activity_unix, @tool_count, @multiplexer, @tmux_target, @now)
   ON CONFLICT(session_id) DO UPDATE SET
     pid = excluded.pid, context = excluded.context, working_dir = excluded.working_dir,
     task = excluded.task, status = excluded.status, last_activity_unix = excluded.last_activity_unix,
-    tool_count = excluded.tool_count, multiplexer = excluded.multiplexer, updated_unix = excluded.updated_unix
+    tool_count = excluded.tool_count, multiplexer = excluded.multiplexer,
+    tmux_target = excluded.tmux_target, updated_unix = excluded.updated_unix
 `);
-function reconcileUpsert(s) { _reconcileUpsert.run(s); }
+function reconcileUpsert(s) { _reconcileUpsert.run({ tmux_target: null, ...s }); }
 
 // --- system sample (sampler.js): write metrics table + a timeline event ------
 const _insMetric = db.prepare(`
