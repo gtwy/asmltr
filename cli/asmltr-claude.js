@@ -25,6 +25,21 @@ const TRACKER = process.env.ASMLTR_CLI_TRACKER_PATH || path.join(HOME, '.asmltr'
 const IDENTITY = process.env.ASMLTR_CLI_IDENTITY || (os.userInfo().username || 'cli');
 
 function haveTmux() { try { execFileSync('tmux', ['-V'], { stdio: 'ignore' }); return true; } catch { return false; } }
+function isExecFile(p) { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } }
+// Resolve a REAL claude executable — scans PATH for a regular executable file (so a stray
+// directory named `claude` on PATH is skipped), then known install locations. Override with
+// ASMLTR_CLAUDE_BIN.
+function resolveClaude() {
+  const envBin = process.env.ASMLTR_CLAUDE_BIN;
+  if (envBin) return isExecFile(envBin) ? envBin : null;
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (dir && isExecFile(path.join(dir, 'claude'))) return path.join(dir, 'claude');
+  }
+  for (const c of ['/usr/local/bin/claude', '/usr/bin/claude', path.join(HOME, '.claude/local/claude'), path.join(HOME, '.local/bin/claude')]) {
+    if (isExecFile(c)) return c;
+  }
+  return null;
+}
 function readTracker() { try { return JSON.parse(fs.readFileSync(TRACKER, 'utf8')); } catch { return { sessions: [] }; } }
 function writeTracker(t) { fs.mkdirSync(path.dirname(TRACKER), { recursive: true }); fs.writeFileSync(TRACKER, JSON.stringify(t)); }
 function upsert(entry) {
@@ -43,9 +58,19 @@ function main() {
   const name = `asmltr-cli-${stamp}`;
   const launchTs = Date.now();
 
-  // Detached tmux session running claude. When claude exits, the session ends on its own.
-  const claudeBin = process.env.ASMLTR_CLAUDE_BIN || 'claude';
-  const create = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, claudeBin, ...args], { stdio: 'inherit' });
+  // Resolve claude up front so we fail loudly (not with a dead tmux pane) if it's missing.
+  const claudeBin = resolveClaude();
+  if (!claudeBin) {
+    console.error('asmltr claude: could not find a working `claude` executable on PATH.');
+    console.error('  Install Claude Code, or set ASMLTR_CLAUDE_BIN to its full path, then retry.');
+    process.exit(127);
+  }
+
+  // Detached tmux session running claude via a tiny shell that LINGERS on failure — so if
+  // claude exits non-zero (e.g. a broken install), you attach and actually see the error
+  // instead of a session that vanished. On a normal exit the pane closes and the session ends.
+  const guard = '"$0" "$@"; ec=$?; if [ $ec -ne 0 ]; then echo; echo "[asmltr] claude exited with code $ec (see above); this pane closes in 30s"; sleep 30; fi';
+  const create = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'bash', '-c', guard, claudeBin, ...args], { stdio: 'inherit' });
   if (create.status !== 0) { console.error('asmltr claude: failed to start tmux session'); process.exit(1); }
 
   const pid = (() => { const r = spawnSync('tmux', ['list-panes', '-t', name, '-F', '#{pane_pid}'], { encoding: 'utf8' }); return Number((r.stdout || '').trim()) || null; })();
