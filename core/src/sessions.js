@@ -42,6 +42,22 @@ const _cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name)
 for (const col of ['working_dir', 'outbound_instance_id', 'outbound_target']) {
   if (!_cols.includes(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
 }
+// Per-session cursor: the highest announcement id this session has already drained.
+if (!_cols.includes('last_announce_id')) db.exec('ALTER TABLE sessions ADD COLUMN last_announce_id INTEGER DEFAULT 0');
+
+// Announcements = a cross-session mailbox. A write is delivered into a session's context at
+// the START of its next turn (guaranteed-on-next-activity awareness, no tokens on idle sessions).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS announcements (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    target       TEXT NOT NULL DEFAULT '*',   -- '*' | <conversation_key> | 'surface:<channel>' | 'identity:<key>'
+    text         TEXT NOT NULL,
+    priority     TEXT NOT NULL DEFAULT 'normal',
+    from_session TEXT,
+    created_at   INTEGER NOT NULL,            -- ms since epoch (the announcement's timestamp)
+    expires_at   INTEGER                      -- optional TTL (ms); null = never
+  );
+`);
 
 const _get = db.prepare('SELECT * FROM sessions WHERE conversation_key = ?');
 const _insert = db.prepare(`
@@ -60,6 +76,11 @@ const _setEngineId = db.prepare('UPDATE sessions SET engine_session_id = ?, last
 const _touch = db.prepare('UPDATE sessions SET last_activity_at = ?, turn_count = turn_count + 1 WHERE conversation_key = ?');
 const _setClaim = db.prepare('UPDATE sessions SET claim_state = ?, claimed_by = ? WHERE conversation_key = ?');
 const _setRoute = db.prepare('UPDATE sessions SET outbound_instance_id = ?, outbound_target = ? WHERE conversation_key = ?');
+
+const _insAnnounce = db.prepare('INSERT INTO announcements (target, text, priority, from_session, created_at, expires_at) VALUES (@target, @text, @priority, @from_session, @created_at, @expires_at)');
+const _liveAnnounce = db.prepare('SELECT * FROM announcements WHERE (expires_at IS NULL OR expires_at > @now) ORDER BY id ASC');
+const _maxAnnounceId = db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM announcements');
+const _setCursor = db.prepare('UPDATE sessions SET last_announce_id = ? WHERE conversation_key = ?');
 
 function nowMs() { return Date.now(); }
 
@@ -108,9 +129,45 @@ function setClaim(conversation_key, claim_state, claimed_by = null) {
 
 function get(conversation_key) { return _get.get(conversation_key); }
 
+/** Post an announcement to the cross-session mailbox. Returns { id, created_at }. */
+function addAnnouncement({ text, target = '*', priority = 'normal', from_session = null, ttlSec = null }) {
+  const created_at = nowMs();
+  const expires_at = ttlSec ? created_at + ttlSec * 1000 : null;
+  const info = _insAnnounce.run({ target, text, priority: priority === 'urgent' ? 'urgent' : 'normal', from_session, created_at, expires_at });
+  return { id: info.lastInsertRowid, created_at };
+}
+
+function _targetMatches(target, ctx) {
+  if (!target || target === '*') return true;
+  if (target === ctx.conversation_key) return true;
+  const m = /^(surface|identity):(.+)$/.exec(target);
+  if (m) return (m[1] === 'surface' && m[2] === ctx.channel) || (m[1] === 'identity' && m[2] === ctx.identity);
+  return false;
+}
+
+/**
+ * Drain the announcements this session hasn't seen yet (id > its cursor), that target it,
+ * are unexpired, and aren't its own. Advances the cursor past ALL current announcements so
+ * each is evaluated once. Returns the due list (with timestamps) to prepend to the turn.
+ */
+function drainAnnouncements(conversation_key, channel, identity) {
+  const row = _get.get(conversation_key);
+  const cursor = (row && row.last_announce_id) || 0;
+  const now = nowMs();
+  const live = _liveAnnounce.all({ now });
+  const due = live.filter((a) => a.id > cursor && a.from_session !== conversation_key
+    && _targetMatches(a.target, { conversation_key, channel, identity })).slice(-15); // cap to avoid a flood on a fresh session
+  const maxId = _maxAnnounceId.get().m;
+  if (maxId > cursor) _setCursor.run(maxId, conversation_key);
+  return due;
+}
+
+/** List currently-live announcements (for `asmltr announcements` / dashboards). */
+function listAnnouncements() { return _liveAnnounce.all({ now: nowMs() }); }
+
 /** Remember where to send an out-of-band reply (operator inject) for this session. */
 function setOutboundRoute(conversation_key, instance_id, target) {
   _setRoute.run(instance_id || null, target != null ? String(target) : null, conversation_key);
 }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, get, DB_PATH };
+module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, get, addAnnouncement, drainAnnouncements, listAnnouncements, DB_PATH };

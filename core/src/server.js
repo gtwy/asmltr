@@ -154,6 +154,17 @@ async function handle(envelope) {
       'COPY (send here AND elsewhere): run it, then reply normally. REDIRECT (send ONLY to the other channel): run it, ' +
       'then reply with exactly [[NO_REPLY]] so nothing is posted on THIS channel. Only do this when the user asks you to.';
   }
+  // Cross-session announcements: drain any this session hasn't seen into its context (with
+  // timestamps) — awareness from other sessions on this machine, delivered on this next turn.
+  try {
+    const anns = sessions.drainAnnouncements(e.conversation_key, e.channel, resolved.user_key);
+    if (anns.length) {
+      const fmt = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+      const lines = anns.map((a) => `• [${fmt(a.created_at)}${a.priority === 'urgent' ? ' · URGENT' : ''}${a.from_session ? ' · from ' + a.from_session : ''}] ${a.text}`);
+      systemPrompt += `\n\n📢 ANNOUNCEMENTS from other sessions on this machine (awareness only — act on them just if relevant to what you're doing):\n${lines.join('\n')}`;
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control', identity: resolved.user_key, source: 'core', payload: { action: 'announcements-received', count: anns.length } });
+    }
+  } catch (_) {}
   const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel });
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',
@@ -362,6 +373,18 @@ app.post('/v2/title', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
   finally { _titleBusy = false; }
 });
+
+// Cross-session announcement mailbox: post an awareness note delivered into other sessions'
+// context on their next turn. { text, target?, priority?, from?, ttl? (seconds) }
+app.post('/v2/announce', (req, res) => {
+  const { text, target, priority, from, ttl } = req.body || {};
+  if (!text) return res.status(400).json({ error: 'need text' });
+  const r = sessions.addAnnouncement({ text: String(text), target: target || '*', priority, from_session: from || null, ttlSec: ttl ? Number(ttl) : null });
+  record({ surface: 'core', session_id: null, event_type: 'control', identity: from || 'operator', source: 'core',
+    payload: { action: 'announce', id: r.id, target: target || '*', priority: priority || 'normal', text: truncate(text, 200) } });
+  res.json({ ok: true, id: r.id, created_at: r.created_at, target: target || '*' });
+});
+app.get('/v2/announcements', (req, res) => res.json({ announcements: sessions.listAnnouncements() }));
 
 app.post('/v2/abort', (req, res) => {
   const key = req.body && req.body.conversation_key;

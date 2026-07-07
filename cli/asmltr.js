@@ -206,6 +206,37 @@ async function cmdSend(rest) {
     .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   console.log(r.ok ? A.grn(`✓ sent to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
+async function cmdAnnounce(rest) {
+  // asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]
+  // Parse flags out of the args so the remaining words are the announcement text.
+  const opts = { target: '*', priority: 'normal', from: ACTOR, ttl: null };
+  const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--urgent') opts.priority = 'urgent';
+    else if (t === '--to') opts.target = rest[++i];
+    else if (t === '--from') opts.from = rest[++i];
+    else if (t === '--ttl') opts.ttl = Number(rest[++i]);
+    else words.push(t);
+  }
+  const text = words.join(' ');
+  if (!text) throw new Error('usage: asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]\n' +
+    '  target: * (all) · a session id · surface:discord · identity:owner');
+  const body = { text, target: opts.target, priority: opts.priority, from: opts.from, ttl: opts.ttl };
+  const r = await fetch(CORE_BASE + '/v2/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch((e) => ({ error: e.message }));
+  console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target}  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
+}
+async function cmdAnnouncements() {
+  const r = await fetch(CORE_BASE + '/v2/announcements').then((x) => x.json()).catch((e) => ({ announcements: [], error: e.message }));
+  const list = r.announcements || [];
+  if (!list.length) return console.log(A.dim('no live announcements'));
+  for (const a of list) {
+    const ts = new Date(a.created_at).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    const exp = a.expires_at ? A.dim(` (expires ${new Date(a.expires_at).toISOString().replace('T', ' ').slice(11, 16)})`) : '';
+    console.log(`${A.dim('#' + a.id)} ${A.dim(ts)}  ${a.priority === 'urgent' ? A.red('[URGENT]') : ''} → ${a.target}${exp}\n   ${a.text}`);
+  }
+}
 async function cmdKill(id, f) {
   if (!id) throw new Error('usage: asmltr kill <session_id> [--hard]');
   const r = await controlApi('/api/control/kill', 'POST', { session_id: id, hard: !!f.hard });
@@ -236,6 +267,9 @@ function cmdHelp() {
   ${A.bold('cross-channel:')}
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
                                        (e.g. send telegram 123 "hi" · send discord alias "yo")
+  asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
+                                       delivered into other sessions' context on their next turn
+  asmltr announcements                 list live announcements (with timestamps)
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -266,6 +300,8 @@ function cmdHelp() {
       case 'tail': return liveStream(null);
       case 'watch': return liveStream(rest[0]);
       case 'send': return await cmdSend(rest);
+      case 'announce': return await cmdAnnounce(rest);
+      case 'announcements': return await cmdAnnouncements();
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
       case 'kill': return await cmdKill(rest[0], f);
