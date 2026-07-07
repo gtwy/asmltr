@@ -148,6 +148,12 @@ async function handle(envelope) {
   // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
   let systemPrompt = buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
   if (e.system_prompt_extra) systemPrompt += '\n\n' + e.system_prompt_extra; // connector-supplied context (e.g. Discord)
+  if (process.env.ASMLTR_CROSS_CHANNEL !== 'off') { // cross-channel routing capability
+    systemPrompt += '\n\nCROSS-CHANNEL: you can deliver output to ANOTHER channel with the shell command ' +
+      '`asmltr send <channel> <target> "<text>"` (channel = discord|telegram|…; target = a channel id / chat id / alias). ' +
+      'COPY (send here AND elsewhere): run it, then reply normally. REDIRECT (send ONLY to the other channel): run it, ' +
+      'then reply with exactly [[NO_REPLY]] so nothing is posted on THIS channel. Only do this when the user asks you to.';
+  }
   const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel });
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',
@@ -227,6 +233,15 @@ async function handle(envelope) {
     identity: resolved.user_key, source: 'core',
     tokens_in: result.usage.tokens_in, tokens_out: result.usage.tokens_out, cost_usd: result.usage.cost_usd,
     payload: { tools: result.tools.length, isError: result.isError } });
+
+  // Universal silence sentinel: if the turn ends with [[NO_REPLY]] (e.g. the agent rerouted its
+  // answer to another channel via `asmltr send` and doesn't want to post here), emit no action so
+  // EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
+  if (/\[\[NO_REPLY\]\]/i.test(result.text || '')) {
+    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+      identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });
+    return [];
+  }
 
   const actions = [env.reply(result.text || "I'm here — what would you like to know?", { segments: result.segments || [] })];
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'outbound',

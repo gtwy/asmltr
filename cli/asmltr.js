@@ -193,6 +193,19 @@ async function cmdRelease(key) {
   console.log(A.grn('released — channel resumes'));
 }
 
+async function cmdSend(rest) {
+  // asmltr send <channel> <target> <text…> — deliver a message OUT through any connector.
+  const channel = rest[0], target = rest[1], text = rest.slice(2).join(' ');
+  if (!channel || !target || !text) {
+    throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
+      '  e.g.  asmltr send telegram 123456 "heads up"   ·   asmltr send discord TD-TSD-main "shipping now"');
+  }
+  const headers = { 'Content-Type': 'application/json' };
+  if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+  const r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify({ channel, target, kind: 'text', text }) })
+    .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  console.log(r.ok ? A.grn(`✓ sent to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
+}
 async function cmdKill(id, f) {
   if (!id) throw new Error('usage: asmltr kill <session_id> [--hard]');
   const r = await controlApi('/api/control/kill', 'POST', { session_id: id, hard: !!f.hard });
@@ -220,6 +233,9 @@ function cmdHelp() {
   asmltr tail            live global event stream
   asmltr watch <key>     live stream for one session
   asmltr system          current system metrics
+  ${A.bold('cross-channel:')}
+  asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
+                                       (e.g. send telegram 123 "hi" · send discord alias "yo")
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -249,6 +265,7 @@ function cmdHelp() {
       case 'system': return await cmdSystem();
       case 'tail': return liveStream(null);
       case 'watch': return liveStream(rest[0]);
+      case 'send': return await cmdSend(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
       case 'kill': return await cmdKill(rest[0], f);
