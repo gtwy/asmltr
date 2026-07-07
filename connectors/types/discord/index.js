@@ -310,8 +310,13 @@ RESPONSE RULES:
     const cid = message.channel.id;
     if (processing.get(cid)) return; // already handling a message in this channel — stay silent (no channel spam)
     processing.set(cid, true);
+    // Discord's typing indicator auto-expires after ~10s. Re-trigger it every
+    // 8s so the "…is typing" shows for the ENTIRE (possibly multi-minute)
+    // processing time, not just the first few seconds. Cleared in finally.
+    let typingInterval = null;
     try {
       await message.channel.sendTyping();
+      typingInterval = setInterval(() => { message.channel.sendTyping().catch(() => {}); }, 8000);
       const context = getRelevantContext(message);
       const sid = message.guild?.id;
       // per-CHANNEL session (was per-guild): prevents cross-channel/cross-speaker
@@ -378,6 +383,7 @@ RESPONSE RULES:
       ctx.log('handle error: ' + e.message);
       await message.channel.send('⚠️ I hit an error processing that. Recalibrating...').catch(() => {});
     } finally {
+      if (typingInterval) clearInterval(typingInterval);
       processing.delete(cid);
     }
   }
