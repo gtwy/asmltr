@@ -70,7 +70,13 @@ function main() {
   // claude exits non-zero (e.g. a broken install), you attach and actually see the error
   // instead of a session that vanished. On a normal exit the pane closes and the session ends.
   const guard = '"$0" "$@"; ec=$?; if [ $ec -ne 0 ]; then echo; echo "[asmltr] claude exited with code $ec (see above); this pane closes in 30s"; sleep 30; fi';
-  const create = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'bash', '-c', guard, claudeBin, ...args], { stdio: 'inherit' });
+  // Make the session aware of the asmltr toolbelt (unless disabled).
+  const selfAware = process.env.ASMLTR_SELF_AWARE !== 'off';
+  const NOTE = 'You are running inside an asmltr-managed session on this machine. Run `asmltr help` for cross-session tools: ' +
+    '`asmltr ls` (see other active sessions — avoid duplicating their work), `asmltr send <channel> <target> "<text>"` (route output to another channel), ' +
+    '`asmltr announce "<text>"` / `asmltr announcements` (send/read awareness notes across sessions).';
+  const claudeArgs = selfAware ? ['--append-system-prompt', NOTE, ...args] : args;
+  const create = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'bash', '-c', guard, claudeBin, ...claudeArgs], { stdio: 'inherit' });
   if (create.status !== 0) { console.error('asmltr claude: failed to start tmux session'); process.exit(1); }
 
   const pid = (() => { const r = spawnSync('tmux', ['list-panes', '-t', name, '-F', '#{pane_pid}'], { encoding: 'utf8' }); return Number((r.stdout || '').trim()) || null; })();

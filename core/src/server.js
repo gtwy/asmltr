@@ -148,11 +148,14 @@ async function handle(envelope) {
   // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
   let systemPrompt = buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
   if (e.system_prompt_extra) systemPrompt += '\n\n' + e.system_prompt_extra; // connector-supplied context (e.g. Discord)
-  if (process.env.ASMLTR_CROSS_CHANNEL !== 'off') { // cross-channel routing capability
-    systemPrompt += '\n\nCROSS-CHANNEL: you can deliver output to ANOTHER channel with the shell command ' +
-      '`asmltr send <channel> <target> "<text>"` (channel = discord|telegram|…; target = a channel id / chat id / alias). ' +
-      'COPY (send here AND elsewhere): run it, then reply normally. REDIRECT (send ONLY to the other channel): run it, ' +
-      'then reply with exactly [[NO_REPLY]] so nothing is posted on THIS channel. Only do this when the user asks you to.';
+  if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
+    systemPrompt += '\n\nASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
+      'You have an `asmltr` CLI (run `asmltr help` for everything). Key cross-session ops (use the Bash tool):\n' +
+      '• `asmltr ls` — every active session here (what/where/who) — check before duplicating work another session is doing.\n' +
+      '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
+      'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here.\n' +
+      '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists live ones.\n' +
+      'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
   }
   // Cross-session announcements: drain any this session hasn't seen into its context (with
   // timestamps) — awareness from other sessions on this machine, delivered on this next turn.
