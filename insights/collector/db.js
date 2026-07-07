@@ -153,6 +153,11 @@ const q = {
     WHERE event_type IN ('tool', 'tool_result') AND payload LIKE @like AND ts > @since
     ORDER BY ts DESC LIMIT 400
   `),
+  // recent tool events (for `asmltr map` — derive where each session is actively working)
+  toolEventsSince: db.prepare(`
+    SELECT session_id, payload, ts FROM events
+    WHERE event_type = 'tool' AND ts > @since ORDER BY ts DESC LIMIT 3000
+  `),
   usage: db.prepare(`SELECT * FROM usage_rollup WHERE bucket_hour >= @since ORDER BY bucket_hour DESC`),
   system: db.prepare(`SELECT * FROM system_metrics WHERE ts >= @since ORDER BY ts DESC LIMIT @limit`),
   notifications: db.prepare(`SELECT * FROM notifications ORDER BY ts DESC LIMIT @limit`),

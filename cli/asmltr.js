@@ -207,18 +207,21 @@ async function cmdSend(rest) {
   console.log(r.ok ? A.grn(`✓ sent to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 async function cmdMap() {
-  // group active sessions by working dir → who's in the same repo (collision radar)
-  const { sessions } = await api('/api/sessions?active=1');
-  const withDir = sessions.filter((s) => s.working_dir);
-  const noDir = sessions.length - withDir.length;
-  if (!withDir.length) return console.log(A.dim('no active session has a working directory' + (noDir ? ` (${noDir} channel sessions have none)` : '')));
+  // where sessions are ACTIVELY working, from recent tool activity → grouped by git repo
+  const r = await api('/api/map');
+  const list = r.sessions || [];
+  if (!list.length) return console.log(A.dim('no session has file activity in the last 30 min.\n' +
+    '(map covers sessions asmltr observes — channel turns + `asmltr claude` sessions; it reads real\n' +
+    ' tool activity, not the spawn dir, so a session shows up once it touches files.)'));
   const groups = {};
-  for (const s of withDir) { const wd = s.worktree ? `${s.working_dir}  (wt: ${s.worktree})` : s.working_dir; (groups[wd] = groups[wd] || []).push(s); }
-  for (const [wd, ss] of Object.entries(groups).sort((a, b) => b[1].length - a[1].length)) {
-    console.log(`${A.bold(wd)}  ${ss.length > 1 ? A.red(`⚠ ${ss.length} sessions — possible collision`) : A.dim('1 session')}`);
-    for (const s of ss) console.log(`   ${paint(s.surface, pad(s.surface, 11))} ${String(s.title || s.session_id).slice(0, 60)}  ${A.dim('· active ' + ageOf(s.last_activity_unix) + ' ago')}`);
+  for (const s of list) { (groups[s.repo] = groups[s.repo] || []).push(s); }
+  for (const [repo, ss] of Object.entries(groups).sort((a, b) => b[1].length - a[1].length)) {
+    console.log(`${A.bold(repo)}  ${ss.length > 1 ? A.red(`⚠ ${ss.length} sessions — possible collision`) : A.dim('1 session')}`);
+    for (const s of ss) {
+      const sub = s.dirs.map((d) => d.dir.replace(repo, '.') + (d.hits > 1 ? `(${d.hits})` : '')).join(' ');
+      console.log(`   ${paint(s.surface, pad(s.surface, 11))} ${String(s.title || s.session_id).slice(0, 40)}  ${A.dim('· ' + ageOf(s.last_activity_unix) + ' ago · ' + sub)}`);
+    }
   }
-  if (noDir) console.log(A.dim(`\n(${noDir} channel sessions have no working dir — omitted)`));
 }
 async function cmdWho(rest) {
   const p = rest[0];

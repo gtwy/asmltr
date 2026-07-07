@@ -19,6 +19,8 @@ require('../../shared/loadenv'); // load <repo>/.env before anything reads confi
  */
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const { Server } = require('socket.io');
 
@@ -139,6 +141,50 @@ app.get('/api/events', requireToken, (req, res) => {
   });
   res.json({ events: rows, count: rows.length });
 });
+// where each session is ACTIVELY working — derived from recent tool events' file paths
+// (resolved to the git repo root), NOT the static spawn dir. This is the honest map.
+function _pathsFromTool(payload) {
+  let p; try { p = JSON.parse(payload); } catch { return []; }
+  let inp = p && p.input;
+  if (typeof inp === 'string') { try { inp = JSON.parse(inp); } catch {} } // core stores input JSON-stringified
+  const out = [];
+  if (inp && typeof inp === 'object') {
+    for (const k of ['file_path', 'notebook_path', 'path']) if (typeof inp[k] === 'string' && inp[k].startsWith('/')) out.push(inp[k]);
+  }
+  return out;
+}
+const _repoCache = new Map();
+function _repoRoot(dir) {
+  if (_repoCache.has(dir)) return _repoCache.get(dir);
+  let d = dir, root = dir;
+  for (let i = 0; i < 15 && d && d !== '/'; i++) { try { if (fs.existsSync(path.join(d, '.git'))) { root = d; break; } } catch {} d = path.dirname(d); }
+  _repoCache.set(dir, root);
+  return root;
+}
+app.get('/api/map', requireToken, (req, res) => {
+  const since = Number(req.query.since) || (Date.now() - 30 * 60000);
+  const meta = {};
+  for (const s of dbmod.q.activeSessions.all()) meta[s.session_id] = s;
+  const dirs = {}; // session_id -> { dir: hits }
+  for (const r of dbmod.q.toolEventsSince.all({ since })) {
+    if (!meta[r.session_id]) continue;
+    for (const fp of _pathsFromTool(r.payload)) {
+      const dir = fp.replace(/\/[^/]*$/, '') || '/';
+      (dirs[r.session_id] = dirs[r.session_id] || {});
+      dirs[r.session_id][dir] = (dirs[r.session_id][dir] || 0) + 1;
+    }
+  }
+  const sessions = [];
+  for (const sid of Object.keys(dirs)) {
+    const ranked = Object.entries(dirs[sid]).sort((a, b) => b[1] - a[1]);
+    sessions.push({
+      session_id: sid, surface: meta[sid].surface, title: meta[sid].title, last_activity_unix: meta[sid].last_activity_unix,
+      repo: _repoRoot(ranked[0][0]), dirs: ranked.slice(0, 3).map(([dir, hits]) => ({ dir, hits })),
+    });
+  }
+  res.json({ since, sessions });
+});
+
 // who touched a path recently — group matching tool events by session (collision radar)
 app.get('/api/who', requireToken, (req, res) => {
   const p = String(req.query.path || '').trim();
