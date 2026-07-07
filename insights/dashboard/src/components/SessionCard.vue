@@ -80,8 +80,9 @@ const claimLabel = computed(() => {
       >
         {{ session.title }}
       </div>
-      <div class="truncate font-mono text-[11px] text-slate-500" :title="session.session_id">
-        {{ session.identity || session.session_id }}
+      <div class="flex items-center gap-1.5 truncate font-mono text-[11px] text-slate-500" :title="session.session_id">
+        <span class="truncate">{{ session.identity || session.session_id }}</span>
+        <span v-if="session.location" class="shrink-0 text-slate-600" :title="session.location">· 💬 {{ truncate(session.location, 30) }}</span>
       </div>
       <!-- live activity preview (falls back to task/context, then a hint) -->
       <div

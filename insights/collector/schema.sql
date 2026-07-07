@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   working_dir        TEXT,
   task               TEXT,
   title              TEXT,                      -- short generated label for the session card
+  location           TEXT,                      -- human origin, e.g. "FabLabz · #eve" (Discord server · channel)
   status             TEXT,                      -- active|idle|ended|paused
   started_unix       INTEGER,
   last_activity_unix INTEGER,

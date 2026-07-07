@@ -115,9 +115,10 @@ async function handle(envelope) {
   const e = env.inbound(envelope);
   const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
 
+  const _cc = e.channel_context || {};
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'inbound',
     identity: e.sender.raw_username || e.sender.raw_id, source: 'core',
-    payload: { text: e.content.text.slice(0, 500), delivery: e.delivery } });
+    payload: { text: e.content.text.slice(0, 500), delivery: e.delivery, server: _cc.server || null, channel: _cc.channel || null } });
 
   // 0) takeover guard: if a human has claimed this session in a terminal, pause
   //    channel responses (don't run a turn) until released.

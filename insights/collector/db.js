@@ -23,6 +23,7 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
 {
   const cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
   if (!cols.includes('title')) db.exec('ALTER TABLE sessions ADD COLUMN title TEXT');
+  if (!cols.includes('location')) db.exec('ALTER TABLE sessions ADD COLUMN location TEXT');
 }
 
 const _insEvent = db.prepare(`
@@ -116,10 +117,23 @@ const ingestEvent = db.transaction((raw) => {
       tokens: row.tokens_in + row.tokens_out,
       tools: row.event_type === 'tool' ? 1 : 0,
     });
+    // origin (server · channel) rides on inbound events — record it on the session for the card
+    if (row.event_type === 'inbound' && evt.payload && (evt.payload.server || evt.payload.channel)) {
+      const loc = fmtLocation(evt.payload.server, evt.payload.channel);
+      if (loc) _setLocation.run(loc, row.session_id);
+    }
   }
 
   return evt;
 });
+function fmtLocation(server, channel) {
+  const s = server && server !== 'Direct Message' ? server : null;
+  const c = channel && channel !== 'DM' ? channel : null;
+  if (s && c) return `${s} · #${c}`;
+  if (s) return s;
+  if (c) return `#${c}`;
+  return server || null; // e.g. "Direct Message"
+}
 
 // --- read queries (REST API) -------------------------------------------------
 const q = {
@@ -154,6 +168,7 @@ function reconcileUpsert(s) { _reconcileUpsert.run({ tmux_target: null, ...s });
 
 const _setTitle = db.prepare('UPDATE sessions SET title = ? WHERE session_id = ?');
 function setTitle(session_id, title) { _setTitle.run(title || null, session_id); }
+const _setLocation = db.prepare('UPDATE sessions SET location = ? WHERE session_id = ?');
 const _getTitle = db.prepare('SELECT title FROM sessions WHERE session_id = ?');
 function getTitle(session_id) { const r = _getTitle.get(session_id); return r ? r.title : null; }
 

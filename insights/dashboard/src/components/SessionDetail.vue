@@ -132,6 +132,7 @@ async function doInject() {
     <!-- meta strip -->
     <div class="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
       <SurfaceBadge :surface="session.surface" />
+      <span v-if="session.location" class="pill border border-white/10 bg-white/5 text-slate-300" :title="'origin: ' + session.location">💬 {{ session.location }}</span>
       <span class="pill border border-white/10 bg-white/5 text-slate-300">{{ session.kind }}</span>
       <span class="flex items-center gap-1.5" :style="{ color: st.color }">
         <span class="h-2 w-2 rounded-full" :class="st.pulse ? 'animate-pulse-dot' : ''" :style="{ backgroundColor: st.color }"></span>

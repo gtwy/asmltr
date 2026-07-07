@@ -340,8 +340,9 @@ RESPONSE RULES:
         }
         if (otherAttachments.length) text += '\n\nATTACHMENTS:\n' + otherAttachments.map(a => `- ${a.name} (${a.contentType}): ${a.url}`).join('\n');
       }
-      ctx.emit({ event_type: 'inbound', session_id: conversationKey, identity: message.author.username, payload: { server: context.location.serverName, channel: context.location.channelName, images: imageAttachments.length } });
-
+      // server + channel names ride in channel_context → the core records them on the inbound
+      // event (and the collector stores them on the session) so the dashboard shows where a
+      // conversation is happening. (No separate inbound emit here — the core records inbound.)
       const actions = await ctx.core.handle({
         channel: 'discord',
         conversation_key: conversationKey,
@@ -351,7 +352,7 @@ RESPONSE RULES:
         delivery: 'sync',
         capabilities: meta.capabilities,
         public: message.channel.type !== 1, // guild channel = public; DM (type 1) = private
-        channel_context: { channelId: cid },
+        channel_context: { channelId: cid, server: context.location.serverName, channel: context.location.channelName },
         context: { scope_id: sid ? `guild:${sid}` : `dm:${message.author.id}`, scope_name: context.location.serverName },
         system_prompt_extra: buildSystemExtra(message, context, forced),
       });
