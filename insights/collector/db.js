@@ -147,6 +147,12 @@ const q = {
       AND ts >= @since
     ORDER BY ts DESC LIMIT @limit
   `),
+  // tool events whose payload mentions a path (for `asmltr who <path>` — collision radar)
+  eventsLike: db.prepare(`
+    SELECT session_id, surface, event_type, payload, ts FROM events
+    WHERE event_type IN ('tool', 'tool_result') AND payload LIKE @like AND ts > @since
+    ORDER BY ts DESC LIMIT 400
+  `),
   usage: db.prepare(`SELECT * FROM usage_rollup WHERE bucket_hour >= @since ORDER BY bucket_hour DESC`),
   system: db.prepare(`SELECT * FROM system_metrics WHERE ts >= @since ORDER BY ts DESC LIMIT @limit`),
   notifications: db.prepare(`SELECT * FROM notifications ORDER BY ts DESC LIMIT @limit`),

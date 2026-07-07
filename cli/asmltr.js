@@ -206,6 +206,32 @@ async function cmdSend(rest) {
     .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   console.log(r.ok ? A.grn(`✓ sent to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
+async function cmdMap() {
+  // group active sessions by working dir → who's in the same repo (collision radar)
+  const { sessions } = await api('/api/sessions?active=1');
+  const withDir = sessions.filter((s) => s.working_dir);
+  const noDir = sessions.length - withDir.length;
+  if (!withDir.length) return console.log(A.dim('no active session has a working directory' + (noDir ? ` (${noDir} channel sessions have none)` : '')));
+  const groups = {};
+  for (const s of withDir) { const wd = s.worktree ? `${s.working_dir}  (wt: ${s.worktree})` : s.working_dir; (groups[wd] = groups[wd] || []).push(s); }
+  for (const [wd, ss] of Object.entries(groups).sort((a, b) => b[1].length - a[1].length)) {
+    console.log(`${A.bold(wd)}  ${ss.length > 1 ? A.red(`⚠ ${ss.length} sessions — possible collision`) : A.dim('1 session')}`);
+    for (const s of ss) console.log(`   ${paint(s.surface, pad(s.surface, 11))} ${String(s.title || s.session_id).slice(0, 60)}  ${A.dim('· active ' + ageOf(s.last_activity_unix) + ' ago')}`);
+  }
+  if (noDir) console.log(A.dim(`\n(${noDir} channel sessions have no working dir — omitted)`));
+}
+async function cmdWho(rest) {
+  const p = rest[0];
+  if (!p) throw new Error('usage: asmltr who <path>   (which sessions recently touched a file/dir)');
+  const r = await api('/api/who?path=' + encodeURIComponent(p));
+  if (r.error) return console.log(A.red(r.error));
+  if (!r.sessions || !r.sessions.length) return console.log(A.dim(`no session has touched "${p}" in the last 6h`));
+  console.log(A.bold(`sessions that recently touched "${p}":`));
+  for (const s of r.sessions) {
+    console.log(`  ${paint(s.surface, pad(s.surface, 11))} ${A.dim(ageOf(s.last_ts) + ' ago')}  ${s.hits} hits  ${A.dim(String(s.session_id).slice(0, 52))}`);
+    if (s.sample) console.log(`     ${A.dim(s.sample)}`);
+  }
+}
 async function cmdAnnounce(rest) {
   // asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]
   // Parse flags out of the args so the remaining words are the announcement text.
@@ -259,6 +285,8 @@ function cmdHelp() {
 
   asmltr                 live TUI dashboard
   asmltr ls              list active sessions
+  asmltr map             active sessions grouped by working dir (collision radar)
+  asmltr who <path>      which sessions recently touched a file/dir
   asmltr brief           compact summary
   asmltr events [..]     recent events  (--surface --identity --session --limit)
   asmltr tail            live global event stream
@@ -294,6 +322,8 @@ function cmdHelp() {
         return process.exit(r.status || 0);
       }
       case 'ls': return await cmdLs();
+      case 'map': return await cmdMap();
+      case 'who': return await cmdWho(rest);
       case 'brief': return await cmdBrief();
       case 'events': return await cmdEvents(f);
       case 'system': return await cmdSystem();

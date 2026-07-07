@@ -139,6 +139,23 @@ app.get('/api/events', requireToken, (req, res) => {
   });
   res.json({ events: rows, count: rows.length });
 });
+// who touched a path recently — group matching tool events by session (collision radar)
+app.get('/api/who', requireToken, (req, res) => {
+  const p = String(req.query.path || '').trim();
+  if (!p) return res.status(400).json({ error: 'need ?path=' });
+  const since = Number(req.query.since) || (Date.now() - 6 * 3600000);
+  const rows = dbmod.q.eventsLike.all({ like: '%' + p + '%', since });
+  const bySession = {};
+  for (const r of rows) {
+    if (!bySession[r.session_id]) {
+      let sample = '';
+      try { const pl = JSON.parse(r.payload); sample = String(pl.tool ? `${pl.tool}: ${typeof pl.input === 'object' ? JSON.stringify(pl.input) : (pl.input || '')}` : (pl.output || '')).replace(/\s+/g, ' ').slice(0, 90); } catch {}
+      bySession[r.session_id] = { session_id: r.session_id, surface: r.surface, last_ts: r.ts, hits: 0, sample };
+    }
+    bySession[r.session_id].hits++;
+  }
+  res.json({ path: p, since, sessions: Object.values(bySession).sort((a, b) => b.last_ts - a.last_ts) });
+});
 app.get('/api/usage', requireToken, (req, res) => {
   const since = Number(req.query.since) || Date.now() - 24 * 3600000;
   res.json({ usage: dbmod.q.usage.all({ since }) });

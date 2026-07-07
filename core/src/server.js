@@ -151,7 +151,7 @@ async function handle(envelope) {
   if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
     systemPrompt += '\n\nASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
       'You have an `asmltr` CLI (run `asmltr help` for everything). Key cross-session ops (use the Bash tool):\n' +
-      '• `asmltr ls` — every active session here (what/where/who) — check before duplicating work another session is doing.\n' +
+      '• `asmltr ls` (active sessions) · `asmltr map` (grouped by working dir) · `asmltr who <path>` (who recently touched a file/dir) — check these before duplicating work another session is already doing.\n' +
       '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
       'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here.\n' +
       '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists live ones.\n' +
