@@ -39,11 +39,11 @@ const meta = {
   type: 'discord',
   displayName: 'Discord',
   supportsMultiple: true,
-  capabilities: { max_message_chars: 2000, supports_markdown: true, supports_code_blocks: false },
+  capabilities: { max_message_chars: 2000, supports_markdown: true, supports_code_blocks: false, supports_attachments_out: true },
   credentialKeys: ['bot_token_bws_key'],
   // How the Access page presents identifiers for this surface (trust framework).
   identifierFormats: [{ surface: 'discord', label: 'Discord User ID', placeholder: '000000000000000000', pattern: '^\\d+$' }],
-  outbound: { kinds: ['text', 'photo'], target: { required: true, label: 'Channel id or alias (e.g. TD-TSD-main)' } },
+  outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. TD-TSD-main)' } },
   configSchema: {
     type: 'object',
     required: ['bot_token_bws_key'],
@@ -613,7 +613,10 @@ RESPONSE RULES:
       const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
       if (!channel || !channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
-      const m = kind === 'photo' ? await channel.send({ content: caption || '', files: [filePath] }) : await channel.send(text);
+      // any file kind (photo/file/attachment/document/image) → send as a Discord attachment
+      const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
+      if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
+      const m = isFile ? await channel.send({ content: caption || text || '', files: [filePath] }) : await channel.send(text);
       res.json({ ok: true, messageId: m.id });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });

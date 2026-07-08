@@ -194,17 +194,29 @@ async function cmdRelease(key) {
 }
 
 async function cmdSend(rest) {
-  // asmltr send <channel> <target> <text…> — deliver a message OUT through any connector.
-  const channel = rest[0], target = rest[1], text = rest.slice(2).join(' ');
-  if (!channel || !target || !text) {
-    throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
-      '  e.g.  asmltr send telegram 123456 "heads up"   ·   asmltr send discord TD-TSD-main "shipping now"');
+  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."]
+  let file = null, caption = null;
+  const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--file') file = rest[++i];
+    else if (t === '--caption') caption = rest[++i];
+    else words.push(t);
   }
+  const channel = words[0], target = words[1], text = words.slice(2).join(' ');
+  if (!channel || !target || (!text && !file)) {
+    throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
+      '       asmltr send <channel> <target> --file <path> [--caption "<text>"]\n' +
+      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send discord 123 --file ~/report.pdf --caption "the report"');
+  }
+  const body = file
+    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined) }
+    : { channel, target, kind: 'text', text };
   const headers = { 'Content-Type': 'application/json' };
   if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
-  const r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify({ channel, target, kind: 'text', text }) })
+  const r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) })
     .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
-  console.log(r.ok ? A.grn(`✓ sent to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
+  console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 async function cmdMap() {
   // where sessions are ACTIVELY working, from recent tool activity → grouped by git repo
@@ -297,7 +309,7 @@ function cmdHelp() {
   asmltr system          current system metrics
   ${A.bold('cross-channel:')}
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
-                                       (e.g. send telegram 123 "hi" · send discord alias "yo")
+       ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
   asmltr announcements                 list live announcements (with timestamps)
