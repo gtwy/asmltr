@@ -2,6 +2,10 @@
 
 **One channel-agnostic backend behind every chat surface for a single AI assistant — with a live insights dashboard.**
 
+[![Documentation](https://img.shields.io/badge/docs-jarethmt.github.io%2Fasmltr-8B5CF6?style=for-the-badge&logo=materialformkdocs&logoColor=white)](https://jarethmt.github.io/asmltr/)
+
+### 📚 Full documentation → **[jarethmt.github.io/asmltr](https://jarethmt.github.io/asmltr/)**
+
 Run *one* assistant (backed by your Claude subscription via the local Agent SDK) and let people
 reach it from **Discord, Telegram, an MCP client, GitHub issues, or any OpenAI-compatible client** — all through the same brain,
 with shared memory, a unified trust/permission model, moderation, and per-secret output redaction.
