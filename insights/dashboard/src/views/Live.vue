@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
 import PageHeader from '@/components/PageHeader.vue'
 import SessionCard from '@/components/SessionCard.vue'
@@ -7,6 +7,7 @@ import SessionDetail from '@/components/SessionDetail.vue'
 import StatTile from '@/components/StatTile.vue'
 import { fmtNum, surfaceMeta } from '@/lib/format'
 import { manager } from '@/services/manager'
+import { api } from '@/services/api'
 
 const store = useCollectorStore()
 const now = ref(Date.now())
@@ -55,7 +56,30 @@ const latestBySession = computed(() => {
 // click a surface pill to filter the lists to that connector (click again to clear)
 const surfaceFilter = ref(null)
 function toggleSurface(s) { surfaceFilter.value = surfaceFilter.value === s ? null : s }
-const matchFilter = (s) => !surfaceFilter.value || s.surface === surfaceFilter.value
+
+// content search: filter cards to sessions whose CONTENT (or metadata) matches a keyword.
+const search = ref('')
+const searchHits = ref({}) // session_id -> { hits, snippet } from the server-side content search
+const searching = ref(false)
+let searchTimer = null
+watch(search, (q) => {
+  clearTimeout(searchTimer)
+  q = q.trim()
+  if (q.length < 2) { searchHits.value = {}; searching.value = false; return }
+  searching.value = true
+  searchTimer = setTimeout(async () => {
+    try { const r = await api.search(q); const m = {}; for (const s of (r.sessions || [])) m[s.session_id] = s; searchHits.value = m }
+    catch (_) { searchHits.value = {} }
+    finally { searching.value = false }
+  }, 300)
+})
+const metaMatch = (s, q) => [s.title, s.location, s.identity, s.session_id, s.task].some((f) => f && String(f).toLowerCase().includes(q))
+function matchFilter(s) {
+  if (surfaceFilter.value && s.surface !== surfaceFilter.value) return false
+  const q = search.value.trim().toLowerCase()
+  if (q.length >= 2) return metaMatch(s, q) || !!searchHits.value[s.session_id]
+  return true
+}
 
 const ephemeral = computed(() =>
   store.sessions.filter((s) => s.kind === 'ephemeral' && matchFilter(s)).sort(byActivity)
@@ -94,6 +118,15 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
   <div>
     <PageHeader title="Live" subtitle="Active sessions and persistent daemons across every surface">
       <template #actions>
+        <div class="relative">
+          <input
+            v-model="search"
+            type="search"
+            placeholder="Search session contents…"
+            class="w-56 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 pl-8 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06] sm:w-72"
+          />
+          <span class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500">{{ searching ? '⏳' : '🔍' }}</span>
+        </div>
         <button
           class="glass glass-hover px-3 py-1.5 text-sm text-slate-300"
           @click="store.fetchSessions()"
@@ -154,7 +187,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         v-if="ephemeral.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" @open="selected = $event" @toggle-channel="toggleChannel" />
+        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No ephemeral sessions right now.
@@ -172,7 +205,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         v-if="persistent.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" @open="selected = $event" @toggle-channel="toggleChannel" />
+        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No persistent daemons registered.

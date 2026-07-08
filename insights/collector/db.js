@@ -158,6 +158,12 @@ const q = {
     SELECT session_id, payload, ts FROM events
     WHERE event_type = 'tool' AND ts > @since ORDER BY ts DESC LIMIT 3000
   `),
+  // full-content search across events (for the dashboard session search)
+  searchEvents: db.prepare(`
+    SELECT session_id, event_type, payload, ts FROM events
+    WHERE session_id IS NOT NULL AND payload LIKE @like AND ts > @since
+    ORDER BY ts DESC LIMIT 800
+  `),
   usage: db.prepare(`SELECT * FROM usage_rollup WHERE bucket_hour >= @since ORDER BY bucket_hour DESC`),
   system: db.prepare(`SELECT * FROM system_metrics WHERE ts >= @since ORDER BY ts DESC LIMIT @limit`),
   notifications: db.prepare(`SELECT * FROM notifications ORDER BY ts DESC LIMIT @limit`),

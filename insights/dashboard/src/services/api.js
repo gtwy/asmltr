@@ -24,7 +24,8 @@ export const api = {
   usage: (params = {}) => get('/usage', params),
   system: (params = {}) => get('/system', params),
   notifications: () => get('/notifications'),
-  brief: () => get('/brief')
+  brief: () => get('/brief'),
+  search: (q) => get('/search', { q })
 }
 
 // Control plane on the CORE (served at root under /v2/...). Used by the live

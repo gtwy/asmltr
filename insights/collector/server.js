@@ -185,6 +185,29 @@ app.get('/api/map', requireToken, (req, res) => {
   res.json({ since, sessions });
 });
 
+// search session CONTENT — which sessions have events whose text matches a query.
+// Returns distinct session_ids with a hit count + a snippet around the first match.
+app.get('/api/search', requireToken, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ q, sessions: [] });
+  const since = Number(req.query.since) || (Date.now() - 30 * 86400000); // last 30 days
+  const rows = dbmod.q.searchEvents.all({ like: '%' + q + '%', since });
+  const ql = q.toLowerCase();
+  const bySession = {};
+  for (const r of rows) {
+    if (!bySession[r.session_id]) {
+      let text = '';
+      try { const p = JSON.parse(r.payload); text = String(p.text || p.output || (p.tool ? `${p.tool}: ${typeof p.input === 'object' ? JSON.stringify(p.input) : (p.input || '')}` : '') || r.payload); }
+      catch { text = r.payload; }
+      const i = text.toLowerCase().indexOf(ql);
+      const snippet = ((i > 30 ? '…' : '') + text.slice(Math.max(0, i - 30), i + q.length + 60)).replace(/\s+/g, ' ').trim();
+      bySession[r.session_id] = { session_id: r.session_id, hits: 0, snippet };
+    }
+    bySession[r.session_id].hits++;
+  }
+  res.json({ q, sessions: Object.values(bySession) });
+});
+
 // who touched a path recently — group matching tool events by session (collision radar)
 app.get('/api/who', requireToken, (req, res) => {
   const p = String(req.query.path || '').trim();

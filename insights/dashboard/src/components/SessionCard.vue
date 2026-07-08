@@ -8,7 +8,8 @@ const props = defineProps({
   now: { type: Number, default: () => Date.now() },
   preview: { type: Object, default: null }, // latest event for this session (live)
   channelState: { type: Boolean, default: undefined }, // Discord channel monitored on/off
-  channelBusy: { type: Boolean, default: false }
+  channelBusy: { type: Boolean, default: false },
+  searchSnippet: { type: String, default: '' } // why this card matched a content search
 })
 defineEmits(['open', 'toggle-channel'])
 
@@ -115,6 +116,11 @@ const claimLabel = computed(() => {
       >
         {{ session.working_dir }}<span v-if="session.worktree"> · wt:{{ session.worktree }}</span>
       </div>
+    </div>
+
+    <!-- search match snippet (why this card matched) -->
+    <div v-if="searchSnippet" class="truncate rounded-md border border-brand-violet/20 bg-brand-violet/5 px-2 py-1 text-[11px] text-violet-300/90" :title="searchSnippet">
+      🔍 …{{ truncate(searchSnippet, 90) }}…
     </div>
 
     <!-- meta chips -->
