@@ -17,7 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const { Client, GatewayIntentBits, Partials, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder } = require('discord.js');
 
 // Assistant identity — the display name AND the spoken wake word for voice.
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -32,6 +32,7 @@ const OWNER_ONLY_CMDS = new Set([
   'unmute', 'unmute here', 'listen here', 'unmute this channel', 'enable', 'enable here',
   'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
   'drone-on', 'drone on', 'drone-off', 'drone off',
+  'transcript-on', 'transcript on', 'transcript-off', 'transcript off',
   'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
   'update-asmltr', 'update asmltr', 'self-update', 'update yourself',
 ]);
@@ -63,6 +64,8 @@ const meta = {
       stt_language: { type: 'string', title: 'Voice STT language (ISO code; empty = auto-detect)', default: 'en' },
       voice_followup_ms: { type: 'integer', title: 'Voice follow-up window (ms) after being addressed, during which follow-ups need no wake word. 0 = STRICT: only respond when directly addressed by name (recommended for meetings).', default: 0 },
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
+      voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
+      voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
       ignore_other_mentions: { type: 'boolean', title: 'Ignore messages @-directed at other specific users/bots (keeps passive name-drops)', default: true },
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
     },
@@ -248,6 +251,10 @@ async function start(ctx) {
         voiceDrone = true; await message.channel.send('🎛 Ambient processing drone **on** for voice replies.'); return true;
       case 'drone-off': case 'drone off':
         voiceDrone = false; await message.channel.send('🎛 Ambient processing drone **off**.'); return true;
+      case 'transcript-on': case 'transcript on':
+        voicePostTranscript = true; await message.channel.send('📝 Live transcript **on** — I\'ll post 🗣️ lines as people speak.'); return true;
+      case 'transcript-off': case 'transcript off':
+        voicePostTranscript = false; await message.channel.send(`🔕 Live transcript **off** — I\'ll stay quiet in chat and ${voiceTranscriptFile ? 'upload the full transcript as a .txt when I leave voice' : 'keep transcribing silently'}.`); return true;
       case 'join-voice': case 'join voice': case 'join vc': case 'join the voice':
         await doJoinVoice(message); return true;
       case 'update-asmltr': case 'update asmltr': case 'self-update': case 'update yourself':
@@ -257,7 +264,7 @@ async function start(ctx) {
       case 'status':
         await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`drone-on\` / \`drone-off\` · \`update-asmltr\` · \`status\``); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`drone-on\` / \`drone-off\` · \`transcript-on\` / \`transcript-off\` · \`update-asmltr\` · \`status\``); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
@@ -454,6 +461,29 @@ RESPONSE RULES:
   // value opens a "keep answering follow-ups without the wake word" window for that many ms.
   const VOICE_WINDOW_MS = Number.isFinite(Number(cfg.voice_followup_ms)) ? Number(cfg.voice_followup_ms) : 0;
   let voiceDrone = cfg.voice_drone !== false; // ambient "working" drone during a spoken reply (toggleable)
+  let voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ lines into the text channel (toggleable)
+  const voiceTranscriptFile = cfg.voice_transcript_file !== false; // upload a full transcript .txt on leave
+  const voiceLog = new Map(); // guildId -> [{ t, who, text }] accumulated for the whole voice session
+
+  // Record a line for the end-of-session transcript file (kept even when live posting is off).
+  function logTranscript(guildId, who, text) {
+    if (!voiceTranscriptFile) return;
+    const arr = voiceLog.get(guildId) || [];
+    arr.push({ t: new Date().toISOString().slice(11, 19), who, text });
+    voiceLog.set(guildId, arr);
+  }
+  // Build + upload the accumulated transcript to `ch`, then clear it. Called when leaving voice.
+  async function uploadTranscript(guildId, ch) {
+    const arr = voiceLog.get(guildId); voiceLog.delete(guildId);
+    if (!voiceTranscriptFile || !ch || !arr || !arr.length) return;
+    try {
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const body = `Voice transcript — ${new Date().toISOString().slice(0, 10)}\n` +
+        `${'='.repeat(40)}\n\n` + arr.map((l) => `[${l.t}] ${l.who}: ${l.text}`).join('\n') + '\n';
+      const file = new AttachmentBuilder(Buffer.from(body, 'utf8'), { name: `voice-transcript-${stamp}.txt` });
+      await ch.send({ content: `📄 Transcript of this voice session (${arr.length} lines).`, files: [file] });
+    } catch (e) { ctx.log(`[voice] transcript upload failed: ${e.message}`); }
+  }
 
   // Reflect what the bot is doing in its live Discord presence (voice tasks). null → back to idle/config.
   const idlePresence = cfg.presence_text || null;
@@ -472,7 +502,8 @@ RESPONSE RULES:
   // need no wake word). A dismissal phrase exits answering mode back to transcription-only.
   async function handleVoiceUtterance(guildId, name, text) {
     const ch = voiceText.get(guildId);
-    if (ch) ch.send(`🗣️ **${name}:** ${text}`).catch(() => {});
+    logTranscript(guildId, name, text); // always captured for the end-of-session file
+    if (ch && voicePostTranscript) ch.send(`🗣️ **${name}:** ${text}`).catch(() => {}); // live flood (toggleable)
     let voice; try { voice = require('./voice'); } catch (_) { return; }
     const lc = text.toLowerCase();
     const active = (voiceActive.get(guildId) || 0) > Date.now();
@@ -481,6 +512,7 @@ RESPONSE RULES:
     if ((addressesEve(text) || active) && LEAVE_RE.test(lc)) {
       voiceActive.delete(guildId); voiceText.delete(guildId); voice.leave(guildId); setVoiceStatus(null);
       if (ch) ch.send('👋 Left the voice channel.').catch(() => {});
+      await uploadTranscript(guildId, ch); // ship the full-session .txt to the origin channel
       return;
     }
     // spoken dismissal → exit answering mode but STAY listening/transcribing
@@ -536,7 +568,10 @@ RESPONSE RULES:
       flush(true);
       await chain; // wait until every sentence has finished speaking
       voice.stopDrone(guildId);
-      if (full.trim() && ch) ch.send(`🔊 **${NAME}:** ${full.trim().slice(0, 1800)}`).catch(() => {});
+      if (full.trim()) {
+        logTranscript(guildId, NAME, full.trim());
+        if (ch && voicePostTranscript) ch.send(`🔊 **${NAME}:** ${full.trim().slice(0, 1800)}`).catch(() => {});
+      }
       if (VOICE_WINDOW_MS > 0) voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open the follow-up window (strict mode: never)
     } catch (e) { voice.stopDrone(guildId); ctx.log(`[voice] reply failed: ${e.message}`); if (ch) ch.send(`⚠️ voice reply failed: ${e.message}`).catch(() => {}); }
     finally { voiceBusy.delete(guildId); setVoiceStatus(null); } // back to listening/idle
@@ -562,17 +597,22 @@ RESPONSE RULES:
         log: (m) => ctx.log(`[voice] ${m}`),
       });
       setVoiceStatus(`🎧 listening · ${vc.name}`);
-      message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. I transcribe everyone as \`🗣️ name: …\`. Say **"${NAME}, …"** out loud to ask something — I'll chime, play a soft "working" tone, and answer by voice. After that, **follow-ups need no name** for a bit; say **"that's enough, ${NAME}"** to go back to just listening, or \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
+      const transcriptNote = voicePostTranscript
+        ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `transcript-off`).'
+        : 'Live transcript is **off** — I listen quietly' + (voiceTranscriptFile ? ' and post a full transcript `.txt` when I leave.' : '.');
+      message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. ${transcriptNote} Say **"${NAME}, …"** out loud to ask something — I'll chime, play a soft "working" drone, and answer by voice. After that, **follow-ups need no name** for a bit; say **"that's enough, ${NAME}"** to go back to just listening, or \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
     } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }
   }
 
   async function doLeaveVoice(message) {
     if (!message.guild) return;
     let voice; try { voice = require('./voice'); } catch (_) { return; }
+    const originCh = voiceText.get(message.guild.id) || message.channel;
     voiceText.delete(message.guild.id);
     const left = voice.leave(message.guild.id);
     setVoiceStatus(null); // back to idle/config presence
     message.channel.send(left ? '👋 Left the voice channel.' : "I'm not in a voice channel.").catch(() => {});
+    if (left) await uploadTranscript(message.guild.id, originCh); // full-session .txt to the origin channel
   }
 
   // Queue a channel message to be delivered AFTER the next restart (drained by the manager
