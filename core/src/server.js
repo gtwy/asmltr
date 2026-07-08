@@ -39,6 +39,7 @@ const env = require('./envelope');
 const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
 const moderation = require('./moderation');
 const sessions = require('./sessions');
+const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const { runTurn, generateTitle } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -330,7 +331,39 @@ async function handle(envelope, opts = {}) {
     if (masked) record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'redacted', count: masked, public: !!e.public } });
   }
+
+  // --- DRAFT / APPROVAL GATE ---------------------------------------------------
+  // If the connector attached an approval policy and it says HOLD for this recipient, divert the
+  // (already-redacted) reply into the shared draft store instead of returning it. The connector
+  // then sends nothing; the draft surfaces on the dashboard + `asmltr drafts` for approve/discard.
+  // Generic — any connector opts in by setting e.approval = { policy, recipient, subject, attachments }.
+  if (e.approval && drafts.shouldHold(e.approval.policy, resolved)) {
+    const replyAction = actions.find((a) => a.type === 'reply');
+    const bodyText = replyAction ? replyAction.text : '';
+    if (bodyText.trim()) {
+      const d = drafts.create({
+        channel: e.channel, instanceId: String(e.conversation_key).split(':')[1] || null,
+        conversationKey: e.conversation_key, recipient: e.approval.recipient || null,
+        subject: e.approval.subject || null, body: bodyText, attachments: e.approval.attachments || [],
+        reason: `policy=${e.approval.policy} tier=${resolved.trust_tier}`,
+      });
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'notification',
+        identity: resolved.user_key, source: 'core',
+        payload: { kind: 'draft', draft_id: d.id, recipient: d.recipient, subject: d.subject, preview: truncate(bodyText, 280) } });
+      return [{ type: 'drafted', draft_id: d.id }]; // connector delivers nothing to the recipient
+    }
+  }
   return actions;
+}
+
+/** Deliver text (+ optional files) OUT through a connector instance, via the manager's unified /send. */
+async function deliverOut({ instanceId, target, text, files }) {
+  const mgr = (process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024').replace(/\/$/, '');
+  const headers = { 'Content-Type': 'application/json' };
+  if (process.env.ASMLTR_MANAGER_TOKEN) headers.Authorization = 'Bearer ' + process.env.ASMLTR_MANAGER_TOKEN;
+  const post = (body) => fetch(`${mgr}/send`, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (text && text.trim()) { const r = await post({ instance_id: instanceId, target, kind: 'text', text }); if (!r.ok) throw new Error(`send ${r.status}`); }
+  for (const p of files || []) { const r = await post({ instance_id: instanceId, target, kind: 'file', path: p }); if (!r.ok) throw new Error(`send file ${r.status}`); }
 }
 
 /** Run handle() under the concurrency slot + per-key lock. */
@@ -367,6 +400,32 @@ app.post('/v2/stream', async (req, res) => {
     frame({ type: 'error', error: err.message });
   }
   res.end();
+});
+
+// --- DRAFTS (hold-for-approval queue, any connector) -------------------------
+app.get('/v2/drafts', (req, res) => {
+  const status = req.query.status || 'pending';
+  res.json({ drafts: drafts.list({ status: status === 'all' ? null : status, channel: req.query.channel || null, limit: Number(req.query.limit) || 50 }), pending: drafts.pendingCount() });
+});
+app.get('/v2/drafts/:id', (req, res) => {
+  const d = drafts.get(Number(req.params.id));
+  return d ? res.json(d) : res.status(404).json({ error: 'unknown draft' });
+});
+app.post('/v2/drafts/:id/approve', async (req, res) => {
+  const d = drafts.get(Number(req.params.id));
+  if (!d) return res.status(404).json({ error: 'unknown draft' });
+  if (d.status !== 'pending') return res.status(409).json({ error: `draft is already ${d.status}` });
+  if (!d.instance_id || !d.recipient) return res.status(422).json({ error: 'draft has no delivery route (instance_id/recipient)' });
+  try {
+    await deliverOut({ instanceId: d.instance_id, target: d.recipient, text: d.body, files: d.attachments });
+    drafts.setStatus(d.id, 'sent');
+    record({ surface: d.channel, session_id: d.conversation_key, event_type: 'outbound', identity: 'operator', source: 'core', payload: { text: truncate(d.body, 500), approved_draft: d.id } });
+    res.json({ ok: true, sent: d.id });
+  } catch (e) { res.status(502).json({ error: 'delivery failed: ' + e.message }); }
+});
+app.post('/v2/drafts/:id/discard', (req, res) => {
+  const ok = drafts.setStatus(Number(req.params.id), 'discarded');
+  return ok ? res.json({ ok: true, discarded: Number(req.params.id) }) : res.status(409).json({ error: 'draft not pending or unknown' });
 });
 
 app.post('/v2/handle', async (req, res) => {

@@ -302,6 +302,38 @@ async function cmdUploads(rest) {
     console.log(`     ${A.dim(`id ${r.id} · from ${r.sender || '?'} · ${r.path}`)}`);
   }
 }
+async function cmdDrafts(rest) {
+  // asmltr drafts [list] | show <id> | send <id> | discard <id>
+  const sub = rest[0];
+  const coreJson = (p, method = 'GET') => fetch(CORE_BASE + p, { method, headers: { 'Content-Type': 'application/json' } }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  if (sub === 'show') {
+    const d = await coreJson('/v2/drafts/' + rest[1]);
+    if (d.error) return console.log(A.red(d.error));
+    console.log(A.bold(`draft #${d.id}`) + `  ${paint(d.channel, d.channel)} → ${d.recipient || '?'}${d.subject ? '  ' + A.dim(d.subject) : ''}  ${A.dim(d.status)}`);
+    if (d.reason) console.log(A.dim('held: ' + d.reason));
+    console.log('\n' + d.body + '\n');
+    if (d.attachments && d.attachments.length) console.log(A.dim('attachments: ' + d.attachments.join(', ')));
+    return;
+  }
+  if (sub === 'send' || sub === 'approve') {
+    const r = await coreJson('/v2/drafts/' + rest[1] + '/approve', 'POST');
+    return console.log(r.ok ? A.grn(`✓ sent draft #${r.sent}`) : A.red('send failed: ' + (r.error || '')));
+  }
+  if (sub === 'discard') {
+    const r = await coreJson('/v2/drafts/' + rest[1] + '/discard', 'POST');
+    return console.log(r.ok ? A.grn(`🗑  discarded draft #${r.discarded}`) : A.red('discard failed: ' + (r.error || '')));
+  }
+  const r = await coreJson('/v2/drafts?status=pending');
+  const items = r.drafts || [];
+  if (!items.length) return console.log(A.dim('no drafts awaiting approval'));
+  console.log(A.bold(`drafts awaiting approval · ${items.length}:`));
+  for (const d of items) {
+    const when = new Date(d.created_at).toISOString().replace('T', ' ').slice(0, 16);
+    console.log(`  ${A.bold('#' + d.id)} ${paint(d.channel, pad(d.channel, 9))} ${A.dim(when)} → ${d.recipient || '?'}${d.subject ? '  ' + d.subject : ''}`);
+    console.log(`     ${A.dim(String(d.body).replace(/\s+/g, ' ').slice(0, 100))}`);
+  }
+  console.log(A.dim('\n  approve: asmltr drafts send <id>   ·   drop: asmltr drafts discard <id>   ·   full: drafts show <id>'));
+}
 async function cmdAnnouncements() {
   const r = await fetch(CORE_BASE + '/v2/announcements').then((x) => x.json()).catch((e) => ({ announcements: [], error: e.message }));
   const list = r.announcements || [];
@@ -349,6 +381,8 @@ function cmdHelp() {
   asmltr announcements                 list live announcements (with timestamps)
   asmltr uploads [search]              files users sent on ANY channel (--channel --since 2h|1d --sender --limit)
        uploads get <id>                print the stored path of one upload
+  asmltr drafts                        replies held for your approval (any connector)
+       drafts show <id> · send <id> · discard <id>
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -384,6 +418,7 @@ function cmdHelp() {
       case 'announce': return await cmdAnnounce(rest);
       case 'announcements': return await cmdAnnouncements();
       case 'uploads': return await cmdUploads(rest);
+      case 'drafts': return await cmdDrafts(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
       case 'kill': return await cmdKill(rest[0], f);

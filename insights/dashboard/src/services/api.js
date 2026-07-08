@@ -31,6 +31,13 @@ export const api = {
 // Control plane on the CORE (served at root under /v2/...). Used by the live
 // "conversation details" pane to take over a session: abort the in-flight turn,
 // or inject an operator message (the reply routes back to the origin channel).
+async function getCore(path) {
+  const res = await fetch(path, { headers: { Accept: 'application/json' } })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(json.error || `GET ${path} -> ${res.status} ${res.statusText}`)
+  return json
+}
+
 async function postCore(path, body) {
   const res = await fetch(path, {
     method: 'POST',
@@ -49,6 +56,13 @@ export const control = {
   // interactive `asmltr claude` (tmux) sessions → collector send-keys (steer / interrupt)
   sendText: (session_id, text) => postCore('/api/control/send-keys', { session_id, text, enter: true }),
   sendKey: (session_id, keys) => postCore('/api/control/send-keys', { session_id, keys })
+}
+
+// Draft / approval queue on the CORE — replies any connector held for a human to approve.
+export const drafts = {
+  list: (status = 'pending') => getCore(`/v2/drafts?status=${encodeURIComponent(status)}`),
+  approve: (id) => postCore(`/v2/drafts/${id}/approve`),
+  discard: (id) => postCore(`/v2/drafts/${id}/discard`)
 }
 
 // payload arrives as a JSON *string* over REST. Be defensive.
