@@ -238,6 +238,11 @@ async function handle(envelope, opts = {}) {
     if (/\[\[NO_REPLY\]\]/i.test(red)) return; // don't ship the silence sentinel
     if (red.length > _emitted) { try { opts.onText(red.slice(_emitted)); } catch (_) {} _emitted = red.length; }
   };
+  // Step streaming (opts.onSegment/onTool/onThinking): a step consumer (e.g. Discord) posts each
+  // COMPLETED narration block / tool call as it lands — not token-by-token. Segments and thinking
+  // are complete blocks, so we redact each whole (no boundary dance) before it leaves the core.
+  const _pushSegment = (seg) => { try { opts.onSegment(mustRedact ? redactSecrets(seg).text : seg); } catch (_) {} };
+  const _pushThinking = (t) => { try { opts.onThinking(mustRedact ? redactSecrets(t).text : t); } catch (_) {} };
 
   const abortController = new AbortController();
   inFlight.set(e.conversation_key, abortController);
@@ -255,6 +260,9 @@ async function handle(envelope, opts = {}) {
       abortController,
       images,
       onDelta: opts.onText ? _pushDelta : undefined,
+      onSegment: opts.onSegment ? _pushSegment : undefined,
+      onTool: opts.onTool ? ((t) => { try { opts.onTool(t); } catch (_) {} }) : undefined,
+      onThinking: opts.onThinking ? _pushThinking : undefined,
       onEvent: (sdkEvt) => {
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
@@ -347,7 +355,12 @@ app.post('/v2/stream', async (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   const frame = (obj) => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (_) {} };
   try {
-    const actions = await dispatch(req.body, { onText: (text) => { if (text) frame({ type: 'delta', text }); } });
+    const actions = await dispatch(req.body, {
+      onText: (text) => { if (text) frame({ type: 'delta', text }); },            // token stream (voice/openai)
+      onSegment: (text) => { if (text) frame({ type: 'segment', text }); },        // completed narration block (step consumers)
+      onTool: (t) => { if (t && t.name) frame({ type: 'tool', name: t.name }); },  // a tool call as it happens
+      onThinking: (text) => { if (text) frame({ type: 'thinking', text }); },      // a completed thinking block
+    });
     frame({ type: 'done', actions });
   } catch (err) {
     console.error('[core] /v2/stream error:', err.message);

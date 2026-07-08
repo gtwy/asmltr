@@ -66,6 +66,8 @@ const meta = {
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
       voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
+      stream_steps: { type: 'boolean', title: 'Post intermediary narration steps to the thread live as they land (only when directly addressed)', default: true },
+      stream_tools: { type: 'boolean', title: 'Also post a subdued line for each tool call while streaming steps', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Ignore messages @-directed at other specific users/bots (keeps passive name-drops)', default: true },
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
     },
@@ -309,6 +311,14 @@ RESPONSE RULES:
   function formatCodeBlocks(text) {
     return text.replace(/```(?:\w+)?\n([\s\S]*?)```/g, (m, code) => '\n' + code.split('\n').map(l => '    ' + l).join('\n') + '\n');
   }
+  // Live "thinking step" — an intermediary narration block, rendered subdued (Discord subtext)
+  // so it reads as process, not the final answer. Clamped so a long step can't wall the thread.
+  const streamSteps = cfg.stream_steps !== false;
+  const streamTools = cfg.stream_tools === true;
+  function renderStep(t) {
+    const clamped = t.length > 700 ? t.slice(0, 700) + '…' : t;
+    return clamped.split('\n').map(l => '-# ' + (l.trim() ? l : '​')).join('\n').slice(0, 1900);
+  }
   function splitResponse(text, max = 1900) {
     const chunks = []; let cur = '';
     for (const para of text.split('\n\n')) {
@@ -375,7 +385,7 @@ RESPONSE RULES:
       // server + channel names ride in channel_context → the core records them on the inbound
       // event (and the collector stores them on the session) so the dashboard shows where a
       // conversation is happening. (No separate inbound emit here — the core records inbound.)
-      const actions = await ctx.core.handle({
+      const envelope = {
         channel: 'discord',
         conversation_key: conversationKey,
         message_id: String(message.id),
@@ -387,10 +397,34 @@ RESPONSE RULES:
         channel_context: { channelId: cid, server: context.location.serverName, channel: context.location.channelName },
         context: { scope_id: sid ? `guild:${sid}` : `dm:${message.author.id}`, scope_name: context.location.serverName },
         system_prompt_extra: buildSystemExtra(message, context, forced),
-      });
+      };
 
-      const reply = actions.find(a => a.type === 'reply');
-      const replyText = reply ? reply.text.trim() : '';
+      // Directly-addressed messages (mention / DM / forced) can't be [[NO_REPLY]], so it's safe to
+      // stream intermediary narration blocks to the thread LIVE. Passive multi-agent listening still
+      // uses the non-streaming path (the model may still decide it's not for us → nothing posts).
+      const addressed = forced || message.channel.type === 1 || message.mentions.has(client.user);
+      let replyText = '';
+      if (streamSteps && addressed) {
+        let pending = ''; // most recent block; the LAST one is the final answer, earlier ones are steps
+        let chain = Promise.resolve(); // serialize sends so steps land in order
+        const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
+        const postStep = (t) => {
+          const clean = (t || '').trim();
+          if (!clean || clean.toUpperCase().includes(NO_REPLY.toUpperCase())) return;
+          enqueue(() => message.channel.send(renderStep(clean)));
+        };
+        const actions = await ctx.core.handleStream(envelope, {
+          onSegment: (t) => { if (pending) postStep(pending); pending = t; }, // a new block ⇒ prior one was intermediary
+          onTool: streamTools ? (name) => enqueue(() => message.channel.send(`-# 🔧 \`${name}\``)) : undefined,
+        });
+        await chain; // all step messages posted before the final answer
+        const reply = actions.find(a => a.type === 'reply');
+        replyText = ((pending && pending.trim()) || (reply ? reply.text.trim() : '')).trim();
+      } else {
+        const actions = await ctx.core.handle(envelope);
+        const reply = actions.find(a => a.type === 'reply');
+        replyText = reply ? reply.text.trim() : '';
+      }
       // Self-gated suppression: the model decided this message wasn't for it (multi-agent
       // channel), or there's nothing to say. Drop it — don't post to the channel.
       const gated = replyText.toUpperCase().includes(NO_REPLY.toUpperCase())

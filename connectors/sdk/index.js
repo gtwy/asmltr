@@ -66,9 +66,12 @@ function makeCoreClient(coreUrl) {
         req.end();
       });
     },
-    // Streaming turn: posts to the core /v2/stream (SSE), calls onDelta(text) per token as the
-    // reply is produced, and resolves with the final actions[]. Used by the OpenAI connector.
-    handleStream(envelope, onDelta) {
+    // Streaming turn: posts to the core /v2/stream (SSE) and resolves with the final actions[].
+    // `handlers` is either a function (treated as onDelta — token stream) or an object:
+    //   { onDelta(text), onSegment(text), onTool(name), onThinking(text) }
+    // Token consumers (voice/openai) use onDelta; step consumers (Discord) use onSegment/onTool.
+    handleStream(envelope, handlers) {
+      const h = typeof handlers === 'function' ? { onDelta: handlers } : (handlers || {});
       return new Promise((resolve, reject) => {
         const payload = JSON.stringify(envelope);
         const req = lib.request({
@@ -89,7 +92,10 @@ function makeCoreClient(coreUrl) {
               buf = buf.slice(i + 2);
               if (!line) continue;
               let obj; try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
-              if (obj.type === 'delta') { if (onDelta && obj.text) { try { onDelta(obj.text); } catch (_) {} } }
+              if (obj.type === 'delta') { if (h.onDelta && obj.text) { try { h.onDelta(obj.text); } catch (_) {} } }
+              else if (obj.type === 'segment') { if (h.onSegment && obj.text) { try { h.onSegment(obj.text); } catch (_) {} } }
+              else if (obj.type === 'tool') { if (h.onTool && obj.name) { try { h.onTool(obj.name); } catch (_) {} } }
+              else if (obj.type === 'thinking') { if (h.onThinking && obj.text) { try { h.onThinking(obj.text); } catch (_) {} } }
               else if (obj.type === 'done') { settled = true; resolve(obj.actions || []); }
               else if (obj.type === 'error') { settled = true; reject(new Error(obj.error || 'stream error')); }
             }

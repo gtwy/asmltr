@@ -23,7 +23,7 @@ const { query } = require('@anthropic-ai/claude-code');
  * @param {(evt:object)=>void} [args.onEvent]  per-SDK-event hook (for live streaming/telemetry)
  * @returns {Promise<{text:string, engineSessionId:string|null, tools:Array, usage:object, isError:boolean}>}
  */
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, onDelta, images = [] }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, onDelta, onSegment, onTool, onThinking, images = [] }) {
   const options = {
     stream: true,
     permissionMode: 'bypassPermissions', // works under root via SDK (CLI flag does not — see eve-query-proxy.js:489)
@@ -92,8 +92,18 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
         for (const c of event.message?.content || []) {
           // separate text blocks (they're split by tool calls) so a narration block
           // doesn't run straight into the next block ("…about.ops-hub is…")
-          if (c.type === 'text' && c.text) { segments.push(c.text.trim()); text += (text && !text.endsWith('\n') ? '\n\n' : '') + c.text; }
-          else if (c.type === 'tool_use') tools.push({ id: c.id, name: c.name, input: c.input });
+          if (c.type === 'text' && c.text) {
+            const seg = c.text.trim();
+            segments.push(seg); text += (text && !text.endsWith('\n') ? '\n\n' : '') + c.text;
+            // A COMPLETED assistant text block = one "step". Step consumers (Discord) post each
+            // as it lands; the LAST block is the final answer. (Distinct from onDelta's tokens.)
+            if (onSegment) { try { onSegment(seg); } catch (_) {} }
+          } else if (c.type === 'tool_use') {
+            tools.push({ id: c.id, name: c.name, input: c.input });
+            if (onTool) { try { onTool({ name: c.name, input: c.input }); } catch (_) {} }
+          } else if (c.type === 'thinking' && c.thinking && onThinking) {
+            try { onThinking(c.thinking); } catch (_) {}
+          }
         }
         break;
       case 'result':
