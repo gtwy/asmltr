@@ -357,13 +357,14 @@ async function handle(envelope, opts = {}) {
 }
 
 /** Deliver text (+ optional files) OUT through a connector instance, via the manager's unified /send. */
-async function deliverOut({ instanceId, target, text, files }) {
+async function deliverOut({ instanceId, target, text, files, subject, ref }) {
   const mgr = (process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024').replace(/\/$/, '');
   const headers = { 'Content-Type': 'application/json' };
   if (process.env.ASMLTR_MANAGER_TOKEN) headers.Authorization = 'Bearer ' + process.env.ASMLTR_MANAGER_TOKEN;
   const post = (body) => fetch(`${mgr}/send`, { method: 'POST', headers, body: JSON.stringify(body) });
-  if (text && text.trim()) { const r = await post({ instance_id: instanceId, target, kind: 'text', text }); if (!r.ok) throw new Error(`send ${r.status}`); }
-  for (const p of files || []) { const r = await post({ instance_id: instanceId, target, kind: 'file', path: p }); if (!r.ok) throw new Error(`send file ${r.status}`); }
+  // subject/ref are email-threading hints; other connectors ignore them.
+  if (text && text.trim()) { const r = await post({ instance_id: instanceId, target, kind: 'text', text, subject, ref }); if (!r.ok) throw new Error(`send ${r.status}`); }
+  for (const p of files || []) { const r = await post({ instance_id: instanceId, target, kind: 'file', path: p, subject, ref }); if (!r.ok) throw new Error(`send file ${r.status}`); }
 }
 
 /** Run handle() under the concurrency slot + per-key lock. */
@@ -417,7 +418,7 @@ app.post('/v2/drafts/:id/approve', async (req, res) => {
   if (d.status !== 'pending') return res.status(409).json({ error: `draft is already ${d.status}` });
   if (!d.instance_id || !d.recipient) return res.status(422).json({ error: 'draft has no delivery route (instance_id/recipient)' });
   try {
-    await deliverOut({ instanceId: d.instance_id, target: d.recipient, text: d.body, files: d.attachments });
+    await deliverOut({ instanceId: d.instance_id, target: d.recipient, text: d.body, files: d.attachments, subject: d.subject, ref: d.conversation_key });
     drafts.setStatus(d.id, 'sent');
     record({ surface: d.channel, session_id: d.conversation_key, event_type: 'outbound', identity: 'operator', source: 'core', payload: { text: truncate(d.body, 500), approved_draft: d.id } });
     res.json({ ok: true, sent: d.id });

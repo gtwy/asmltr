@@ -137,7 +137,7 @@ app.delete('/instances/:id', requireToken, (req, res) => {
 
 // --- unified outbound: route a message OUT through a connector instance --------
 // POST /send { channel|instance_id, target, kind?, text?, path?, caption? }
-async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption }) {
+async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, ref }) {
   const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
     : null;
@@ -147,7 +147,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const port = inst.config && inst.config.http_port;
   if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port` };
   try {
-    const r = await fetch(`http://127.0.0.1:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption }) });
+    const r = await fetch(`http://127.0.0.1:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, ref }) });
     const j = await r.json().catch(() => ({}));
     return { ok: r.ok, status: r.ok ? 200 : 502, via: `${inst.type}:${inst.name}`, ...j };
   } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }

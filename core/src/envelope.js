@@ -69,6 +69,11 @@ function inbound(e) {
     // Surface visibility: true if outbound text is seen by anyone beyond a full-trust
     // recipient (github comment, discord guild channel). Drives the core redaction layer.
     public: !!e.public,
+    // Optional connector-supplied approval policy → the core's draft/approval gate. Held
+    // replies are diverted to the draft store instead of returned. { policy, recipient, subject, attachments }.
+    approval: e.approval && typeof e.approval === 'object'
+      ? { policy: String(e.approval.policy || 'always_send'), recipient: e.approval.recipient || null, subject: e.approval.subject || null, attachments: Array.isArray(e.approval.attachments) ? e.approval.attachments : [] }
+      : null,
   };
 }
 

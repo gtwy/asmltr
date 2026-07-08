@@ -18,6 +18,7 @@ const SCHEMA_VERSION = 1;
 const SURFACES = Object.freeze([
   'discord',
   'telegram',
+  'email',       // SMTP/IMAP mailbox (the assistant's own address)
   'voice',       // voice-channel sessions (e.g. Discord voice / meetings)
   'eve-assistant-web',
   'eve-assistant-native',
