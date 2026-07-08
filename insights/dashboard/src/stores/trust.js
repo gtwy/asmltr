@@ -125,6 +125,21 @@ export const useTrustStore = defineStore('trust', {
       }
     },
 
+    // merge sourceId INTO targetId: identifiers + grants move to the target, source is deleted
+    async mergePrincipal(sourceId, targetId) {
+      this._setBusy(sourceId, 'merge')
+      try {
+        await trust.mergePrincipal(sourceId, targetId)
+        await this.fetchPrincipals() // source gone, target changed — refresh the whole list
+        this.lastError = null
+      } catch (e) {
+        this.lastError = e.message
+        throw e
+      } finally {
+        this._clearBusy(sourceId)
+      }
+    },
+
     // ---- identifiers ----
     async addIdentifier(principalId, payload) {
       await trust.addIdentifier(principalId, payload)

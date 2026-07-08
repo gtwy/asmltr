@@ -40,6 +40,8 @@ export const trust = {
   createPrincipal: (payload) => request('POST', '/principals', payload),
   updatePrincipal: (id, patch) => request('PATCH', `/principals/${encodeURIComponent(id)}`, patch),
   removePrincipal: (id) => request('DELETE', `/principals/${encodeURIComponent(id)}`),
+  // merge principal `id` (absorbed) INTO `into` (survivor)
+  mergePrincipal: (id, into) => request('POST', `/principals/${encodeURIComponent(id)}/merge`, { into }),
 
   // identifiers (scoped to a principal for create, global by id for delete)
   addIdentifier: (principalId, payload) =>

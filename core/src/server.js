@@ -480,6 +480,11 @@ app.get('/trust/principals/:id', (req, res) => { const p = trust.principals.get(
 app.post('/trust/principals', (req, res) => res.json(trust.principals.create(req.body)));
 app.patch('/trust/principals/:id', (req, res) => { const p = trust.principals.update(req.params.id, req.body); return p ? res.json(p) : res.status(404).json({ error: 'not found' }); });
 app.delete('/trust/principals/:id', (req, res) => res.json({ ok: trust.principals.remove(req.params.id) }));
+// merge principal :id (the one being absorbed) INTO body.into (the survivor)
+app.post('/trust/principals/:id/merge', (req, res) => {
+  const merged = trust.principals.merge(req.params.id, req.body && req.body.into);
+  return merged ? res.json(merged) : res.status(400).json({ error: 'merge failed — unknown or identical principals' });
+});
 app.post('/trust/principals/:id/identifiers', (req, res) => res.json(trust.identifiers.add(req.params.id, req.body.surface, String(req.body.value))));
 app.delete('/trust/identifiers/:iid', (req, res) => res.json({ ok: trust.identifiers.remove(Number(req.params.iid)) }));
 app.get('/trust/roles', (req, res) => res.json({ roles: trust.roles.list() }));

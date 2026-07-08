@@ -13,7 +13,7 @@ const props = defineProps({
   principal: { type: Object, required: true },
   busy: { type: String, default: '' }
 })
-const emit = defineEmits(['edit', 'add-identifier', 'add-grant', 'delete'])
+const emit = defineEmits(['edit', 'add-identifier', 'add-grant', 'delete', 'merge'])
 
 const store = useTrustStore()
 const p = computed(() => props.principal)
@@ -177,6 +177,9 @@ async function removeGrant(gid) {
     <!-- action row -->
     <div class="mt-1 flex flex-wrap items-center gap-2 border-t border-white/5 pt-3">
       <button type="button" class="act" :disabled="isBusy" @click="emit('edit', p)">✎ Edit</button>
+      <button type="button" class="act" :disabled="isBusy" title="Merge this user into another (combine split records)" @click="emit('merge', p)">
+        {{ busy === 'merge' ? '…' : '⤵ Merge' }}
+      </button>
       <button
         type="button"
         class="act-danger ml-auto"

@@ -73,6 +73,25 @@ const principals = {
       .run(f.display_name ?? p.display_name, f.default_tier ?? p.default_tier, (f.revoked ?? !!p.revoked) ? 1 : 0, f.notes ?? p.notes, now(), id);
     return principals.get(id); },
   remove: (id) => db.prepare('DELETE FROM principals WHERE id=?').run(id).changes > 0,
+  // Merge `sourceId` INTO `targetId`: move all identifiers + grants to the target, keep the
+  // higher tier, append a merge note, keep the target's name/revoked flag, then delete the source.
+  // (identifiers are UNIQUE(surface,value) so there can be no collision.)
+  merge: (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return null;
+    const src = db.prepare('SELECT * FROM principals WHERE id=?').get(sourceId);
+    const tgt = db.prepare('SELECT * FROM principals WHERE id=?').get(targetId);
+    if (!src || !tgt) return null;
+    db.transaction(() => {
+      db.prepare('UPDATE identifiers SET principal_id=? WHERE principal_id=?').run(targetId, sourceId);
+      db.prepare('UPDATE grants SET principal_id=? WHERE principal_id=?').run(targetId, sourceId);
+      const tier = Math.max(Number(tgt.default_tier) || 0, Number(src.default_tier) || 0);
+      const mergeNote = `merged in "${src.display_name}" (${sourceId})${src.notes ? ': ' + src.notes : ''}`;
+      const notes = [tgt.notes, mergeNote].filter(Boolean).join('\n').trim();
+      db.prepare('UPDATE principals SET default_tier=?, notes=?, updated_at=? WHERE id=?').run(tier, notes, now(), targetId);
+      db.prepare('DELETE FROM principals WHERE id=?').run(sourceId);
+    })();
+    return principals.get(targetId);
+  },
 };
 const identifiers = {
   add: (principal_id, surface, value) => { db.prepare('INSERT OR REPLACE INTO identifiers (principal_id,surface,value) VALUES (?,?,?)').run(principal_id, surface, value); return principals.get(principal_id); },

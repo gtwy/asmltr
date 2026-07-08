@@ -18,6 +18,7 @@ import RoleCard from '@/components/RoleCard.vue'
 import PrincipalForm from '@/components/PrincipalForm.vue'
 import IdentifierForm from '@/components/IdentifierForm.vue'
 import GrantForm from '@/components/GrantForm.vue'
+import MergeForm from '@/components/MergeForm.vue'
 import RoleForm from '@/components/RoleForm.vue'
 import ResolvePreview from '@/components/ResolvePreview.vue'
 
@@ -28,7 +29,17 @@ const manager = useManagerStore()
 const principalForm = ref({ open: false, principal: null }) // principal=null => create
 const identifierForm = ref(null) // principal => open
 const grantForm = ref(null) // principal => open
+const mergeForm = ref(null) // source principal => open the merge picker
 const roleForm = ref({ open: false, role: null }) // role=null => create
+
+async function doMerge({ sourceId, targetId }) {
+  try {
+    await store.mergePrincipal(sourceId, targetId)
+    mergeForm.value = null
+  } catch (e) {
+    store.lastError = e.message
+  }
+}
 
 const identifierCount = computed(() =>
   store.principals.reduce((n, p) => n + (p.identifiers?.length || 0), 0)
@@ -145,6 +156,7 @@ onMounted(() => {
           @edit="openEditUser"
           @add-identifier="identifierForm = $event"
           @add-grant="grantForm = $event"
+          @merge="mergeForm = $event"
           @delete="deletePrincipal"
         />
       </div>
@@ -210,6 +222,13 @@ onMounted(() => {
       v-if="grantForm"
       :principal="grantForm"
       @close="grantForm = null"
+    />
+    <MergeForm
+      v-if="mergeForm"
+      :source="mergeForm"
+      :principals="store.principals"
+      @close="mergeForm = null"
+      @merge="doMerge"
     />
     <RoleForm
       v-if="roleForm.open"
