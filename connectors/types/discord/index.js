@@ -344,19 +344,33 @@ RESPONSE RULES:
       const MAX_IMG_BYTES = 5 * 1024 * 1024;
       const imageAttachments = [];
       if (message.attachments.size > 0) {
-        const otherAttachments = [];
+        const savedNotes = [];
+        // Register every inbound attachment on the shared, channel-agnostic upload surface so
+        // it's findable from any channel — and so non-image files survive Discord's expiring
+        // CDN URLs (we keep the bytes on disk, not just a link).
+        const register = (buf, a, kind) => {
+          try {
+            const rec = ctx.uploads.save({
+              channel: 'discord', instance: ctx.instanceId, buffer: buf,
+              filename: a.name, mime: (a.contentType || '').split(';')[0].trim() || 'application/octet-stream', kind,
+              caption: message.content || '', sender: message.author.username, senderId: message.author.id,
+              conversationKey,
+            });
+            savedNotes.push(`- ${kind || 'file'}: ${rec.filename} (${rec.mime}, ${ctx.uploads.humanSize(rec.size)}) → ${rec.path}`);
+          } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
+        };
         for (const a of message.attachments.values()) {
           const mt = (a.contentType || '').split(';')[0].trim();
-          if (SUPPORTED_IMG.includes(mt) && imageAttachments.length < 5 && (a.size || 0) <= MAX_IMG_BYTES) {
-            try {
-              const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
+          const isImg = SUPPORTED_IMG.includes(mt);
+          try {
+            const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
+            register(buf, a, isImg ? 'image' : 'file');
+            if (isImg && imageAttachments.length < 5 && (a.size || 0) <= MAX_IMG_BYTES) {
               imageAttachments.push({ type: 'image', media_type: mt, data: buf.toString('base64'), name: a.name });
-            } catch (e) { ctx.log(`[img] download failed ${a.name}: ${e.message}`); otherAttachments.push(a); }
-          } else {
-            otherAttachments.push(a);
-          }
+            }
+          } catch (e) { ctx.log(`[att] download failed ${a.name}: ${e.message}`); savedNotes.push(`- ${a.name} (${a.contentType}): ${a.url} (couldn't download — link only)`); }
         }
-        if (otherAttachments.length) text += '\n\nATTACHMENTS:\n' + otherAttachments.map(a => `- ${a.name} (${a.contentType}): ${a.url}`).join('\n');
+        if (savedNotes.length) text += '\n\nATTACHMENTS (saved to the shared asmltr upload area, findable via `asmltr uploads`; Read a path to use it):\n' + savedNotes.join('\n');
       }
       // server + channel names ride in channel_context → the core records them on the inbound
       // event (and the collector stores them on the session) so the dashboard shows where a

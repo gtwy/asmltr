@@ -135,6 +135,12 @@ function makeSecrets() {
   return require('../../shared/secrets');
 }
 
+/** Shared upload surface — connectors register EVERY inbound file here so any session,
+ *  on any channel, can find it the same way. See shared/uploads.js. */
+function makeUploads() {
+  return require('../../shared/uploads');
+}
+
 /** Telemetry emitter → collector /ingest (best-effort, never blocks the connector). */
 function makeEmitter(collectorUrl, token, defaults) {
   return function emit(partial) {
@@ -158,6 +164,7 @@ function buildContext({ instanceId, instanceName, type, config, coreUrl, collect
     config: config || {},
     core: makeCoreClient(coreUrl),
     secrets: makeSecrets(),
+    uploads: makeUploads(),
     emit,
     log: (...a) => console.log(`[${type}:${instanceName || instanceId}]`, ...a),
     signal,

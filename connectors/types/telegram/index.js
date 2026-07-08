@@ -64,28 +64,54 @@ async function start(ctx) {
 
     const attachments = [];
     let text = msg.text || msg.caption || '';
+    const savedNotes = []; // "saved at <path>" lines handed to the model for any non-inline file
 
-    // photo transport: download → base64 image attachment (native vision; the model
-    // SEES it) AND keep a host-file copy in the temp-photos dir other tools reference.
-    // Telegram always re-encodes photos to JPEG. Largest preview = msg.photo[last].
-    if (msg.photo && msg.photo.length) {
-      try {
-        const fileId = msg.photo[msg.photo.length - 1].file_id;
-        const file = await bot.getFile(fileId);
-        const buf = Buffer.from(await (await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`)).arrayBuffer());
-        const fileName = `photo_${Date.now()}.jpg`;
-        const localPath = path.join(photoDir, fileName);
-        try { fs.mkdirSync(photoDir, { recursive: true }); fs.writeFileSync(localPath, buf); } catch (_) {}
-        if (buf.length <= 5 * 1024 * 1024) {
-          // canonical vision shape — matches the core/runner contract (type/media_type/data)
-          attachments.push({ type: 'image', media_type: 'image/jpeg', data: buf.toString('base64'), name: fileName, path: localPath });
-          ctx.log(`photo: ${buf.length}b -> vision + ${localPath}`);
-        } else {
-          // too big to inline — fall back to the Read-the-file hint
-          text = `${text}\n\n[Attached image saved at ${localPath} — read it with the Read tool if relevant.]`;
-          ctx.log(`photo too large for inline vision (${buf.length}b); saved ${localPath}`);
-        }
-      } catch (e) { ctx.log(`photo download failed: ${e.message}`); }
+    // Download a Telegram file by file_id → Buffer. (Bot API can only fetch files up to ~20MB.)
+    const dl = async (fileId) => {
+      const file = await bot.getFile(fileId);
+      return Buffer.from(await (await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`)).arrayBuffer());
+    };
+    // Register ANY inbound file on the shared, channel-agnostic upload surface (tagged
+    // channel=telegram) so a session on ANY channel can find it later, then note its path.
+    const register = (buf, { filename, mime, kind }) => {
+      const rec = ctx.uploads.save({
+        channel: 'telegram', instance: ctx.instanceId, buffer: buf,
+        filename, mime, kind, caption: msg.caption || '',
+        sender: (msg.from && msg.from.username) || String(userId), senderId: userId,
+        conversationKey: `telegram:${ctx.instanceId}:user:${userId}`,
+      });
+      savedNotes.push(`- ${kind || 'file'}: ${rec.filename} (${rec.mime}, ${ctx.uploads.humanSize(rec.size)}) → ${rec.path}`);
+      return rec;
+    };
+
+    // Handle EVERY attachment kind Telegram sends — not just photos (the old code silently
+    // dropped documents/audio/video, which is why "find the recording I sent" failed).
+    try {
+      if (msg.photo && msg.photo.length) { // Telegram re-encodes photos to JPEG; largest = last
+        const buf = await dl(msg.photo[msg.photo.length - 1].file_id);
+        const rec = register(buf, { filename: `photo_${Date.now()}.jpg`, mime: 'image/jpeg', kind: 'image' });
+        try { fs.mkdirSync(photoDir, { recursive: true }); fs.writeFileSync(path.join(photoDir, rec.stored_name), buf); } catch (_) {} // legacy copy some tools reference
+        if (buf.length <= 5 * 1024 * 1024) attachments.push({ type: 'image', media_type: 'image/jpeg', data: buf.toString('base64'), name: rec.filename, path: rec.path });
+        ctx.log(`photo: ${buf.length}b -> vision + ${rec.path}`);
+      }
+      if (msg.document) { const d = msg.document; const buf = await dl(d.file_id);
+        const rec = register(buf, { filename: d.file_name || `document_${Date.now()}`, mime: d.mime_type, kind: 'document' });
+        if ((d.mime_type || '').startsWith('image/') && buf.length <= 5 * 1024 * 1024) attachments.push({ type: 'image', media_type: d.mime_type, data: buf.toString('base64'), name: rec.filename, path: rec.path });
+        ctx.log(`document: ${rec.filename} -> ${rec.path}`);
+      }
+      if (msg.audio) { const a = msg.audio; register(await dl(a.file_id), { filename: a.file_name || `audio_${Date.now()}.mp3`, mime: a.mime_type || 'audio/mpeg', kind: 'audio' }); }
+      if (msg.voice) { const v = msg.voice; register(await dl(v.file_id), { filename: `voice_${Date.now()}.ogg`, mime: v.mime_type || 'audio/ogg', kind: 'voice' }); }
+      if (msg.video) { const v = msg.video; register(await dl(v.file_id), { filename: v.file_name || `video_${Date.now()}.mp4`, mime: v.mime_type || 'video/mp4', kind: 'video' }); }
+      if (msg.video_note) { register(await dl(msg.video_note.file_id), { filename: `videonote_${Date.now()}.mp4`, mime: 'video/mp4', kind: 'video' }); }
+      if (msg.animation) { const v = msg.animation; register(await dl(v.file_id), { filename: v.file_name || `animation_${Date.now()}.mp4`, mime: v.mime_type || 'video/mp4', kind: 'video' }); }
+    } catch (e) {
+      const big = /too big|file is too big/i.test(e.message || '');
+      ctx.log(`attachment download failed: ${e.message}`);
+      savedNotes.push(`- ⚠️ an attachment couldn't be downloaded: ${e.message}${big ? ' (Telegram bots can only fetch files up to 20MB)' : ''}`);
+    }
+
+    if (savedNotes.length) {
+      text += `\n\n[Files received on Telegram, saved to the shared asmltr upload area (findable from any channel via \`asmltr uploads\`):\n${savedNotes.join('\n')}\nRead a file at its path if the user wants you to work with it.]`;
     }
     if (!text.trim() && !attachments.length) return;
 

@@ -268,6 +268,40 @@ async function cmdAnnounce(rest) {
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target}  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
 }
+function _parseSince(s) {
+  const m = /^(\d+)\s*([smhd])$/.exec(String(s || '').trim());
+  if (!m) return 0;
+  return Number(m[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 }[m[2]]);
+}
+async function cmdUploads(rest) {
+  // asmltr uploads [search words] [--channel x] [--sender s] [--since 2h|1d] [--limit N]
+  // asmltr uploads get <id>   → print just the stored path (for piping into Read/tools)
+  const uploads = require('../shared/uploads');
+  if (rest[0] === 'get') {
+    const rec = uploads.get(rest[1]);
+    if (!rec) throw new Error(`no upload with id "${rest[1]}"`);
+    return console.log(rec.path);
+  }
+  const o = { limit: 25 }; const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--channel') o.channel = rest[++i];
+    else if (t === '--sender') o.sender = rest[++i];
+    else if (t === '--limit') o.limit = Number(rest[++i]) || 25;
+    else if (t === '--since') o.sinceMs = Date.now() - _parseSince(rest[++i]);
+    else words.push(t);
+  }
+  if (words.length) o.query = words.join(' ');
+  const items = uploads.list(o);
+  if (!items.length) return console.log(A.dim('no uploads found' + (o.query ? ` for "${o.query}"` : '')));
+  console.log(A.bold(`uploads · newest first · ${items.length}${o.channel ? ' · ' + o.channel : ''}${o.query ? ` · "${o.query}"` : ''}:`));
+  for (const r of items) {
+    const when = new Date(r.ts).toISOString().replace('T', ' ').slice(0, 16);
+    const cap = r.caption ? `  ${A.dim('“' + r.caption.slice(0, 50) + '”')}` : '';
+    console.log(`  ${paint(r.channel, pad(r.channel, 9))} ${A.dim(when)}  ${r.filename}  ${A.dim(`(${r.mime}, ${uploads.humanSize(r.size)})`)}${cap}`);
+    console.log(`     ${A.dim(`id ${r.id} · from ${r.sender || '?'} · ${r.path}`)}`);
+  }
+}
 async function cmdAnnouncements() {
   const r = await fetch(CORE_BASE + '/v2/announcements').then((x) => x.json()).catch((e) => ({ announcements: [], error: e.message }));
   const list = r.announcements || [];
@@ -313,6 +347,8 @@ function cmdHelp() {
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
   asmltr announcements                 list live announcements (with timestamps)
+  asmltr uploads [search]              files users sent on ANY channel (--channel --since 2h|1d --sender --limit)
+       uploads get <id>                print the stored path of one upload
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -347,6 +383,7 @@ function cmdHelp() {
       case 'send': return await cmdSend(rest);
       case 'announce': return await cmdAnnounce(rest);
       case 'announcements': return await cmdAnnouncements();
+      case 'uploads': return await cmdUploads(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
       case 'kill': return await cmdKill(rest[0], f);

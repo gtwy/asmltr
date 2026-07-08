@@ -163,6 +163,22 @@ async function handle(envelope, opts = {}) {
       systemPrompt += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${e.channel} ${chTarget} --file <abs-path> [--caption "…"]\`. Do NOT tell the user you can't attach files here or fall back to another channel — you can.`;
     }
   }
+  // Cross-channel file uploads: every file a user sends on ANY channel is saved to one shared
+  // area (see shared/uploads.js), so "find the thing I sent" works even when it arrived on a
+  // different channel/app. Trust-gated: only full-trust (owner) sessions are told about the
+  // upload area + shown the recent file list — don't leak the owner's files to lesser callers.
+  if (resolved.bypass_moderation) {
+    systemPrompt += '\n\nFILE UPLOADS (shared across ALL channels): every file a user sends on any channel ' +
+      '(Telegram, Discord, …) is saved to ONE shared upload area, tagged with its origin channel. When the user ' +
+      'refers to a file they sent/uploaded/shared — even "on Telegram" or from another app — DO NOT claim you ' +
+      'can\'t find it before checking here: run `asmltr uploads` (newest first; also `asmltr uploads <search>`, ' +
+      '`--channel <name>`, `--since <2h|1d>`), then Read the file at the path it prints.';
+    try {
+      const recent = require('../../shared/uploads').recentSummary(6);
+      if (recent) systemPrompt += `\n\nRecent uploads (newest first):\n${recent}`;
+    } catch (_) {}
+  }
+
   // Cross-session announcements: drain any this session hasn't seen into its context (with
   // timestamps) — awareness from other sessions on this machine, delivered on this next turn.
   try {
