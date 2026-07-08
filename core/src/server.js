@@ -111,7 +111,7 @@ Your underlying runtime is Claude Code, but that is an internal implementation d
 /**
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
-async function handle(envelope) {
+async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
   const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
 
@@ -202,6 +202,27 @@ async function handle(envelope) {
     if (outInstance && outTarget) sessions.setOutboundRoute(e.conversation_key, outInstance, outTarget);
   } catch (_) {}
 
+  // Redaction applies on public surfaces or for any non-full-trust recipient. Computed NOW (not
+  // just at the output stage) so STREAMED deltas can be masked in-flight — a secret is never shipped.
+  const mustRedact = !!e.public || !resolved.bypass_moderation;
+  // Streaming (opts.onText): emit assistant text as the SDK produces it. When redacting, only ship up
+  // to the last WHITESPACE boundary — so a secret is a complete token (redactSecrets masks it) before
+  // it goes out, and we never emit a still-forming token. Full-trust recipients stream raw (no lag).
+  let _streamRaw = '', _emitted = 0;
+  const _pushDelta = (raw) => {
+    _streamRaw += raw;
+    const red = mustRedact ? redactSecrets(_streamRaw).text : _streamRaw;
+    let end = red.length;
+    if (mustRedact) { const b = Math.max(red.lastIndexOf(' '), red.lastIndexOf('\n')); end = b >= 0 ? b + 1 : _emitted; }
+    if (end > _emitted) { try { opts.onText(red.slice(_emitted, end)); } catch (_) {} _emitted = end; }
+  };
+  const _flushStream = () => {
+    if (!opts.onText) return;
+    const red = mustRedact ? redactSecrets(_streamRaw).text : _streamRaw;
+    if (/\[\[NO_REPLY\]\]/i.test(red)) return; // don't ship the silence sentinel
+    if (red.length > _emitted) { try { opts.onText(red.slice(_emitted)); } catch (_) {} _emitted = red.length; }
+  };
+
   const abortController = new AbortController();
   inFlight.set(e.conversation_key, abortController);
   let result;
@@ -217,6 +238,7 @@ async function handle(envelope) {
       cwd,
       abortController,
       images,
+      onDelta: opts.onText ? _pushDelta : undefined,
       onEvent: (sdkEvt) => {
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
@@ -245,6 +267,7 @@ async function handle(envelope) {
   } finally {
     inFlight.delete(e.conversation_key);
   }
+  _flushStream(); // ship any redacted tail held back during streaming
 
   if (result.engineSessionId) sessions.recordEngineId(e.conversation_key, result.engineSessionId);
   sessions.touch(e.conversation_key);
@@ -272,7 +295,7 @@ async function handle(envelope) {
   // a full-trust user: public surfaces (github comments, discord channels) always
   // redact; private 1:1 surfaces redact unless the recipient is full-trust (the owner).
   // Telemetry above stays RAW — the operator TUI is a private, full-trust surface.
-  const mustRedact = !!e.public || !resolved.bypass_moderation;
+  // (mustRedact was computed up-front so streaming deltas could be masked in-flight too.)
   if (mustRedact) {
     let masked = 0;
     for (const a of actions) {
@@ -287,11 +310,11 @@ async function handle(envelope) {
 }
 
 /** Run handle() under the concurrency slot + per-key lock. */
-function dispatch(envelope) {
+function dispatch(envelope, opts) {
   const key = envelope.conversation_key || 'anon';
   return withKeyLock(key, async () => {
     await acquireSlot();
-    try { return await handle(envelope); }
+    try { return await handle(envelope, opts); }
     finally { releaseSlot(); }
   });
 }
@@ -301,6 +324,21 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core', active }));
+
+// Streaming turn: same pipeline as /v2/handle, but assistant text is streamed as it's produced.
+// SSE frames: {type:'delta', text} … then {type:'done', actions}. Deltas are redacted in-flight.
+app.post('/v2/stream', async (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  const frame = (obj) => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (_) {} };
+  try {
+    const actions = await dispatch(req.body, { onText: (text) => { if (text) frame({ type: 'delta', text }); } });
+    frame({ type: 'done', actions });
+  } catch (err) {
+    console.error('[core] /v2/stream error:', err.message);
+    frame({ type: 'error', error: err.message });
+  }
+  res.end();
+});
 
 app.post('/v2/handle', async (req, res) => {
   try {

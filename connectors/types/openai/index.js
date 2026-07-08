@@ -111,37 +111,45 @@ async function start(ctx) {
 
     ctx.emit({ event_type: 'inbound', session_id: convKey, identity, payload: { text: lastUser.slice(0, 200) } });
 
+    const envelope = {
+      channel: 'openai',
+      conversation_key: convKey,
+      message_id: String(Date.now()),
+      sender: { raw_id: identity, raw_username: username },
+      content: { text: prompt },
+      delivery: 'sync',
+      public: false, // 1:1 authed caller; redaction still applies unless the identity is full-trust
+      channel_context: {},
+      context: { scope_name: 'OpenAI API' },
+      system_prompt_extra: systemText || undefined,
+    };
+    const id = 'chatcmpl-' + crypto.randomBytes(12).toString('hex');
+    const created = Math.floor(Date.now() / 1000);
+
+    if (body.stream) {
+      // TRUE token streaming — forward the core's live SSE deltas as OpenAI chat.completion chunks
+      // (low first-token latency; enables realtime voice front-ends like ElevenLabs Custom LLM).
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+      const send = (delta, finish) => { try { res.write('data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created, model: MODEL, choices: [{ index: 0, delta, finish_reason: finish || null }] }) + '\n\n'); } catch (_) {} };
+      send({ role: 'assistant' });
+      try {
+        await ctx.core.handleStream(envelope, (text) => send({ content: text }));
+      } catch (e) {
+        ctx.log('openai stream error: ' + e.message);
+      }
+      send({}, 'stop');
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
+
     let replyText = '';
     try {
-      const actions = await ctx.core.handle({
-        channel: 'openai',
-        conversation_key: convKey,
-        message_id: String(Date.now()),
-        sender: { raw_id: identity, raw_username: username },
-        content: { text: prompt },
-        delivery: 'sync',
-        public: false, // 1:1 authed caller; redaction still applies unless the identity is full-trust
-        channel_context: {},
-        context: { scope_name: 'OpenAI API' },
-        system_prompt_extra: systemText || undefined,
-      });
+      const actions = await ctx.core.handle(envelope);
       const reply = (actions || []).find((a) => a.type === 'reply');
       replyText = reply ? reply.text : '';
     } catch (e) {
       ctx.log('openai handle error: ' + e.message);
       return res.status(500).json(oaiErr('backend error: ' + e.message, 'server_error'));
-    }
-
-    const id = 'chatcmpl-' + crypto.randomBytes(12).toString('hex');
-    const created = Math.floor(Date.now() / 1000);
-    if (body.stream) {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-      const send = (delta, finish) => res.write('data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created, model: MODEL, choices: [{ index: 0, delta, finish_reason: finish || null }] }) + '\n\n');
-      send({ role: 'assistant' });
-      for (const piece of splitChunks(replyText, 60)) send({ content: piece });
-      send({}, 'stop');
-      res.write('data: [DONE]\n\n');
-      return res.end();
     }
     res.json({
       id, object: 'chat.completion', created, model: MODEL,

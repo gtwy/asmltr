@@ -66,6 +66,41 @@ function makeCoreClient(coreUrl) {
         req.end();
       });
     },
+    // Streaming turn: posts to the core /v2/stream (SSE), calls onDelta(text) per token as the
+    // reply is produced, and resolves with the final actions[]. Used by the OpenAI connector.
+    handleStream(envelope, onDelta) {
+      return new Promise((resolve, reject) => {
+        const payload = JSON.stringify(envelope);
+        const req = lib.request({
+          hostname: u.hostname,
+          port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: '/v2/stream',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), Accept: 'text/event-stream' },
+        }, (res) => {
+          if (res.statusCode < 200 || res.statusCode >= 300) { res.resume(); return reject(new Error(`core ${res.statusCode}`)); }
+          let buf = '', settled = false;
+          res.setEncoding('utf8');
+          res.on('data', (c) => {
+            buf += c;
+            let i;
+            while ((i = buf.indexOf('\n\n')) >= 0) {
+              const line = buf.slice(0, i).split('\n').find((l) => l.startsWith('data:'));
+              buf = buf.slice(i + 2);
+              if (!line) continue;
+              let obj; try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
+              if (obj.type === 'delta') { if (onDelta && obj.text) { try { onDelta(obj.text); } catch (_) {} } }
+              else if (obj.type === 'done') { settled = true; resolve(obj.actions || []); }
+              else if (obj.type === 'error') { settled = true; reject(new Error(obj.error || 'stream error')); }
+            }
+          });
+          res.on('end', () => { if (!settled) resolve([]); });
+        });
+        req.on('error', reject);
+        req.write(payload);
+        req.end();
+      });
+    },
     // Read-only trust resolution (for connector-side authorization, e.g. owner-only commands).
     resolve(envelope) {
       return new Promise((resolve, reject) => {

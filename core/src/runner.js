@@ -23,7 +23,7 @@ const { query } = require('@anthropic-ai/claude-code');
  * @param {(evt:object)=>void} [args.onEvent]  per-SDK-event hook (for live streaming/telemetry)
  * @returns {Promise<{text:string, engineSessionId:string|null, tools:Array, usage:object, isError:boolean}>}
  */
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, images = [] }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, onDelta, images = [] }) {
   const options = {
     stream: true,
     permissionMode: 'bypassPermissions', // works under root via SDK (CLI flag does not — see eve-query-proxy.js:489)
@@ -78,6 +78,11 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
   for await (const event of response) {
     if (abortController && abortController.signal.aborted) break;
     if (onEvent) { try { onEvent(event); } catch (_) { /* never let a telemetry hook break a turn */ } }
+    // Incremental assistant TEXT tokens (includePartialMessages) → live streaming out.
+    if (onDelta && event.type === 'stream_event' && event.event && event.event.type === 'content_block_delta'
+        && event.event.delta && event.event.delta.type === 'text_delta' && event.event.delta.text) {
+      try { onDelta(event.event.delta.text); } catch (_) {}
+    }
 
     switch (event.type) {
       case 'system':
