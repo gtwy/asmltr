@@ -6,11 +6,19 @@ import { statusMeta, fmtAge, fmtNum, truncate } from '@/lib/format'
 const props = defineProps({
   session: { type: Object, required: true },
   now: { type: Number, default: () => Date.now() },
-  preview: { type: Object, default: null } // latest event for this session (live)
+  preview: { type: Object, default: null }, // latest event for this session (live)
+  channelState: { type: Boolean, default: undefined }, // Discord channel monitored on/off
+  channelBusy: { type: Boolean, default: false }
 })
-defineEmits(['open'])
+defineEmits(['open', 'toggle-channel'])
 
 const st = computed(() => statusMeta(props.session.status))
+// Discord channel sessions can be enabled/disabled for monitoring right from the card.
+const isDiscordChannel = computed(() => {
+  const p = String(props.session.session_id || '').split(':')
+  return p[0] === 'discord' && p[2] === 'channel'
+})
+const monitored = computed(() => props.channelState !== false) // default enabled
 
 // Live one-line preview of the most recent conversation/tool activity — replaces
 // the static "no active task" line so the card breathes.
@@ -153,8 +161,20 @@ const claimLabel = computed(() => {
       </span>
     </div>
 
-    <!-- open the conversation details + takeover pane -->
-    <div class="mt-1 flex items-center justify-end border-t border-white/5 pt-3">
+    <!-- footer: monitor toggle (Discord channels) + open details -->
+    <div class="mt-1 flex items-center justify-between border-t border-white/5 pt-3">
+      <button
+        v-if="isDiscordChannel"
+        type="button"
+        :disabled="channelBusy"
+        :title="monitored ? 'Monitoring this channel — click to disable (bot stops responding here)' : 'This channel is disabled — click to re-enable monitoring'"
+        class="rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-40"
+        :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-500 hover:text-slate-300'"
+        @click.stop="$emit('toggle-channel', session.session_id)"
+      >
+        {{ channelBusy ? '…' : (monitored ? '● monitored' : '○ disabled') }}
+      </button>
+      <span v-else></span>
       <button
         type="button"
         class="rounded-lg border border-brand-violet/30 bg-brand-violet/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-brand-violet/20"

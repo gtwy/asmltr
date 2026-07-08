@@ -45,5 +45,9 @@ export const manager = {
   // lifecycle
   start: (id) => request('POST', `/instances/${id}/start`),
   stop: (id) => request('POST', `/instances/${id}/stop`),
-  restart: (id) => request('POST', `/instances/${id}/restart`)
+  restart: (id) => request('POST', `/instances/${id}/restart`),
+
+  // per-channel enable/disable (Discord etc.) — GET lists channels + enabled state; POST toggles one
+  channels: (id) => request('GET', `/instances/${id}/channels`),
+  setChannel: (id, body) => request('POST', `/instances/${id}/channels`, body)
 }

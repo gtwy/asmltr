@@ -12,9 +12,17 @@ import SurfaceBadge from './SurfaceBadge.vue'
 
 const props = defineProps({
   session: { type: Object, required: true },
-  now: { type: Number, default: () => Date.now() }
+  now: { type: Number, default: () => Date.now() },
+  channelState: { type: Boolean, default: undefined },
+  channelBusy: { type: Boolean, default: false }
 })
-defineEmits(['close'])
+defineEmits(['close', 'toggle-channel'])
+
+const isDiscordChannel = computed(() => {
+  const p = String(props.session.session_id || '').split(':')
+  return p[0] === 'discord' && p[2] === 'channel'
+})
+const monitored = computed(() => props.channelState !== false)
 
 const store = useCollectorStore()
 const seeded = ref([]) // chronological (oldest → newest), fetched once on open
@@ -141,6 +149,15 @@ async function doInject() {
       <span class="pill border border-violet-400/30 bg-violet-400/10 text-violet-300">⟁ {{ fmtNum(session.tokens_total) }} tok</span>
       <span v-if="session.tool_count" class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300">🛠 {{ fmtNum(session.tool_count) }}</span>
       <span class="text-slate-500">last {{ fmtAge(session.last_activity_unix, now) }}</span>
+      <button
+        v-if="isDiscordChannel"
+        type="button"
+        :disabled="channelBusy"
+        :title="monitored ? 'Monitoring this channel — click to disable (bot stops responding here)' : 'Channel disabled — click to re-enable monitoring'"
+        class="pill border transition-colors disabled:opacity-40"
+        :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'"
+        @click="$emit('toggle-channel', session.session_id)"
+      >{{ channelBusy ? '…' : (monitored ? '● monitored' : '○ disabled') }}</button>
     </div>
 
     <!-- conversation history -->

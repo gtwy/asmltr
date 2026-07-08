@@ -6,6 +6,7 @@ import SessionCard from '@/components/SessionCard.vue'
 import SessionDetail from '@/components/SessionDetail.vue'
 import StatTile from '@/components/StatTile.vue'
 import { fmtNum, surfaceMeta } from '@/lib/format'
+import { manager } from '@/services/manager'
 
 const store = useCollectorStore()
 const now = ref(Date.now())
@@ -13,6 +14,34 @@ let ticker = null
 
 // which session's details pane is open (a snapshot — its history streams live)
 const selected = ref(null)
+
+// per-channel monitored state (Discord): channel_id -> enabled. Powers the card/detail toggle.
+const channelStates = ref({})
+const channelBusy = ref({})
+function discordChannel(sessionId) {
+  const p = String(sessionId || '').split(':')
+  return (p[0] === 'discord' && p[2] === 'channel') ? { instanceId: p[1], channelId: p[3] } : null
+}
+async function loadChannelStates() {
+  const instanceIds = new Set()
+  for (const s of store.sessions) { const d = discordChannel(s.session_id); if (d) instanceIds.add(d.instanceId) }
+  const next = {}
+  for (const id of instanceIds) {
+    try { const r = await manager.channels(id); for (const c of (r.channels || [])) next[c.channel_id] = c.enabled } catch (_) {}
+  }
+  channelStates.value = next
+}
+async function toggleChannel(sessionId) {
+  const d = discordChannel(sessionId)
+  if (!d) return
+  const cur = channelStates.value[d.channelId] !== false
+  channelBusy.value = { ...channelBusy.value, [d.channelId]: true }
+  try {
+    await manager.setChannel(d.instanceId, { channel_id: d.channelId, enabled: !cur })
+    channelStates.value = { ...channelStates.value, [d.channelId]: !cur }
+  } catch (_) {}
+  finally { channelBusy.value = { ...channelBusy.value, [d.channelId]: false } }
+}
 
 // latest event per session (store.events is newest-first) → live card previews
 const latestBySession = computed(() => {
@@ -49,13 +78,16 @@ const surfacesActive = computed(() => {
   return Object.entries(map).sort((a, b) => b[1] - a[1])
 })
 
+let chanTimer = null
 onMounted(() => {
   store.fetchSessions()
   store.fetchBrief()
   store.fetchEvents({ limit: 300 }) // seed the buffer so card previews render immediately
+  loadChannelStates()
   ticker = setInterval(() => (now.value = Date.now()), 1000)
+  chanTimer = setInterval(loadChannelStates, 15000) // refresh channel enabled/disabled state
 })
-onUnmounted(() => clearInterval(ticker))
+onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
 </script>
 
 <template>
@@ -122,7 +154,7 @@ onUnmounted(() => clearInterval(ticker))
         v-if="ephemeral.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" @open="selected = $event" />
+        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" @open="selected = $event" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No ephemeral sessions right now.
@@ -140,7 +172,7 @@ onUnmounted(() => clearInterval(ticker))
         v-if="persistent.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" @open="selected = $event" />
+        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" @open="selected = $event" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No persistent daemons registered.
@@ -148,6 +180,6 @@ onUnmounted(() => clearInterval(ticker))
     </section>
 
     <!-- conversation details + takeover pane -->
-    <SessionDetail v-if="selected" :session="selected" :now="now" @close="selected = null" />
+    <SessionDetail v-if="selected" :session="selected" :now="now" :channel-state="channelStates[discordChannel(selected.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(selected.session_id)?.channelId]" @close="selected = null" @toggle-channel="toggleChannel" />
   </div>
 </template>
