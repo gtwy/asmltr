@@ -8,7 +8,7 @@ is still the shared core.
 
 ---
 
-## Message flow — when does she respond?
+## Message flow — when does it respond?
 
 Every message runs through this gauntlet in `messageCreate` (first `return` wins). Understanding the
 order explains all the behavior:
@@ -21,22 +21,22 @@ order explains all the behavior:
 4. **Commands** (`handleControlCommands`) → if the message `@mentions` the bot (or a role it holds)
    and the text is a recognized command, run it and stop. See [Commands](#commands).
 5. **Disabled channel** → if this channel is disabled (via `mute`, the TUI, or an allowlist default),
-   ignore everything except the commands above. See [Channel enable/disable](#channel-enabledisable--control-what-she-listens-to).
-6. **Voice-session suppression** → while she's in an active voice session in this guild, she answers
+   ignore everything except the commands above. See [Channel enable/disable](#channel-enabledisable--control-what-it-listens-to).
+6. **Voice-session suppression** → while it's in an active voice session in this guild, it answers
    by *voice* only; non-`@mention` text is dropped (prevents a doubled spoken + text reply).
 7. **Directed at another agent** → if `ignore_other_mentions` (default on) and the message `@mentions`
    another user/bot **or leads with another agent's name** ("Moneo, …") and *not* her → ignore.
    (Plain names aren't real Discord `@`-mentions, so both cases are checked.)
 8. **Silenced** → if `silence`d, only respond to a direct `@mention`.
 9. **Autonomous participation** (`shouldRespondTo`) → otherwise, respond if `@mentioned`, the message
-   uses her name (lead/trail/mid), asks a question involving her, matches a relevant topic, or she's
-   mid-thread. This is what lets her chime in on a passive name-drop.
+   uses its name (lead/trail/mid), asks a question involving it, matches a relevant topic, or it's
+   mid-thread. This is what lets it chime in on a passive name-drop.
 
-Two more guards apply when she *does* generate a reply:
+Two more guards apply when it *does* generate a reply:
 
-- **Self-gating** — the core prompt tells her, in a multi-agent room, to emit only the token
-  `[[NO_REPLY]]` if a message isn't actually for her; the connector then drops the reply silently.
-- **Dedup** — she never re-posts a reply verbatim-identical to one of her last ~6 in that channel
+- **Self-gating** — the core prompt tells it, in a multi-agent room, to emit only the token
+  `[[NO_REPLY]]` if a message isn't actually for it; the connector then drops the reply silently.
+- **Dedup** — it never re-posts a reply verbatim-identical to one of its last ~6 in that channel
   (guards against rare replays in long resumed sessions).
 
 ---
@@ -61,7 +61,7 @@ resolved live via the core's `/trust/resolve`. So each agent knows its own owner
 run the state-changing commands. State (`mute`, `engage-all-bots`) persists in
 `connectors/manager/data/discord-<id>-settings.json`.
 
-## Channel enable/disable — control what she listens to
+## Channel enable/disable — control what it listens to
 
 By default the bot processes every text channel it can see in every server it's in. In a busy
 server that's wasteful: each surfaced message that passes the gauntlet becomes a core turn (usage).
@@ -104,20 +104,20 @@ Several agents can share a channel. Key knobs:
 
 Optional; needs **ffmpeg** and an OpenAI key (STT) + optionally ElevenLabs (TTS).
 
-1. **`@Bot join-voice`** (while you're in a voice channel) → she joins, chimes, and starts listening.
+1. **`@Bot join-voice`** (while you're in a voice channel) → it joins, chimes, and starts listening.
 2. **Listening** — Discord gives a separate audio stream per speaker (free diarization). Each
    utterance is captured (silence-gated + energy-gated to skip noise), transcribed via OpenAI
    (`gpt-4o-transcribe`, language-locked, name-biased prompt), and posted as `🗣️ name: …`.
-3. **Addressing her** — say her name (lead **or** trail: "Eve, …" / "…, Eve"). She chimes ("heard
+3. **Addressing it** — say its name (lead **or** trail: "Assistant, …" / "…, Assistant"). It chimes ("heard
    you"), plays a soft **"working" drone** while the turn runs, then **speaks** the reply (ElevenLabs)
    and mirrors it as `🔊 Name: …`.
-4. **Follow-ups** — after she answers, follow-ups need **no wake word** for `voice_followup_ms`
+4. **Follow-ups** — after it answers, follow-ups need **no wake word** for `voice_followup_ms`
    (default 45s, extends each exchange). No chime on follow-ups, just the drone.
-5. **Dismissal** — "that's enough, Eve" / "we're good" / "go back to listening" exits answering mode
-   back to **transcription-only** (she stays in the channel).
+5. **Dismissal** — "that's enough, Assistant" / "we're good" / "go back to listening" exits answering mode
+   back to **transcription-only** (it stays in the channel).
 6. **`@Bot leave-voice`** (or say "leave voice") → disconnect.
 
-Voice replies run through the core's redaction (public), so she won't speak secrets aloud.
+Voice replies run through the core's redaction (public), so it won't speak secrets aloud.
 
 ---
 

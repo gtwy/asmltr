@@ -4,8 +4,8 @@ asmltr runs an **LLM security screen on every inbound message** before the agent
 and can **alert an admin** when something is blocked. Both are configurable. This document
 covers how they work, how to configure them, and the safety model.
 
-Code: [`core/src/moderation.js`](../core/src/moderation.js). Called from the core pipeline in
-[`core/src/server.js`](../core/src/server.js) right after identity/trust resolution.
+Code: [`core/src/moderation.js`](https://github.com/jarethmt/asmltr/blob/main/core/src/moderation.js). Called from the core pipeline in
+[`core/src/server.js`](https://github.com/jarethmt/asmltr/blob/main/core/src/server.js) right after identity/trust resolution.
 
 ---
 

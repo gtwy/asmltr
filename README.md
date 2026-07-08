@@ -135,7 +135,7 @@ Each connector's full config schema is discoverable at `GET /types` on the manag
 
 - **discord** — mention/DM + autonomous participation, an `@mention` command system, multi-agent group
   chats, and an optional **voice mode** (join a voice channel → live transcription → spoken replies).
-  **Full guide: [docs/DISCORD.md](docs/DISCORD.md).**
+  **Full guide: [docs/connectors/discord.md](docs/connectors/discord.md).**
 - **telegram** — 1:1 bot with photo→vision. Key config: `bot_token_bws_key`, `allowed_chat_ids`.
 - **mcp** — OAuth 2.1 MCP server exposing an `ask_<assistant>` tool (SSE + Streamable HTTP). Pre-register
   clients in `connectors/types/mcp/clients.json` (see `clients.example.json`); each client maps to a trust principal.
@@ -153,13 +153,13 @@ Each connector's full config schema is discoverable at `GET /types` on the manag
 - **Trust is default-deny.** Only principals seeded into the trust store (or added via the Access UI)
   get access; each carries capability grants. `bypass_moderation` = full trust. See `core/src/trust/`.
 - **Moderation** — every inbound message gets an LLM security screen before execution (strict mode for
-  low-trust principals). Provider/model/key and alert routing are all configurable — see [docs/MODERATION.md](docs/MODERATION.md).
+  low-trust principals). Provider/model/key and alert routing are all configurable — see [docs/security/moderation.md](docs/security/moderation.md).
 - **Output redaction** — `shared/redact.js` masks tokens/keys/passwords/private-keys from replies on
   **public** surfaces (and for any non-full-trust recipient). Private DMs with a full-trust owner see raw output.
 - **Steer & takeover** — reach into a live background session from the TUI or dashboard: stop its
   in-flight turn, or inject a message to redirect it. Channel sessions resume via the SDK and the reply
   routes back to the origin channel; `asmltr claude` sessions get keys typed into their tmux pane (or you
-  attach it). See [docs/INJECTION.md](docs/INJECTION.md).
+  attach it). See [docs/coordination/injection.md](docs/coordination/injection.md).
 - **Secrets never live in the repo.** They resolve at runtime through the pluggable provider
   (`shared/secrets.js`): env → secrets file → command. Config files that hold secrets
   (`.env`, `clients.json`, `seed.json`, `channel-aliases.json`) are gitignored; commit only their `.example` twins.
