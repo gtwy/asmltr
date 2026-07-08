@@ -60,7 +60,7 @@ const meta = {
       presence_text: { type: 'string', title: 'Presence/activity text', default: '' },
       elevenlabs_key_name: { type: 'string', title: 'Secret key name for ElevenLabs (voice)', default: 'elevenlabs_api_key' },
       stt_language: { type: 'string', title: 'Voice STT language (ISO code; empty = auto-detect)', default: 'en' },
-      voice_followup_ms: { type: 'integer', title: 'Voice follow-up window (ms) — no wake word needed after being addressed', default: 45000 },
+      voice_followup_ms: { type: 'integer', title: 'Voice follow-up window (ms) after being addressed, during which follow-ups need no wake word. 0 = STRICT: only respond when directly addressed by name (recommended for meetings).', default: 0 },
       ignore_other_mentions: { type: 'boolean', title: 'Ignore messages @-directed at other specific users/bots (keeps passive name-drops)', default: true },
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
     },
@@ -444,7 +444,9 @@ RESPONSE RULES:
 
   const voiceBusy = new Set();   // guildIds mid-reply (one spoken reply at a time)
   const voiceActive = new Map(); // guildId -> expiry ts of the "answering mode" follow-up window
-  const VOICE_WINDOW_MS = Number(cfg.voice_followup_ms) || 45000; // follow-ups need no wake word within this window
+  // 0 (default) = STRICT: respond ONLY when directly addressed by name, then go passive. A positive
+  // value opens a "keep answering follow-ups without the wake word" window for that many ms.
+  const VOICE_WINDOW_MS = Number.isFinite(Number(cfg.voice_followup_ms)) ? Number(cfg.voice_followup_ms) : 0;
   const LEAVE_RE = /\b(leave (the )?(voice|call|channel)|disconnect|drop (from )?(the )?(voice|call))\b/;
   const DISMISS_RE = /\b(that'?s (enough|all|it)( for now)?|we'?re (good|done|all set)|stop (answering|talking|responding|for now)|(just|go back to) (listen|transcrib)|you can (stop|relax)|stand down|dismiss(ed)?)\b/;
 
@@ -498,7 +500,7 @@ RESPONSE RULES:
       voice.stopDrone(guildId); // stop the drone just before speaking
       if (say && ch) ch.send(`🔊 **${NAME}:** ${say}`).catch(() => {});
       if (mp3) await voice.speak(guildId, mp3);
-      voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open/extend the follow-up window
+      if (VOICE_WINDOW_MS > 0) voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open the follow-up window (strict mode: never)
     } catch (e) { voice.stopDrone(guildId); ctx.log(`[voice] reply failed: ${e.message}`); if (ch) ch.send(`⚠️ voice reply failed: ${e.message}`).catch(() => {}); }
     finally { voiceBusy.delete(guildId); }
   }
