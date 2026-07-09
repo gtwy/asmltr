@@ -38,14 +38,30 @@ async function getOpenAIClient() {
   return _openai;
 }
 
-// pull the JSON object out of a model reply (tolerates code fences / surrounding prose)
+// Pull the JSON object out of a model reply. Tolerant of code fences, surrounding prose, a
+// SECOND object/prose after the first, braces inside string values, and trailing commas —
+// the naive first-`{`…last-`}` slice mangled all of these and fail-secure-BLOCKED legit users.
 function extractJson(t) {
-  const s = t.indexOf('{'), e = t.lastIndexOf('}');
-  return JSON.parse(s >= 0 && e > s ? t.slice(s, e + 1) : t);
+  if (t == null || t === '') throw new Error('empty moderation response');
+  const s = String(t).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const start = s.indexOf('{');
+  if (start < 0) throw new Error('no JSON object in moderation response');
+  // Brace-count the FIRST complete top-level object, respecting strings + escapes.
+  let depth = 0, inStr = false, esc = false, end = -1;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; }
+    else if (ch === '"') inStr = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}' && --depth === 0) { end = i; break; }
+  }
+  const body = (end > start ? s.slice(start, end + 1) : s.slice(start)).replace(/,\s*([}\]])/g, '$1');
+  return JSON.parse(body);
 }
 
-// Run the moderation classifier via the configured provider; returns the parsed assessment.
-async function runModeration(systemPrompt, userPrompt) {
+// Raw provider call → the model's reply text (unparsed). jsonMode asks OpenAI for a guaranteed
+// JSON object (its models require the word "json" somewhere in the messages — the prompts have it).
+async function providerRaw(systemPrompt, userPrompt, jsonMode) {
   if (MOD_PROVIDER === 'anthropic') {
     const key = await getModKey();
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -60,15 +76,33 @@ async function runModeration(systemPrompt, userPrompt) {
     });
     if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const j = await r.json();
-    return extractJson((j.content || []).map((b) => b.text || '').join('').trim());
+    return (j.content || []).map((b) => b.text || '').join('').trim();
   }
-  // openai (default)
   const client = await getOpenAIClient();
-  const completion = await client.chat.completions.create({
-    model: MOD_MODEL,
-    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-  });
-  return extractJson(completion.choices[0].message.content.trim());
+  const params = { model: MOD_MODEL, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] };
+  if (jsonMode) params.response_format = { type: 'json_object' };
+  const completion = await client.chat.completions.create(params);
+  return (completion.choices[0].message.content || '').trim();
+}
+
+// Run the classifier; returns the parsed assessment. Deterministic JSON on OpenAI + a single
+// retry so an occasional malformed reply no longer fail-secure-blocks a legitimate request.
+async function runModeration(systemPrompt, userPrompt) {
+  let jsonMode = MOD_PROVIDER !== 'anthropic';
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let raw;
+    try {
+      raw = await providerRaw(systemPrompt, userPrompt, jsonMode);
+    } catch (err) {
+      // A model that rejects response_format → drop json mode and retry, don't hard-fail.
+      if (jsonMode && /response_format|json/i.test(err.message)) { jsonMode = false; continue; }
+      throw err;
+    }
+    try { return extractJson(raw); }
+    catch (parseErr) {
+      if (attempt === 2) { console.error('[moderation] unparseable after retry:', String(raw).slice(0, 200)); throw parseErr; }
+    }
+  }
 }
 
 const NAME = process.env.ASSISTANT_NAME || 'the assistant';
