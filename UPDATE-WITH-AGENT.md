@@ -56,6 +56,36 @@ done
 
 ---
 
+## 3b. Re-read `INSTALL-WITH-AGENT.md` — backfill any install-time pieces this machine is missing
+
+A code update can introduce **new install-time steps** that a fresh install would perform but an
+existing install has never run — a new agent skill to link, a new required CLI/symlink, a new service
+or connector type, a new setup step. These won't appear from `git reset` alone.
+
+**Every update, re-read `INSTALL-WITH-AGENT.md` and its Completion checklist, and reconcile:** for each
+step/checklist item, confirm this machine already satisfies it; if something is new or missing, perform
+it now (idempotently). See what changed since your last version to focus the diff:
+
+```bash
+git diff <recorded-commit> HEAD -- INSTALL-WITH-AGENT.md    # new/changed install steps this update
+```
+
+Common backfills:
+
+```bash
+# asmltr on PATH (step 7) — ensure it's still linked
+command -v asmltr >/dev/null || ln -sf "$(pwd)/cli/asmltr.js" /usr/local/bin/asmltr
+
+# asmltr agent skill (step 7b) — link/refresh so the agent has the current command surface
+mkdir -p ~/.claude/skills && ln -sfn "$(pwd)/skills/asmltr" ~/.claude/skills/asmltr
+```
+
+(The skill is a **symlink** into the repo, so its content updates for free with the code — you only need
+to (re)create the link if it's missing.) Do this reconciliation on every update; treat the install doc's
+checklist as the source of truth for "what a complete install has."
+
+---
+
 ## 4. Restart the services — **detached** (do NOT restart inline)
 
 > ⚠️ **Critical if you were asked to update yourself over a channel (Discord/Telegram/etc.).**

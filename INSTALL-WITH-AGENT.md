@@ -177,6 +177,23 @@ asmltr ls      # list active sessions (or: node cli/asmltr.js ls)
 `asmltr` (no args) opens the full live TUI dashboard (sessions + event log + system); `asmltr --help`
 lists commands. Confirm `asmltr ls` runs without error before moving on.
 
+### 7b. Install the asmltr agent skill (so THIS machine's agent knows how to drive asmltr)
+
+The repo ships a generic, identity-neutral skill at `skills/asmltr/` that teaches an AI coding agent
+the whole `asmltr` command surface (send/route, email send+browse, uploads, drafts, announce,
+monitor, takeover). Symlink it into the agent's skills directory so it's always in sync with the repo:
+
+```bash
+# Claude Code default skills dir is ~/.claude/skills — adjust if this agent uses another path.
+mkdir -p ~/.claude/skills
+ln -sfn "$(pwd)/skills/asmltr" ~/.claude/skills/asmltr
+```
+
+Do NOT create per-capability skills for individual channels (email, send, …) — this one generic
+skill covers them all and is updated in lockstep with the code. Any **install-specific** policy
+(the identity/signature to send as, which senders are trusted) belongs in this machine's own agent
+context (e.g. `CLAUDE.md`), NOT in the shipped skill.
+
 ## 8. Verify it's live end-to-end
 
 ```bash
@@ -282,6 +299,7 @@ install's local notes, so the update guide can detect later whether public authe
 - [ ] all three services online under PM2 (`pm2 ls` shows asmltr-core, asmltr-connector-manager, asmltr-insights-collector) and `curl 127.0.0.1:3023/health` is ok
 - [ ] one instance per requested channel created, and its logs show started/online (step 8)
 - [ ] **`asmltr ls` runs** (the CLI/TUI is installed and on PATH, or the fallback command is documented for the user)
+- [ ] **asmltr agent skill linked** (step 7b: `~/.claude/skills/asmltr` → `skills/asmltr`) so the agent knows the command surface
 - [ ] a real test message got a reply
 - [ ] **web GUI decision made** (step 9): either deployed (local-only or public-behind-auth) or the user
       explicitly declined — never left publicly reachable without authentication
