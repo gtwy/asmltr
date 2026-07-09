@@ -194,24 +194,25 @@ async function cmdRelease(key) {
 }
 
 async function cmdSend(rest) {
-  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."]
-  let file = null, caption = null;
+  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."]
+  let file = null, caption = null, subject = null;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === '--file') file = rest[++i];
     else if (t === '--caption') caption = rest[++i];
+    else if (t === '--subject') subject = rest[++i]; // email subject (ignored by channels without one)
     else words.push(t);
   }
   const channel = words[0], target = words[1], text = words.slice(2).join(' ');
   if (!channel || !target || (!text && !file)) {
     throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
-      '       asmltr send <channel> <target> --file <path> [--caption "<text>"]\n' +
-      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send discord 123 --file ~/report.pdf --caption "the report"');
+      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"]\n' +
+      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@b.com "the body" --subject "Hello" --file ~/report.pdf');
   }
   const body = file
-    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined) }
-    : { channel, target, kind: 'text', text };
+    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject }
+    : { channel, target, kind: 'text', text, subject };
   const headers = { 'Content-Type': 'application/json' };
   if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
   const r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) })
@@ -376,6 +377,7 @@ function cmdHelp() {
   ${A.bold('cross-channel:')}
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
+       ... --subject "<subj>"           set the subject (email)
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
   asmltr announcements                 list live announcements (with timestamps)

@@ -135,8 +135,14 @@ app.delete('/instances/:id', requireToken, (req, res) => {
   res.json({ ok: true });
 });
 
+// Attachment-kind taxonomy + the canonical "can this connector send a file out?" flag. A type
+// supports outbound attachments iff its meta.outbound.kinds lists any attachment kind. Used to
+// gate `--file` sends and surfaced on /send/targets so callers know before they try.
+const ATTACH_KINDS = ['file', 'photo', 'document'];
+const supportsAttachments = (meta) => !!(meta && meta.outbound && (meta.outbound.kinds || []).some((k) => ATTACH_KINDS.includes(k)));
+
 // --- unified outbound: route a message OUT through a connector instance --------
-// POST /send { channel|instance_id, target, kind?, text?, path?, caption? }
+// POST /send { channel|instance_id, target, kind?, text?, path?, caption?, subject?, ref? }
 async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, ref }) {
   const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
@@ -144,6 +150,12 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   if (!inst) return { ok: false, status: 404, error: 'no connector instance for that channel/instance_id' };
   const meta = TYPES[inst.type];
   if (!meta || !meta.outbound) return { ok: false, status: 400, error: `type '${inst.type}' has no outbound capability` };
+  // Outbound file-attachment capability: a connector must DECLARE it supports an attachment kind
+  // (file/photo/document in meta.outbound.kinds) before we route a file to it — a clean, honest
+  // "this channel can't attach files" instead of a confusing failure inside the connector.
+  if (ATTACH_KINDS.includes(kind) && !supportsAttachments(meta)) {
+    return { ok: false, status: 400, error: `type '${inst.type}' does not support outbound file attachments` };
+  }
   const port = inst.config && inst.config.http_port;
   if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port` };
   try {
@@ -184,7 +196,7 @@ async function drainAnnouncements() {
 // list outbound-capable destinations (for the skill / dashboard)
 app.get('/send/targets', requireToken, (req, res) => {
   const dests = registry.list().filter((i) => TYPES[i.type] && TYPES[i.type].outbound)
-    .map((i) => ({ instance_id: i.id, channel: i.type, name: i.name, enabled: i.enabled, outbound: TYPES[i.type].outbound }));
+    .map((i) => ({ instance_id: i.id, channel: i.type, name: i.name, enabled: i.enabled, outbound: TYPES[i.type].outbound, attachments: supportsAttachments(TYPES[i.type]) }));
   res.json({ targets: dests });
 });
 
