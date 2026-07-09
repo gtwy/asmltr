@@ -117,16 +117,16 @@ const _statusLast = new Map(); // session_id -> last status-gen time (unix sec)
 let _statusChain = Promise.resolve();
 function recentActivity(sid) {
   try {
+    // Only the USER request + the TOOLS run — the honest signal for "what is it doing". We
+    // deliberately EXCLUDE the assistant's own first-person narration/thinking, which the summarizer
+    // otherwise echoes back ("Let me check…" / "I'll…") instead of producing a third-person label.
     const rows = dbmod.db.prepare(
-      "SELECT event_type, payload FROM events WHERE session_id=? AND event_type IN ('inbound','outbound','tool','thinking') ORDER BY ts DESC LIMIT 16"
+      "SELECT event_type, payload FROM events WHERE session_id=? AND event_type IN ('inbound','tool') ORDER BY ts DESC LIMIT 18"
     ).all(sid);
     return rows.reverse().map((r) => {
       let p = {}; try { p = JSON.parse(r.payload); } catch {}
-      if (r.event_type === 'inbound') return `User: ${String(p.text || '').slice(0, 240)}`;
-      if (r.event_type === 'outbound') return `Assistant: ${String(p.text || '').slice(0, 240)}`;
-      if (r.event_type === 'tool') return `[ran tool ${p.tool || '?'}${p.input ? ': ' + String(typeof p.input === 'string' ? p.input : JSON.stringify(p.input)).slice(0, 120) : ''}]`;
-      if (r.event_type === 'thinking') return `(thinking: ${String(p.text || '').slice(0, 160)})`;
-      return '';
+      if (r.event_type === 'inbound') return `User request: ${String(p.text || '').slice(0, 240)}`;
+      return `ran ${p.tool || 'tool'}${p.input ? ': ' + String(typeof p.input === 'string' ? p.input : JSON.stringify(p.input)).slice(0, 120) : ''}`;
     }).filter(Boolean).join('\n');
   } catch { return ''; }
 }

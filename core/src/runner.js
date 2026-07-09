@@ -170,7 +170,15 @@ async function generateStatus(text) {
     'continue the work, do NOT run any tools, do NOT use the word "I". Reply with ONLY the phrase — no ' +
     'preamble, no quotes, no trailing punctuation.\n\n---\n' +
     String(text || '').slice(0, 4000);
-  const options = { stream: true, permissionMode: 'bypassPermissions', extraArgs: { 'dangerously-skip-permissions': true, model }, maxTurns: 1 };
+  const options = {
+    stream: true, permissionMode: 'bypassPermissions',
+    extraArgs: { 'dangerously-skip-permissions': true, model }, maxTurns: 1,
+    // Override the agentic persona — otherwise the model reads the activity log as ITS task and
+    // "continues" it in the first person ("I'll check…") instead of labeling it.
+    appendSystemPrompt: 'You are ONLY a text-labeling function. You never take actions, never use tools, ' +
+      'never speak in the first person, never continue or perform a task. You read a log of ANOTHER ' +
+      'agent\'s activity and output a single short third-person label of what it is doing. Nothing else.',
+  };
   let out = '';
   const response = await query({ prompt, options });
   for await (const ev of response) {
@@ -178,6 +186,9 @@ async function generateStatus(text) {
     else if (ev.type === 'result' && ev.result && !out) out += ev.result;
   }
   let s = out.replace(/["'`]+/g, '').replace(/\s+/g, ' ').trim().split('\n')[0].replace(/[.:;,\s]+$/, '');
+  // Defensive: if a first-person continuation still leaks through, strip the lead-in.
+  s = s.replace(/^(let me|i['’]?ll|i['’]?ve|i['’]?m|i am|i will|i need to|i should|i)\s+/i, '');
+  s = s.charAt(0).toUpperCase() + s.slice(1);
   if (s.length > 80) s = s.slice(0, 80).replace(/\s+\S*$/, ''); // trim to a word boundary, not mid-word
   return s;
 }

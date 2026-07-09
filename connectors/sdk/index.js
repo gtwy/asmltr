@@ -40,6 +40,12 @@ const { buildEvent } = require('../../shared/events');
 function makeCoreClient(coreUrl) {
   const u = new URL(coreUrl);
   const lib = u.protocol === 'https:' ? https : http;
+  // Idle-socket timeout so a DROPPED core connection (e.g. the core restarting mid-turn) can't
+  // leave a request pending forever — which strands the connector's per-channel lock and "hangs"
+  // the assistant on that channel. Generous, and reset by any socket activity, so long streaming
+  // turns (which emit data) are unaffected; a genuinely silent turn beyond this is treated as dead.
+  const REQ_TIMEOUT = Number(process.env.ASMLTR_CORE_TIMEOUT_MS || 15 * 60 * 1000);
+  const guard = (req) => { req.setTimeout(REQ_TIMEOUT, () => req.destroy(new Error('core request timed out (connection dropped?)'))); };
   return {
     handle(envelope) {
       return new Promise((resolve, reject) => {
@@ -62,6 +68,7 @@ function makeCoreClient(coreUrl) {
           });
         });
         req.on('error', reject);
+        guard(req);
         req.write(payload);
         req.end();
       });
@@ -103,6 +110,7 @@ function makeCoreClient(coreUrl) {
           res.on('end', () => { if (!settled) resolve([]); });
         });
         req.on('error', reject);
+        guard(req);
         req.write(payload);
         req.end();
       });
@@ -129,6 +137,7 @@ function makeCoreClient(coreUrl) {
           });
         });
         req.on('error', reject);
+        guard(req);
         req.write(payload);
         req.end();
       });
