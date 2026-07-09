@@ -320,12 +320,25 @@ RESPONSE RULES:
     return clamped.split('\n').map(l => '-# ' + (l.trim() ? l : '​')).join('\n').slice(0, 1900);
   }
   function splitResponse(text, max = 1900) {
+    // Pack paragraphs into <=max chunks AND hard-split any single paragraph longer than max
+    // (e.g. a big code block with no blank lines) — otherwise it goes out as one >2000-char
+    // message and Discord rejects it with "Invalid Form Body".
     const chunks = []; let cur = '';
-    for (const para of text.split('\n\n')) {
-      if ((cur + para).length > max) { if (cur) chunks.push(cur.trim()); cur = para; }
-      else cur += (cur ? '\n\n' : '') + para;
+    const flush = () => { const t = cur.trim(); if (t) chunks.push(t); cur = ''; };
+    for (let para of String(text || '').split('\n\n')) {
+      while (para.length > max) {
+        flush();
+        let cut = para.lastIndexOf('\n', max);          // prefer a line boundary
+        if (cut <= 0) cut = para.lastIndexOf(' ', max);  // else a word boundary
+        if (cut <= 0) cut = max;                         // else a hard cut
+        const piece = para.slice(0, cut).trim();
+        if (piece) chunks.push(piece);
+        para = para.slice(cut);
+      }
+      if ((cur + '\n\n' + para).length > max) flush();
+      cur += (cur ? '\n\n' : '') + para;
     }
-    if (cur) chunks.push(cur.trim());
+    flush();
     return chunks;
   }
 
@@ -399,23 +412,30 @@ RESPONSE RULES:
         system_prompt_extra: buildSystemExtra(message, context, forced),
       };
 
-      // Directly-addressed messages (mention / DM / forced) can't be [[NO_REPLY]], so it's safe to
-      // stream intermediary narration blocks to the thread LIVE. Passive multi-agent listening still
-      // uses the non-streaming path (the model may still decide it's not for us → nothing posts).
-      const addressed = forced || message.channel.type === 1 || message.mentions.has(client.user);
+      // Directly-addressed messages can't be [[NO_REPLY]], so it's safe to stream intermediary
+      // narration blocks to the thread LIVE. "Addressed" = @-mention, DM, forced, OR the message
+      // leads/trails with the assistant's NAME (addressesEve) — the common "Eve, do X" case that was
+      // previously falling back to the non-streaming path and dumping everything at the end. Passive
+      // multi-agent listening (name absent) still uses the non-streaming path.
+      const addressed = forced || message.channel.type === 1 || message.mentions.has(client.user)
+        || addressesEve(message.cleanContent || message.content || '');
       let replyText = '';
       if (streamSteps && addressed) {
-        let pending = ''; // most recent block; the LAST one is the final answer, earlier ones are steps
-        let chain = Promise.resolve(); // serialize sends so steps land in order
+        // Hold the latest narration block in `pending`; flush it as a live step the moment its
+        // boundary closes — either a tool call starts (the common case: post immediately, no lag)
+        // or a new narration block begins. The block still open at `done` is the final answer.
+        let pending = '', sawNoReply = false, chain = Promise.resolve();
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
-        const postStep = (t) => {
-          const clean = (t || '').trim();
-          if (!clean || clean.toUpperCase().includes(NO_REPLY.toUpperCase())) return;
+        const flushStep = () => {
+          const clean = (pending || '').trim(); pending = '';
+          if (!clean) return;
+          if (clean.toUpperCase().includes(NO_REPLY.toUpperCase())) { sawNoReply = true; return; }
+          if (sawNoReply) return;
           enqueue(() => message.channel.send(renderStep(clean)));
         };
         const actions = await ctx.core.handleStream(envelope, {
-          onSegment: (t) => { if (pending) postStep(pending); pending = t; }, // a new block ⇒ prior one was intermediary
-          onTool: streamTools ? (name) => enqueue(() => message.channel.send(`-# 🔧 \`${name}\``)) : undefined,
+          onSegment: (t) => { flushStep(); pending = t; },  // a new block ⇒ the prior one was intermediary
+          onTool: (name) => { flushStep(); if (streamTools) enqueue(() => message.channel.send(`-# 🔧 \`${name}\``)); }, // a tool ⇒ post the block NOW
         });
         await chain; // all step messages posted before the final answer
         const reply = actions.find(a => a.type === 'reply');
