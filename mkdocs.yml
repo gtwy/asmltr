@@ -85,6 +85,7 @@ nav:
     - Cross-channel send: coordination/cross-channel.md
     - Announcements: coordination/announcements.md
     - Session awareness: coordination/awareness.md
+  - Federation (exploration): FEDERATION.md
   - Security:
     - Trust & permissions: security/trust.md
     - Moderation: security/moderation.md
