@@ -158,6 +158,17 @@ async function handle(envelope, opts = {}) {
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n' +
       '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists live ones.\n' +
       'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
+    // Mesh steer is a COERCIVE verb — only advertise it when the operator has enabled it, and always
+    // teach the announce-vs-steer distinction so it's used deliberately, not reflexively.
+    if (/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
+      systemPrompt += '\n• `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]` — push guidance ' +
+        'directly into ANOTHER session\'s LIVE turn. This is fundamentally different from `announce`: **announce** ' +
+        'is an advisory note the other session sees on its NEXT turn and decides for itself whether to act on; ' +
+        '**steer** overrides what that session is doing RIGHT NOW and makes it act on your guidance (`--interrupt` ' +
+        'abandons its current turn; without it, your guidance is applied after the current turn finishes). Steer is ' +
+        'coercive — it spends the other session\'s turn. Use it sparingly for time-sensitive redirection; prefer ' +
+        'announce for everything else. Never steer a session into a loop (don\'t steer one that\'s steering you).';
+    }
     // If THIS channel supports attachments, tell the agent exactly how — so it never claims it can't.
     if (e.capabilities && e.capabilities.supports_attachments_out) {
       const chTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || '<this channel id>';
@@ -538,6 +549,14 @@ app.post('/v2/abort', (req, res) => {
 app.post('/v2/inject', (req, res) => {
   const { conversation_key: key, text, by, interrupt } = req.body || {};
   if (!key || !text) return res.status(400).json({ error: 'need conversation_key + text' });
+  // MESH STEER (`by: "mesh:<label>"`) = one SESSION steering another. Unlike the advisory `announce`
+  // mailbox (a note the peer sees next turn and decides whether to act on), a steer is COERCIVE — it
+  // pushes into a live turn. It's OFF by default; the operator opts in per instance with
+  // ASMLTR_MESH_STEER=on. Operator/dashboard steers (any other `by`) are always allowed.
+  const meshSteer = typeof by === 'string' && by.startsWith('mesh:');
+  if (meshSteer && !/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
+    return res.status(403).json({ error: 'mesh steer is disabled on this instance (set ASMLTR_MESH_STEER=on to allow session-to-session steering)' });
+  }
   const row = sessions.get(key);
   if (!row) return res.status(404).json({ error: 'unknown session' });
   // A steer QUEUES behind any in-flight turn (withKeyLock serializes per key) so the current
@@ -552,8 +571,9 @@ app.post('/v2/inject', (req, res) => {
     const { resume } = sessions.resolveForTurn(key, row.channel);
     // Mid-task steer → frame the text so the model continues its current work with this guidance
     // rather than answering it in isolation. Idle session → deliver it as a normal message.
+    const steerer = meshSteer ? `Peer session "${by.slice(5)}"` : 'Operator';
     const prompt = (wasRunning || interrupt)
-      ? `[Operator steering — you are mid-task. Incorporate the following guidance into the work you are ALREADY doing and continue it. Do NOT restart from scratch, and do NOT treat it as a standalone question to answer in isolation.]\n\n${text}`
+      ? `[${steerer} steering — you are mid-task. Incorporate the following guidance into the work you are ALREADY doing and continue it. Do NOT restart from scratch, and do NOT treat it as a standalone question to answer in isolation.]\n\n${text}`
       : text;
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;

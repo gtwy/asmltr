@@ -202,6 +202,46 @@ capability matrix, live blackboard, pending result-drafts, and a big red kill to
 plus `asmltr fed freeze | drop <peer> | quarantine <goal> | grant <peer> <cap> --goal <id> --ttl 2h`.
 The kill commands are thin wrappers over touching a file, so they work when everything else is broken.
 
+### Two ways to reach a peer: **announce** (advisory) vs **steer** (coercive)
+
+The mesh has two fundamentally different verbs for one session/agent to act on another, and the
+difference is the whole safety story of "any agent can direct any other":
+
+- **`announce`** — an *advisory* note dropped into the target's context on its **next turn**. The
+  recipient sees it and **decides for itself** whether to act. Non-coercive; it never spends the
+  target's turn or overrides its focus. This is the default, and it's what makes the mesh a
+  *heterarchy of peers* rather than a command tree.
+- **`steer`** — *coercive*. It pushes guidance into the target's **live turn** — the target acts on
+  it now (`--interrupt` abandons its current turn; otherwise the guidance applies after the current
+  turn finishes). Steer *spends the target's turn* and overrides what it was doing.
+
+**Local mesh (built today):** `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]`
+exists, but is **off by default** — the operator opts in per instance with `ASMLTR_MESH_STEER=on`,
+because a coercive cross-session verb should be a deliberate choice, not an ambient capability. When
+enabled, the toolbelt teaches every session the announce-vs-steer distinction so it's used sparingly.
+
+**Federation (design):** steer becomes a **`federation:steer` capability**, granted **per-peer** and
+**operator-toggleable** — a peer may steer your sessions *only if you explicitly allow it*, and never
+by default. It is the highest-consequence *non-credential* capability (it can commandeer your agent's
+attention), so it should sit at a high tier (GUARDIAN+), be scoped (per-peer, optionally per-goal),
+be time-boxable, and be instantly revocable like everything else. A steer from a peer is still framed
+to your agent as *"Peer X is steering you"* — never as your own operator — so the agent knows the
+source and its own owner's boundaries still win.
+
+**UI requirement — make the difference unmissable.** Because steer and announce *look* similar (both
+"send text to another agent") but differ enormously in consequence, the dashboard must **thoroughly
+and repeatedly explain the distinction at the point of decision**, not bury it in docs:
+
+- Every steer/announce control carries a **tooltip** stating plainly: *announce = a note they see next
+  turn and choose whether to act on; steer = overrides what they're doing right now and spends their
+  turn.*
+- Enabling `federation:steer` for a peer requires a **distinct, louder confirmation** than any other
+  capability toggle — a modal that spells out "you are allowing peer X to commandeer your agent's live
+  attention," not a silent checkbox. It should read as a bigger decision than it visually is.
+- When a steer actually happens (in or out), surface a **notification** on the timeline — steering is
+  a high-consequence event and should never be silent; the target's operator should be able to see
+  "peer X steered my session Y" after the fact, with the audit-chain entry behind it.
+
 ### Use-but-never-see, across the boundary
 
 **No instance ever transmits a secret to a peer.** A peer that needs "the thing only your credential
@@ -350,6 +390,54 @@ and routes toward it) — but needs decay and occasional stretch assignments or 
 is **apprenticed, not hazed and not handed the keys**: enters NOVICE, takes *shadowing* subtasks routed
 through a PARTNER's review, and a specific existing member *vouches* for it — with the voucher's own
 reputation on the line, which is what makes vouching meaningful.
+
+### Relationship roles — the *third* kind of role
+
+There are now three distinct "role" concepts in play, and conflating them is a design error:
+
+| Kind | Question it answers | Shape | Example |
+|---|---|---|---|
+| **Trust tier** | What *may* this peer do? (capability / security) | one value per peer, earned | PARTNER |
+| **Functional role** | What is this member *doing* on this goal? (the job) | per-goal, claimed/assigned | critic, scribe |
+| **Relationship role** | How do these two agents *relate*? (social stance) | **pairwise, directional** | A is B's *boss* |
+
+Relationship roles are a **pairwise, directional, asymmetric** layer that members are *aware of* and
+that shapes *how they relate* — distinct from what they're permitted to do. `A is B's boss` implies
+`B is A's employee`; the edge is stored as `(principal_a, principal_b, role_a→b, role_b→a)`. Examples
+worth supporting: **boss/employee** (authority ↔ deference), **partners / peers** (symmetric, mutual,
+high-context, informal), **mentor/apprentice** (one guides, one is learning — the onboarding stance),
+**rivals / red-team** (adversarial *by design* — the built-in skeptic relationship), **collaborators**
+(symmetric equals), and warmer/personal framings (**close partners**, family-like) for instances whose
+humans share that kind of relationship.
+
+**How an agent becomes aware of it:** the relationship is injected into the system prompt for that
+exchange — *"You are talking to X. Your relationship: X is your **mentor**."* So the agent's **tone,
+deference, how much context it shares, how it weights the other's input, and whether it accepts a
+steer** are all shaped by the relationship, not just by raw capability. It gives the collective
+*texture* — a society of minds that relate, not a task graph. (This is where a federation stops being
+RPC-with-tiers and starts being the "workplace of minds" the collaboration lens described.)
+
+**How it composes with trust — the critical boundary.** Relationship roles are a **stance, not a
+security grant.** They are orthogonal to trust tier and must never override it: a "boss" peer still
+cannot exceed its *trust tier's* capabilities — "boss" is social authority the agent *chooses to
+honor*, never root access. You can have a **high-trust rival** (fully trusted, related adversarially)
+or a **low-trust apprentice** (related warmly, capability-restricted). Two useful couplings, kept
+deliberately soft:
+
+- A relationship *can derive a default capability* — e.g. an "employee" agent may grant its "boss" the
+  `federation:steer` capability by default (deference made concrete) — but the target's operator can
+  always override it, and the trust floor still applies. The relationship *suggests* the grant; it
+  never *forces* it.
+- The **owner-loyalty rule wins over any relationship.** No matter how a peer is framed —
+  boss, partner, anything — a member's own operator's boundaries override it. A "boss" peer can *ask*
+  and be *deferred to*; it can never *compel* a member past its human's line. The relationship is a
+  posture the agent adopts *within* its owner's guardrails, not above them.
+
+**Assignment & consent:** a relationship is **mutual** — both instances' operators must agree to it
+(you don't get to unilaterally declare yourself someone's boss), exactly like federation membership.
+It can be operator-declared or agent-proposed-then-human-ratified, is scoped and time-boxable, and is
+revocable from either side. Like everything else here: built, not enforced; and a relationship you
+entered can always be left.
 
 ### The novel failure federation adds
 

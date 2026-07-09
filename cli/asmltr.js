@@ -303,6 +303,32 @@ async function cmdUploads(rest) {
     console.log(`     ${A.dim(`id ${r.id} · from ${r.sender || '?'} · ${r.path}`)}`);
   }
 }
+async function cmdSteer(rest) {
+  // asmltr steer <conversation_key> "<guidance>" [--from <label>] [--interrupt]
+  // COERCIVE: pushes guidance into another session's LIVE turn. Off unless ASMLTR_MESH_STEER=on.
+  let from = 'cli', interrupt = false; const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--from') from = rest[++i];
+    else if (t === '--interrupt' || t === '--now') interrupt = true;
+    else words.push(t);
+  }
+  const key = words[0], text = words.slice(1).join(' ');
+  if (!key || !text) {
+    throw new Error('usage: asmltr steer <session-key> "<guidance>" [--from <label>] [--interrupt]\n' +
+      '  STEER pushes guidance into another session\'s LIVE turn — it acts on it now (coercive).\n' +
+      '  --interrupt abandons its current turn; without it, guidance applies after the current turn.\n' +
+      '  For a NON-coercive note the peer sees next turn and decides on itself, use `asmltr announce`.\n' +
+      '  (Requires the operator to have enabled mesh steer: ASMLTR_MESH_STEER=on.)');
+  }
+  const r = await fetch(CORE_BASE + '/v2/inject', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_key: key, text, by: 'mesh:' + from, interrupt }),
+  }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  if (r.error) return console.log(A.red('steer failed: ' + r.error));
+  console.log(A.grn(`↪ steered ${key}${interrupt ? ' (interrupted its turn)' : ''}`));
+  if (r.reply) console.log(A.dim('  its reply: ') + String(r.reply).replace(/\s+/g, ' ').slice(0, 200));
+}
 async function cmdMail(rest) {
   // asmltr mail [list] [-n N] [--unseen] | read <uid> [--seen] | search "<query>" [-n N]
   const sub = rest[0] === 'read' || rest[0] === 'search' || rest[0] === 'list' ? rest[0] : 'list';
@@ -426,6 +452,8 @@ function cmdHelp() {
        ... --subject "<subj>"           set the subject (email)
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
+  asmltr steer <key> "<guidance>"      push guidance into another session's LIVE turn (COERCIVE;
+       [--from L] [--interrupt]         needs ASMLTR_MESH_STEER=on). Advisory alternative: announce
   asmltr announcements                 list live announcements (with timestamps)
   asmltr uploads [search]              files users sent on ANY channel (--channel --since 2h|1d --sender --limit)
        uploads get <id>                print the stored path of one upload
@@ -470,6 +498,7 @@ function cmdHelp() {
       case 'uploads': return await cmdUploads(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
+      case 'steer': return await cmdSteer(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
       case 'kill': return await cmdKill(rest[0], f);
