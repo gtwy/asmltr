@@ -40,7 +40,7 @@ const trust = require('./trust/store'); // unified auth/trust/capability framewo
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
-const { runTurn, generateTitle } = require('./runner');
+const { runTurn, generateTitle, generateStatus } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
 
@@ -519,6 +519,20 @@ app.post('/v2/title', async (req, res) => {
     res.json({ ok: true, title });
   } catch (e) { res.status(500).json({ error: e.message }); }
   finally { _titleBusy = false; }
+});
+
+// Live "what is this session doing right now" rollup — the rolling counterpart to /v2/title.
+let _statusBusy = false;
+app.post('/v2/status', async (req, res) => {
+  const text = req.body && req.body.text;
+  if (!text) return res.status(400).json({ error: 'need text' });
+  if (_statusBusy) return res.status(429).json({ error: 'busy' });
+  _statusBusy = true;
+  try {
+    const status = await generateStatus(text);
+    res.json({ ok: true, status });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+  finally { _statusBusy = false; }
 });
 
 // Cross-session announcement mailbox: post an awareness note delivered into other sessions'

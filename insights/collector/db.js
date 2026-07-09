@@ -24,6 +24,7 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   const cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
   if (!cols.includes('title')) db.exec('ALTER TABLE sessions ADD COLUMN title TEXT');
   if (!cols.includes('location')) db.exec('ALTER TABLE sessions ADD COLUMN location TEXT');
+  if (!cols.includes('activity')) db.exec('ALTER TABLE sessions ADD COLUMN activity TEXT'); // live "what it's doing now" rollup
 }
 
 const _insEvent = db.prepare(`
@@ -185,6 +186,8 @@ function reconcileUpsert(s) { _reconcileUpsert.run({ tmux_target: null, ...s });
 
 const _setTitle = db.prepare('UPDATE sessions SET title = ? WHERE session_id = ?');
 function setTitle(session_id, title) { _setTitle.run(title || null, session_id); }
+const _setActivity = db.prepare('UPDATE sessions SET activity = ? WHERE session_id = ?');
+function setActivity(session_id, activity) { _setActivity.run(activity || null, session_id); }
 const _setLocation = db.prepare('UPDATE sessions SET location = ? WHERE session_id = ?');
 const _getTitle = db.prepare('SELECT title FROM sessions WHERE session_id = ?');
 function getTitle(session_id) { const r = _getTitle.get(session_id); return r ? r.title : null; }
@@ -204,4 +207,4 @@ const insertSystemSample = db.transaction((s) => {
   });
 });
 
-module.exports = { db, ingestEvent, reconcileUpsert, setTitle, getTitle, insertSystemSample, q, DB_PATH };
+module.exports = { db, ingestEvent, reconcileUpsert, setTitle, getTitle, setActivity, insertSystemSample, q, DB_PATH };

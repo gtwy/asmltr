@@ -108,6 +108,49 @@ function maybeTitle(e) {
   else if (n % TITLE_EVERY === 0) queueTitle(sid, recentConvo(sid) || payloadText(e)); // periodic refresh
 }
 
+// --- live ACTIVITY rollup: "what is this session doing right now" ------------
+// The rolling counterpart to the title. Refreshed from recent activity (messages AND tools) at
+// most once per session per STATUS_MIN_SEC, triggered by inbound + tool events (so a session
+// grinding on a long multi-tool task updates mid-work, not just on a new message).
+const STATUS_MIN_SEC = Math.max(10, Number(process.env.ASMLTR_STATUS_REFRESH_SEC || 30));
+const _statusLast = new Map(); // session_id -> last status-gen time (unix sec)
+let _statusChain = Promise.resolve();
+function recentActivity(sid) {
+  try {
+    const rows = dbmod.db.prepare(
+      "SELECT event_type, payload FROM events WHERE session_id=? AND event_type IN ('inbound','outbound','tool','thinking') ORDER BY ts DESC LIMIT 16"
+    ).all(sid);
+    return rows.reverse().map((r) => {
+      let p = {}; try { p = JSON.parse(r.payload); } catch {}
+      if (r.event_type === 'inbound') return `User: ${String(p.text || '').slice(0, 240)}`;
+      if (r.event_type === 'outbound') return `Assistant: ${String(p.text || '').slice(0, 240)}`;
+      if (r.event_type === 'tool') return `[ran tool ${p.tool || '?'}${p.input ? ': ' + String(typeof p.input === 'string' ? p.input : JSON.stringify(p.input)).slice(0, 120) : ''}]`;
+      if (r.event_type === 'thinking') return `(thinking: ${String(p.text || '').slice(0, 160)})`;
+      return '';
+    }).filter(Boolean).join('\n');
+  } catch { return ''; }
+}
+function queueActivity(session_id, text) {
+  if (!text) return;
+  _statusChain = _statusChain.then(async () => {
+    try {
+      const r = await fetch(CORE_BASE + '/v2/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j && j.status) { dbmod.setActivity(session_id, j.status); io.emit('sessions-changed', {}); }
+    } catch (_) {}
+  }).catch(() => {});
+}
+function maybeActivity(e) {
+  if (!e || !e.session_id || e.surface === 'system') return;
+  if (e.event_type !== 'inbound' && e.event_type !== 'tool') return;
+  const sid = e.session_id;
+  const now = Date.now() / 1000;
+  if (now - (_statusLast.get(sid) || 0) < STATUS_MIN_SEC) return;
+  _statusLast.set(sid, now);
+  queueActivity(sid, recentActivity(sid));
+}
+
 // --- ingest ------------------------------------------------------------------
 app.post('/ingest', requireToken, (req, res) => {
   const body = req.body;
@@ -118,6 +161,7 @@ app.post('/ingest', requireToken, (req, res) => {
       const stored = dbmod.ingestEvent(e);
       io.emit('event', stored);
       maybeTitle(stored);
+      maybeActivity(stored);
       ok++;
     } catch (err) {
       return res.status(400).json({ error: err.message, ingested: ok });

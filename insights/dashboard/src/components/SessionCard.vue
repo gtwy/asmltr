@@ -25,6 +25,9 @@ const monitored = computed(() => props.channelState !== false) // default enable
 // the static "no active task" line so the card breathes.
 const ICON = { inbound: '▶', outbound: '◀', thinking: '💭', tool: '🔧', tool_result: '📥', moderation_decision: '🛡', control: '⚙', 'token-usage': '∑', 'session-start': '●' }
 const previewLine = computed(() => {
+  // Prefer the semantic "what it's doing right now" rollup (a cheap haiku status the collector
+  // keeps fresh) — the human-readable version of the raw last event below.
+  if (props.session.activity) return { icon: '›', text: String(props.session.activity) }
   const e = props.preview
   if (!e) return null
   const p = e._payload || {}

@@ -156,4 +156,30 @@ async function generateTitle(text) {
   return out.replace(/["'`]+/g, '').replace(/\s+/g, ' ').trim().split('\n')[0].replace(/[.:;,\s]+$/, '').slice(0, 60);
 }
 
-module.exports = { runTurn, generateTitle };
+/**
+ * Generate a LIVE one-line status of what a session is currently DOING (present tense) from its
+ * recent activity — the rolling counterpart to generateTitle (title = stable topic; status = what
+ * it's doing now). Cheap haiku call. The collector shows it on the dashboard cards. Returns ≤80 chars.
+ */
+async function generateStatus(text) {
+  const model = process.env.ASMLTR_STATUS_MODEL || process.env.ASMLTR_TITLE_MODEL || 'haiku';
+  const prompt =
+    'Give a concise 3-8 word phrase, starting with an -ing verb, that summarizes what the assistant is ' +
+    'CURRENTLY working on in the following activity — e.g. "Debugging the email connector", "Testing the ' +
+    'Discord streaming fix", "Waiting for user approval". This is a SUMMARY of past activity: do NOT ' +
+    'continue the work, do NOT run any tools, do NOT use the word "I". Reply with ONLY the phrase — no ' +
+    'preamble, no quotes, no trailing punctuation.\n\n---\n' +
+    String(text || '').slice(0, 4000);
+  const options = { stream: true, permissionMode: 'bypassPermissions', extraArgs: { 'dangerously-skip-permissions': true, model }, maxTurns: 1 };
+  let out = '';
+  const response = await query({ prompt, options });
+  for await (const ev of response) {
+    if (ev.type === 'assistant') for (const c of ev.message?.content || []) if (c.type === 'text') out += c.text;
+    else if (ev.type === 'result' && ev.result && !out) out += ev.result;
+  }
+  let s = out.replace(/["'`]+/g, '').replace(/\s+/g, ' ').trim().split('\n')[0].replace(/[.:;,\s]+$/, '');
+  if (s.length > 80) s = s.slice(0, 80).replace(/\s+\S*$/, ''); // trim to a word boundary, not mid-word
+  return s;
+}
+
+module.exports = { runTurn, generateTitle, generateStatus };
