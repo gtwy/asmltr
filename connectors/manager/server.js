@@ -166,6 +166,29 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
 }
 app.post('/send', requireToken, async (req, res) => { const r = await deliver(req.body || {}); res.status(r.status).json(r); });
 
+// --- unified read: browse a READABLE connector's source (e.g. an email mailbox) ---------
+// POST /read { channel|instance_id, op, ...args } → proxied to the connector's /read. Symmetric
+// with /send→/out. A connector must declare meta.readable (e.g. email: list|read|search).
+const isReadable = (meta) => !!(meta && meta.readable);
+async function readSource(body) {
+  const { channel, instance_id } = body || {};
+  const inst = instance_id ? registry.get(instance_id)
+    : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
+    : null;
+  if (!inst) return { ok: false, status: 404, error: 'no connector instance for that channel/instance_id' };
+  const meta = TYPES[inst.type];
+  if (!isReadable(meta)) return { ok: false, status: 400, error: `type '${inst.type}' is not readable (no browse capability)` };
+  const port = inst.config && inst.config.http_port;
+  if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port` };
+  try {
+    const { channel: _c, instance_id: _i, ...args } = body;
+    const r = await fetch(`http://127.0.0.1:${port}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    const j = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.ok ? 200 : 502, via: `${inst.type}:${inst.name}`, ...j };
+  } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }
+}
+app.post('/read', requireToken, async (req, res) => { const r = await readSource(req.body || {}); res.status(r.status).json(r); });
+
 // --- deferred announcements: queued now, delivered AFTER the next (re)start once the target
 // connector reconnects. Lets an agent that just triggered its OWN update (over a channel)
 // confirm completion in-channel, even though the restart killed the turn that issued it.
@@ -196,7 +219,7 @@ async function drainAnnouncements() {
 // list outbound-capable destinations (for the skill / dashboard)
 app.get('/send/targets', requireToken, (req, res) => {
   const dests = registry.list().filter((i) => TYPES[i.type] && TYPES[i.type].outbound)
-    .map((i) => ({ instance_id: i.id, channel: i.type, name: i.name, enabled: i.enabled, outbound: TYPES[i.type].outbound, attachments: supportsAttachments(TYPES[i.type]) }));
+    .map((i) => ({ instance_id: i.id, channel: i.type, name: i.name, enabled: i.enabled, outbound: TYPES[i.type].outbound, attachments: supportsAttachments(TYPES[i.type]), readable: isReadable(TYPES[i.type]) }));
   res.json({ targets: dests });
 });
 

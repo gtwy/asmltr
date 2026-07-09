@@ -303,6 +303,52 @@ async function cmdUploads(rest) {
     console.log(`     ${A.dim(`id ${r.id} · from ${r.sender || '?'} · ${r.path}`)}`);
   }
 }
+async function cmdMail(rest) {
+  // asmltr mail [list] [-n N] [--unseen] | read <uid> [--seen] | search "<query>" [-n N]
+  const sub = rest[0] === 'read' || rest[0] === 'search' || rest[0] === 'list' ? rest[0] : 'list';
+  const args = ['read', 'search', 'list'].includes(rest[0]) ? rest.slice(1) : rest;
+  let n = 20, unseen = false, markSeen = false; const words = [];
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (t === '-n' || t === '--limit') n = Number(args[++i]) || 20;
+    else if (t === '--unseen') unseen = true;
+    else if (t === '--seen') markSeen = true;
+    else words.push(t);
+  }
+  const post = (body) => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    return fetch(MANAGER_BASE + '/read', { method: 'POST', headers, body: JSON.stringify({ channel: 'email', ...body }) })
+      .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  };
+
+  if (sub === 'read') {
+    if (!words[0]) throw new Error('usage: asmltr mail read <uid> [--seen]');
+    const r = await post({ op: 'read', uid: Number(words[0]), markSeen });
+    if (!r.ok) return console.log(A.red(r.error || 'read failed'));
+    const m = r.message;
+    console.log(A.bold(`#${m.uid}  ${m.subject}`));
+    console.log(A.dim(`from ${m.from}${m.date ? '  ·  ' + new Date(m.date).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : ''}`));
+    console.log('\n' + (m.text || A.dim('(no text body)')) + '\n');
+    if (m.attachments && m.attachments.length) console.log(A.dim('📎 attachments (saved to uploads):\n   ' + m.attachments.map((a) => `${a.name} → ${a.path}`).join('\n   ')));
+    return;
+  }
+
+  const isSearch = sub === 'search';
+  const query = words.join(' ');
+  if (isSearch && !query) throw new Error('usage: asmltr mail search "<query>"');
+  const r = await post(isSearch ? { op: 'search', query, limit: n } : { op: 'list', limit: n, unseen });
+  if (!r.ok) return console.log(A.red(r.error || 'read failed'));
+  const msgs = r.messages || [];
+  if (!msgs.length) return console.log(A.dim(isSearch ? `no mail matches "${query}"` : (unseen ? 'no unseen mail' : 'inbox empty')));
+  console.log(A.bold(`${isSearch ? 'search: "' + query + '"' : 'inbox'} · ${msgs.length}${unseen ? ' unseen' : ''} (newest first):`));
+  for (const m of msgs) {
+    const dot = m.seen ? '  ' : A.grn('● ');
+    const when = m.date ? new Date(m.date).toISOString().slice(5, 16).replace('T', ' ') : '     ';
+    console.log(`  ${dot}${A.bold('#' + m.uid)}\t${A.dim(when)}  ${pad(m.from, 26)} ${m.subject}`);
+  }
+  console.log(A.dim('\n  read: asmltr mail read <uid>   ·   search: asmltr mail search "<q>"'));
+}
 async function cmdDrafts(rest) {
   // asmltr drafts [list] | show <id> | send <id> | discard <id>
   const sub = rest[0];
@@ -385,6 +431,8 @@ function cmdHelp() {
        uploads get <id>                print the stored path of one upload
   asmltr drafts                        replies held for your approval (any connector)
        drafts show <id> · send <id> · discard <id>
+  asmltr mail [list]                   browse the mailbox (-n N, --unseen)
+       mail read <uid> [--seen] · mail search "<q>"
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -421,6 +469,7 @@ function cmdHelp() {
       case 'announcements': return await cmdAnnouncements();
       case 'uploads': return await cmdUploads(rest);
       case 'drafts': return await cmdDrafts(rest);
+      case 'mail': return await cmdMail(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
       case 'kill': return await cmdKill(rest[0], f);

@@ -28,6 +28,7 @@ const meta = {
   type: 'email',
   displayName: 'Email (SMTP/IMAP)',
   outbound: { kinds: ['text', 'file'], target: { required: true, label: 'Recipient email address' } },
+  readable: { ops: ['list', 'read', 'search'] }, // the mailbox can be browsed on demand (agent-facing)
   capabilities: { max_message_chars: 100000, supports_markdown: false, supports_attachments_out: true },
   credentialKeys: ['user_bws_key', 'pass_bws_key'],
   configSchema: {
@@ -195,6 +196,76 @@ async function start(ctx) {
   }
   connectImap().catch((e) => ctx.log(`imap connect failed: ${e.message}`));
 
+  // --- mailbox READ/BROWSE (agent-facing) ------------------------------------
+  // A SEPARATE IMAP connection so browsing never perturbs the IDLE watcher's selected-mailbox
+  // state / UID cursor. Lazily connected, reused, reconnected on failure.
+  let readImap = null;
+  async function getReadImap() {
+    if (readImap && readImap.usable) return readImap;
+    const c = new ImapFlow({ host: cfg.imap_host, port: cfg.imap_port || 993, secure: true, auth: { user: address, pass: password }, logger: false });
+    c.on('error', () => {}); c.on('close', () => { if (readImap === c) readImap = null; });
+    await c.connect();
+    readImap = c; return c;
+  }
+  const summarize = (m) => {
+    const e = m.envelope || {};
+    const f = (e.from && e.from[0]) || {};
+    return { uid: m.uid, seq: m.seq, from: f.name || f.address || '?', address: f.address || '', subject: e.subject || '(no subject)', date: e.date || null, seen: m.flags ? m.flags.has('\\Seen') : true };
+  };
+  async function mailList({ mailbox, limit = 20, unseen }) {
+    const c = await getReadImap();
+    const lock = await c.getMailboxLock(mailbox || MAILBOX);
+    try {
+      const total = (c.mailbox && c.mailbox.exists) || 0;
+      if (!total) return [];
+      const items = [];
+      if (unseen) {
+        const uids = (await c.search({ seen: false }, { uid: true })) || [];
+        const pick = uids.slice(-limit);
+        if (pick.length) for await (const m of c.fetch({ uid: pick }, { envelope: true, flags: true, uid: true })) items.push(summarize(m));
+      } else {
+        const start = Math.max(1, total - limit + 1);
+        for await (const m of c.fetch(`${start}:*`, { envelope: true, flags: true, uid: true })) items.push(summarize(m));
+      }
+      return items.reverse(); // newest first
+    } finally { lock.release(); }
+  }
+  async function mailSearch({ query, mailbox, limit = 20 }) {
+    const c = await getReadImap();
+    const lock = await c.getMailboxLock(mailbox || MAILBOX);
+    try {
+      const uids = (await c.search({ or: [{ subject: query }, { from: query }, { body: query }] }, { uid: true })) || [];
+      const pick = uids.slice(-limit);
+      const items = [];
+      if (pick.length) for await (const m of c.fetch({ uid: pick }, { envelope: true, flags: true, uid: true })) items.push(summarize(m));
+      return items.reverse();
+    } finally { lock.release(); }
+  }
+  async function mailRead({ uid, mailbox, markSeen }) {
+    if (uid == null) throw new Error('uid required');
+    const c = await getReadImap();
+    const lock = await c.getMailboxLock(mailbox || MAILBOX);
+    try {
+      const msg = await c.fetchOne(String(uid), { source: true, uid: true }, { uid: true });
+      if (!msg) throw new Error(`no message with uid ${uid}`);
+      const parsed = await simpleParser(msg.source);
+      const attachments = [];
+      for (const a of parsed.attachments || []) {
+        if (!a.content) continue;
+        try {
+          const rec = ctx.uploads.save({ channel: 'email', instance: ctx.instanceId, buffer: a.content, filename: a.filename || `attachment-${Date.now()}`, mime: a.contentType, kind: 'document', caption: parsed.subject || '', sender: (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '', conversationKey: `email:${ctx.instanceId}:read` });
+          attachments.push({ name: rec.filename, path: rec.path, mime: rec.mime, size: rec.size });
+        } catch (_) {}
+      }
+      if (markSeen) { try { await c.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }); } catch (_) {} }
+      return {
+        uid, from: parsed.from && parsed.from.text, to: parsed.to && parsed.to.text,
+        subject: parsed.subject || '(no subject)', date: parsed.date || null, messageId: parsed.messageId || null,
+        text: (parsed.text || '').trim(), attachments,
+      };
+    } finally { lock.release(); }
+  }
+
   // --- outbound HTTP (/out — the manager's unified send calls this) ----------
   const app = express();
   app.use(express.json({ limit: '25mb' }));
@@ -210,10 +281,20 @@ async function start(ctx) {
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
+  // Mailbox browse (the manager's /read proxies here; op = list | read | search).
+  app.post('/read', async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (b.op === 'list') return res.json({ ok: true, messages: await mailList(b) });
+      if (b.op === 'search') return res.json({ ok: true, messages: await mailSearch(b) });
+      if (b.op === 'read') return res.json({ ok: true, message: await mailRead(b) });
+      return res.status(400).json({ ok: false, error: `unknown read op '${b.op}'` });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
   const httpServer = app.listen(PORT, BIND, () => ctx.log(`email outbound on ${BIND}:${PORT} (from ${address})`));
 
   return {
-    async stop() { stopped = true; try { if (imap) await imap.logout(); } catch (_) {} try { smtp.close(); } catch (_) {} await new Promise((r) => httpServer.close(() => r())); },
+    async stop() { stopped = true; try { if (imap) await imap.logout(); } catch (_) {} try { if (readImap) await readImap.logout(); } catch (_) {} try { smtp.close(); } catch (_) {} await new Promise((r) => httpServer.close(() => r())); },
     health() { return { address, mailbox: MAILBOX, policy, imap: !!(imap && imap.usable) }; },
   };
 }
