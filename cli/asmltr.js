@@ -126,6 +126,49 @@ async function cmdEvents(f) {
   console.log(A.dim(`\n${events.length} events`));
 }
 
+async function cmdContext(rest) {
+  // asmltr context <session-id> [-n <events>] [--full]
+  // A condensed, readable transcript + live status of one session, BY ID — the drill-down primitive:
+  // copy an id off the dashboard and hand this output to another session to "pull context from X".
+  let limit = 60, full = false; const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '-n' || t === '--limit') limit = Number(rest[++i]) || 60;
+    else if (t === '--full') full = true;
+    else words.push(t);
+  }
+  const id = words[0];
+  if (!id) throw new Error('usage: asmltr context <session-id> [-n <events>] [--full]\n' +
+    '  Condensed transcript + status of a session, by id (copy the id from the dashboard).\n' +
+    '  --full also includes tool inputs/outputs and thinking. Ideal to hand to another session.');
+  const { sessions } = await api('/api/sessions');
+  const s = (sessions || []).find((x) => x.session_id === id) || (sessions || []).find((x) => String(x.session_id).includes(id));
+  const sid = (s && s.session_id) || id;
+  const { events } = await api('/api/events?' + new URLSearchParams({ session: sid, limit: String(limit) }).toString());
+
+  console.log(A.bold('═ session ') + sid);
+  if (s) {
+    console.log('  ' + [paint(s.surface, s.surface), s.identity, s.working_dir, s.status && A.dim(s.status)].filter(Boolean).join(' · '));
+    if (s.title) console.log('  ' + A.dim('title:') + ' ' + s.title);
+    if (s.activity) console.log('  ' + A.dim('doing:') + ' ' + s.activity);
+    if (s.last_activity_unix) { const ms = s.last_activity_unix > 1e12 ? s.last_activity_unix : s.last_activity_unix * 1000; console.log('  ' + A.dim('last active: ' + ageOf(ms) + ' ago')); }
+  } else {
+    console.log(A.dim('  (session not in the live table — showing its recorded events)'));
+  }
+  const rows = (events || []).slice().reverse().filter((e) => ['inbound', 'outbound', 'tool', 'tool_result', 'thinking'].includes(e.event_type));
+  console.log(A.dim(`─ transcript · ${rows.length} events, oldest→newest ─`));
+  const cap = full ? 100000 : 500;
+  for (const e of rows) {
+    const p = parsePayload(e.payload) || {};
+    if (e.event_type === 'inbound') console.log(A.bold('User: ') + String(p.text || '').replace(/\s+/g, ' ').slice(0, cap));
+    else if (e.event_type === 'outbound') console.log(A.grn('Asst: ') + String(p.text || '').replace(/\s+/g, ' ').slice(0, cap));
+    else if (e.event_type === 'tool') console.log(A.dim('  · ' + (p.tool || 'tool') + (p.input ? ' ' + String(typeof p.input === 'object' ? JSON.stringify(p.input) : p.input).replace(/\s+/g, ' ').slice(0, full ? 2000 : 100) : '')));
+    else if (full && e.event_type === 'tool_result') console.log(A.dim('    ↳ ' + String(typeof p.output === 'object' ? JSON.stringify(p.output) : (p.output || '')).replace(/\s+/g, ' ').slice(0, 2000)));
+    else if (full && e.event_type === 'thinking') console.log(A.dim('  💭 ' + String(p.text || '').replace(/\s+/g, ' ').slice(0, 800)));
+  }
+  if (!full) console.log(A.dim('\n(--full adds tool i/o + thinking)'));
+}
+
 function printEvent(e) {
   const t = new Date(e.ts).toISOString().slice(11, 19);
   const pl = parsePayload(e.payload);
@@ -445,6 +488,8 @@ function cmdHelp() {
   asmltr events [..]     recent events  (--surface --identity --session --limit)
   asmltr tail            live global event stream
   asmltr watch <key>     live stream for one session
+  asmltr context <id>    condensed, readable transcript + status of a session by id
+       [-n <events>] [--full]         (hand this to another session to pull its context)
   asmltr system          current system metrics
   ${A.bold('cross-channel:')}
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
@@ -492,6 +537,7 @@ function cmdHelp() {
       case 'system': return await cmdSystem();
       case 'tail': return liveStream(null);
       case 'watch': return liveStream(rest[0]);
+      case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
       case 'announce': return await cmdAnnounce(rest);
       case 'announcements': return await cmdAnnouncements();

@@ -1,7 +1,16 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import { statusMeta, fmtAge, fmtNum, truncate } from '@/lib/format'
+
+// One-click copy of the session id (the conversation_key) — the id you hand to `asmltr context <id>`.
+const copied = ref(false)
+function copyId() {
+  const id = props.session.session_id
+  const done = () => { copied.value = true; setTimeout(() => (copied.value = false), 1200) }
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(id).then(done).catch(done)
+  else { try { const t = document.createElement('textarea'); t.value = id; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); done() } catch (_) {} }
+}
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -94,6 +103,11 @@ const claimLabel = computed(() => {
       </div>
       <div class="flex items-center gap-1.5 truncate font-mono text-[11px] text-slate-500" :title="session.session_id">
         <span class="truncate">{{ session.identity || session.session_id }}</span>
+        <button
+          class="shrink-0 rounded px-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
+          :title="copied ? 'Copied!' : 'Copy session id (for `asmltr context <id>`)'"
+          @click.stop="copyId"
+        >{{ copied ? '✓' : '⧉' }}</button>
         <span v-if="session.location" class="shrink-0 text-slate-600" :title="session.location">· 💬 {{ truncate(session.location, 30) }}</span>
       </div>
       <!-- live activity preview (falls back to task/context, then a hint) -->

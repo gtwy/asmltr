@@ -32,6 +32,15 @@ const scrollBox = ref(null)
 const key = computed(() => props.session.session_id)
 const st = computed(() => statusMeta(props.session.status))
 
+// One-click copy of the session id (hand it to `asmltr context <id>` to pull this session's context).
+const copied = ref(false)
+function copyId() {
+  const id = props.session.session_id
+  const done = () => { copied.value = true; setTimeout(() => (copied.value = false), 1200) }
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(id).then(done).catch(done)
+  else { try { const t = document.createElement('textarea'); t.value = id; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); done() } catch (_) {} }
+}
+
 // Merge the seeded history with any newer live events for THIS session that have
 // streamed into the store since we fetched (store.events is newest-first).
 const maxSeededTs = computed(() => (seeded.value.length ? seeded.value[seeded.value.length - 1].ts : 0))
@@ -158,6 +167,12 @@ async function doInject() {
         :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'"
         @click="$emit('toggle-channel', session.session_id)"
       >{{ channelBusy ? '…' : (monitored ? '● monitored' : '○ disabled') }}</button>
+      <button
+        type="button"
+        class="pill border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
+        :title="copied ? 'Copied!' : 'Copy session id — hand it to `asmltr context <id>`'"
+        @click="copyId"
+      >{{ copied ? '✓ copied' : '⧉ copy id' }}</button>
     </div>
 
     <!-- conversation history -->
