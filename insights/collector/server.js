@@ -151,6 +151,25 @@ function maybeActivity(e) {
   queueActivity(sid, recentActivity(sid));
 }
 
+// --- self-update awareness: periodically check origin/main; surface + optionally auto-run --------
+const selfUpdate = require('../../shared/update');
+const UPDATE_CHECK_MS = Math.max(60000, Number(process.env.ASMLTR_UPDATE_CHECK_MS || 15 * 60 * 1000));
+let _updateStatus = { available: false, behind: 0, checked_at: 0 };
+async function checkUpdates() {
+  try {
+    const s = await selfUpdate.getUpdateStatus();
+    const changed = s.available !== _updateStatus.available || s.behind !== _updateStatus.behind;
+    _updateStatus = { ...s, auto: selfUpdate.isAutoUpdate() };
+    if (changed) io.emit('update-status', _updateStatus);
+    if (s.available && selfUpdate.isAutoUpdate()) {
+      console.log(`[update] auto-update enabled and ${s.behind} commit(s) behind — triggering update session`);
+      try { await fetch(CORE_BASE + '/v2/update/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ by: 'auto-update' }) }); } catch (_) {}
+    }
+  } catch (_) {}
+}
+setInterval(checkUpdates, UPDATE_CHECK_MS).unref();
+setTimeout(checkUpdates, 8000); // initial check shortly after boot
+
 // --- ingest ------------------------------------------------------------------
 app.post('/ingest', requireToken, (req, res) => {
   const body = req.body;
@@ -175,6 +194,7 @@ app.get('/api/sessions', requireToken, (req, res) => {
   const rows = req.query.active === '1' ? dbmod.q.activeSessions.all() : dbmod.q.sessions.all({ limit: Number(req.query.limit) || 200 });
   res.json({ sessions: rows, count: rows.length });
 });
+app.get('/api/update-status', requireToken, (req, res) => res.json(_updateStatus));
 app.get('/api/events', requireToken, (req, res) => {
   const rows = dbmod.q.events.all({
     surface: req.query.surface || null,

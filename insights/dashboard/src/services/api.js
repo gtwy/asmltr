@@ -20,6 +20,7 @@ async function get(path, params) {
 
 export const api = {
   sessions: (params = { active: 1 }) => get('/sessions', params),
+  updateStatus: () => get('/update-status'),
   events: (params = {}) => get('/events', params),
   usage: (params = {}) => get('/usage', params),
   system: (params = {}) => get('/system', params),
@@ -56,6 +57,13 @@ export const control = {
   // interactive `asmltr claude` (tmux) sessions → collector send-keys (steer / interrupt)
   sendText: (session_id, text) => postCore('/api/control/send-keys', { session_id, text, enter: true }),
   sendKey: (session_id, keys) => postCore('/api/control/send-keys', { session_id, keys })
+}
+
+// Self-update on the CORE — check status (via collector), toggle auto, or run the update session.
+export const update = {
+  run: () => postCore('/v2/update/run', { by: 'dashboard' }),
+  getAuto: () => getCore('/v2/update/auto'),
+  setAuto: (enabled) => postCore('/v2/update/auto', { enabled }),
 }
 
 // Draft / approval queue on the CORE — replies any connector held for a human to approve.

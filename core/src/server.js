@@ -40,6 +40,7 @@ const trust = require('./trust/store'); // unified auth/trust/capability framewo
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
+const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
 const { runTurn, generateTitle, generateStatus } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -535,6 +536,20 @@ app.post('/v2/status', async (req, res) => {
   finally { _statusBusy = false; }
 });
 
+// --- self-update ------------------------------------------------------------
+app.get('/v2/update/status', async (req, res) => res.json(await selfUpdate.getUpdateStatus({ fetch: req.query.fetch !== '0' })));
+app.get('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.isAutoUpdate() }));
+app.post('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.setAutoUpdate(!!(req.body && req.body.enabled)) }));
+// Kick off a self-update: spawns a DETACHED agent session that runs UPDATE-WITH-AGENT.md and
+// restarts via restart-with-rollback.sh (auto-rollback on failure). Returns immediately.
+app.post('/v2/update/run', (req, res) => {
+  try {
+    const r = selfUpdate.spawnUpdateSession();
+    record({ surface: 'core', session_id: 'self-update', event_type: 'control', identity: (req.body && req.body.by) || 'operator', source: 'core', payload: { action: 'self-update-started', pid: r.pid } });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Cross-session announcement mailbox: post an awareness note delivered into other sessions'
 // context on their next turn. { text, target?, priority?, from?, ttl? (seconds) }
 app.post('/v2/announce', (req, res) => {
@@ -549,6 +564,17 @@ app.get('/v2/announcements', (req, res) => res.json({ announcements: sessions.li
 
 app.post('/v2/abort', (req, res) => {
   const key = req.body && req.body.conversation_key;
+  // The self-update session is a SEPARATE process (not core inFlight) — stop it via its kill file,
+  // which it polls between steps. Lets the existing overlay Stop button abort the update too.
+  if (typeof key === 'string' && key.startsWith('self-update')) {
+    try {
+      const os = require('os'), fsm = require('fs'), pth = require('path');
+      const f = pth.join(os.homedir(), '.asmltr', 'self-update.kill');
+      fsm.mkdirSync(pth.dirname(f), { recursive: true }); fsm.writeFileSync(f, 'kill ' + Date.now());
+    } catch (_) {}
+    record({ surface: 'core', session_id: key, event_type: 'control', identity: 'operator', source: 'core', payload: { action: 'abort-self-update' } });
+    return res.json({ ok: true, aborted: key, via: 'kill-file' });
+  }
   const ctrl = inFlight.get(key);
   if (!ctrl) return res.status(404).json({ ok: false, error: 'no in-flight turn for that conversation' });
   ctrl.abort();
