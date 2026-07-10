@@ -23,15 +23,24 @@ function discordChannel(sessionId) {
   const p = String(sessionId || '').split(':')
   return (p[0] === 'discord' && p[2] === 'channel') ? { instanceId: p[1], channelId: p[3] } : null
 }
+// the set of Discord connector instances currently visible (as a stable key so we can watch it)
+const discordInstanceKey = computed(() => {
+  const ids = new Set()
+  for (const s of store.sessions) { const d = discordChannel(s.session_id); if (d) ids.add(d.instanceId) }
+  return [...ids].sort().join(',')
+})
 async function loadChannelStates() {
-  const instanceIds = new Set()
-  for (const s of store.sessions) { const d = discordChannel(s.session_id); if (d) instanceIds.add(d.instanceId) }
+  const instanceIds = discordInstanceKey.value ? discordInstanceKey.value.split(',') : []
   const next = {}
   for (const id of instanceIds) {
     try { const r = await manager.channels(id); for (const c of (r.channels || [])) next[c.channel_id] = c.enabled } catch (_) {}
   }
   channelStates.value = next
 }
+// onMounted fires before the sessions have loaded (so no Discord instances are known yet and the
+// real per-channel states never get fetched — a disabled channel then looks enabled on refresh).
+// Re-load whenever the set of Discord instances appears/changes.
+watch(discordInstanceKey, (k) => { if (k) loadChannelStates() })
 async function toggleChannel(sessionId) {
   const d = discordChannel(sessionId)
   if (!d) return
