@@ -46,6 +46,10 @@ const meta = {
   // How the Access page presents identifiers for this surface (trust framework).
   identifierFormats: [{ surface: 'discord', label: 'Discord User ID', placeholder: '000000000000000000', pattern: '^\\d+$' }],
   outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. TD-TSD-main)' } },
+  // Per-unit monitoring on/off: the assistant sits in many Discord channels and decides when to
+  // chime in; each can be individually muted via the connector's /channels endpoint (no restart).
+  // The dashboard reads this to know a session is mutable (matching a channel_id in the roster).
+  mutable: { scope: 'channel', unit: 'channel', label: 'monitored channel', endpoint: 'channels' },
   configSchema: {
     type: 'object',
     required: ['bot_token_bws_key'],

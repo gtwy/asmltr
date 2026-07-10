@@ -16,19 +16,22 @@ const props = defineProps({
   session: { type: Object, required: true },
   now: { type: Number, default: () => Date.now() },
   preview: { type: Object, default: null }, // latest event for this session (live)
-  channelState: { type: Boolean, default: undefined }, // Discord channel monitored on/off
+  mutable: { type: Object, default: null }, // { instanceId, channelId, label } if this session's channel can be muted
+  channelState: { type: Boolean, default: undefined }, // monitored on/off for that channel
   channelBusy: { type: Boolean, default: false },
   searchSnippet: { type: String, default: '' } // why this card matched a content search
 })
 defineEmits(['open', 'toggle-channel'])
 
 const st = computed(() => statusMeta(props.session.status))
-// Discord channel sessions can be enabled/disabled for monitoring right from the card.
-const isDiscordChannel = computed(() => {
-  const p = String(props.session.session_id || '').split(':')
-  return p[0] === 'discord' && p[2] === 'channel'
-})
 const monitored = computed(() => props.channelState !== false) // default enabled
+// Tooltip spelling out exactly what the toggle does (capability-driven; only shows when mutable).
+const monitorTip = computed(() => {
+  const unit = props.mutable?.label || 'channel'
+  return monitored.value
+    ? `Monitored — the assistant reads this ${unit} and can respond autonomously. Click to mute (it stops reading & replying here; no restart).`
+    : `Muted — the assistant ignores this ${unit}. Click to resume monitoring it.`
+})
 
 // Live one-line preview of the most recent conversation/tool activity — replaces
 // the static "no active task" line so the card breathes.
@@ -184,18 +187,18 @@ const claimLabel = computed(() => {
       </span>
     </div>
 
-    <!-- footer: monitor toggle (Discord channels) + open details -->
+    <!-- footer: monitor toggle (mute-capable connectors, e.g. Discord channels) + open details -->
     <div class="mt-1 flex items-center justify-between border-t border-white/5 pt-3">
       <button
-        v-if="isDiscordChannel"
+        v-if="mutable"
         type="button"
         :disabled="channelBusy"
-        :title="monitored ? 'Monitoring this channel — click to disable (bot stops responding here)' : 'This channel is disabled — click to re-enable monitoring'"
+        :title="monitorTip"
         class="rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-40"
         :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-500 hover:text-slate-300'"
         @click.stop="$emit('toggle-channel', session.session_id)"
       >
-        {{ channelBusy ? '…' : (monitored ? '● monitored' : '○ disabled') }}
+        {{ channelBusy ? '…' : (monitored ? '● monitored' : '○ muted') }}
       </button>
       <span v-else></span>
       <button

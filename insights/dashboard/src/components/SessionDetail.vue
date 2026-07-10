@@ -17,6 +17,7 @@ import SurfaceBadge from './SurfaceBadge.vue'
 const props = defineProps({
   session: { type: Object, required: true },
   now: { type: Number, default: () => Date.now() },
+  mutable: { type: Object, default: null }, // { instanceId, channelId, label } if this session's channel can be muted
   channelState: { type: Boolean, default: undefined },
   channelBusy: { type: Boolean, default: false }
 })
@@ -37,11 +38,13 @@ const st = computed(() => statusMeta(sess.value.status))
 const isWeb = computed(() => String(key.value || '').startsWith('web:'))
 const isCli = computed(() => sess.value.multiplexer === 'tmux')
 const attachCmd = computed(() => (isCli.value && sess.value.tmux_target ? `tmux attach -t ${sess.value.tmux_target}` : null))
-const isDiscordChannel = computed(() => {
-  const p = String(key.value || '').split(':')
-  return p[0] === 'discord' && p[2] === 'channel'
-})
 const monitored = computed(() => props.channelState !== false)
+const monitorTip = computed(() => {
+  const unit = props.mutable?.label || 'channel'
+  return monitored.value
+    ? `Monitored — the assistant reads this ${unit} and can respond autonomously. Click to mute (it stops reading & replying here; no restart).`
+    : `Muted — the assistant ignores this ${unit}. Click to resume monitoring it.`
+})
 
 // One-click copy of the session id.
 const copied = ref(false)
@@ -266,14 +269,14 @@ const placeholder = computed(() => {
       <span v-if="sess.tool_count" class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300">🛠 {{ fmtNum(sess.tool_count) }}</span>
       <span v-if="sess.last_activity_unix" class="text-slate-500">last {{ fmtAge(sess.last_activity_unix, now) }}</span>
       <button
-        v-if="isDiscordChannel"
+        v-if="mutable"
         type="button"
         :disabled="channelBusy"
-        :title="monitored ? 'Monitoring this channel — click to disable' : 'Channel disabled — click to re-enable'"
+        :title="monitorTip"
         class="pill border transition-colors disabled:opacity-40"
         :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'"
         @click="$emit('toggle-channel', key)"
-      >{{ channelBusy ? '…' : (monitored ? '● monitored' : '○ disabled') }}</button>
+      >{{ channelBusy ? '…' : (monitored ? '● monitored' : '○ muted') }}</button>
       <button
         type="button"
         class="pill border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"

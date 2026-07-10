@@ -49,33 +49,47 @@ function startNew() {
   newOpen.value = false
 }
 
-// per-channel monitored state (Discord): channel_id -> enabled. Powers the card/detail toggle.
-const channelStates = ref({})
+// --- per-channel monitoring (capability-driven, not shape-parsed) ------------
+// A connector advertises `mutable` (Discord: per-channel on/off). We load which instances
+// support it + their channel roster, then a session is "mutable" iff its id references a
+// channel_id in that roster — so voice/DM/system sessions correctly have no toggle, and we
+// never hardcode a `discord:…:channel:…` shape.
+const muteInstances = ref({})  // instanceId -> mutable capability { scope,label,… }
+const channelStates = ref({})  // channel_id -> enabled
 const channelBusy = ref({})
-function discordChannel(sessionId) {
-  const p = String(sessionId || '').split(':')
-  return (p[0] === 'discord' && p[2] === 'channel') ? { instanceId: p[1], channelId: p[3] } : null
+async function loadMuteState() {
+  try {
+    const r = await manager.instances()
+    const caps = {}
+    for (const i of (r.instances || [])) if (i.mutable) caps[i.id] = i.mutable
+    muteInstances.value = caps
+    const next = {}
+    for (const id of Object.keys(caps)) {
+      try { const c = await manager.channels(id); for (const ch of (c.channels || [])) next[ch.channel_id] = ch.enabled } catch (_) {}
+    }
+    channelStates.value = next
+  } catch (_) {}
 }
-// the set of Discord connector instances currently visible (as a stable key so we can watch it)
-const discordInstanceKey = computed(() => {
-  const ids = new Set()
-  for (const s of store.sessions) { const d = discordChannel(s.session_id); if (d) ids.add(d.instanceId) }
-  return [...ids].sort().join(',')
-})
-async function loadChannelStates() {
-  const instanceIds = discordInstanceKey.value ? discordInstanceKey.value.split(',') : []
-  const next = {}
-  for (const id of instanceIds) {
-    try { const r = await manager.channels(id); for (const c of (r.channels || [])) next[c.channel_id] = c.enabled } catch (_) {}
+// Resolve a session to its mutable unit: { instanceId, channelId, label } or null.
+function mutableChannel(sessionId) {
+  const parts = String(sessionId || '').split(':')
+  if (parts.length < 3) return null
+  const instanceId = parts[1]
+  const cap = muteInstances.value[instanceId]
+  if (!cap) return null
+  for (const seg of parts.slice(2)) {
+    if (Object.prototype.hasOwnProperty.call(channelStates.value, seg)) return { instanceId, channelId: seg, label: cap.label || 'channel' }
   }
-  channelStates.value = next
+  return null
 }
-// onMounted fires before the sessions have loaded (so no Discord instances are known yet and the
-// real per-channel states never get fetched — a disabled channel then looks enabled on refresh).
-// Re-load whenever the set of Discord instances appears/changes.
-watch(discordInstanceKey, (k) => { if (k) loadChannelStates() })
+// Precompute per visible session so the template doesn't recompute 3×/card.
+const mutableBySession = computed(() => {
+  const m = {}
+  for (const s of store.sessions) { const r = mutableChannel(s.session_id); if (r) m[s.session_id] = r }
+  return m
+})
 async function toggleChannel(sessionId) {
-  const d = discordChannel(sessionId)
+  const d = mutableChannel(sessionId)
   if (!d) return
   const cur = channelStates.value[d.channelId] !== false
   channelBusy.value = { ...channelBusy.value, [d.channelId]: true }
@@ -149,9 +163,9 @@ onMounted(() => {
   store.fetchSessions()
   store.fetchBrief()
   store.fetchEvents({ limit: 300 }) // seed the buffer so card previews render immediately
-  loadChannelStates()
+  loadMuteState()
   ticker = setInterval(() => (now.value = Date.now()), 1000)
-  chanTimer = setInterval(loadChannelStates, 15000) // refresh channel enabled/disabled state
+  chanTimer = setInterval(loadMuteState, 15000) // refresh mute-capable instances + channel enabled/disabled state
 })
 onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
 </script>
@@ -274,7 +288,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         v-if="ephemeral.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
+        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :mutable="mutableBySession[s.session_id]" :channel-state="channelStates[mutableBySession[s.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[s.session_id]?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No ephemeral sessions right now.
@@ -292,7 +306,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         v-if="persistent.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :channel-state="channelStates[discordChannel(s.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(s.session_id)?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
+        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :mutable="mutableBySession[s.session_id]" :channel-state="channelStates[mutableBySession[s.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[s.session_id]?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No persistent daemons registered.
@@ -300,6 +314,6 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
     </section>
 
     <!-- conversation details + takeover pane -->
-    <SessionDetail v-if="selected" :session="selected" :now="now" :channel-state="channelStates[discordChannel(selected.session_id)?.channelId]" :channel-busy="channelBusy[discordChannel(selected.session_id)?.channelId]" @close="selected = null" @toggle-channel="toggleChannel" />
+    <SessionDetail v-if="selected" :session="selected" :now="now" :mutable="mutableBySession[selected.session_id]" :channel-state="channelStates[mutableBySession[selected.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[selected.session_id]?.channelId]" @close="selected = null" @toggle-channel="toggleChannel" />
   </div>
 </template>

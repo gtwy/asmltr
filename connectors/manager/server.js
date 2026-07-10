@@ -66,7 +66,9 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-conne
 app.get('/types', requireToken, (req, res) => res.json({ types: Object.values(TYPES) }));
 
 app.get('/instances', requireToken, (req, res) => {
-  res.json({ instances: registry.list().map((i) => ({ ...i, runtime: supervisor.status(i.id) })) });
+  // Surface each type's capabilities so the dashboard doesn't hardcode them: `mutable`
+  // declares the connector supports per-unit monitoring on/off (e.g. Discord per channel).
+  res.json({ instances: registry.list().map((i) => ({ ...i, runtime: supervisor.status(i.id), mutable: (TYPES[i.type] && TYPES[i.type].mutable) || null })) });
 });
 app.get('/instances/:id', requireToken, (req, res) => {
   const i = registry.get(req.params.id);
