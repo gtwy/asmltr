@@ -1,4 +1,6 @@
-# asmltr
+<p align="center"><img src="assets/asmltr-logo.svg" alt="asmltr" width="120"/></p>
+
+<h1 align="center">asmltr</h1>
 
 **One channel-agnostic backend behind every chat surface for a single AI assistant — with a live insights dashboard.**
 
