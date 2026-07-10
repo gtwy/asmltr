@@ -184,6 +184,7 @@ async function cmdSystem() {
   console.log(A.bold('system') + A.dim(`  (${ageOf(s.ts)} ago)`));
   console.log(`  cpu   : ${s.cpu_pct}%   load ${s.load1}/${s.load5}`);
   console.log(`  mem   : ${s.mem_used_mb}/${s.mem_total_mb} MB`);
+  if (s.swap_total_mb) console.log(`  swap  : ${s.swap_used_mb}/${s.swap_total_mb} MB`);
   console.log(`  disk  : ${s.disk_used_pct}% used, ${s.disk_free_gb} GB free`);
 }
 

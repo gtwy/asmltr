@@ -45,11 +45,22 @@ function diskUsage() {
   });
 }
 
+// Swap from /proc/meminfo (Linux). Returns {swap_used_mb, swap_total_mb}; zeros if unavailable.
+function swapUsage() {
+  try {
+    const m = require('fs').readFileSync('/proc/meminfo', 'utf8');
+    const kb = (k) => { const r = new RegExp(`^${k}:\\s+(\\d+)`, 'm').exec(m); return r ? Number(r[1]) : 0; };
+    const total = kb('SwapTotal'), free = kb('SwapFree');
+    return { swap_total_mb: Math.round(total / 1024), swap_used_mb: Math.round((total - free) / 1024) };
+  } catch { return { swap_total_mb: 0, swap_used_mb: 0 }; }
+}
+
 async function sample() {
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
   const load = os.loadavg();
   const disk = await diskUsage();
+  const swap = swapUsage();
   return {
     ts: Date.now(),
     cpu_pct: cpuPct(),
@@ -57,6 +68,8 @@ async function sample() {
     load5: Math.round(load[1] * 100) / 100,
     mem_used_mb: Math.round((totalMem - freeMem) / 1048576),
     mem_total_mb: Math.round(totalMem / 1048576),
+    swap_used_mb: swap.swap_used_mb,
+    swap_total_mb: swap.swap_total_mb,
     disk_used_pct: disk.disk_used_pct,
     disk_free_gb: disk.disk_free_gb,
   };

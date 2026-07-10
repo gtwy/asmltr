@@ -25,6 +25,9 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('title')) db.exec('ALTER TABLE sessions ADD COLUMN title TEXT');
   if (!cols.includes('location')) db.exec('ALTER TABLE sessions ADD COLUMN location TEXT');
   if (!cols.includes('activity')) db.exec('ALTER TABLE sessions ADD COLUMN activity TEXT'); // live "what it's doing now" rollup
+  const mcols = db.prepare('PRAGMA table_info(system_metrics)').all().map((c) => c.name);
+  if (!mcols.includes('swap_used_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_used_mb INTEGER DEFAULT 0');
+  if (!mcols.includes('swap_total_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_total_mb INTEGER DEFAULT 0');
 }
 
 const _insEvent = db.prepare(`
@@ -194,8 +197,8 @@ function getTitle(session_id) { const r = _getTitle.get(session_id); return r ? 
 
 // --- system sample (sampler.js): write metrics table + a timeline event ------
 const _insMetric = db.prepare(`
-  INSERT OR REPLACE INTO system_metrics (ts, cpu_pct, load1, load5, mem_used_mb, mem_total_mb, disk_used_pct, disk_free_gb)
-  VALUES (@ts, @cpu_pct, @load1, @load5, @mem_used_mb, @mem_total_mb, @disk_used_pct, @disk_free_gb)
+  INSERT OR REPLACE INTO system_metrics (ts, cpu_pct, load1, load5, mem_used_mb, mem_total_mb, swap_used_mb, swap_total_mb, disk_used_pct, disk_free_gb)
+  VALUES (@ts, @cpu_pct, @load1, @load5, @mem_used_mb, @mem_total_mb, @swap_used_mb, @swap_total_mb, @disk_used_pct, @disk_free_gb)
 `);
 const insertSystemSample = db.transaction((s) => {
   _insMetric.run(s);

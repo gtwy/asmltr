@@ -16,6 +16,11 @@ const memRatio = computed(() =>
     ? latest.value.mem_used_mb / latest.value.mem_total_mb
     : null
 )
+const swapRatio = computed(() =>
+  latest.value && latest.value.swap_total_mb
+    ? latest.value.swap_used_mb / latest.value.swap_total_mb
+    : null
+)
 
 const times = computed(() =>
   store.samples.map((s) => new Date(s.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
@@ -118,7 +123,7 @@ onMounted(() => {
     </PageHeader>
 
     <!-- big stat tiles -->
-    <div class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
       <StatTile
         label="CPU"
         :value="latest ? latest.cpu_pct.toFixed(0) : '—'"
@@ -134,6 +139,14 @@ onMounted(() => {
         accent="#34D399"
         :ratio="memRatio"
         :sub="latest ? `of ${(latest.mem_total_mb / 1024).toFixed(1)} GB` : ''"
+      />
+      <StatTile
+        label="Swap"
+        :value="latest ? (latest.swap_used_mb / 1024).toFixed(1) : '—'"
+        unit="GB"
+        accent="#38BDF8"
+        :ratio="swapRatio"
+        :sub="latest ? (latest.swap_total_mb ? `of ${(latest.swap_total_mb / 1024).toFixed(1)} GB` : 'no swap') : ''"
       />
       <StatTile
         label="Disk used"
