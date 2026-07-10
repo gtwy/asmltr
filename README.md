@@ -48,12 +48,16 @@ flowchart LR
   M[MCP]:::ch --> CONN
   G[GitHub]:::ch --> CONN
 
-  CONN(["connector<br/>(thin adapter)"]) --> ENV[/normalized envelope/]
+  CONN(["connector<br/>thin adapter"]) --> ENV["normalized envelope"]
   ENV --> CORE
 
-  subgraph CORE ["core pipeline"]
+  subgraph CORE [core pipeline]
     direction TB
-    R["resolve identity / trust"] --> SP["build system prompt"] --> MOD["moderate<br/>(LLM security screen)"] --> SESS["conversation_key → session"] --> RUN["run turn<br/>(local Agent SDK)"] --> RED["redact secrets on public output"]
+    R["resolve identity / trust"] --> SP["build system prompt"]
+    SP --> MOD["moderate<br/>LLM security screen"]
+    MOD --> SESS["conversation_key → session"]
+    SESS --> RUN["run turn<br/>local Agent SDK"]
+    RUN --> RED["redact secrets on public output"]
   end
 
   CORE --> OUT["outbound actions"]
