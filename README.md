@@ -2,6 +2,9 @@
 
 **One channel-agnostic backend behind every chat surface for a single AI assistant — with a live insights dashboard.**
 
+*Say it “assimilator.” It stands for **A**gentic **S**peech, **M**essaging, **L**ikeness, **T**rust, and **R**outing —
+one agent that assimilates every channel while staying recognizably itself.*
+
 [![Documentation](https://img.shields.io/badge/docs-jarethmt.github.io%2Fasmltr-8B5CF6?style=for-the-badge&logo=materialformkdocs&logoColor=white)](https://jarethmt.github.io/asmltr/)
 
 ### 📚 Full documentation → **[jarethmt.github.io/asmltr](https://jarethmt.github.io/asmltr/)**
@@ -11,8 +14,11 @@ reach it from **Discord, Telegram, an MCP client, GitHub issues, or any OpenAI-c
 with shared memory, a unified trust/permission model, moderation, and per-secret output redaction.
 A collector + dashboard give you one pane of glass over everything the assistant is doing.
 
-> asmltr is deliberately scoped to **asynchronous chat channels + monitoring**. It is not a
-> voice-assistant framework (though the Discord connector does have an optional voice mode).
+> asmltr routes **messaging across channels** with first-class **monitoring** — and treats **speech as a
+> first-class citizen**, not an afterthought. The goal: voice lives as a shared capability layer in the
+> core (STT/TTS + realtime relays) that any connector can opt into, so a connector can be **text**,
+> **voice**, or **both**. *Live today:* the Discord connector's voice mode. *In progress:* lifting voice
+> into the core as that shared layer, and tightening speech round-trip latency for natural, direct talk.
 
 ## ⚡ Quick setup — paste this to your AI agent
 
