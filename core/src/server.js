@@ -395,9 +395,46 @@ app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core', active }));
 
+// The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
+// hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
+// from config or the reverse proxy's Authelia-resolved user, so the same build works anywhere.
+// The browser sends a placeholder sender; we overwrite raw_id with the real owner here.
+function normalizeWebSender(req) {
+  const b = req.body;
+  if (!b || b.channel !== 'eve-assistant-web') return;
+  const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User');
+  if (owner) b.sender = { ...(b.sender || {}), raw_id: String(owner), raw_username: (b.sender && b.sender.raw_username) || 'dashboard' };
+}
+
+// Attach a browser-uploaded file to the shared upload surface (Phase B of the web chat). Body is
+// JSON { channel, filename, mime, conversation_key?, data_base64 } — base64 keeps it within the
+// existing express.json body (no multipart dep). Returns the manifest record incl. absolute path,
+// which the chat composer then references in the next message so the agent can Read it.
+app.post('/v2/upload', (req, res) => {
+  try {
+    const { filename, mime, conversation_key, data_base64 } = req.body || {};
+    if (!data_base64 || typeof data_base64 !== 'string') return res.status(400).json({ error: 'data_base64 required' });
+    const buffer = Buffer.from(data_base64, 'base64');
+    if (!buffer.length) return res.status(400).json({ error: 'empty file' });
+    const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User') || 'dashboard';
+    const rec = require('../../shared/uploads').save({
+      channel: 'eve-assistant-web', buffer, filename, mime,
+      sender: 'dashboard', senderId: String(owner), conversationKey: conversation_key || null,
+      kind: /^image\//.test(mime || '') ? 'image' : 'document',
+    });
+    record({ surface: 'eve-assistant-web', session_id: conversation_key || null, event_type: 'control',
+      identity: String(owner), source: 'core', payload: { action: 'upload', name: rec.filename, path: rec.path, bytes: buffer.length } });
+    res.json({ ok: true, file: { path: rec.path, name: rec.filename, mime: rec.mime || mime || null, kind: rec.kind, bytes: buffer.length } });
+  } catch (err) {
+    console.error('[core] /v2/upload error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Streaming turn: same pipeline as /v2/handle, but assistant text is streamed as it's produced.
 // SSE frames: {type:'delta', text} … then {type:'done', actions}. Deltas are redacted in-flight.
 app.post('/v2/stream', async (req, res) => {
+  normalizeWebSender(req);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   const frame = (obj) => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (_) {} };
   try {

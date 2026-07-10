@@ -66,6 +66,79 @@ export const update = {
   setAuto: (enabled) => postCore('/v2/update/auto', { enabled }),
 }
 
+// Web chat — the browser acts as a connector. Post an `eve-assistant-web` envelope to the core's
+// streaming endpoint and get the reply token-by-token; the core records the whole exchange, so the
+// session shows up in Live like any other. The operator identity is resolved server-side (the
+// dashboard never hardcodes it), so `sender` here is just a placeholder the core overwrites.
+export const webChat = {
+  // Stream one turn. `handlers` = { onDelta, onSegment, onTool, onThinking, onDone, onError }.
+  // Returns an AbortController so the caller can cancel the fetch (the core also has /v2/abort).
+  send({ conversation_key, text, attachments = [], working_dir = null }, handlers = {}) {
+    const ac = new AbortController()
+    const envelope = {
+      channel: 'eve-assistant-web',
+      conversation_key,
+      sender: { raw_id: 'dashboard', raw_username: 'dashboard' },
+      content: { text, attachments },
+      delivery: 'sync',
+      public: false,
+      ...(working_dir ? { working_dir } : {})
+    }
+    ;(async () => {
+      let res
+      try {
+        res = await fetch('/v2/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+          body: JSON.stringify(envelope),
+          signal: ac.signal
+        })
+      } catch (e) { handlers.onError?.(e.message || 'network error'); return }
+      if (!res.ok || !res.body) { handlers.onError?.(`stream ${res.status}`); return }
+      const reader = res.body.getReader()
+      const dec = new TextDecoder()
+      let buf = ''
+      try {
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          // SSE frames are separated by a blank line; each frame's payload is a `data: {...}` line.
+          let idx
+          while ((idx = buf.indexOf('\n\n')) !== -1) {
+            const raw = buf.slice(0, idx); buf = buf.slice(idx + 2)
+            const line = raw.split('\n').find((l) => l.startsWith('data:'))
+            if (!line) continue
+            let f; try { f = JSON.parse(line.slice(5).trim()) } catch { continue }
+            if (f.type === 'delta') handlers.onDelta?.(f.text)
+            else if (f.type === 'segment') handlers.onSegment?.(f.text)
+            else if (f.type === 'tool') handlers.onTool?.(f.name)
+            else if (f.type === 'thinking') handlers.onThinking?.(f.text)
+            else if (f.type === 'done') handlers.onDone?.(f.actions || [])
+            else if (f.type === 'error') handlers.onError?.(f.error || 'stream error')
+          }
+        }
+      } catch (e) {
+        if (ac.signal.aborted) handlers.onError?.('aborted')
+        else handlers.onError?.(e.message || 'stream read error')
+      }
+    })()
+    return ac
+  },
+
+  // Attach a file: base64 it and POST to the core, which stores it in the shared upload area and
+  // returns the on-disk path. The next message references that path so the agent can Read it.
+  async upload(file, conversation_key) {
+    const data_base64 = await new Promise((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result).split(',')[1] || '')
+      r.onerror = () => reject(new Error('read failed'))
+      r.readAsDataURL(file)
+    })
+    return postCore('/v2/upload', { filename: file.name, mime: file.type, conversation_key, data_base64 })
+  }
+}
+
 // Draft / approval queue on the CORE — replies any connector held for a human to approve.
 export const drafts = {
   list: (status = 'pending') => getCore(`/v2/drafts?status=${encodeURIComponent(status)}`),

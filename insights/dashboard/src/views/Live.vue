@@ -4,6 +4,7 @@ import { useCollectorStore } from '@/stores/collector'
 import PageHeader from '@/components/PageHeader.vue'
 import SessionCard from '@/components/SessionCard.vue'
 import SessionDetail from '@/components/SessionDetail.vue'
+import ModalShell from '@/components/ModalShell.vue'
 import StatTile from '@/components/StatTile.vue'
 import { fmtNum, surfaceMeta } from '@/lib/format'
 import { manager } from '@/services/manager'
@@ -15,6 +16,36 @@ let ticker = null
 
 // which session's details pane is open (a snapshot — its history streams live)
 const selected = ref(null)
+
+// --- new web session ---------------------------------------------------------
+// Start a fresh session right from the browser: the dashboard acts as a connector
+// (channel `eve-assistant-web`). The working dir picks the "flavour" — /root gives a
+// full root session, a project path gives a scoped one. First message spawns it server-side.
+const newOpen = ref(false)
+const newWorkdir = ref('')
+const WORKDIR_PRESETS = [
+  { label: 'Root', dir: '', hint: '/root — full access' },
+  { label: 'asmltr', dir: '~/asmltr', hint: 'this project' }
+]
+function openNew() { newWorkdir.value = ''; newOpen.value = true }
+function startNew() {
+  const uuid = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.floor(Math.random() * 1e6))
+  const wd = newWorkdir.value.trim()
+  selected.value = {
+    session_id: `web:${uuid}`,
+    surface: 'eve-assistant-web',
+    kind: 'ephemeral',
+    status: 'idle',
+    identity: 'web · you',
+    title: 'New web session',
+    working_dir: wd || null,
+    started_unix: Math.floor(Date.now() / 1000),
+    last_activity_unix: Math.floor(Date.now() / 1000),
+    tokens_total: 0,
+    tool_count: 0
+  }
+  newOpen.value = false
+}
 
 // per-channel monitored state (Discord): channel_id -> enabled. Powers the card/detail toggle.
 const channelStates = ref({})
@@ -137,6 +168,13 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
           <span class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500">{{ searching ? '⏳' : '🔍' }}</span>
         </div>
         <button
+          class="rounded-lg bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30"
+          title="Start a new session right here in the browser"
+          @click="openNew"
+        >
+          ＋ New session
+        </button>
+        <button
           class="glass glass-hover px-3 py-1.5 text-sm text-slate-300"
           @click="store.fetchSessions()"
         >
@@ -144,6 +182,44 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         </button>
       </template>
     </PageHeader>
+
+    <!-- new web session: pick a working dir, then chat -->
+    <ModalShell v-if="newOpen" title="New session" subtitle="Runs right here in the browser (channel: eve-assistant-web)" @close="newOpen = false">
+      <div class="space-y-4">
+        <p class="text-sm text-slate-400">
+          The dashboard acts as a connector — your messages stream through the core and the session
+          shows up in Live like any other. Pick where it runs:
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="p in WORKDIR_PRESETS"
+            :key="p.label"
+            type="button"
+            class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+            :class="newWorkdir.trim() === p.dir ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+            @click="newWorkdir = p.dir"
+          >
+            <div class="font-semibold">{{ p.label }}</div>
+            <div class="font-mono text-[10px] text-slate-500">{{ p.hint }}</div>
+          </button>
+        </div>
+        <label class="block">
+          <span class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Working directory (optional)</span>
+          <input
+            v-model="newWorkdir"
+            type="text"
+            placeholder="/root (default)"
+            class="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
+          />
+        </label>
+      </div>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <button type="button" class="glass glass-hover px-4 py-2 text-sm text-slate-300" @click="newOpen = false">Cancel</button>
+          <button type="button" class="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30" @click="startNew">Start chatting →</button>
+        </div>
+      </template>
+    </ModalShell>
 
     <!-- summary tiles -->
     <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
