@@ -39,8 +39,10 @@ function startNew() {
     identity: 'web · you',
     title: 'New web session',
     working_dir: wd || null,
-    started_unix: Math.floor(Date.now() / 1000),
-    last_activity_unix: Math.floor(Date.now() / 1000),
+    // timestamps are epoch-MILLIS everywhere in the UI (fmtAge expects ms). Once the first turn
+    // is recorded, SessionDetail live-merges the real collector row over this placeholder.
+    started_unix: Date.now(),
+    last_activity_unix: Date.now(),
     tokens_total: 0,
     tool_count: 0
   }

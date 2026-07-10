@@ -104,6 +104,7 @@ function maybeTitle(e) {
   const sid = e.session_id;
   const n = (_inboundCounts.get(sid) || 0) + 1;
   _inboundCounts.set(sid, n);
+  if (dbmod.isTitleLocked(sid)) return;                                  // manual override → never auto-title
   if (!dbmod.getTitle(sid)) queueTitle(sid, payloadText(e));             // first inbound → title it now
   else if (n % TITLE_EVERY === 0) queueTitle(sid, recentConvo(sid) || payloadText(e)); // periodic refresh
 }
@@ -338,6 +339,14 @@ app.post('/api/control/send-keys', requireControl, (req, res) => {
   const r = control.sendKeys(session_id, { text, keys, enter }, req.actor);
   io.emit('control', { action: 'send-keys', target: session_id, ok: r.ok });
   res.status(r.ok ? 200 : 400).json(r);
+});
+// manually set a session title (locks it against AI regeneration); empty title unlocks + reverts to AI
+app.post('/api/control/session-title', requireControl, (req, res) => {
+  const { session_id, title } = req.body || {};
+  if (!session_id) return res.status(400).json({ error: 'session_id required' });
+  const ok = dbmod.setTitleManual(session_id, title);
+  if (ok) io.emit('sessions-changed', {});
+  res.status(ok ? 200 : 404).json({ ok, locked: !!(title || '').trim(), error: ok ? undefined : 'unknown session (no row yet)' });
 });
 app.get('/api/control/diff', requireControl, (req, res) => {
   control.diff(req.query.session_id, (_e, r) => res.status(r.ok ? 200 : 400).json(r));

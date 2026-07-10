@@ -25,6 +25,7 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('title')) db.exec('ALTER TABLE sessions ADD COLUMN title TEXT');
   if (!cols.includes('location')) db.exec('ALTER TABLE sessions ADD COLUMN location TEXT');
   if (!cols.includes('activity')) db.exec('ALTER TABLE sessions ADD COLUMN activity TEXT'); // live "what it's doing now" rollup
+  if (!cols.includes('title_locked')) db.exec('ALTER TABLE sessions ADD COLUMN title_locked INTEGER DEFAULT 0'); // 1 = manually set, AI gen must not overwrite
   const mcols = db.prepare('PRAGMA table_info(system_metrics)').all().map((c) => c.name);
   if (!mcols.includes('swap_used_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_used_mb INTEGER DEFAULT 0');
   if (!mcols.includes('swap_total_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_total_mb INTEGER DEFAULT 0');
@@ -187,13 +188,23 @@ const _reconcileUpsert = db.prepare(`
 `);
 function reconcileUpsert(s) { _reconcileUpsert.run({ tmux_target: null, ...s }); }
 
-const _setTitle = db.prepare('UPDATE sessions SET title = ? WHERE session_id = ?');
+// AI-generated titles NEVER overwrite a manually-set (locked) one.
+const _setTitle = db.prepare('UPDATE sessions SET title = ? WHERE session_id = ? AND COALESCE(title_locked, 0) = 0');
 function setTitle(session_id, title) { _setTitle.run(title || null, session_id); }
+// Manual override: lock a title so the generator leaves it alone. An empty title unlocks
+// (reverts to AI generation — the title is cleared so the next inbound re-titles it).
+const _setTitleManual = db.prepare('UPDATE sessions SET title = ?, title_locked = ? WHERE session_id = ?');
+function setTitleManual(session_id, title) {
+  const t = (title || '').trim();
+  const info = _setTitleManual.run(t || null, t ? 1 : 0, session_id);
+  return info.changes > 0;
+}
 const _setActivity = db.prepare('UPDATE sessions SET activity = ? WHERE session_id = ?');
 function setActivity(session_id, activity) { _setActivity.run(activity || null, session_id); }
 const _setLocation = db.prepare('UPDATE sessions SET location = ? WHERE session_id = ?');
-const _getTitle = db.prepare('SELECT title FROM sessions WHERE session_id = ?');
+const _getTitle = db.prepare('SELECT title, title_locked FROM sessions WHERE session_id = ?');
 function getTitle(session_id) { const r = _getTitle.get(session_id); return r ? r.title : null; }
+function isTitleLocked(session_id) { const r = _getTitle.get(session_id); return !!(r && r.title_locked); }
 
 // --- system sample (sampler.js): write metrics table + a timeline event ------
 const _insMetric = db.prepare(`
@@ -210,4 +221,4 @@ const insertSystemSample = db.transaction((s) => {
   });
 });
 
-module.exports = { db, ingestEvent, reconcileUpsert, setTitle, getTitle, setActivity, insertSystemSample, q, DB_PATH };
+module.exports = { db, ingestEvent, reconcileUpsert, setTitle, setTitleManual, getTitle, isTitleLocked, setActivity, insertSystemSample, q, DB_PATH };

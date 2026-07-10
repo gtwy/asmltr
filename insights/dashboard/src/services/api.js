@@ -56,7 +56,9 @@ export const control = {
   inject: (conversation_key, text) => postCore('/v2/inject', { conversation_key, text, by: 'dashboard' }),
   // interactive `asmltr claude` (tmux) sessions → collector send-keys (steer / interrupt)
   sendText: (session_id, text) => postCore('/api/control/send-keys', { session_id, text, enter: true }),
-  sendKey: (session_id, keys) => postCore('/api/control/send-keys', { session_id, keys })
+  sendKey: (session_id, keys) => postCore('/api/control/send-keys', { session_id, keys }),
+  // manually set a session title (locks it against AI regeneration); '' reverts to AI
+  setTitle: (session_id, title) => postCore('/api/control/session-title', { session_id, title })
 }
 
 // Self-update on the CORE — check status (via collector), toggle auto, or run the update session.
