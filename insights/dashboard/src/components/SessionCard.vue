@@ -67,7 +67,7 @@ const claimLabel = computed(() => {
     class="glass glass-hover flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:border-brand-violet/30"
     role="button"
     tabindex="0"
-    title="Open conversation details + takeover"
+    title="Open session — direct it, stop a turn, or take over in a terminal"
     @click="$emit('open', session)"
     @keydown.enter="$emit('open', session)"
   >
@@ -203,7 +203,7 @@ const claimLabel = computed(() => {
         class="rounded-lg border border-brand-violet/30 bg-brand-violet/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-brand-violet/20"
         @click.stop="$emit('open', session)"
       >
-        Details + takeover →
+        Manage session →
       </button>
     </div>
   </div>

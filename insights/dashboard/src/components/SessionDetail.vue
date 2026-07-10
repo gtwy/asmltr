@@ -195,11 +195,11 @@ async function doInject() {
       </div>
     </div>
 
-    <!-- takeover -->
+    <!-- direct the session (stop a turn / send a message). NOT "takeover" — that's the terminal detach below. -->
     <template #footer>
       <div class="w-full">
         <div v-if="attachCmd" class="mb-2 flex items-center gap-2 text-[11px] text-slate-400">
-          <span>Take over in your terminal:</span>
+          <span>Take over in your terminal (detach from the channel):</span>
           <code class="rounded bg-black/40 px-1.5 py-0.5 font-mono text-brand-violet/90">{{ attachCmd }}</code>
         </div>
         <div v-if="notice" class="mb-2 text-xs" :class="notice.ok ? 'text-emerald-300' : 'text-rose-300'">{{ notice.text }}</div>
@@ -214,7 +214,7 @@ async function doInject() {
           <textarea
             v-model="steer"
             rows="1"
-            :placeholder="isCli ? 'Type a message to send into the session (Enter)…' : 'Take over — type a message to steer this conversation, then Send (reply goes back to the channel)…'"
+            :placeholder="isCli ? 'Type a message to send into the session (Enter)…' : 'Type a message to direct this conversation, then Send (reply goes back to the channel)…'"
             class="min-h-[38px] flex-1 resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
             @keydown.enter.exact.prevent="doInject"
           ></textarea>
