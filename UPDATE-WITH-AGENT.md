@@ -105,10 +105,14 @@ curl -s -X POST 127.0.0.1:3024/announce -H 'Content-Type: application/json' \
 ```
 
 Then launch a **detached, delayed** restart that survives your turn ending and runs *after* you've
-replied. It also clears any stale connector child (which would otherwise keep old code):
+replied. Restarting the connector manager cleanly cycles every connector onto the new code — the
+manager reaps its own child connectors on stop, so there is **no `pkill`** here. (An earlier version
+of this guide ran `pkill -f "…run-instance.js"`, but inside a `bash -c` that pattern matches the
+running shell's *own* argv and kills it before `pm2 restart` executes — a silent failure that left
+stale code running. See issue #8.)
 
 ```bash
-setsid bash -c 'sleep 8; pkill -f "connectors/runtime/run-instance.js" 2>/dev/null; sleep 2; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager' >/tmp/asmltr-update.log 2>&1 </dev/null &
+setsid bash -c 'sleep 8; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager' >/tmp/asmltr-update.log 2>&1 </dev/null &
 ```
 
 Then **finish your reply** (e.g. "Pulled + installed the update — restarting now; I'll confirm here
@@ -122,7 +126,6 @@ confirmation to the channel.
 **Running the update from a plain shell** (a human, not through the assistant)? Then just restart directly:
 
 ```bash
-pkill -f 'connectors/runtime/run-instance.js' 2>/dev/null; sleep 2
 pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager
 ```
 
@@ -130,13 +133,22 @@ pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager
 
 ## 5. Verify
 
+Don't stop at `/health` — it returns `200` even from a stale process that never actually restarted.
+Confirm each service is running the **new code sha** by comparing its `/version` against on-disk HEAD:
+
 ```bash
-curl -s 127.0.0.1:3023/health                                   # → {"status":"ok",...}
+WANT=$(git -C <repo> rev-parse --short HEAD)                    # the sha you just updated to
+for hp in 3023 3024 3017; do
+  echo -n "$hp → "; curl -s 127.0.0.1:$hp/version               # sha must equal $WANT
+done
 curl -s 127.0.0.1:3024/instances | head -c 400; echo            # instances still present
 asmltr ls                                                       # CLI/TUI still works
 ```
 
-Then have the user send a real test message on one channel and confirm a reply.
+If any `/version` sha ≠ `$WANT`, that service did **not** restart onto the new code — investigate
+before declaring success (the automated path, `scripts/restart-with-rollback.sh`, makes exactly this
+check and auto-rolls-back on a mismatch). Then have the user send a real test message on one channel
+and confirm a reply.
 
 ---
 

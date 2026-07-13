@@ -394,6 +394,11 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core', active }));
+// Build identity — the code sha this process is running + when it started. An updater checks this
+// (not just /health, which returns 200 even on stale code) to confirm the restart actually landed.
+const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
+const STARTED_AT = new Date().toISOString();
+app.get('/version', (req, res) => res.json({ service: 'asmltr-core', sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
 
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side

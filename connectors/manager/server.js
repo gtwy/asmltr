@@ -63,6 +63,11 @@ function requireToken(req, res, next) {
 }
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-connector-manager', types: Object.keys(TYPES) }));
+// Build identity — the code sha this process is actually running + when it started. An updater
+// checks this (not just /health, which is 200 even on stale code) to confirm the restart landed.
+const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
+const STARTED_AT = new Date().toISOString();
+app.get('/version', (req, res) => res.json({ service: 'asmltr-connector-manager', sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
 app.get('/types', requireToken, (req, res) => res.json({ types: Object.values(TYPES) }));
 
 app.get('/instances', requireToken, (req, res) => {
@@ -236,6 +241,21 @@ const server = app.listen(PORT, HOST, () => {
   setTimeout(drainAnnouncements, Number(process.env.ASMLTR_ANNOUNCE_DELAY_MS || 12000));
 });
 
-process.on('SIGTERM', () => { supervisor.stopAll(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000); });
+// Graceful shutdown: reap every connector child, THEN exit — so `pm2 restart` cleanly cycles
+// the whole tree onto new code with no orphans and no external `pkill` needed. Handle SIGINT too:
+// pm2's default kill signal is SIGINT, so a SIGTERM-only handler never ran on `pm2 restart` (the
+// original reason a manual pkill was bolted onto the update flow). The safety-net timeout stays
+// under the pm2 kill_timeout (5000ms) so we always exit cleanly before pm2 escalates to SIGKILL.
+let _shuttingDown = false;
+function gracefulShutdown(signal) {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  console.log(`[manager] ${signal} — reaping connector children before exit…`);
+  try { server.close(); } catch (_) {}
+  supervisor.stopAll(() => { console.log('[manager] all children stopped — exiting'); process.exit(0); });
+  setTimeout(() => { console.warn('[manager] shutdown grace elapsed — exiting'); process.exit(0); }, 4500).unref();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = { app };

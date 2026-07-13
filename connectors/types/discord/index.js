@@ -710,7 +710,10 @@ RESPONSE RULES:
         let commit = '';
         try { commit = execSync('git rev-parse --short HEAD', { cwd: repo }).toString().trim(); } catch (_) {}
         queueAnnouncement(message.channel.id, `✅ asmltr updated${commit ? ` to \`${commit}\`` : ''} and restarted — all systems back online.`);
-        const script = 'sleep 5; pkill -f "connectors/runtime/run-instance.js"; sleep 2; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager';
+        // The manager reaps its own connector children on restart, so a plain pm2 restart cleanly
+        // cycles everything onto new code — no pkill (which, run inside this bash -c, would match
+        // the literal in argv and kill this very shell before pm2 ran; see issue #8).
+        const script = 'sleep 5; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager';
         try { spawn('setsid', ['bash', '-c', script], { detached: true, stdio: 'ignore', cwd: repo }).unref(); }
         catch (e3) { message.channel.send(`⚠️ Update installed but restart-launch failed: ${e3.message}`).catch(() => {}); }
       });

@@ -69,19 +69,23 @@ function makeSupervisor(env) {
   }
 
   // SIGTERM, then SIGKILL any child that hasn't exited within the grace window — so a
-  // hung connector can never survive a stop/restart as a stale-code orphan.
-  function killChild(child, graceMs = 4000) {
-    let exited = false;
-    child.once('exit', () => { exited = true; });
-    try { child.kill('SIGTERM'); } catch (_) {}
-    setTimeout(() => { if (!exited) { try { child.kill('SIGKILL'); } catch (_) {} } }, graceMs).unref();
+  // hung connector can never survive a stop/restart as a stale-code orphan. Invokes `onExit`
+  // once the child is truly gone (or immediately if it was already dead), so callers can wait
+  // for reaping to finish instead of racing it.
+  function killChild(child, graceMs = 3000, onExit) {
+    let called = false;
+    const done = () => { if (called) return; called = true; if (onExit) onExit(); };
+    if (!child || child.exitCode != null || child.signalCode != null) { done(); return; }
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, graceMs);
+    child.once('exit', () => { clearTimeout(timer); done(); });
+    try { child.kill('SIGTERM'); } catch (_) { clearTimeout(timer); done(); }
   }
 
-  function stopInstance(id) {
+  function stopInstance(id, cb) {
     const rec = procs.get(id);
-    if (!rec || !rec.child) { if (rec) rec.status = 'stopped'; return false; }
+    if (!rec || !rec.child) { if (rec) rec.status = 'stopped'; if (cb) cb(); return false; }
     rec.intentionalStop = true;
-    killChild(rec.child);
+    killChild(rec.child, 3000, () => { rec.status = 'stopped'; if (cb) cb(); });
     return true;
   }
 
@@ -102,7 +106,16 @@ function makeSupervisor(env) {
     return { status: rec.status, pid: rec.child ? rec.pid : null, restarts: rec.restarts, startedAt: rec.startedAt, lastExit: rec.lastExit };
   }
   function logs(id) { const rec = procs.get(id); return rec ? rec.logs.slice() : []; }
-  function stopAll() { for (const id of procs.keys()) stopInstance(id); }
+  // Stop every child; invoke `cb` once they've ALL exited. On shutdown the manager waits on this
+  // so it never exits while a connector is still alive — which would orphan it (old code) and is
+  // exactly why the update guide used to need a separate `pkill`.
+  function stopAll(cb) {
+    const ids = [...procs.keys()];
+    if (!ids.length) { if (cb) cb(); return; }
+    let remaining = ids.length;
+    const one = () => { if (--remaining === 0 && cb) cb(); };
+    for (const id of ids) stopInstance(id, one);
+  }
 
   return { spawnInstance, stopInstance, restartInstance, status, logs, stopAll };
 }

@@ -71,6 +71,11 @@ function requireControl(req, res, next) {
 }
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-insights-collector' }));
+// Build identity — the code sha this process is running + when it started (an updater checks this
+// to confirm the restart landed; /health returns 200 even on stale code).
+const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
+const STARTED_AT = new Date().toISOString();
+app.get('/version', (req, res) => res.json({ service: 'asmltr-insights-collector', sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
 
 // --- session titles ----------------------------------------------------------
 // Label each session card with a short generated title. On the FIRST inbound for a
