@@ -42,6 +42,7 @@ const sessions = require('./sessions');
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
+const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
 const { runTurn, generateTitle, generateStatus } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -469,23 +470,47 @@ app.post('/v2/speak', async (req, res) => {
   normalizeWebSender(req);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   const frame = (obj) => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (_) {} };
+  const wantAck = req.body && req.body.voice && req.body.voice.ack != null ? !!req.body.voice.ack : voice.isAckEnabled();
+
+  // Immediate feedback so the agent's think-time isn't dead air: chime (instant), then the ambient
+  // drone loops until the first real sentence lands. The client plays the cue assets it fetches.
+  frame({ type: 'cue', cue: 'chime' });
+  frame({ type: 'cue', cue: 'drone-start' });
+  if (wantAck) { try { const a = await voice.getAckClip(); frame({ type: 'audio', role: 'ack', mime: a.mime, b64: a.audio.toString('base64'), text: a.phrase }); } catch (e) { console.error('[core] ack tts:', e.message); } }
+
+  let droneStopped = false;
+  const stopDrone = () => { if (!droneStopped) { droneStopped = true; frame({ type: 'cue', cue: 'drone-stop' }); } };
   const speaker = createSpeaker({
     onText: (p) => frame({ type: 'text', seq: p.seq, text: p.text }),
     onAudio: (clip) => {
+      stopDrone(); // first real reply audio → cut the ambient bed
       if (clip.error) frame({ type: 'audio-error', seq: clip.seq, error: clip.error, text: clip.text });
-      else frame({ type: 'audio', seq: clip.seq, mime: clip.mime, b64: clip.audio.toString('base64') });
+      else frame({ type: 'audio', seq: clip.seq, role: 'reply', mime: clip.mime, b64: clip.audio.toString('base64') });
     },
   });
   try {
     const actions = await dispatch(req.body, { onText: (text) => { if (text) speaker.pushDelta(text); } });
     await speaker.finish();               // wait for every sentence's audio to be emitted, in order
+    stopDrone();                          // no-audio replies (e.g. NO_REPLY) still end the drone
     frame({ type: 'done', actions });
   } catch (err) {
     console.error('[core] /v2/speak error:', err.message);
     try { await speaker.finish(); } catch (_) {}
+    stopDrone();
     frame({ type: 'error', error: err.message });
   }
   res.end();
+});
+
+// Voice settings + cue assets (chime/drone) for any voice client. The spoken-ack toggle persists
+// in the asmltr state dir; the dashboard flips it here.
+app.get('/v2/voice/ack', (req, res) => res.json({ enabled: voice.isAckEnabled() }));
+app.post('/v2/voice/ack', (req, res) => res.json({ enabled: voice.setAckEnabled(!!(req.body && req.body.enabled)) }));
+app.get('/v2/voice/asset/:name', (req, res) => {
+  const a = voice.asset(req.params.name);
+  if (!a) return res.status(404).json({ error: 'unknown asset' });
+  res.set('Content-Type', a.mime); res.set('Cache-Control', 'public, max-age=86400');
+  res.sendFile(a.path);
 });
 
 // --- DRAFTS (hold-for-approval queue, any connector) -------------------------

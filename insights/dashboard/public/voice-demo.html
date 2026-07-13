@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>asmltr · voice</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0b0b14; color:#e2e8f0; display:flex; min-height:100vh; align-items:center; justify-content:center; }
+  .card { width:min(680px,92vw); background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:22px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  h1 { font-size:18px; margin:0 0 2px; background:linear-gradient(90deg,#8B5CF6,#EC4899); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  p.sub { margin:0 0 16px; color:#94a3b8; font-size:13px; }
+  textarea { width:100%; box-sizing:border-box; min-height:64px; resize:vertical; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1); border-radius:10px; color:#e2e8f0; padding:10px 12px; font-size:14px; outline:none; }
+  textarea:focus { border-color:rgba(139,92,246,.6); }
+  .row { display:flex; align-items:center; gap:10px; margin-top:12px; }
+  button { background:linear-gradient(90deg,#8B5CF6,#EC4899); color:#fff; border:0; border-radius:10px; padding:10px 18px; font-weight:600; font-size:14px; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:default; }
+  label.ack { display:flex; align-items:center; gap:6px; font-size:13px; color:#cbd5e1; margin-left:auto; }
+  .status { margin-top:14px; min-height:20px; font-size:13px; color:#a5b4fc; }
+  .transcript { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+  .bubble { align-self:flex-start; max-width:85%; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:14px; border-bottom-left-radius:4px; padding:8px 12px; font-size:14px; line-height:1.4; }
+  .bubble.ack { color:#94a3b8; font-style:italic; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#8B5CF6; margin-right:6px; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>asmltr · voice</h1>
+    <p class="sub">Full agent, streamed to speech. You hear a chime instantly, an ambient bed while it works, an optional spoken "on it", then the real answer — sentence by sentence, intermediary narration and all.</p>
+    <textarea id="q" placeholder="Ask something…">Walk me through what you'd check first if a web service returned a 502, in two or three sentences.</textarea>
+    <div class="row">
+      <button id="go">▶ Speak</button>
+      <label class="ack"><input type="checkbox" id="ack" /> spoken acknowledgment</label>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="transcript" id="transcript"></div>
+  </div>
+
+<script>
+const CORE = ''; // same origin as the dashboard; /v2/* is proxied to the core
+const chime = new Audio('/v2/voice/asset/chime.ogg');
+const drone = new Audio('/v2/voice/asset/drone.ogg'); drone.loop = true; drone.volume = 0.35;
+const $ = (id) => document.getElementById(id);
+
+// Sequential audio queue — clips play back-to-back in arrival order (ack, then reply sentences).
+const queue = []; let playing = false;
+function enqueue(b64, mime) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  queue.push(URL.createObjectURL(new Blob([bytes], { type: mime || 'audio/mpeg' })));
+  if (!playing) playNext();
+}
+function playNext() {
+  const url = queue.shift();
+  if (!url) { playing = false; return; }
+  playing = true;
+  const a = new Audio(url);
+  a.onended = a.onerror = () => { URL.revokeObjectURL(url); playNext(); };
+  a.play().catch(() => playNext());
+}
+function stopDrone() { try { drone.pause(); drone.currentTime = 0; } catch (_) {} }
+
+// ack toggle — reads/writes the core setting so it sticks server-side
+async function loadAck() { try { const r = await fetch('/v2/voice/ack'); $('ack').checked = (await r.json()).enabled; } catch (_) {} }
+$('ack').addEventListener('change', () => fetch('/v2/voice/ack', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled: $('ack').checked }) }));
+loadAck();
+
+async function speak() {
+  const text = $('q').value.trim(); if (!text) return;
+  $('go').disabled = true; $('transcript').innerHTML = ''; $('status').innerHTML = '<span class="dot"></span>connecting…';
+  const t0 = performance.now();
+  const body = JSON.stringify({ channel:'eve-assistant-web', conversation_key:'web:voice-'+Date.now(), sender:{raw_id:'dashboard'}, content:{ text }, delivery:'sync', public:false });
+  let res;
+  try { res = await fetch('/v2/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body }); }
+  catch (e) { $('status').textContent = 'error: ' + e.message; $('go').disabled = false; return; }
+  const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream:true }); let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const line = buf.slice(0, i).split('\n').find(l => l.startsWith('data:')); buf = buf.slice(i + 2);
+      if (!line) continue; let o; try { o = JSON.parse(line.slice(5).trim()); } catch { continue; }
+      if (o.type === 'cue') {
+        if (o.cue === 'chime') { chime.currentTime = 0; chime.play().catch(()=>{}); $('status').innerHTML = '<span class="dot"></span>on it…'; }
+        else if (o.cue === 'drone-start') { drone.play().catch(()=>{}); }
+        else if (o.cue === 'drone-stop') { stopDrone(); $('status').textContent = 'answering… (' + ((performance.now()-t0)/1000).toFixed(1) + 's to first reply)'; }
+      } else if (o.type === 'audio') {
+        enqueue(o.b64, o.mime);
+        if (o.role === 'ack') { const d = document.createElement('div'); d.className = 'bubble ack'; d.textContent = o.text || '(acknowledgment)'; $('transcript').appendChild(d); }
+      } else if (o.type === 'text') {
+        const d = document.createElement('div'); d.className = 'bubble'; d.textContent = o.text; $('transcript').appendChild(d);
+      } else if (o.type === 'done') { $('status').textContent = 'done · ' + ((performance.now()-t0)/1000).toFixed(1) + 's total'; }
+      else if (o.type === 'error') { $('status').textContent = 'error: ' + o.error; }
+    }
+  }
+  stopDrone(); $('go').disabled = false;
+}
+$('go').addEventListener('click', speak);
+</script>
+</body>
+</html>
