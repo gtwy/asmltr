@@ -141,6 +141,48 @@ export const webChat = {
   }
 }
 
+// Voice — the core speech layer. `speak()` streams a turn as interleaved transcript + audio-clip
+// frames (chime/drone cues, an optional spoken ack, then the answer sentence-by-sentence). Same
+// browser-as-connector envelope as webChat; the reply is spoken. Ack on/off persists server-side.
+export const voice = {
+  getAck: () => getCore('/v2/voice/ack'),
+  setAck: (enabled) => postCore('/v2/voice/ack', { enabled }),
+  assetUrl: (name) => `/v2/voice/asset/${name}`,
+  // handlers: { onCue(name), onText({seq,text}), onAudio({seq,role,mime,b64}), onDone(actions), onError(msg) }
+  speak({ conversation_key, text }, handlers = {}) {
+    const ac = new AbortController()
+    const envelope = {
+      channel: 'eve-assistant-web', conversation_key,
+      sender: { raw_id: 'dashboard', raw_username: 'dashboard' },
+      content: { text }, delivery: 'sync', public: false
+    }
+    ;(async () => {
+      let res
+      try { res = await fetch('/v2/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(envelope), signal: ac.signal }) }
+      catch (e) { handlers.onError?.(e.message || 'network error'); return }
+      if (!res.ok || !res.body) { handlers.onError?.(`speak ${res.status}`); return }
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''
+      try {
+        for (;;) {
+          const { value, done } = await reader.read(); if (done) break
+          buf += dec.decode(value, { stream: true }); let i
+          while ((i = buf.indexOf('\n\n')) !== -1) {
+            const raw = buf.slice(0, i); buf = buf.slice(i + 2)
+            const line = raw.split('\n').find((l) => l.startsWith('data:')); if (!line) continue
+            let f; try { f = JSON.parse(line.slice(5).trim()) } catch { continue }
+            if (f.type === 'cue') handlers.onCue?.(f.cue)
+            else if (f.type === 'text') handlers.onText?.(f)
+            else if (f.type === 'audio') handlers.onAudio?.(f)
+            else if (f.type === 'done') handlers.onDone?.(f.actions || [])
+            else if (f.type === 'error') handlers.onError?.(f.error || 'speak error')
+          }
+        }
+      } catch (e) { if (!ac.signal.aborted) handlers.onError?.(e.message || 'stream error') }
+    })()
+    return ac
+  }
+}
+
 // Draft / approval queue on the CORE — replies any connector held for a human to approve.
 export const drafts = {
   list: (status = 'pending') => getCore(`/v2/drafts?status=${encodeURIComponent(status)}`),
