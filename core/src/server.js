@@ -41,6 +41,7 @@ const moderation = require('./moderation');
 const sessions = require('./sessions');
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
+const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
 const { runTurn, generateTitle, generateStatus } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -452,6 +453,36 @@ app.post('/v2/stream', async (req, res) => {
     frame({ type: 'done', actions });
   } catch (err) {
     console.error('[core] /v2/stream error:', err.message);
+    frame({ type: 'error', error: err.message });
+  }
+  res.end();
+});
+
+// Streaming VOICE turn: same pipeline as /v2/stream, but the reply is spoken. The core speech layer
+// (shared/speech) buffers the live token stream to sentence boundaries and runs each through TTS as
+// it completes, so audio starts on the FIRST sentence — including the agent's intermediary narration
+// (it rides the same token stream). SSE frames interleave transcript + ordered audio clips:
+//   {type:'text', seq, text}        a sentence, as it's queued for speech (for a live transcript)
+//   {type:'audio', seq, mime, b64}  that sentence's audio clip, emitted in order (play sequentially)
+//   {type:'done', actions}          turn complete (sent only after all audio has been flushed)
+app.post('/v2/speak', async (req, res) => {
+  normalizeWebSender(req);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  const frame = (obj) => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (_) {} };
+  const speaker = createSpeaker({
+    onText: (p) => frame({ type: 'text', seq: p.seq, text: p.text }),
+    onAudio: (clip) => {
+      if (clip.error) frame({ type: 'audio-error', seq: clip.seq, error: clip.error, text: clip.text });
+      else frame({ type: 'audio', seq: clip.seq, mime: clip.mime, b64: clip.audio.toString('base64') });
+    },
+  });
+  try {
+    const actions = await dispatch(req.body, { onText: (text) => { if (text) speaker.pushDelta(text); } });
+    await speaker.finish();               // wait for every sentence's audio to be emitted, in order
+    frame({ type: 'done', actions });
+  } catch (err) {
+    console.error('[core] /v2/speak error:', err.message);
+    try { await speaker.finish(); } catch (_) {}
     frame({ type: 'error', error: err.message });
   }
   res.end();
