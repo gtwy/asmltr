@@ -154,9 +154,9 @@ async function handle(envelope, opts = {}) {
   // Medium awareness FIRST (applies to every channel) — the model's runtime is
   // Claude Code, but the USER is on this connector's channel. Without this, "what
   // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
-  // IDENTITY anchor FIRST — who you are, asserted (not inferred). Applies to every channel so a
-  // multi-agent surface (Discord) can't drift an agent into another's identity (the Thor incident).
-  let systemPrompt = identity.identityPreamble() + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
+  // IDENTITY FIRST — the anchor (who you are, asserted not inferred; the anti-drift fix from the Thor
+  // incident) + the living layer (preferences + story). Applies to every channel.
+  let systemPrompt = identity.fullIdentity() + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
   if (e.system_prompt_extra) systemPrompt += '\n\n' + e.system_prompt_extra; // connector-supplied context (e.g. Discord)
   if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
     systemPrompt += '\n\nASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
@@ -536,12 +536,17 @@ app.post('/v2/runtime/update', (req, res) => {
 
 // Identity (the Likeness "Self"): the name (ASSISTANT_NAME) + editable self-description, and a live
 // preview of the anchor injected into EVERY session's system prompt. The GUI edits it here.
-app.get('/v2/identity', (req, res) => res.json({ name: identity.name(), self_description: identity.identityFile(), preamble: identity.identityPreamble() }));
+function identitySnapshot() {
+  return { name: identity.name(), self_description: identity.identityFile(), preferences: identity.getFacet('preferences'), story: identity.getFacet('story'), preamble: identity.fullIdentity() };
+}
+app.get('/v2/identity', (req, res) => res.json(identitySnapshot()));
 app.post('/v2/identity', (req, res) => {
   const b = req.body || {};
   if (b.name != null && !identity.setName(b.name)) return res.status(500).json({ error: 'could not write name' });
   if (b.self_description != null && !identity.setIdentity(b.self_description)) return res.status(500).json({ error: 'could not write identity file' });
-  res.json({ ok: true, name: identity.name(), self_description: identity.identityFile(), preamble: identity.identityPreamble() });
+  if (b.preferences != null && !identity.setFacet('preferences', b.preferences)) return res.status(500).json({ error: 'could not write preferences' });
+  if (b.story != null && !identity.setFacet('story', b.story)) return res.status(500).json({ error: 'could not write story' });
+  res.json({ ok: true, ...identitySnapshot() });
 });
 
 // Periodic SDK freshness check — an old SDK silently caps the model, so watch for a newer one.

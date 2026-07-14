@@ -61,8 +61,10 @@ export const control = {
   setTitle: (session_id, title) => postCore('/api/control/session-title', { session_id, title })
 }
 
-// Self-update on the CORE — check status (via collector), toggle auto, or run the update session.
+// Self-update on the CORE (git code) — status (behind/available + changelog), toggle auto-install,
+// or run the update session now (a background agent session that runs UPDATE-WITH-AGENT.md).
 export const update = {
+  status: (fetch = true) => getCore('/v2/update/status' + (fetch ? '' : '?fetch=0')),
   run: () => postCore('/v2/update/run', { by: 'dashboard' }),
   getAuto: () => getCore('/v2/update/auto'),
   setAuto: (enabled) => postCore('/v2/update/auto', { enabled }),
