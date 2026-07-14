@@ -231,6 +231,13 @@ function _repoRoot(dir) {
   _repoCache.set(dir, root);
   return root;
 }
+// Proprioception — the body-schema graph (parts + structural edges). The live vital sign.
+const selfSchema = require('./self-schema');
+app.get('/api/self/schema', requireToken, (req, res) => {
+  try { res.json(selfSchema.buildSchema(dbmod, { since: Number(req.query.since) || undefined })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/map', requireToken, (req, res) => {
   const since = Number(req.query.since) || (Date.now() - 30 * 60000);
   const meta = {};
