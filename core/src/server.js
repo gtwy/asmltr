@@ -137,9 +137,10 @@ function drainObserved(key) {
   if (!arr || !arr.length) return '';
   observed.delete(key);
   const lines = arr.map((m) => `- ${m.author}: ${m.text}`).join('\n');
-  return `[Channel activity since you last replied — CONTEXT ONLY. You were not addressed in these ` +
-    `(they were for other people/agents or ambient chatter); stay aware of them but do NOT respond to them ` +
-    `now. Only the message that follows is for you.]\n${lines}\n[End of catch-up]\n\n`;
+  return `[Channel activity since you last replied — CONTEXT ONLY, for your awareness. You were not ` +
+    `addressed in these (they were for other people/agents or ambient chatter). Do not reply to them; ` +
+    `just factor them into your understanding. Then apply your normal rules to the message that follows ` +
+    `— which may or may not itself be for you.]\n${lines}\n[End of catch-up]\n\n`;
 }
 
 /**
