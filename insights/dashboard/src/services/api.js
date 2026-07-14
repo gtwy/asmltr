@@ -28,7 +28,9 @@ export const api = {
   brief: () => get('/brief'),
   search: (q) => get('/search', { q }),
   // proprioception — the body-schema graph (parts + structural edges)
-  selfSchema: (params) => get('/self/schema', params)
+  selfSchema: (params) => get('/self/schema', params),
+  // proprioception 1b — the deduced goal / threads / flags / semantic relations + history
+  selfAssessment: () => get('/self/assessment')
 }
 
 // Control plane on the CORE (served at root under /v2/...). Used by the live

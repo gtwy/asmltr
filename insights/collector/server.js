@@ -238,6 +238,20 @@ app.get('/api/self/schema', requireToken, (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Proprioception 1b — the considered self-assessment: latest deduced goal/threads/flags/relations,
+// plus a short history so the goal can be watched shifting. Written by the reflect() heartbeat below.
+app.get('/api/self/assessment', requireToken, (req, res) => {
+  try {
+    const row = dbmod.q.latestAssessment.get();
+    const latest = row ? {
+      ts: row.ts, goal: row.goal || '', parts: row.parts, edges: row.edges,
+      threads: JSON.parse(row.threads_json || '[]'), flags: JSON.parse(row.flags_json || '[]'),
+      relations: JSON.parse(row.relations_json || '[]'),
+    } : null;
+    res.json({ latest, history: dbmod.q.assessmentHistory.all({ limit: 20 }) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/map', requireToken, (req, res) => {
   const since = Number(req.query.since) || (Date.now() - 30 * 60000);
   const meta = {};
@@ -371,12 +385,65 @@ app.post('/api/control/restart-daemon', requireControl, (req, res) => {
 });
 app.get('/api/control/audit', requireToken, (req, res) => res.json({ audit: control.recentAudit(Number(req.query.limit) || 50) }));
 
+// --- proprioception 1b: the self-assessment heartbeat -----------------------
+// The considered, slow voice. Every REFLECT_CHECK_MS it snapshots the body; it only spends an LLM
+// turn when the body has MATERIALLY changed (digest hash differs) or REFLECT_MAX_MS has elapsed
+// since the last one — "considered and less often", change-triggered. Needs ≥2 parts (a lone limb
+// has no relations and no whole to deduce a goal from). Non-influential: it records, never steers.
+const crypto = require('crypto');
+const REFLECT_CHECK_MS = Math.max(60000, Number(process.env.ASMLTR_REFLECT_CHECK_MS || 5 * 60000));
+const REFLECT_MAX_MS = Math.max(REFLECT_CHECK_MS, Number(process.env.ASMLTR_REFLECT_MAX_MS || 25 * 60000));
+let _reflectBusy = false;
+let _lastReflect = 0;
+let _lastDigestHash = '';
+async function reflect() {
+  if (_reflectBusy) return;
+  let schema, digest;
+  try {
+    schema = selfSchema.buildSchema(dbmod);
+    if (schema.nodes.length < 2) return; // nothing to relate — leave the last assessment standing
+    digest = selfSchema.buildDigest(schema);
+  } catch (e) { console.warn('[reflect] digest failed:', e.message); return; }
+  const hash = crypto.createHash('sha1').update(digest.text).digest('hex');
+  const now = Date.now();
+  const changed = hash !== _lastDigestHash;
+  const stale = now - _lastReflect > REFLECT_MAX_MS;
+  if (!changed && !stale) return;
+  _reflectBusy = true;
+  try {
+    const r = await fetch(CORE_BASE + '/v2/self-assessment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ digest: digest.text }),
+    });
+    if (!r.ok) { console.warn('[reflect] core said', r.status); return; }
+    const j = await r.json();
+    const a = j && j.assessment;
+    if (!a) return;
+    // map the model's index-based relations back to session_id pairs so the GUI can overlay them
+    const relations = (a.relations || []).map((rel) => {
+      const from = digest.index[rel.a], to = digest.index[rel.b];
+      if (!from || !to || from === to) return null;
+      return { from, to, rel: rel.rel };
+    }).filter(Boolean);
+    dbmod.insertAssessment({
+      ts: now, goal: a.goal || '', threads_json: JSON.stringify(a.threads || []),
+      flags_json: JSON.stringify(a.flags || []), relations_json: JSON.stringify(relations),
+      parts: schema.counts.parts, edges: schema.counts.edges, digest_hash: hash,
+    });
+    _lastDigestHash = hash; _lastReflect = now;
+    io.emit('self-assessment-changed', { at: now });
+    console.log(`[reflect] assessed body: ${schema.counts.parts} parts, goal="${(a.goal || '').slice(0, 60)}"`);
+  } catch (e) { console.warn('[reflect] failed:', e.message); }
+  finally { _reflectBusy = false; }
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`asmltr-insights-collector on http://${HOST}:${PORT}`);
   if (!TOKEN) console.warn('[collector] WARNING: ASMLTR_INSIGHTS_TOKEN unset — auth disabled (dev mode)');
 
   reconcile.start(dbmod, RECONCILE_MS, (n) => io.emit('sessions-changed', { count: n }));
   sampler.start(dbmod, SAMPLE_MS, (s) => io.emit('system-sample', s));
+  setTimeout(reflect, 20000).unref?.();               // first pass shortly after boot
+  setInterval(reflect, REFLECT_CHECK_MS).unref?.();   // then change-triggered on each check
   if (ENABLE_TAILER) {
     tailer.start(dbmod, TAIL_MS, (n) => console.log(`[tailer] ingested ${n} events from proxy logs`));
     console.log('[collector] JSONL tailer active (proxy logs → events)');
