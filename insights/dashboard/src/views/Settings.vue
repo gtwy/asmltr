@@ -1,101 +1,119 @@
 <script setup>
-// Settings — the agent runtime (the SDK version that GATES which models are reachable, the model
-// selection, and SDK auto-update) plus a couple of behavioural toggles. Keeping the SDK current is
-// how the underlying model stays up to date; an old SDK silently pins you to an old model.
+// Settings — organised into tabs so it can grow: Identity (who the agent is), Runtime (the Agent
+// SDK + model), Voice (behaviour). Each section is self-contained; add a tab as new areas appear.
 import { ref, onMounted, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { runtime, voice, identity } from '@/services/api'
 
-// --- Identity (the Self / Likeness plane) ---
-const idn = ref(null)          // { name, self_description, preamble }
-const idnDraft = ref('')
-const idnDirty = computed(() => idn.value && idnDraft.value !== idn.value.self_description)
-const showPreamble = ref(false)
-async function loadIdentity() { try { idn.value = await identity.get(); idnDraft.value = idn.value.self_description } catch (_) {} }
-async function saveIdentity() {
-  busy.value = 'identity'
-  try { idn.value = await identity.set(idnDraft.value); idnDraft.value = idn.value.self_description; notice.value = 'Identity saved — applies to the next turn on every surface.' }
-  catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
-}
-onMounted(loadIdentity)
-
-const rt = ref(null)
-const loading = ref(true)
+const TABS = [
+  { id: 'identity', label: 'Identity', icon: '🪪' },
+  { id: 'runtime', label: 'Runtime', icon: '⚙' },
+  { id: 'voice', label: 'Voice', icon: '🎙' }
+]
+const tab = ref('identity')
 const busy = ref('')      // which action is in flight
 const notice = ref('')
-const customModel = ref('')
 
+// --- Identity (the Self / Likeness plane) ---
+const idn = ref(null)          // { name, self_description, preamble }
+const nameDraft = ref('')
+const descDraft = ref('')
+const showPreamble = ref(false)
+const nameDirty = computed(() => idn.value && nameDraft.value.trim() && nameDraft.value.trim() !== idn.value.name)
+const descDirty = computed(() => idn.value && descDraft.value !== idn.value.self_description)
+const idnDirty = computed(() => nameDirty.value || descDirty.value)
+async function loadIdentity() { try { idn.value = await identity.get(); nameDraft.value = idn.value.name; descDraft.value = idn.value.self_description } catch (_) {} }
+async function saveIdentity() {
+  busy.value = 'identity'; notice.value = ''
+  const renamed = nameDirty.value
+  try {
+    const body = {}
+    if (nameDirty.value) body.name = nameDraft.value.trim()
+    if (descDirty.value) body.self_description = descDraft.value
+    idn.value = await identity.set(body)
+    nameDraft.value = idn.value.name; descDraft.value = idn.value.self_description
+    notice.value = renamed
+      ? `Saved. The core uses “${idn.value.name}” from the next turn — but connector-level name (Discord wake word, the shell alias, the bot's own username) needs a service restart + re-provision to fully realign.`
+      : 'Identity saved — applies to the next turn on every surface.'
+  } catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
+}
+
+// --- Runtime (SDK + model) ---
+const rt = ref(null)
+const customModel = ref('')
 const MODEL_CHOICES = [
   { id: 'opus', label: 'Opus', hint: 'latest Opus (recommended)' },
   { id: 'sonnet', label: 'Sonnet', hint: 'faster, latest Sonnet' },
   { id: 'haiku', label: 'Haiku', hint: 'fastest, lightest' },
   { id: '', label: 'SDK default', hint: '1M-context Opus' }
 ]
-const configured = computed(() => rt.value?.model?.configured ?? '')
-const isChoice = (id) => configured.value === id
-
-async function load(fetch = true) {
-  loading.value = true
-  try { rt.value = await runtime.get(fetch) } catch (e) { notice.value = 'Could not load runtime: ' + e.message }
-  finally { loading.value = false }
-}
-onMounted(() => load(true))
-
+const isChoice = (id) => (rt.value?.model?.configured ?? '') === id
+async function loadRuntime(fetch = true) { try { rt.value = await runtime.get(fetch) } catch (e) { notice.value = 'Could not load runtime: ' + e.message } }
 async function pickModel(id) {
   busy.value = 'model'; notice.value = ''
   try { const r = await runtime.setModel(id); rt.value.model.configured = r.model; notice.value = `Model set to “${r.model || 'SDK default'}” — applies on the next turn.` }
   catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
 async function setCustom() { const m = customModel.value.trim(); if (m) { await pickModel(m); customModel.value = '' } }
-
 async function toggleAuto() {
   busy.value = 'auto'
   try { const r = await runtime.setAutoUpdate(!rt.value.autoUpdate); rt.value.autoUpdate = r.autoUpdate }
   catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
-
 async function updateSdk() {
   busy.value = 'update'; notice.value = ''
   try {
     await runtime.update()
-    notice.value = 'SDK update started — the core will reinstall and restart. This can take a minute; the page will refresh the version automatically.'
-    // poll for the version to change / core to come back
-    const before = rt.value?.sdk?.installed
-    let tries = 0
+    notice.value = 'SDK update started — the core will reinstall and restart. This can take a minute; the version refreshes automatically.'
+    const before = rt.value?.sdk?.installed; let tries = 0
     const timer = setInterval(async () => {
       tries++
-      try { const r = await runtime.get(true); if (r?.sdk?.installed && r.sdk.installed !== before) { rt.value = r; notice.value = `Updated to ${r.sdk.installed}.`; clearInterval(timer) } }
-      catch (_) {}
+      try { const r = await runtime.get(true); if (r?.sdk?.installed && r.sdk.installed !== before) { rt.value = r; notice.value = `Updated to ${r.sdk.installed}.`; clearInterval(timer) } } catch (_) {}
       if (tries > 30) clearInterval(timer)
     }, 6000)
   } catch (e) { notice.value = 'Update failed to start: ' + e.message } finally { busy.value = '' }
 }
 
-// voice ack toggle (a behavioural setting, consolidated here)
+// --- Voice ---
 const ackOn = ref(true)
-onMounted(async () => { try { ackOn.value = (await voice.getAck()).enabled } catch (_) {} })
 function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).catch(() => {}) }
+
+onMounted(async () => {
+  await Promise.all([loadIdentity(), loadRuntime(true)])
+  try { ackOn.value = (await voice.getAck()).enabled } catch (_) {}
+})
 </script>
 
 <template>
   <div>
-    <PageHeader title="Settings" subtitle="Agent runtime, model selection, and behaviour" />
+    <PageHeader title="Settings" subtitle="Identity, runtime, and behaviour" />
 
-    <div class="mx-auto max-w-2xl space-y-5">
-      <!-- Identity (the Self) -->
-      <div class="glass p-5">
+    <div class="mx-auto max-w-2xl">
+      <!-- tab bar -->
+      <div class="mb-5 flex gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
+        <button
+          v-for="t in TABS" :key="t.id" type="button"
+          class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+          :class="tab === t.id ? 'bg-brand-violet/20 text-violet-200' : 'text-slate-400 hover:text-slate-200'"
+          @click="tab = t.id"
+        >{{ t.icon }} {{ t.label }}</button>
+      </div>
+
+      <!-- Identity -->
+      <div v-show="tab === 'identity'" class="glass p-5">
         <h3 class="mb-1 text-sm font-semibold text-slate-200">Identity</h3>
         <p class="mb-4 text-[12px] text-slate-500">Who this agent is. Asserted at the top of <em>every</em> session (terminal + all channels) so identity is declared, not inferred — the fix for cross-agent drift.</p>
         <template v-if="idn">
-          <div class="mb-3 flex items-center gap-2">
-            <span class="text-[11px] uppercase tracking-wide text-slate-500">Name</span>
-            <span class="rounded-md border border-brand-violet/30 bg-brand-violet/10 px-2 py-0.5 text-sm font-semibold text-violet-200">{{ idn.name }}</span>
-            <span class="text-[11px] text-slate-600">(set via ASSISTANT_NAME)</span>
-          </div>
+          <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Name</label>
+          <input
+            v-model="nameDraft"
+            type="text"
+            class="mb-4 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition-colors focus:border-brand-violet/60 focus:bg-white/[0.06]"
+          />
           <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Self-description</label>
           <textarea
-            v-model="idnDraft"
-            rows="5"
+            v-model="descDraft"
+            rows="6"
             placeholder="Who you are, in your own words…"
             class="w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[13px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
           ></textarea>
@@ -115,14 +133,11 @@ function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).cat
         <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
       </div>
 
-      <!-- Agent runtime -->
-      <div class="glass p-5">
+      <!-- Runtime -->
+      <div v-show="tab === 'runtime'" class="glass p-5">
         <h3 class="mb-1 text-sm font-semibold text-slate-200">Agent runtime</h3>
         <p class="mb-4 text-[12px] text-slate-500">The Agent SDK gates which models are reachable — an old SDK silently pins you to an old model. Keep it current and use a model alias to track the latest.</p>
-
-        <p v-if="loading" class="py-4 text-center text-sm text-slate-500">loading…</p>
-        <template v-else-if="rt">
-          <!-- SDK version -->
+        <template v-if="rt">
           <div class="mb-5 flex flex-wrap items-center gap-3 rounded-lg border border-white/5 bg-black/20 p-3">
             <div class="min-w-0">
               <div class="text-[11px] uppercase tracking-wide text-slate-500">Agent SDK</div>
@@ -139,8 +154,6 @@ function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).cat
               @click="updateSdk"
             >{{ busy === 'update' ? 'starting…' : (rt.sdk.updateAvailable ? '↑ Update now' : 'Latest') }}</button>
           </div>
-
-          <!-- SDK auto-update -->
           <label class="mb-5 flex cursor-pointer items-center justify-between gap-3">
             <span>
               <span class="text-sm text-slate-200">Auto-update the SDK</span>
@@ -150,8 +163,6 @@ function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).cat
               <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.autoUpdate ? 'left-[22px]' : 'left-0.5'"></span>
             </button>
           </label>
-
-          <!-- Model -->
           <div>
             <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Model
               <span v-if="rt.model.resolved" class="ml-1 font-mono text-slate-400">· running {{ rt.model.resolved }}</span>
@@ -174,10 +185,11 @@ function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).cat
             </div>
           </div>
         </template>
+        <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
       </div>
 
       <!-- Voice -->
-      <div class="glass p-5">
+      <div v-show="tab === 'voice'" class="glass p-5">
         <h3 class="mb-3 text-sm font-semibold text-slate-200">Voice</h3>
         <label class="flex cursor-pointer items-center justify-between gap-3">
           <span>
@@ -190,7 +202,7 @@ function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).cat
         </label>
       </div>
 
-      <p v-if="notice" class="text-center text-[12px] text-slate-400">{{ notice }}</p>
+      <p v-if="notice" class="mt-4 text-center text-[12px] text-slate-400">{{ notice }}</p>
     </div>
   </div>
 </template>
