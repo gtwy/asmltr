@@ -163,6 +163,12 @@ const q = {
     SELECT session_id, payload, ts FROM events
     WHERE event_type = 'tool' AND ts > @since ORDER BY ts DESC LIMIT 3000
   `),
+  // recent announce control events (for proprioception communicated-edges: from → target)
+  announceEventsSince: db.prepare(`
+    SELECT identity, payload, ts FROM events
+    WHERE event_type = 'control' AND payload LIKE '%"action":"announce"%' AND ts > @since
+    ORDER BY ts DESC LIMIT 500
+  `),
   // full-content search across events (for the dashboard session search)
   searchEvents: db.prepare(`
     SELECT session_id, event_type, payload, ts FROM events

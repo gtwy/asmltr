@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   { path: '/', name: 'live', component: () => import('@/views/Live.vue'), meta: { title: 'Live', icon: '◉' } },
+  { path: '/self', name: 'self', component: () => import('@/views/Self.vue'), meta: { title: 'Self', icon: '🧠' } },
   { path: '/timeline', name: 'timeline', component: () => import('@/views/Timeline.vue'), meta: { title: 'Timeline', icon: '≣' } },
   { path: '/usage', name: 'usage', component: () => import('@/views/Usage.vue'), meta: { title: 'Usage', icon: '▤' } },
   { path: '/system', name: 'system', component: () => import('@/views/System.vue'), meta: { title: 'System', icon: '▦' } },
