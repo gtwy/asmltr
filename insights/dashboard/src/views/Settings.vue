@@ -4,7 +4,20 @@
 // how the underlying model stays up to date; an old SDK silently pins you to an old model.
 import { ref, onMounted, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { runtime, voice } from '@/services/api'
+import { runtime, voice, identity } from '@/services/api'
+
+// --- Identity (the Self / Likeness plane) ---
+const idn = ref(null)          // { name, self_description, preamble }
+const idnDraft = ref('')
+const idnDirty = computed(() => idn.value && idnDraft.value !== idn.value.self_description)
+const showPreamble = ref(false)
+async function loadIdentity() { try { idn.value = await identity.get(); idnDraft.value = idn.value.self_description } catch (_) {} }
+async function saveIdentity() {
+  busy.value = 'identity'
+  try { idn.value = await identity.set(idnDraft.value); idnDraft.value = idn.value.self_description; notice.value = 'Identity saved — applies to the next turn on every surface.' }
+  catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
+}
+onMounted(loadIdentity)
 
 const rt = ref(null)
 const loading = ref(true)
@@ -69,6 +82,39 @@ function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).cat
     <PageHeader title="Settings" subtitle="Agent runtime, model selection, and behaviour" />
 
     <div class="mx-auto max-w-2xl space-y-5">
+      <!-- Identity (the Self) -->
+      <div class="glass p-5">
+        <h3 class="mb-1 text-sm font-semibold text-slate-200">Identity</h3>
+        <p class="mb-4 text-[12px] text-slate-500">Who this agent is. Asserted at the top of <em>every</em> session (terminal + all channels) so identity is declared, not inferred — the fix for cross-agent drift.</p>
+        <template v-if="idn">
+          <div class="mb-3 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-slate-500">Name</span>
+            <span class="rounded-md border border-brand-violet/30 bg-brand-violet/10 px-2 py-0.5 text-sm font-semibold text-violet-200">{{ idn.name }}</span>
+            <span class="text-[11px] text-slate-600">(set via ASSISTANT_NAME)</span>
+          </div>
+          <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Self-description</label>
+          <textarea
+            v-model="idnDraft"
+            rows="5"
+            placeholder="Who you are, in your own words…"
+            class="w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[13px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
+          ></textarea>
+          <div class="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              :disabled="!idnDirty || busy === 'identity'"
+              class="rounded-lg bg-brand-gradient px-4 py-1.5 text-xs font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40"
+              @click="saveIdentity"
+            >{{ busy === 'identity' ? 'saving…' : 'Save' }}</button>
+            <button type="button" class="text-xs text-slate-400 hover:text-slate-200" @click="showPreamble = !showPreamble">
+              {{ showPreamble ? 'hide' : 'preview' }} the anchor every session sees
+            </button>
+          </div>
+          <pre v-if="showPreamble" class="mt-3 max-h-56 overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/30 p-3 text-[11px] leading-relaxed text-slate-400">{{ idn.preamble }}</pre>
+        </template>
+        <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
+      </div>
+
       <!-- Agent runtime -->
       <div class="glass p-5">
         <h3 class="mb-1 text-sm font-semibold text-slate-200">Agent runtime</h3>

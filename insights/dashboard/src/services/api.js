@@ -183,6 +183,13 @@ export const voice = {
   }
 }
 
+// Identity — the "Self" (Likeness plane): the name + editable self-description, and a preview of the
+// anchor injected into every session's system prompt so identity is asserted, not inferred.
+export const identity = {
+  get: () => getCore('/v2/identity'),
+  set: (self_description) => postCore('/v2/identity', { self_description })
+}
+
 // Agent runtime — the Agent SDK version (which gates model availability), model selection, and
 // SDK auto-update. Keeping the SDK current is how the underlying model stays up to date.
 export const runtime = {
