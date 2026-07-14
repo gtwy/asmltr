@@ -116,6 +116,32 @@ This message reached you through the asmltr "${e.channel}" connector. You are ta
 Your underlying runtime is Claude Code, but that is an internal implementation detail and is NOT the medium of this conversation. If asked what app/medium/channel/platform you're on, the truthful answer is ${label} (via the asmltr ${e.channel} connector) — do NOT say "Claude Code", "the terminal", "SSH", or describe session-start hooks / git status / system reminders as if the user sent them. Those are your backstage context, not this conversation.`;
 }
 
+// --- observe-only awareness buffer ------------------------------------------
+// Messages the assistant should stay AWARE of but not reply to (addressed to another agent in a
+// multi-agent channel, or ambient chatter). We don't run a turn for these — the SDK session only
+// grows via real turns — so we buffer them per conversation_key and prepend them as context to the
+// NEXT real turn. This is what lets the session stay current without a reply. Bounded to avoid bloat.
+const observed = new Map(); // conversation_key -> [{ author, text }]
+const OBSERVE_MAX = Math.max(5, Number(process.env.ASMLTR_OBSERVE_MAX || 60));
+function pushObserved(key, author, text) {
+  const t = String(text || '').trim();
+  if (!t) return;
+  const arr = observed.get(key) || [];
+  arr.push({ author: String(author || 'someone'), text: t.slice(0, 800) });
+  while (arr.length > OBSERVE_MAX) arr.shift(); // sliding window — keep the most recent
+  observed.set(key, arr);
+}
+// Drain the buffer into a context preamble for the next real turn (and clear it).
+function drainObserved(key) {
+  const arr = observed.get(key);
+  if (!arr || !arr.length) return '';
+  observed.delete(key);
+  const lines = arr.map((m) => `- ${m.author}: ${m.text}`).join('\n');
+  return `[Channel activity since you last replied — CONTEXT ONLY. You were not addressed in these ` +
+    `(they were for other people/agents or ambient chatter); stay aware of them but do NOT respond to them ` +
+    `now. Only the message that follows is for you.]\n${lines}\n[End of catch-up]\n\n`;
+}
+
 /**
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
@@ -126,7 +152,14 @@ async function handle(envelope, opts = {}) {
   const _cc = e.channel_context || {};
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'inbound',
     identity: e.sender.raw_username || e.sender.raw_id, source: 'core',
-    payload: { text: e.content.text.slice(0, 500), delivery: e.delivery, server: _cc.server || null, channel: _cc.channel || null } });
+    payload: { text: e.content.text.slice(0, 500), delivery: e.delivery, server: _cc.server || null, channel: _cc.channel || null, observed: e.observe_only || undefined } });
+
+  // Observe-only: ingest for awareness, never reply. Recorded above (backend visibility); buffered
+  // here so it reaches the model as context on the next real turn. No trust/moderation/turn.
+  if (e.observe_only) {
+    pushObserved(e.conversation_key, e.sender.raw_username || e.sender.raw_id, e.content.text);
+    return [];
+  }
 
   // 0) takeover guard: if a human has claimed this session in a terminal, pause
   //    channel responses (don't run a turn) until released.
@@ -273,8 +306,11 @@ async function handle(envelope, opts = {}) {
     const images = (e.content.attachments || [])
       .filter((a) => a && a.type === 'image' && a.data && a.media_type)
       .map((a) => ({ media_type: a.media_type, data: a.data }));
+    // Prepend any observed-but-not-replied channel activity so the session catches up before it
+    // answers — then the buffer is cleared. Keeps the resumed session authoritative for history.
+    const catchUp = drainObserved(e.conversation_key);
     result = await runTurn({
-      prompt: e.content.text,
+      prompt: catchUp + e.content.text,
       systemPrompt,
       resume,
       cwd,

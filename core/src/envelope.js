@@ -69,6 +69,11 @@ function inbound(e) {
     // Surface visibility: true if outbound text is seen by anyone beyond a full-trust
     // recipient (github comment, discord guild channel). Drives the core redaction layer.
     public: !!e.public,
+    // Observe-only: ingest this message into the session's awareness WITHOUT running a turn or
+    // replying. The core records it and buffers it as context for the next real turn — so a
+    // multi-agent channel stays current on messages addressed to OTHER agents (or ambient chatter)
+    // while only ever replying when actually addressed. content.text still carries the message.
+    observe_only: !!e.observe_only,
     // Optional connector-supplied approval policy → the core's draft/approval gate. Held
     // replies are diverted to the draft store instead of returned. { policy, recipient, subject, attachments }.
     approval: e.approval && typeof e.approval === 'object'
