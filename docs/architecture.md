@@ -47,7 +47,7 @@ one adapter that emits an envelope and renders a reply.
     These four constraints are load-bearing. They are enforced in code and are the reason
     the deployment topology looks the way it does.
 
-- **Execution is LOCAL via the Agent SDK** (`@anthropic-ai/claude-code`), on the user's
+- **Execution is LOCAL via the Agent SDK** (`@anthropic-ai/claude-agent-sdk`), on the user's
   Claude subscription — the same auth Claude Code uses. There is **no `ANTHROPIC_API_KEY`
   execution path**: the core deletes `ANTHROPIC_API_KEY` from its environment at startup
   (`core/src/server.js`), so agent turns can never silently switch to metered billing or a

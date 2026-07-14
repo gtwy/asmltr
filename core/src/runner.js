@@ -11,7 +11,9 @@
  * minus the terminal-output cleaning cruft (not needed off the structured stream).
  */
 
-const { query } = require('@anthropic-ai/claude-code');
+const { query } = require('@anthropic-ai/claude-agent-sdk'); // programmatic Agent SDK (the query() API
+// moved here when @anthropic-ai/claude-code became CLI-only at 2.x). Bundles a current CLI runtime,
+// so channel turns run the same modern models as the interactive terminal.
 
 /**
  * Run one turn.
@@ -26,13 +28,18 @@ const { query } = require('@anthropic-ai/claude-code');
 async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, onDelta, onSegment, onTool, onThinking, images = [] }) {
   const options = {
     stream: true,
-    permissionMode: 'bypassPermissions', // works under root via SDK (CLI flag does not — see eve-query-proxy.js:489)
-    extraArgs: { 'dangerously-skip-permissions': true },
+    // Full autonomy (the equivalent of --dangerously-skip-permissions): permissionMode bypass +
+    // IS_SANDBOX=1 (set in server.js). The raw CLI flag is REJECTED as root on the modern CLI, so we
+    // rely on bypassPermissions instead — verified to run tools with no prompts as root.
+    permissionMode: 'bypassPermissions',
     // Surface full process insight: tool RESULTS arrive as `user` messages only with
     // includePartialMessages; thinking blocks appear when maxThinkingTokens > 0
     // (adaptive — trivial turns won't think, so overhead is self-limiting).
     includePartialMessages: true,
   };
+  // Pin the model so channel turns match the terminal. An alias (opus/sonnet) auto-tracks the latest
+  // of that tier; a full id pins exactly. Unset → the SDK default (currently the 1M-context Opus).
+  if (process.env.ASMLTR_MODEL) options.model = process.env.ASMLTR_MODEL;
   const thinkTokens = Number(process.env.ASMLTR_MAX_THINKING_TOKENS ?? 4000);
   if (thinkTokens > 0) options.maxThinkingTokens = thinkTokens;
   // Spawn cwd controls which CLAUDE.md hierarchy loads (ambient context) AND where
@@ -144,7 +151,7 @@ async function generateTitle(text) {
   const options = {
     stream: true,
     permissionMode: 'bypassPermissions',
-    extraArgs: { 'dangerously-skip-permissions': true, model },
+    model,
     maxTurns: 1,
   };
   let out = '';
@@ -172,7 +179,7 @@ async function generateStatus(text) {
     String(text || '').slice(0, 4000);
   const options = {
     stream: true, permissionMode: 'bypassPermissions',
-    extraArgs: { 'dangerously-skip-permissions': true, model }, maxTurns: 1,
+    model, maxTurns: 1,
     // Override the agentic persona — otherwise the model reads the activity log as ITS task and
     // "continues" it in the first person ("I'll check…") instead of labeling it.
     appendSystemPrompt: 'You are ONLY a text-labeling function. You never take actions, never use tools, ' +

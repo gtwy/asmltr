@@ -26,7 +26,8 @@ require('../../shared/loadenv'); // load <repo>/.env before anything reads confi
 // We STRIP it from the env so agent execution can never silently go metered, even if an
 // Anthropic key is configured for the moderation classifier (which resolves its key from
 // the secrets provider, not this env var — see core/src/moderation.js + docs/MODERATION.md).
-process.env.IS_SANDBOX = process.env.IS_SANDBOX || 'true';
+process.env.IS_SANDBOX = '1'; // MUST be '1' (not 'true') — the modern CLI only accepts '1' to permit
+// bypassPermissions as root. With 'true' it refuses (--dangerously-skip-permissions blocked as root).
 delete process.env.CLAUDECODE;
 delete process.env.CLAUDE_CODE_ENTRYPOINT;
 delete process.env.ANTHROPIC_API_KEY;

@@ -5,7 +5,7 @@
 Run *one* assistant and let people reach it from **Discord, Telegram, an MCP client, GitHub issues, or any OpenAI-compatible client** — all through the same brain. Every surface shares one memory, one trust/permission model, one moderation screen, and per-secret output redaction. A collector plus dashboard give you a single pane of glass over everything the assistant is doing.
 
 !!! note "The assistant runs on your Claude subscription"
-    Execution is **local**, through the Claude Agent SDK (`@anthropic-ai/claude-code`) — the same auth Claude Code uses. There is **no `ANTHROPIC_API_KEY` execution path**: an API key would switch to metered billing and a sandbox with no local filesystem, project context, or skills.
+    Execution is **local**, through the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) — the same auth Claude Code uses. There is **no `ANTHROPIC_API_KEY` execution path**: an API key would switch to metered billing and a sandbox with no local filesystem, project context, or skills.
 
 !!! warning "Scope: asynchronous chat channels + monitoring"
     asmltr is deliberately scoped to **asynchronous chat channels and observability**. It is not a voice-assistant framework — though the Discord connector does have an optional voice mode.

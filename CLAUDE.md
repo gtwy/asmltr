@@ -7,15 +7,18 @@ in the repo. Per-install private notes live in `CLAUDE.local.md` (gitignored).
 ## The non-negotiables (violating these breaks the model)
 
 1. **No `ANTHROPIC_API_KEY` execution path.** All agent execution goes through the local Agent SDK
-   (`@anthropic-ai/claude-code`) on the user's Claude subscription. An API key silently switches to
-   metered billing and a sandbox with no local FS / project-context / skills. Verify: nothing in
-   `core/` reads `ANTHROPIC_API_KEY`.
+   (`@anthropic-ai/claude-agent-sdk` — the programmatic `query()` API; `@anthropic-ai/claude-code`
+   became CLI-only at 2.x) on the user's Claude subscription. An API key silently switches to metered
+   billing and a sandbox with no local FS / project-context / skills. Verify: nothing in `core/` reads
+   `ANTHROPIC_API_KEY`. Set the model with `ASMLTR_MODEL` (alias like `opus` tracks the latest tier).
 2. **`core/` and `insights/collector/` run on the HOST under PM2**, never Docker — they spawn the
    local `claude` binary and signal host pids. Connectors may be containerized (reach the host via
    `host.docker.internal`).
 3. **Bind `127.0.0.1`.** Only a reverse proxy faces the internet.
-4. **Root auth quirk:** as root the CLI rejects `--dangerously-skip-permissions`; the SDK's
-   `permissionMode: 'bypassPermissions'` is the working equivalent (`core/src/runner.js`).
+4. **Root auth quirk:** as root the modern CLI rejects `--dangerously-skip-permissions`. The working
+   full-autonomy equivalent is `permissionMode: 'bypassPermissions'` (`core/src/runner.js`) **plus
+   `IS_SANDBOX=1`** (set in `core/src/server.js` — must be `'1'`, not `'true'`). Never pass the raw
+   `dangerously-skip-permissions` flag via `extraArgs`; the modern CLI fatals on it as root.
 
 ## Architecture in one breath
 
