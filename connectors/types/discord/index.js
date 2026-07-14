@@ -58,6 +58,7 @@ const meta = {
       http_port: { type: 'integer', title: 'Send-message HTTP port', default: 3016 },
       dm_allowed_user_id: { type: 'string', title: 'Allowed DM user id', default: '' },
       min_response_interval_ms: { type: 'integer', title: 'Min ms between autonomous responses', default: 10000 },
+      reply_debounce_ms: { type: 'integer', title: 'Reply debounce: wait this long for the channel to go QUIET before replying, so a multi-block message (or another agent mid-thought) fully lands first — prevents replying to a partial. Resets on each new message. 0 = reply immediately.', default: 3000 },
       max_responses_per_hour: { type: 'integer', title: 'Max autonomous responses/hour/channel', default: 20 },
       data_dir: { type: 'string', title: 'Memory data dir', default: '' },
       voice_id: { type: 'string', title: 'ElevenLabs voice id (spoken replies)', default: '' },
@@ -100,6 +101,7 @@ async function start(ctx) {
   const ignoreOtherMentions = cfg.ignore_other_mentions !== false; // drop msgs @-directed at OTHER specific users/bots
   const minInterval = cfg.min_response_interval_ms || 10000;
   const maxPerHour = cfg.max_responses_per_hour || 20;
+  const replyDebounceMs = cfg.reply_debounce_ms != null ? cfg.reply_debounce_ms : 3000;
   const dataDir = cfg.data_dir || path.join(__dirname, '..', '..', 'manager', 'data');
   const memoryFile = path.join(dataDir, `discord-${ctx.instanceId}-memory.json`);
 
@@ -111,6 +113,7 @@ async function start(ctx) {
   // --- state ---
   let memory = { servers: {}, globalTimeline: [] };
   const processing = new Map();
+  const pendingReply = new Map(); // cid -> { timer, message, forced } — the reply-debounce quiet-window
   let silenced = false;
   let lastResponseTime = 0;
   const responseCount = new Map();
@@ -473,6 +476,25 @@ RESPONSE RULES:
     }
   }
 
+  // Reply DEBOUNCE — don't reply the instant a message lands. Wait for the channel to go quiet for
+  // `replyDebounceMs`, resetting the timer on every new message, so a multi-block reply (or another
+  // agent still mid-thought — the blocks arrive sub-second apart) fully lands BEFORE we read context
+  // and answer. Without this, the first block grabs the processing lock and we reply to a fragment,
+  // and multiple agents race each other. The trigger is always the LATEST message in the settled
+  // window; `forced` (a silence-mode @mention) is sticky across the window.
+  function scheduleReply(message, forced) {
+    const cid = message.channel.id;
+    if (replyDebounceMs <= 0) { handleMessage(message, forced).catch(() => {}); return; }
+    const prev = pendingReply.get(cid);
+    if (prev) clearTimeout(prev.timer);
+    const entry = { message, forced: !!forced || !!(prev && prev.forced) };
+    entry.timer = setTimeout(() => {
+      pendingReply.delete(cid);
+      handleMessage(entry.message, entry.forced).catch(() => {});
+    }, replyDebounceMs);
+    pendingReply.set(cid, entry);
+  }
+
   // --- Discord client ---
   const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildVoiceStates],
@@ -745,8 +767,8 @@ RESPONSE RULES:
       const directedElsewhere = (message.mentions.users.size > 0 && !message.mentions.has(client.user)) || leadsOtherAgent;
       if (directedElsewhere && !addressesMe) return;
     }
-    if (silenced) { if (message.mentions.has(client.user)) await handleMessage(message, true); return; }
-    if (shouldRespondTo(message)) await handleMessage(message, false);
+    if (silenced) { if (message.mentions.has(client.user)) scheduleReply(message, true); return; }
+    if (shouldRespondTo(message)) scheduleReply(message, false);
   });
 
   // --- /send-message endpoint (message-discord depends on this) ---
