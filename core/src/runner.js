@@ -15,6 +15,8 @@ const { query } = require('@anthropic-ai/claude-agent-sdk'); // programmatic Age
 // moved here when @anthropic-ai/claude-code became CLI-only at 2.x). Bundles a current CLI runtime,
 // so channel turns run the same modern models as the interactive terminal.
 
+let _lastModel = null; // the model id the most recent turn actually ran on (surfaced in the GUI)
+
 /**
  * Run one turn.
  * @param {object} args
@@ -37,9 +39,11 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
     // (adaptive — trivial turns won't think, so overhead is self-limiting).
     includePartialMessages: true,
   };
-  // Pin the model so channel turns match the terminal. An alias (opus/sonnet) auto-tracks the latest
-  // of that tier; a full id pins exactly. Unset → the SDK default (currently the 1M-context Opus).
-  if (process.env.ASMLTR_MODEL) options.model = process.env.ASMLTR_MODEL;
+  // Pin the model so channel turns match the terminal. Resolved via shared/runtime (GUI-set file →
+  // ASMLTR_MODEL → 'opus'), so a dashboard change applies on the NEXT turn with no restart. An alias
+  // (opus/sonnet) auto-tracks the latest of that tier; a full id pins exactly.
+  const _model = require('../../shared/runtime').getModel();
+  if (_model) options.model = _model;
   const thinkTokens = Number(process.env.ASMLTR_MAX_THINKING_TOKENS ?? 4000);
   if (thinkTokens > 0) options.maxThinkingTokens = thinkTokens;
   // Spawn cwd controls which CLAUDE.md hierarchy loads (ambient context) AND where
@@ -94,6 +98,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
     switch (event.type) {
       case 'system':
         if (event.session_id) engineSessionId = event.session_id;
+        if (event.model) _lastModel = event.model; // the id our alias actually resolved to (for the GUI)
         break;
       case 'assistant':
         for (const c of event.message?.content || []) {
@@ -200,4 +205,4 @@ async function generateStatus(text) {
   return s;
 }
 
-module.exports = { runTurn, generateTitle, generateStatus };
+module.exports = { runTurn, generateTitle, generateStatus, getLastModel: () => _lastModel };

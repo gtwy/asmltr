@@ -183,6 +183,15 @@ export const voice = {
   }
 }
 
+// Agent runtime — the Agent SDK version (which gates model availability), model selection, and
+// SDK auto-update. Keeping the SDK current is how the underlying model stays up to date.
+export const runtime = {
+  get: (fetch = true) => getCore('/v2/runtime' + (fetch ? '' : '?fetch=0')),
+  setModel: (model) => postCore('/v2/runtime/model', { model }),
+  setAutoUpdate: (enabled) => postCore('/v2/runtime/auto-update', { enabled }),
+  update: () => postCore('/v2/runtime/update', { by: 'dashboard' })
+}
+
 // Draft / approval queue on the CORE — replies any connector held for a human to approve.
 export const drafts = {
   list: (status = 'pending') => getCore(`/v2/drafts?status=${encodeURIComponent(status)}`),

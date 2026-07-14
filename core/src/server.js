@@ -44,7 +44,8 @@ const drafts = require('./drafts'); // shared hold-for-approval queue (any conne
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
-const { runTurn, generateTitle, generateStatus } = require('./runner');
+const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
+const { runTurn, generateTitle, generateStatus, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
 
@@ -513,6 +514,41 @@ app.get('/v2/voice/asset/:name', (req, res) => {
   res.set('Content-Type', a.mime); res.set('Cache-Control', 'public, max-age=86400');
   res.sendFile(a.path);
 });
+
+// Agent runtime settings — the SDK version (installed vs latest-on-npm) that gates model availability,
+// the model selection (applies next turn, no restart), the last-resolved model id, and SDK auto-update.
+app.get('/v2/runtime', async (req, res) => {
+  const s = await runtime.status({ fetch: req.query.fetch !== '0' });
+  s.model.resolved = getLastModel();
+  res.json(s);
+});
+app.post('/v2/runtime/model', (req, res) => res.json({ model: runtime.setModel(req.body && req.body.model) }));
+app.post('/v2/runtime/auto-update', (req, res) => res.json({ autoUpdate: runtime.setSdkAutoUpdate(!!(req.body && req.body.enabled)) }));
+app.post('/v2/runtime/update', (req, res) => {
+  const r = runtime.updateSdk();
+  record({ surface: 'core', session_id: null, event_type: 'control', identity: (req.body && req.body.by) || 'operator', source: 'core', payload: { action: 'sdk-update-started', pid: r.pid } });
+  res.json({ ok: true, ...r });
+});
+
+// Periodic SDK freshness check — an old SDK silently caps the model, so watch for a newer one.
+// Auto-update + restart if enabled; otherwise emit a one-time notification so the dashboard can nudge.
+let _lastSdkNotified = null;
+async function checkSdkFreshness() {
+  try {
+    const s = await runtime.status({ fetch: true });
+    if (!s.sdk.updateAvailable) return;
+    if (runtime.isSdkAutoUpdate()) {
+      record({ surface: 'core', session_id: null, event_type: 'control', identity: 'system', source: 'core', payload: { action: 'sdk-auto-update', from: s.sdk.installed, to: s.sdk.latest } });
+      runtime.updateSdk();
+    } else if (_lastSdkNotified !== s.sdk.latest) {
+      _lastSdkNotified = s.sdk.latest;
+      record({ surface: 'core', session_id: null, event_type: 'notification', identity: 'system', source: 'core',
+        payload: { kind: 'sdk-update', title: 'Agent SDK update available', body: `${s.sdk.installed} → ${s.sdk.latest} — update to keep the model current.` } });
+    }
+  } catch (_) {}
+}
+setTimeout(checkSdkFreshness, 30000); // once shortly after boot
+setInterval(checkSdkFreshness, 6 * 3600 * 1000); // every 6h
 
 // --- DRAFTS (hold-for-approval queue, any connector) -------------------------
 app.get('/v2/drafts', (req, res) => {
