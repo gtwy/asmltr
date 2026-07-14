@@ -45,6 +45,7 @@ const selfUpdate = require('../../shared/update'); // self-update: detect + run 
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
+const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
 const { runTurn, generateTitle, generateStatus, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -152,7 +153,9 @@ async function handle(envelope, opts = {}) {
   // Medium awareness FIRST (applies to every channel) — the model's runtime is
   // Claude Code, but the USER is on this connector's channel. Without this, "what
   // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
-  let systemPrompt = buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
+  // IDENTITY anchor FIRST — who you are, asserted (not inferred). Applies to every channel so a
+  // multi-agent surface (Discord) can't drift an agent into another's identity (the Thor incident).
+  let systemPrompt = identity.identityPreamble() + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
   if (e.system_prompt_extra) systemPrompt += '\n\n' + e.system_prompt_extra; // connector-supplied context (e.g. Discord)
   if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
     systemPrompt += '\n\nASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
@@ -528,6 +531,14 @@ app.post('/v2/runtime/update', (req, res) => {
   const r = runtime.updateSdk();
   record({ surface: 'core', session_id: null, event_type: 'control', identity: (req.body && req.body.by) || 'operator', source: 'core', payload: { action: 'sdk-update-started', pid: r.pid } });
   res.json({ ok: true, ...r });
+});
+
+// Identity (the Likeness "Self"): the name (ASSISTANT_NAME) + editable self-description, and a live
+// preview of the anchor injected into EVERY session's system prompt. The GUI edits it here.
+app.get('/v2/identity', (req, res) => res.json({ name: identity.name(), self_description: identity.identityFile(), preamble: identity.identityPreamble() }));
+app.post('/v2/identity', (req, res) => {
+  if (!identity.setIdentity(req.body && req.body.self_description)) return res.status(500).json({ error: 'could not write identity file' });
+  res.json({ ok: true, name: identity.name(), self_description: identity.identityFile(), preamble: identity.identityPreamble() });
 });
 
 // Periodic SDK freshness check — an old SDK silently caps the model, so watch for a newer one.
