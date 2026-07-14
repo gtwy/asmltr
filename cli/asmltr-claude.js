@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * `asmltr claude [args…]` — launch an interactive `claude` session inside tmux so it is
+ * `asmltr claude [args…]` — launch an interactive `claude` session inside a multiplexer (tmux or screen) so it is
  * monitored in the asmltr dashboard (live conversation history) and can be steered
  * (inject), interrupted, or attached ("taken over") from the dashboard/TUI.
  *
@@ -48,10 +48,12 @@ function upsert(entry) {
   if (i >= 0) t.sessions[i] = { ...t.sessions[i], ...entry }; else t.sessions.push(entry);
   writeTracker(t);
 }
-function tmuxAlive(name) { return spawnSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' }).status === 0; }
+const mux = require('../shared/mux');
 
 function main() {
-  if (!haveTmux()) { console.error('asmltr claude: tmux is required (e.g. `apt install tmux`).'); process.exit(1); }
+  const MUX = mux.current();      // 'screen' | 'tmux' (ASMLTR_MULTIPLEXER, default tmux; screen = native mouse-wheel scrollback)
+  const M = mux.provider(MUX);
+  if (!mux.available(MUX)) { console.error('asmltr claude: no terminal multiplexer found — install tmux or screen (or set ASMLTR_MULTIPLEXER).'); process.exit(1); }
   const args = process.argv.slice(2);
   const cwd = process.cwd();
   const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -79,13 +81,13 @@ function main() {
     'another channel), `asmltr announce "<text>"` / `asmltr announcements` (awareness notes across sessions).';
   const appended = selfAware ? require('../shared/identity').assemble({ cwd, extra: TOOLBELT }) : '';
   const claudeArgs = appended ? ['--append-system-prompt', appended, ...args] : args;
-  const create = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'bash', '-c', guard, claudeBin, ...claudeArgs], { stdio: 'inherit' });
-  if (create.status !== 0) { console.error('asmltr claude: failed to start tmux session'); process.exit(1); }
+  const ok = M.spawnDetached(name, cwd, ['bash', '-c', guard, claudeBin, ...claudeArgs]);
+  if (!ok) { console.error(`asmltr claude: failed to start ${MUX} session`); process.exit(1); }
 
-  const pid = (() => { const r = spawnSync('tmux', ['list-panes', '-t', name, '-F', '#{pane_pid}'], { encoding: 'utf8' }); return Number((r.stdout || '').trim()) || null; })();
+  const pid = M.pid(name);
   upsert({
     session_id: name, surface: 'claude-code', identity: IDENTITY,
-    multiplexer: 'tmux', tmux_target: name, pid,
+    multiplexer: MUX, tmux_target: name, pid,
     cwd, working_dir: cwd, task: `claude — ${path.basename(cwd)}`,
     started_unix: Math.floor(launchTs / 1000), last_activity_unix: Math.floor(launchTs / 1000),
     tool_count: 0, status: 'active',
@@ -99,19 +101,19 @@ function main() {
   child.unref();
 
   console.log(`▶ asmltr: monitoring this claude session as \x1b[36m${name}\x1b[0m (dashboard → Live).`);
-  console.log(`  detach with Ctrl-b d (keeps running + monitored) · re-attach: tmux attach -t ${name}\n`);
+  console.log(`  detach with ${M.detachHint} (keeps running + monitored) · re-attach: ${M.attachCmd(name)}\n`);
 
   // Attach (foreground). Returns on detach or when claude exits.
-  spawnSync('tmux', ['attach', '-t', name], { stdio: 'inherit' });
+  M.attach(name);
 
-  if (!tmuxAlive(name)) {
+  if (!M.alive(name)) {
     // claude exited → mark ended (the tailer also notices and flushes).
     const t = readTracker();
     const s = t.sessions.find((x) => x.session_id === name);
     if (s) { s.status = 'ended'; s.last_activity_unix = Math.floor(Date.now() / 1000); writeTracker(t); }
     console.log(`\n✓ session ${name} ended.`);
   } else {
-    console.log(`\n↩ detached — ${name} still running and monitored. Re-attach: tmux attach -t ${name}`);
+    console.log(`\n↩ detached — ${name} still running and monitored. Re-attach: ${M.attachCmd(name)}`);
   }
 }
 
