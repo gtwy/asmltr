@@ -3,39 +3,60 @@
 // SDK + model), Voice (behaviour). Each section is self-contained; add a tab as new areas appear.
 import { ref, onMounted, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { runtime, voice, identity } from '@/services/api'
+import { runtime, voice, identity, update } from '@/services/api'
 
 const TABS = [
   { id: 'identity', label: 'Identity', icon: '🪪' },
   { id: 'runtime', label: 'Runtime', icon: '⚙' },
+  { id: 'updates', label: 'Updates', icon: '↑' },
   { id: 'voice', label: 'Voice', icon: '🎙' }
 ]
 const tab = ref('identity')
 const busy = ref('')      // which action is in flight
 const notice = ref('')
 
-// --- Identity (the Self / Likeness plane) ---
-const idn = ref(null)          // { name, self_description, preamble }
-const nameDraft = ref('')
-const descDraft = ref('')
+// --- Identity (the Self / Likeness plane): anchor (name + essence) + living layer (prefs + story) ---
+const idn = ref(null)
+const d = ref({ name: '', self_description: '', preferences: '', story: '' })
 const showPreamble = ref(false)
-const nameDirty = computed(() => idn.value && nameDraft.value.trim() && nameDraft.value.trim() !== idn.value.name)
-const descDirty = computed(() => idn.value && descDraft.value !== idn.value.self_description)
-const idnDirty = computed(() => nameDirty.value || descDirty.value)
-async function loadIdentity() { try { idn.value = await identity.get(); nameDraft.value = idn.value.name; descDraft.value = idn.value.self_description } catch (_) {} }
+const nameDirty = computed(() => idn.value && d.value.name.trim() && d.value.name.trim() !== idn.value.name)
+const idnDirty = computed(() => idn.value && (nameDirty.value
+  || d.value.self_description !== idn.value.self_description
+  || d.value.preferences !== idn.value.preferences
+  || d.value.story !== idn.value.story))
+function syncIdentity() { d.value = { name: idn.value.name, self_description: idn.value.self_description, preferences: idn.value.preferences || '', story: idn.value.story || '' } }
+async function loadIdentity() { try { idn.value = await identity.get(); syncIdentity() } catch (_) {} }
 async function saveIdentity() {
   busy.value = 'identity'; notice.value = ''
   const renamed = nameDirty.value
   try {
     const body = {}
-    if (nameDirty.value) body.name = nameDraft.value.trim()
-    if (descDirty.value) body.self_description = descDraft.value
-    idn.value = await identity.set(body)
-    nameDraft.value = idn.value.name; descDraft.value = idn.value.self_description
+    if (nameDirty.value) body.name = d.value.name.trim()
+    if (d.value.self_description !== idn.value.self_description) body.self_description = d.value.self_description
+    if (d.value.preferences !== idn.value.preferences) body.preferences = d.value.preferences
+    if (d.value.story !== idn.value.story) body.story = d.value.story
+    idn.value = await identity.set(body); syncIdentity()
     notice.value = renamed
       ? `Saved. The core uses “${idn.value.name}” from the next turn — but connector-level name (Discord wake word, the shell alias, the bot's own username) needs a service restart + re-provision to fully realign.`
       : 'Identity saved — applies to the next turn on every surface.'
   } catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
+}
+
+// --- Updates (git code self-update) ---
+const upd = ref(null)        // { behind, available, head, remote, changelog }
+const updAuto = ref(false)
+async function loadUpdates() {
+  try { upd.value = await update.status(true) } catch (_) {}
+  try { updAuto.value = (await update.getAuto()).auto } catch (_) {}
+}
+async function toggleUpdAuto() {
+  busy.value = 'upd-auto'
+  try { updAuto.value = (await update.setAuto(!updAuto.value)).auto } catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
+}
+async function runUpdate() {
+  busy.value = 'upd-run'; notice.value = ''
+  try { await update.run(); notice.value = 'Update session started — a background agent is running the update. Watch it in Live (session “self-update”); it health-checks + auto-rolls-back on failure.' }
+  catch (e) { notice.value = 'Failed to start: ' + e.message } finally { busy.value = '' }
 }
 
 // --- Runtime (SDK + model) ---
@@ -79,7 +100,7 @@ const ackOn = ref(true)
 function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).catch(() => {}) }
 
 onMounted(async () => {
-  await Promise.all([loadIdentity(), loadRuntime(true)])
+  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates()])
   try { ackOn.value = (await voice.getAck()).enabled } catch (_) {}
 })
 </script>
@@ -106,15 +127,29 @@ onMounted(async () => {
         <template v-if="idn">
           <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Name</label>
           <input
-            v-model="nameDraft"
+            v-model="d.name"
             type="text"
             class="mb-4 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition-colors focus:border-brand-violet/60 focus:bg-white/[0.06]"
           />
-          <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Self-description</label>
+          <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Essence <span class="normal-case text-slate-600">— the stable core, asserted in the anchor</span></label>
           <textarea
-            v-model="descDraft"
-            rows="6"
+            v-model="d.self_description"
+            rows="5"
             placeholder="Who you are, in your own words…"
+            class="mb-4 w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[13px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
+          ></textarea>
+          <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Preferences <span class="normal-case text-slate-600">— tendencies &amp; working style (not rules; can be self-updated over time)</span></label>
+          <textarea
+            v-model="d.preferences"
+            rows="4"
+            placeholder="How you tend to work, what you value…"
+            class="mb-4 w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[13px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
+          ></textarea>
+          <label class="mb-1 block text-[11px] uppercase tracking-wide text-slate-500">Story &amp; context <span class="normal-case text-slate-600">— the narrative you carry (grows over time)</span></label>
+          <textarea
+            v-model="d.story"
+            rows="5"
+            placeholder="Formative events, relationships, the accumulated narrative…"
             class="w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[13px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06]"
           ></textarea>
           <div class="mt-2 flex items-center gap-2">
@@ -184,6 +219,44 @@ onMounted(async () => {
               <button type="button" :disabled="!customModel.trim() || busy === 'model'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustom">Set</button>
             </div>
           </div>
+        </template>
+        <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
+      </div>
+
+      <!-- Updates (git code self-update) -->
+      <div v-show="tab === 'updates'" class="glass p-5">
+        <h3 class="mb-1 text-sm font-semibold text-slate-200">Updates</h3>
+        <p class="mb-4 text-[12px] text-slate-500">asmltr's own code. New commits on <span class="font-mono">origin/main</span> are detected every 15 min; installing runs a background agent session (the UPDATE-WITH-AGENT procedure) that health-checks and auto-rolls-back on failure.</p>
+        <template v-if="upd">
+          <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-white/5 bg-black/20 p-3">
+            <div class="min-w-0">
+              <div class="text-[11px] uppercase tracking-wide text-slate-500">Code</div>
+              <div class="font-mono text-sm text-slate-200">{{ upd.head || '—' }}
+                <span v-if="!upd.available" class="ml-1 text-[11px] text-emerald-400">✓ up to date</span>
+                <span v-else class="ml-1 text-[11px] text-amber-400">→ {{ upd.behind }} behind ({{ upd.remote }})</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              :disabled="busy === 'upd-run' || !upd.available"
+              class="ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
+              :class="upd.available ? 'border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'border-white/10 bg-white/5 text-slate-500'"
+              @click="runUpdate"
+            >{{ busy === 'upd-run' ? 'starting…' : (upd.available ? '↑ Update now' : 'Latest') }}</button>
+          </div>
+          <div v-if="upd.available && upd.changelog?.length" class="mb-4 max-h-40 overflow-y-auto rounded-lg border border-white/5 bg-black/20 p-3">
+            <div class="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Incoming ({{ upd.behind }})</div>
+            <div v-for="(c, i) in upd.changelog" :key="i" class="truncate font-mono text-[11px] text-slate-400">{{ c }}</div>
+          </div>
+          <label class="flex cursor-pointer items-center justify-between gap-3">
+            <span>
+              <span class="text-sm text-slate-200">Auto-install updates</span>
+              <span class="block text-[12px] text-slate-500">When a new commit is detected, run the update session automatically (with rollback safety).</span>
+            </span>
+            <button type="button" :disabled="busy === 'upd-auto'" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="updAuto ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleUpdAuto">
+              <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="updAuto ? 'left-[22px]' : 'left-0.5'"></span>
+            </button>
+          </label>
         </template>
         <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
       </div>

@@ -45,6 +45,25 @@ function setIdentity(text) {
   try { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, String(text || '').trim() + '\n'); return true; } catch (_) { return false; }
 }
 
+// The LIVING layer — facets beyond the essence: descriptive, evolving, allowed to shift. Stored as
+// prose (not a trait-database), so a human OR a future self-reflection orchestrator can grow them
+// over time. `preferences` = tastes/working-style/values (tendencies, not rules); `story` = the
+// accumulated narrative / formative context the assistant reconstitutes from.
+const FACET_FILE = { preferences: 'preferences.md', story: 'story.md' };
+function facetPath(key) { return process.env['ASMLTR_' + key.toUpperCase() + '_FILE'] || path.join(os.homedir(), '.asmltr', FACET_FILE[key] || key + '.md'); }
+function getFacet(key) { try { return fs.readFileSync(facetPath(key), 'utf8').trim(); } catch (_) { return ''; } }
+function setFacet(key, text) {
+  const p = facetPath(key);
+  try { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, String(text || '').trim() + '\n'); return true; } catch (_) { return false; }
+}
+/** The living-layer block (preferences + story) appended after the anchor. Descriptive, not prescriptive. */
+function livingLayer() {
+  const out = [];
+  const pref = getFacet('preferences'); if (pref) out.push('## PREFERENCES\nHow I tend to work and what I value (tendencies, not rules — I can still surprise you):\n' + pref);
+  const story = getFacet('story'); if (story) out.push('## STORY & CONTEXT\nThe accumulated narrative I carry:\n' + story);
+  return out.join('\n\n');
+}
+
 /** A strong, surface-neutral self-anchor. The explicit "you are X, not any other agent" is the
  *  anti-drift line — injected into EVERY session (terminal + channel) so identity is declared, not
  *  inferred from ambiguous context (the structural fix for cross-agent drift). */
@@ -87,11 +106,17 @@ function contextBlocks(cwd) {
   return out;
 }
 
+/** The full identity: anchor (name + essence) + living layer (preferences + story). Used by the core
+ *  channel prompt so every surface gets the whole self, not just the name. */
+function fullIdentity() {
+  return [identityPreamble(), livingLayer()].filter(Boolean).join('\n\n');
+}
+
 /** Assemble the full appended system prompt for an interactive session: identity + context + extra. */
 function assemble({ cwd, extra } = {}) {
-  const parts = [identityPreamble(), ...contextBlocks(cwd)];
+  const parts = [fullIdentity(), ...contextBlocks(cwd)];
   if (extra) parts.push(extra);
   return parts.filter(Boolean).join('\n\n---\n\n');
 }
 
-module.exports = { name, setName, aliasName, identityPath, identityFile, setIdentity, identityPreamble, contextBlocks, assemble };
+module.exports = { name, setName, aliasName, identityPath, identityFile, setIdentity, getFacet, setFacet, livingLayer, identityPreamble, fullIdentity, contextBlocks, assemble };
