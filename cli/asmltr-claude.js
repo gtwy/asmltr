@@ -70,12 +70,15 @@ function main() {
   // claude exits non-zero (e.g. a broken install), you attach and actually see the error
   // instead of a session that vanished. On a normal exit the pane closes and the session ends.
   const guard = '"$0" "$@"; ec=$?; if [ $ec -ne 0 ]; then echo; echo "[asmltr] claude exited with code $ec (see above); this pane closes in 30s"; sleep 30; fi';
-  // Make the session aware of the asmltr toolbelt (unless disabled).
+  // Assemble the appended system prompt: IDENTITY anchor (who you are — the Likeness self-attestation)
+  // + pluggable CONTEXT (the assistant's own injected startup context, via ASMLTR_CLAUDE_CONTEXT_CMD /
+  // ~/.asmltr/context.d) + the asmltr TOOLBELT note. Disable the whole block with ASMLTR_SELF_AWARE=off.
   const selfAware = process.env.ASMLTR_SELF_AWARE !== 'off';
-  const NOTE = 'You are running inside an asmltr-managed session on this machine. Run `asmltr help` for cross-session tools: ' +
-    '`asmltr ls` (see other active sessions — avoid duplicating their work), `asmltr send <channel> <target> "<text>"` (route output to another channel), ' +
-    '`asmltr announce "<text>"` / `asmltr announcements` (send/read awareness notes across sessions).';
-  const claudeArgs = selfAware ? ['--append-system-prompt', NOTE, ...args] : args;
+  const TOOLBELT = '## ASMLTR TOOLBELT\nRun `asmltr help` for cross-session tools: `asmltr ls` (other active ' +
+    'sessions — avoid duplicating their work), `asmltr send <channel> <target> "<text>"` (route output to ' +
+    'another channel), `asmltr announce "<text>"` / `asmltr announcements` (awareness notes across sessions).';
+  const appended = selfAware ? require('../shared/identity').assemble({ cwd, extra: TOOLBELT }) : '';
+  const claudeArgs = appended ? ['--append-system-prompt', appended, ...args] : args;
   const create = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'bash', '-c', guard, claudeBin, ...claudeArgs], { stdio: 'inherit' });
   if (create.status !== 0) { console.error('asmltr claude: failed to start tmux session'); process.exit(1); }
 
