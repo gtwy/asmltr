@@ -25,6 +25,17 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // Self-gating sentinel: in a multi-agent channel the model emits ONLY this token when a
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
+// The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
+// "[no response]") instead of emitting the exact token — those must be dropped too, or the
+// paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
+// mentions the phrase from being swallowed: only a short, self-contained refusal counts as silence.
+function isSilence(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (t.toUpperCase().includes(NO_REPLY.toUpperCase())) return true;
+  const s = t.replace(/^[[(*\s]+|[\])*.!\s]+$/g, '').toLowerCase();
+  return s.length <= 40 && /^(no\s+(response|reply|comment)|n\/?a|silent)(\s+(requested|needed|required|necessary|expected|warranted|here|for me))?$/.test(s);
+}
 // Control commands that change the bot's behavior — restricted to the bot's owner.
 const OWNER_ONLY_CMDS = new Set([
   'silence', 'be quiet', 'quiet', 'shush', 'speak', 'unsilence', 'wake up', 'resume',
@@ -313,7 +324,7 @@ RESPONSE RULES:
 1. Your text output IS the Discord message — do NOT call any external send/notify tool; just output the text.
 2. Output ONLY your conversational response — no summary/narration afterward.
 3. Keep it conversational and substantive (under ~1500 chars ideally).
-4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token.`;
+4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the literal token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token. Do NOT paraphrase it: writing "No response requested", "No reply needed", "N/A", or any prose instead of the exact token will get POSTED to the channel as spam. The verbatim token ${NO_REPLY} is the only way to stay silent.`;
   }
 
   function formatCodeBlocks(text) {
@@ -437,7 +448,7 @@ RESPONSE RULES:
         const flushStep = () => {
           const clean = (pending || '').trim(); pending = '';
           if (!clean) return;
-          if (clean.toUpperCase().includes(NO_REPLY.toUpperCase())) { sawNoReply = true; return; }
+          if (isSilence(clean)) { sawNoReply = true; return; }
           if (sawNoReply) return;
           enqueue(() => message.channel.send(renderStep(clean)));
         };
@@ -455,9 +466,7 @@ RESPONSE RULES:
       }
       // Self-gated suppression: the model decided this message wasn't for it (multi-agent
       // channel), or there's nothing to say. Drop it — don't post to the channel.
-      const gated = replyText.toUpperCase().includes(NO_REPLY.toUpperCase())
-        || replyText.toLowerCase() === 'no response';
-      if (!replyText || gated) { ctx.log(`suppressed reply (not addressed to ${NAME})`); return; }
+      if (isSilence(replyText)) { ctx.log(`suppressed reply (not addressed to ${NAME})`); return; }
       // Dedup: never re-post a message verbatim-identical to one of the last few we sent here.
       // Long resumed sessions (esp. AI-to-AI loops) can occasionally replay an earlier reply.
       const recents = recentReplies.get(cid) || [];
