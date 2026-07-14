@@ -27,6 +27,8 @@ defineProps({
   option: { type: Object, required: true },
   height: { type: String, default: '280px' }
 })
+// Forward echarts interaction events for callers that need them (e.g. clicking a graph node).
+defineEmits(['click'])
 </script>
 
 <template>
@@ -36,5 +38,6 @@ defineProps({
     :option="option"
     autoresize
     :theme="undefined"
+    @click="$emit('click', $event)"
   />
 </template>
