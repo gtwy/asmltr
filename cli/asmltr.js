@@ -513,6 +513,10 @@ function cmdHelp() {
   asmltr kill <id>       SIGTERM an ephemeral session's pid (--hard = SIGKILL after grace)
   asmltr stop <id>       SIGINT an ephemeral session
   asmltr diff <id>       git diff of a session's worktree
+  ${A.bold('sessions:')}
+  asmltr claude [args]   launch a monitored, identity-anchored claude session (tmux; takeover-able)
+  asmltr provision-alias create a \`<agent-name>\` → \`asmltr claude\` command (from ASSISTANT_NAME;
+       [name] [--force]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
   asmltr help
 
   collector: ${BASE}   core: ${CORE_BASE}   ${TOKEN ? '(token set)' : A.dim('(no token — dev mode)')}`);
@@ -529,6 +533,22 @@ function cmdHelp() {
       case 'claude': { // launch an interactive claude session wrapped for monitoring + takeover
         const r = spawnSync(process.execPath, [require('path').join(__dirname, 'asmltr-claude.js'), ...rest], { stdio: 'inherit' });
         return process.exit(r.status || 0);
+      }
+      case 'provision-alias': { // create a `<agent-name>` → `asmltr claude` command shim (conflict-checked)
+        try { require('../shared/loadenv'); } catch (_) {} // so ASSISTANT_NAME resolves from .env
+        const alias = require('../shared/alias');
+        const force = rest.includes('--force') || rest.includes('-f');
+        const named = rest.find((a) => !a.startsWith('-'));
+        const r = alias.provisionAlias({ name: named, force });
+        if (!r.ok) { console.error(A.red('✗ ' + r.error)); return process.exit(1); }
+        console.log(A.grn(`✓ '${r.alias}' → ${r.target}`) + A.dim(`  (${r.path}${r.replacedOwn ? ', refreshed' : ''})`));
+        if (r.warning) console.log(A.yel('  ⚠ ' + r.warning));
+        return;
+      }
+      case 'unalias': {
+        const r = require('../shared/alias').removeAlias(rest.find((a) => !a.startsWith('-')));
+        console.log(r.ok ? A.grn('✓ removed ' + r.removed) : A.yel('· ' + r.error));
+        return;
       }
       case 'ls': return await cmdLs();
       case 'map': return await cmdMap();

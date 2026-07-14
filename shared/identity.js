@@ -21,6 +21,9 @@ const { execSync } = require('child_process');
 const name = () => process.env.ASSISTANT_NAME || 'Assistant';
 function hostname() { try { return os.hostname(); } catch (_) { return 'this host'; } }
 
+/** A shell-command-safe alias derived from the assistant name (e.g. "Eve" → "eve"). null if empty. */
+function aliasName() { return (name() || '').toLowerCase().replace(/[^a-z0-9._-]/g, '') || null; }
+
 /** The assistant's canonical self-description (optional). $ASMLTR_IDENTITY_FILE → ~/.asmltr/identity.md. */
 function identityFile() {
   const p = process.env.ASMLTR_IDENTITY_FILE || path.join(os.homedir(), '.asmltr', 'identity.md');
@@ -74,4 +77,4 @@ function assemble({ cwd, extra } = {}) {
   return parts.filter(Boolean).join('\n\n---\n\n');
 }
 
-module.exports = { name, identityFile, identityPreamble, contextBlocks, assemble };
+module.exports = { name, aliasName, identityFile, identityPreamble, contextBlocks, assemble };

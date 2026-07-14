@@ -194,6 +194,19 @@ skill covers them all and is updated in lockstep with the code. Any **install-sp
 (the identity/signature to send as, which senders are trusted) belongs in this machine's own agent
 context (e.g. `CLAUDE.md`), NOT in the shipped skill.
 
+### 7c. Provision the agent-name alias (type the assistant's name to launch a session)
+
+So the operator can start a monitored session by just typing the assistant's name (e.g. `eve`
+instead of `asmltr claude`):
+
+```bash
+asmltr provision-alias      # ASSISTANT_NAME=Eve → an `eve` shim → `asmltr claude`
+```
+
+It derives the command from `ASSISTANT_NAME`, **conflict-checks** it (refuses to shadow an existing
+command — pick a different name or pass `--force`), and drops an executable shim onto a PATH bin dir.
+Remove it later with `asmltr unalias`.
+
 ## 8. Verify it's live end-to-end
 
 ```bash
