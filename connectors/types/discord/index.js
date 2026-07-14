@@ -73,7 +73,8 @@ const meta = {
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
       stream_steps: { type: 'boolean', title: 'Post intermediary narration steps to the thread live as they land (only when directly addressed)', default: true },
       stream_tools: { type: 'boolean', title: 'Also post a subdued line for each tool call while streaming steps', default: false },
-      ignore_other_mentions: { type: 'boolean', title: 'Ignore messages @-directed at other specific users/bots (keeps passive name-drops)', default: true },
+      ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
+      ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
     },
   },
@@ -98,7 +99,8 @@ async function start(ctx) {
   const token = (await ctx.secrets.get(cfg.bot_token_bws_key)) || cfg.bot_token;
   if (!token) throw new Error(`no bot token (bws key '${cfg.bot_token_bws_key}')`);
   const dmUser = cfg.dm_allowed_user_id || '';
-  const ignoreOtherMentions = cfg.ignore_other_mentions !== false; // drop msgs @-directed at OTHER specific users/bots
+  const ignoreOtherMentions = cfg.ignore_other_mentions !== false; // don't REPLY to msgs @-directed at OTHER users/bots (still ingested)
+  const ingestUnaddressed = cfg.ingest_unaddressed !== false;      // ingest ambient (non-addressed) messages too, for full awareness
   const minInterval = cfg.min_response_interval_ms || 10000;
   const maxPerHour = cfg.max_responses_per_hour || 20;
   const replyDebounceMs = cfg.reply_debounce_ms != null ? cfg.reply_debounce_ms : 3000;
@@ -182,10 +184,11 @@ async function start(ctx) {
     return memory.globalTimeline.filter(m => !(m.serverId === exSid && m.channelId === exCid) && kws.some(k => m.content.toLowerCase().includes(k))).slice(-10);
   }
   function getRelevantContext(message) {
+    // NOTE: per-channel conversation history now lives in the resumed core SDK session (plus the
+    // observe buffer for messages we didn't reply to) — we no longer re-feed the last-N here. This
+    // provides only what the SESSION doesn't have: cross-channel references + location/participants.
     const sid = message.guild?.id || 'DM', cid = message.channel.id;
-    const msgs = memory.servers[sid]?.channels[cid]?.messages || [];
     return {
-      primary: msgs.slice(-10),
       crossContext: searchGlobalTimeline(message.content, sid, cid).slice(0, 3),
       location: { serverName: memory.servers[sid]?.name || 'Direct Message', channelName: memory.servers[sid]?.channels[cid]?.name || 'DM', participants: Array.from(memory.servers[sid]?.channels[cid]?.participants || []) },
     };
@@ -285,7 +288,6 @@ async function start(ctx) {
     const mode = forced ? 'You were directly @-mentioned (silence mode is on, so only mentions reach you).'
       : mentioned ? 'You were directly @-mentioned.'
       : 'You were NOT @-mentioned — this message was surfaced as *possibly* relevant. Decide whether it is actually for you (see MULTI-AGENT below) before replying.';
-    const primary = context.primary.map(m => `[${m.author}]: ${m.content}`).join('\n');
     const cross = context.crossContext.length ? `\n\nCROSS-CONTEXT (other servers/channels, reference only):\n${context.crossContext.map(m => `- [${m.serverName}/#${m.channelName}] ${m.author}: ${m.content.substring(0, 100)}...`).join('\n')}` : '';
     // NOTE: authorization/trust is now the core's trust framework (data-driven,
     // scoped per server) — NOT hardcoded here. This preamble is Discord CONTEXT only.
@@ -305,8 +307,7 @@ This channel may contain OTHER AI assistants and bots besides you. A message is 
 
 Those other agents are CONVERSATIONAL PEERS in this channel — not tools, systems, or data sources. If someone asks you to ask / relay / check something WITH another agent (e.g. "ask Thor what time it is"), do NOT try to answer on their behalf and do NOT look them up with your tools or search. Just post a normal message addressing that agent by name (e.g. "Thor, what time is it for Jareth?") — they read this channel and will answer for themselves. Talking TO another agent by name is a valid reply here.
 
-IMMEDIATE CONVERSATION (last 10 in this channel):
-${primary}${cross}
+The running back-and-forth of THIS channel is already in your session history (including messages you observed but didn't reply to, folded in as context) — don't ask for it to be repeated.${cross}
 
 RESPONSE RULES:
 1. Your text output IS the Discord message — do NOT call any external send/notify tool; just output the text.
@@ -474,6 +475,32 @@ RESPONSE RULES:
       if (typingInterval) clearInterval(typingInterval);
       processing.delete(cid);
     }
+  }
+
+  // OBSERVE — ingest a message into the core session for AWARENESS without replying. The core
+  // records it (backend visibility) and buffers it as context for the next real turn. This is how
+  // we stay current on messages addressed to OTHER agents (or ambient chatter) without answering
+  // them — decoupling "receive" from "reply" (the OpenClaw model). Fire-and-forget; returns [].
+  function observe(message) {
+    try {
+      const cid = message.channel.id;
+      const sid = message.guild?.id;
+      const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
+      let text = (message.cleanContent || message.content || '').trim();
+      if (message.attachments.size) text += ` [sent ${message.attachments.size} attachment(s)]`;
+      if (!text) return;
+      ctx.core.handle({
+        channel: 'discord',
+        conversation_key: conversationKey,
+        message_id: String(message.id),
+        sender: { raw_id: String(message.author.id), raw_username: message.author.username },
+        content: { text },
+        delivery: 'async',
+        observe_only: true,
+        public: message.channel.type !== 1,
+        channel_context: { channelId: cid },
+      }).catch((e) => ctx.log('observe relay failed: ' + e.message));
+    } catch (e) { ctx.log('observe error: ' + e.message); }
   }
 
   // Reply DEBOUNCE — don't reply the instant a message lands. Wait for the channel to go quiet for
@@ -747,28 +774,35 @@ RESPONSE RULES:
     // Ignore voice transcript / spoken-reply mirror lines (🗣️ / 🔊) that ANY agent posts for
     // its own voice session — they're artifacts, never conversation for another agent to answer.
     if (/^\s*(?:🗣️|🔊)/u.test(message.content || '')) return;
-    if (message.author.bot && !isAllowedBot(message.author.username)) return;
     saveMemory(message, message.author.username, message.content);
     if (await handleControlCommands(message)) return;
-    if (!channelEnabled(message.channel.id)) return; // channel disabled — no relay to core, no usage (mention-commands above still work)
-    // While in an active voice session for this guild, answer by VOICE only — don't ALSO run
-    // autonomous text participation (that caused a doubled reply: spoken + a text-channel reply).
-    // Direct @mentions still get a text reply; the voice path handles spoken utterances.
-    if (message.guild && voiceText.has(message.guild.id) && !message.mentions.has(client.user)) return;
-    // Drop messages directed at ANOTHER specific agent — either an @-mention of another user/bot,
-    // OR a message that LEADS with another agent's name ("Moneo, …" — a plain name Discord does
-    // NOT turn into a real @-mention). Passive mid-sentence name-drops + anything addressing US
-    // still flow through to shouldRespondTo, so autonomous participation is preserved.
+    if (!channelEnabled(message.channel.id)) return; // channel disabled — fully ignore (mention-commands above still work)
+
+    // Decouple RECEIVE from REPLY (the OpenClaw model). Everything observable is INGESTED into the
+    // core session for awareness (so we stay current on the whole channel); a message only triggers
+    // a REPLY when it's actually addressed to us. `observe()` ingests-without-replying; anything that
+    // reaches scheduleReply() also carries its own context, so we don't double-ingest it.
+    const mentionsMe = message.mentions.has(client.user);
+
+    // Reasons a message is observe-ONLY (stay aware, never reply):
+    //  • from another bot we don't engage → follow what it says, don't answer it
+    //  • an active voice session owns replies for this guild (the voice path speaks; text stays silent)
+    //  • it's @-directed at / leads with ANOTHER agent's name (and not us)
+    const botNotEngaged = message.author.bot && !isAllowedBot(message.author.username);
+    const voiceHandsOff = message.guild && voiceText.has(message.guild.id) && !mentionsMe;
+    let directedElsewhere = false;
     if (ignoreOtherMentions && message.guild) {
       const c = (message.content || '').toLowerCase();
-      const addressesMe = message.mentions.has(client.user) || new RegExp(`^\\s*@?${WAKE}\\b`).test(c);
+      const addressesMe = mentionsMe || new RegExp(`^\\s*@?${WAKE}\\b`).test(c);
       const escaped = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const leadsOtherAgent = allowedBotNames.some((n) => new RegExp(`^\\s*@?${escaped(n)}\\b`).test(c));
-      const directedElsewhere = (message.mentions.users.size > 0 && !message.mentions.has(client.user)) || leadsOtherAgent;
-      if (directedElsewhere && !addressesMe) return;
+      directedElsewhere = ((message.mentions.users.size > 0 && !mentionsMe) || leadsOtherAgent) && !addressesMe;
     }
-    if (silenced) { if (message.mentions.has(client.user)) scheduleReply(message, true); return; }
+    if (botNotEngaged || voiceHandsOff || directedElsewhere) { observe(message); return; }
+
+    if (silenced) { if (mentionsMe) scheduleReply(message, true); else observe(message); return; }
     if (shouldRespondTo(message)) scheduleReply(message, false);
+    else if (ingestUnaddressed) observe(message); // ambient chatter → ingest for awareness, don't reply
   });
 
   // --- /send-message endpoint (message-discord depends on this) ---
