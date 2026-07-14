@@ -36,8 +36,11 @@ const sess = computed(() => {
 const st = computed(() => statusMeta(sess.value.status))
 
 const isWeb = computed(() => String(key.value || '').startsWith('web:'))
-const isCli = computed(() => sess.value.multiplexer === 'tmux')
-const attachCmd = computed(() => (isCli.value && sess.value.tmux_target ? `tmux attach -t ${sess.value.tmux_target}` : null))
+const isCli = computed(() => sess.value.multiplexer === 'tmux' || sess.value.multiplexer === 'screen')
+const attachCmd = computed(() => {
+  if (!isCli.value || !sess.value.tmux_target) return null
+  return sess.value.multiplexer === 'screen' ? `screen -x ${sess.value.tmux_target}` : `tmux attach -t ${sess.value.tmux_target}`
+})
 const monitored = computed(() => props.channelState !== false)
 const monitorTip = computed(() => {
   const unit = props.mutable?.label || 'channel'

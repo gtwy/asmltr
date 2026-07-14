@@ -90,15 +90,12 @@ function makeControl(db) {
     const row = getSession(session_id);
     if (!row) { audit({ actor, action: 'send-keys', target: session_id, result: 'failure', detail: 'no such session' }); return { ok: false, error: 'no such session' }; }
     const target = row.tmux_target;
-    if (!target || row.multiplexer !== 'tmux') { audit({ actor, action: 'send-keys', target: session_id, result: 'denied', detail: 'not a tmux session' }); return { ok: false, error: 'session has no tmux target (can only inject into `asmltr claude` sessions)' }; }
+    if (!target || (row.multiplexer !== 'tmux' && row.multiplexer !== 'screen')) { audit({ actor, action: 'send-keys', target: session_id, result: 'denied', detail: 'not a multiplexer session' }); return { ok: false, error: 'session has no multiplexer target (can only inject into `asmltr claude` sessions)' }; }
+    const M = require('../../shared/mux').provider(row.multiplexer); // dispatch tmux vs screen
     try {
-      if (keys) {
-        execFile('tmux', ['send-keys', '-t', target, keys], () => {});
-      } else if (text != null) {
-        execFile('tmux', ['send-keys', '-t', target, '-l', '--', String(text)], (e1) => {
-          if (!e1 && enter) execFile('tmux', ['send-keys', '-t', target, 'Enter'], () => {});
-        });
-      } else { return { ok: false, error: 'nothing to send' }; }
+      if (keys) M.sendKey(target, keys);
+      else if (text != null) M.sendText(target, text, enter);
+      else return { ok: false, error: 'nothing to send' };
     } catch (e) { audit({ actor, action: 'send-keys', target: session_id, result: 'failure', detail: e.message }); return { ok: false, error: e.message }; }
     audit({ actor, action: 'send-keys', target: session_id, result: 'success', detail: keys ? `keys ${keys}` : `text (${String(text).length} chars)` });
     return { ok: true, target };
