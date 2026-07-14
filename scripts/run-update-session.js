@@ -14,8 +14,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
-const { query } = require('@anthropic-ai/claude-code');
+const { query } = require(path.join(__dirname, '..', 'core', 'node_modules', '@anthropic-ai/claude-agent-sdk')); // query() moved here at 2.x; resolve from core's install
 const { buildEvent } = require('../shared/events');
+
+// The modern CLI needs IS_SANDBOX=1 (not 'true') + NO --dangerously-skip-permissions to run tools
+// autonomously as root (see core/src/runner.js). Set before query() spawns.
+process.env.IS_SANDBOX = '1';
+delete process.env.CLAUDECODE; delete process.env.CLAUDE_CODE_ENTRYPOINT; delete process.env.ANTHROPIC_API_KEY;
 
 const REPO = path.join(__dirname, '..');
 const KEY = 'self-update:' + Date.now();
@@ -58,7 +63,7 @@ async function main() {
     `It restarts the services detached, health-checks them, and AUTO-ROLLS-BACK to ${rollback} if unhealthy. Report its exit result.\n` +
     `Also do the idempotent install-doc backfills (step 3b): re-link the asmltr skill and ensure the CLI is on PATH.\n\n` +
     `================ UPDATE-WITH-AGENT.md ================\n${doc}`;
-  const options = { stream: true, permissionMode: 'bypassPermissions', extraArgs: { 'dangerously-skip-permissions': true }, cwd: REPO, abortController: ac, includePartialMessages: true };
+  const options = { stream: true, permissionMode: 'bypassPermissions', model: require('../shared/runtime').getModel(), cwd: REPO, abortController: ac, includePartialMessages: true };
 
   const response = await query({ prompt, options });
   for await (const ev of response) {
