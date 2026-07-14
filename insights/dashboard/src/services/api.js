@@ -187,7 +187,7 @@ export const voice = {
 // anchor injected into every session's system prompt so identity is asserted, not inferred.
 export const identity = {
   get: () => getCore('/v2/identity'),
-  set: (self_description) => postCore('/v2/identity', { self_description })
+  set: (body) => postCore('/v2/identity', body) // { name?, self_description? }
 }
 
 // Agent runtime — the Agent SDK version (which gates model availability), model selection, and

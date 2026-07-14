@@ -18,7 +18,18 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 
-const name = () => process.env.ASSISTANT_NAME || 'Assistant';
+// The name is editable (GUI-set file → ASSISTANT_NAME env → default), so it can change without a
+// code/.env edit. The core reads it live; connector-level uses (Discord wake word, the provisioned
+// alias, the bot's own username) still need a restart / re-provision to fully realign.
+const nameFile = () => process.env.ASMLTR_NAME_FILE || path.join(os.homedir(), '.asmltr', 'name');
+function name() {
+  try { const v = fs.readFileSync(nameFile(), 'utf8').trim(); if (v) return v; } catch (_) {}
+  return process.env.ASSISTANT_NAME || 'Assistant';
+}
+function setName(n) {
+  const v = String(n || '').trim();
+  try { fs.mkdirSync(path.dirname(nameFile()), { recursive: true }); if (v) fs.writeFileSync(nameFile(), v); else fs.unlinkSync(nameFile()); return true; } catch (_) { return false; }
+}
 function hostname() { try { return os.hostname(); } catch (_) { return 'this host'; } }
 
 /** A shell-command-safe alias derived from the assistant name (e.g. "Eve" → "eve"). null if empty. */
@@ -83,4 +94,4 @@ function assemble({ cwd, extra } = {}) {
   return parts.filter(Boolean).join('\n\n---\n\n');
 }
 
-module.exports = { name, aliasName, identityPath, identityFile, setIdentity, identityPreamble, contextBlocks, assemble };
+module.exports = { name, setName, aliasName, identityPath, identityFile, setIdentity, identityPreamble, contextBlocks, assemble };

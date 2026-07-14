@@ -107,6 +107,7 @@ const CHANNEL_LABELS = {
   'eve-assistant-native': 'a mobile assistant app', core: 'a direct API call',
 };
 function buildChannelAwareness(e, resolved) {
+  const NAME = identity.name(); // live (GUI-editable) — not the module-load env const
   const who = (resolved && resolved.display_name) || (e.sender && e.sender.raw_username) || 'a user';
   const scope = e.context && e.context.scope_name ? ` in "${e.context.scope_name}"` : '';
   const label = CHANNEL_LABELS[e.channel] || e.channel;
@@ -537,7 +538,9 @@ app.post('/v2/runtime/update', (req, res) => {
 // preview of the anchor injected into EVERY session's system prompt. The GUI edits it here.
 app.get('/v2/identity', (req, res) => res.json({ name: identity.name(), self_description: identity.identityFile(), preamble: identity.identityPreamble() }));
 app.post('/v2/identity', (req, res) => {
-  if (!identity.setIdentity(req.body && req.body.self_description)) return res.status(500).json({ error: 'could not write identity file' });
+  const b = req.body || {};
+  if (b.name != null && !identity.setName(b.name)) return res.status(500).json({ error: 'could not write name' });
+  if (b.self_description != null && !identity.setIdentity(b.self_description)) return res.status(500).json({ error: 'could not write identity file' });
   res.json({ ok: true, name: identity.name(), self_description: identity.identityFile(), preamble: identity.identityPreamble() });
 });
 
