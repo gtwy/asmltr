@@ -48,6 +48,24 @@ function loadTypes() {
 }
 const TYPES = loadTypes();
 
+// Resolve an instance's outbound HTTP port the same way the connector itself does.
+//
+// Every connector binds `cfg.http_port || <default>` (discord 3016, telegram 3008), so the port is
+// ALWAYS listening — even when the instance config omits the field. The manager, however, used to
+// read `config.http_port` with no fallback, so any instance created without that key explicitly
+// persisted (the schema `default` is only materialized by the GUI form, not by the API or a
+// hand-seeded row) failed EVERY outbound send, file attachment, and channel-list call with
+// "instance 'x' has no http_port" — while the connector sat there listening on exactly that port.
+//
+// Falling back to the type's configSchema default makes the manager agree with the connector.
+function instancePort(inst) {
+  const fromConfig = inst && inst.config && inst.config.http_port;
+  if (fromConfig) return fromConfig;
+  const schema = TYPES[inst && inst.type] && TYPES[inst.type].configSchema;
+  const props = (schema && schema.properties) || {};
+  return (props.http_port && props.http_port.default) || null;
+}
+
 function validateConfig(typeMeta, config) {
   const req = (typeMeta.configSchema && typeMeta.configSchema.required) || [];
   const missing = req.filter((k) => config[k] === undefined || config[k] === null || config[k] === '');
@@ -123,8 +141,8 @@ app.post('/instances/:id/restart', requireToken, (req, res) => {
 async function proxyChannels(id, method, body) {
   const inst = registry.get(id);
   if (!inst) return { status: 404, json: { ok: false, error: 'not found' } };
-  const port = inst.config && inst.config.http_port;
-  if (!port) return { status: 400, json: { ok: false, error: `instance '${inst.name}' has no http_port` } };
+  const port = instancePort(inst);
+  if (!port) return { status: 400, json: { ok: false, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` } };
   try {
     const r = await fetch(`http://127.0.0.1:${port}/channels`, {
       method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
@@ -163,8 +181,8 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   if (ATTACH_KINDS.includes(kind) && !supportsAttachments(meta)) {
     return { ok: false, status: 400, error: `type '${inst.type}' does not support outbound file attachments` };
   }
-  const port = inst.config && inst.config.http_port;
-  if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port` };
+  const port = instancePort(inst);
+  if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` };
   try {
     const r = await fetch(`http://127.0.0.1:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, ref }) });
     const j = await r.json().catch(() => ({}));
@@ -185,8 +203,8 @@ async function readSource(body) {
   if (!inst) return { ok: false, status: 404, error: 'no connector instance for that channel/instance_id' };
   const meta = TYPES[inst.type];
   if (!isReadable(meta)) return { ok: false, status: 400, error: `type '${inst.type}' is not readable (no browse capability)` };
-  const port = inst.config && inst.config.http_port;
-  if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port` };
+  const port = instancePort(inst);
+  if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` };
   try {
     const { channel: _c, instance_id: _i, ...args } = body;
     const r = await fetch(`http://127.0.0.1:${port}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
