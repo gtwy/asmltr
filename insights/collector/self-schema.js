@@ -36,9 +36,12 @@ function repoRoot(dir) {
 
 /** Build the body-schema graph from the collector DB. */
 function buildSchema(dbmod, { since } = {}) {
-  since = since || Date.now() - 45 * 60000;
-  // The LIVE body — parts that ACTED within the window, not every session ever marked 'active'
-  // (status stays 'active' forever, so the raw list is a graveyard). Proprioception is the present.
+  const now = Date.now();
+  // Default window = the day's body. Status stays 'active' forever (channel sessions never emit an
+  // end), so the raw list is a graveyard of stale limbs; recency is the honest liveness signal.
+  // 24h shows the parts that actually did something today (~10) and drops the ancient ~45. The GUI
+  // can widen or narrow via ?since — proprioception with an adjustable depth of field.
+  since = since || now - 24 * 3600000;
   const sessions = dbmod.q.activeSessions.all().filter((s) => (s.last_activity_unix || 0) > since);
   const byId = {}; for (const s of sessions) byId[s.session_id] = s;
 
@@ -46,6 +49,7 @@ function buildSchema(dbmod, { since } = {}) {
     session_id: s.session_id, surface: s.surface, title: s.title || null, activity: s.activity || null,
     working_dir: s.working_dir || null, status: s.status, tokens: s.tokens_total || 0, tools: s.tool_count || 0,
     last_activity_unix: s.last_activity_unix || 0,
+    age_min: Math.round((now - (s.last_activity_unix || now)) / 60000), // minutes since this part last acted
   }));
 
   // per-session dominant repo (from recent tool activity)
@@ -88,7 +92,44 @@ function buildSchema(dbmod, { since } = {}) {
     addEdge(r.identity, to, 'communicated', 'announce');
   }
 
-  return { at: Date.now(), nodes, edges, counts: { parts: nodes.length, edges: edges.length } };
+  // how many parts are marked 'active' but fell outside the window (the graveyard) — shown so the
+  // count is never mysterious: "10 parts today · 45 resting beyond the window".
+  const totalActive = dbmod.q.activeSessions.all().length;
+  return {
+    at: now, window_ms: now - since, nodes, edges,
+    counts: { parts: nodes.length, edges: edges.length, resting: Math.max(0, totalActive - nodes.length) },
+  };
 }
 
-module.exports = { buildSchema };
+/**
+ * Render a body-schema into a compact text digest for the reflector (1b). Parts are enumerated [n]
+ * so the model can reference them in `relations` and we can map those indices back to session_ids.
+ * Returns { text, index } where index[n] = session_id of part [n].
+ */
+function buildDigest(schema) {
+  const idx = {};
+  const surfaceOf = {};
+  const lines = ['PARTS (my current limbs):'];
+  schema.nodes.forEach((n, i) => {
+    const num = i + 1;
+    idx[num] = n.session_id;
+    surfaceOf[n.session_id] = num;
+    const what = n.activity || n.title || '(no activity label)';
+    const repo = n.repo ? `repo:${n.repo.split('/').slice(-1)[0]}` : 'no repo';
+    const load = `${n.tokens ? Math.round(n.tokens / 1000) + 'k tok' : '0 tok'}, ${n.tools || 0} tools`;
+    const age = n.age_min <= 1 ? 'active now' : `active ${n.age_min}m ago`;
+    lines.push(`[${num}] ${n.surface} · "${what}" · ${repo} · ${load} · ${age}`);
+  });
+  const struct = schema.edges.map((e) => {
+    const a = surfaceOf[e.from], b = surfaceOf[e.to];
+    if (!a || !b) return null;
+    return e.kind === 'colocated'
+      ? `- [${a}] and [${b}] work in the same repo${e.detail ? ' (' + e.detail + ')' : ''}`
+      : `- [${a}] announced to [${b}]`;
+  }).filter(Boolean);
+  if (struct.length) { lines.push('', 'STRUCTURAL LINKS:'); lines.push(...struct); }
+  else lines.push('', 'STRUCTURAL LINKS: none detected (parts are not sharing a repo or announcing).');
+  return { text: lines.join('\n'), index: idx };
+}
+
+module.exports = { buildSchema, buildDigest };

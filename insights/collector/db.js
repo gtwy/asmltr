@@ -31,6 +31,21 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!mcols.includes('swap_total_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_total_mb INTEGER DEFAULT 0');
 }
 
+// Proprioception 1b — the considered self-assessment series (deduced goal + threads + flags +
+// semantic relations), one row per reflection so the goal can be watched shifting over time.
+db.exec(`CREATE TABLE IF NOT EXISTS self_assessments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  goal TEXT,
+  threads_json TEXT,
+  flags_json TEXT,
+  relations_json TEXT,
+  parts INTEGER,
+  edges INTEGER,
+  digest_hash TEXT
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_self_assessments_ts ON self_assessments (ts DESC)');
+
 const _insEvent = db.prepare(`
   INSERT INTO events (ts, surface, session_id, identity, event_type, tokens_in, tokens_out, cost_usd, payload, source)
   VALUES (@ts, @surface, @session_id, @identity, @event_type, @tokens_in, @tokens_out, @cost_usd, @payload, @source)
@@ -178,7 +193,16 @@ const q = {
   usage: db.prepare(`SELECT * FROM usage_rollup WHERE bucket_hour >= @since ORDER BY bucket_hour DESC`),
   system: db.prepare(`SELECT * FROM system_metrics WHERE ts >= @since ORDER BY ts DESC LIMIT @limit`),
   notifications: db.prepare(`SELECT * FROM notifications ORDER BY ts DESC LIMIT @limit`),
+  // proprioception 1b — latest assessment + a short history for the goal timeline
+  latestAssessment: db.prepare(`SELECT * FROM self_assessments ORDER BY ts DESC LIMIT 1`),
+  assessmentHistory: db.prepare(`SELECT id, ts, goal, parts, edges FROM self_assessments ORDER BY ts DESC LIMIT @limit`),
 };
+
+// insert one self-assessment row (relations already mapped to session_id pairs by the caller)
+const _insAssessment = db.prepare(`
+  INSERT INTO self_assessments (ts, goal, threads_json, flags_json, relations_json, parts, edges, digest_hash)
+  VALUES (@ts, @goal, @threads_json, @flags_json, @relations_json, @parts, @edges, @digest_hash)`);
+function insertAssessment(a) { _insAssessment.run(a); }
 
 // --- session upsert used by reconcile.js (richer column set) -----------------
 const _reconcileUpsert = db.prepare(`
@@ -227,4 +251,4 @@ const insertSystemSample = db.transaction((s) => {
   });
 });
 
-module.exports = { db, ingestEvent, reconcileUpsert, setTitle, setTitleManual, getTitle, isTitleLocked, setActivity, insertSystemSample, q, DB_PATH };
+module.exports = { db, ingestEvent, reconcileUpsert, setTitle, setTitleManual, getTitle, isTitleLocked, setActivity, insertSystemSample, insertAssessment, q, DB_PATH };

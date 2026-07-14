@@ -46,7 +46,7 @@ const { createSpeaker } = require('../../shared/speech/speaker'); // core speech
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
-const { runTurn, generateTitle, generateStatus, getLastModel } = require('./runner');
+const { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
 
@@ -688,6 +688,22 @@ app.post('/v2/status', async (req, res) => {
     res.json({ ok: true, status });
   } catch (e) { res.status(500).json({ error: e.message }); }
   finally { _statusBusy = false; }
+});
+
+// Proprioception's considered voice (Phase 1b) — the collector sends a digest of the current body
+// (all parts + structural links, enumerated [n]); this deduces the goal/threads/flags/relations and
+// returns them. Non-influential: a mirror, never instructs a part. Serialized like title/status.
+let _assessBusy = false;
+app.post('/v2/self-assessment', async (req, res) => {
+  const digest = req.body && req.body.digest;
+  if (!digest) return res.status(400).json({ error: 'need digest' });
+  if (_assessBusy) return res.status(429).json({ error: 'busy' });
+  _assessBusy = true;
+  try {
+    const assessment = await generateSelfAssessment(digest);
+    res.json({ ok: true, assessment });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+  finally { _assessBusy = false; }
 });
 
 // --- self-update ------------------------------------------------------------

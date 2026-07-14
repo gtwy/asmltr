@@ -205,4 +205,63 @@ async function generateStatus(text) {
   return s;
 }
 
-module.exports = { runTurn, generateTitle, generateStatus, getLastModel: () => _lastModel };
+/**
+ * The self-assessment reflector — proprioception's SLOW, considered voice (Phase 1b).
+ *
+ * Where generateStatus labels ONE part in a phrase, this reads the whole body at once (a digest of
+ * all current parts + their structural links, parts enumerated [1],[2],…) and deduces:
+ *   goal      — one honest sentence: what the whole seems to be working toward right now
+ *   threads   — the distinct workstreams currently in flight
+ *   flags     — tensions worth noticing (duplication, drift, two parts fighting the same file…)
+ *   relations — meaning-level edges BETWEEN parts, referenced by the digest indices, so the caller
+ *               can fold them onto the structural graph (feeds / duplicates / same-subject / loops-back)
+ *
+ * Non-influential by design: it is a MIRROR. It describes; it never instructs a part what to do.
+ * Uses a capable model (this is the considered pass, run ~25 min apart, not the always-on skeleton).
+ * Returns a parsed object or throws.
+ */
+async function generateSelfAssessment(digest) {
+  const model = process.env.ASMLTR_ASSESSMENT_MODEL || process.env.ASMLTR_MODEL || 'opus';
+  const prompt =
+    'Below is a live snapshot of an AI assistant\'s PARTS — its concurrent working sessions ("limbs"), ' +
+    'each numbered [n], with what it is doing and any structural links between them. You are that ' +
+    'assistant\'s proprioception: a NEUTRAL inner observer of the WHOLE. Read the snapshot and reflect.\n\n' +
+    'Reply with ONLY a JSON object, no preamble, no code fence, exactly this shape:\n' +
+    '{\n' +
+    '  "goal": "<one honest sentence: what the whole seems to be working toward right now, or \'no single goal — the parts are unrelated\' if they genuinely are>",\n' +
+    '  "threads": ["<short phrase per distinct workstream in flight>"],\n' +
+    '  "flags": ["<short phrase per tension worth noticing: duplication, drift, two parts on the same file, a stuck part — [] if none>"],\n' +
+    '  "relations": [{"a": <part number>, "b": <part number>, "rel": "feeds|duplicates|same-subject|loops-back"}]\n' +
+    '}\n' +
+    'Rules: deduce, do not instruct — this is a mirror, never advice. Reference parts only by their [n]. ' +
+    'If two parts are unrelated, do not invent a relation. Keep every phrase under 10 words.\n\n---\n' +
+    String(digest || '').slice(0, 8000);
+  const options = {
+    stream: true, permissionMode: 'bypassPermissions', model, maxTurns: 1,
+    // Same guard as generateStatus: it must LABEL the body, not adopt the work as its own.
+    appendSystemPrompt: 'You are ONLY a reflective analysis function observing another agent\'s parts. ' +
+      'You never take actions, never use tools, never continue the work, never give instructions or ' +
+      'advice. You output a single JSON object describing what you observe. Nothing else.',
+  };
+  let out = '';
+  const response = await query({ prompt, options });
+  for await (const ev of response) {
+    if (ev.type === 'assistant') for (const c of ev.message?.content || []) if (c.type === 'text') out += c.text;
+    else if (ev.type === 'result' && ev.result && !out) out += ev.result;
+  }
+  // Extract the first {...} block and parse defensively.
+  const m = out.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('assessment: no JSON in model output');
+  const parsed = JSON.parse(m[0]);
+  return {
+    goal: typeof parsed.goal === 'string' ? parsed.goal.trim().slice(0, 240) : '',
+    threads: Array.isArray(parsed.threads) ? parsed.threads.filter((t) => typeof t === 'string').map((t) => t.trim().slice(0, 80)).slice(0, 12) : [],
+    flags: Array.isArray(parsed.flags) ? parsed.flags.filter((t) => typeof t === 'string').map((t) => t.trim().slice(0, 100)).slice(0, 12) : [],
+    relations: Array.isArray(parsed.relations)
+      ? parsed.relations.filter((r) => r && Number.isFinite(+r.a) && Number.isFinite(+r.b) && typeof r.rel === 'string')
+          .map((r) => ({ a: +r.a, b: +r.b, rel: r.rel.trim().slice(0, 24) })).slice(0, 40)
+      : [],
+  };
+}
+
+module.exports = { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel: () => _lastModel };
