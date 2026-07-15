@@ -32,13 +32,14 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
   function svcBase(service) { return service === 'core' ? CORE_BASE : service === 'manager' ? MGR.base : BASE; }
   function svcHeaders(service) { return service === 'manager' ? mgrHeaders() : ctlHeaders(); }
   function getPath(o, p) { return p ? String(p).split('.').reduce((a, k) => (a == null ? a : a[k]), o) : o; }
-  function fillTokens(obj, tokens) { // {value}/{session}… → real values; coerce bool-ish strings
+  function fillTokens(obj, tokens) { // {value}/{session}… → real values; coerce bool-ish strings; recurse into nested bodies
     const out = {};
     for (const [k, v] of Object.entries(obj || {})) {
       if (typeof v === 'string') {
         const s = v.replace(/\{(\w+)\}/g, (m, t) => (t in tokens ? tokens[t] : m));
         out[k] = s === 'true' ? true : s === 'false' ? false : s;
-      } else out[k] = v;
+      } else if (v && typeof v === 'object' && !Array.isArray(v)) out[k] = fillTokens(v, tokens);
+      else out[k] = v;
     }
     return out;
   }
@@ -435,7 +436,7 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
           items.push(`  ${v ? '[{green-fg}x{/green-fg}]' : '[ ]'} ${f.label}`);
           appRows.push({ kind: 'toggle', sec, f, value: !!v });
         } else if (f.type === 'choice') {
-          const resolved = getPath(appData[sec.id] || {}, f.resolvedGet);
+          const resolved = f.resolvedGet ? getPath(appData[sec.id] || {}, f.resolvedGet) : null;
           const shown = (v === '' || v == null) ? 'SDK default' : v;
           items.push(`  ${f.label}: {cyan-fg}${shown}{/cyan-fg}${resolved ? ` {gray-fg}(→ ${resolved}){/gray-fg}` : ''}  {gray-fg}· ENTER change{/gray-fg}`);
           appRows.push({ kind: 'choice', sec, f, value: v });

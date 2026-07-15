@@ -11,6 +11,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
 import { api, control, webChat, parsePayload } from '@/services/api'
 import { manager } from '@/services/manager'
+import { useSpeech } from '@/composables/useSpeech'
 import { statusMeta, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
 import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
@@ -252,6 +253,7 @@ function webSend() {
       onSegment: (t) => { if (!turn.reply && t) turn.reply = t },
       onDone: () => {
         turn.streaming = false; busy.value = false; streamCtrl = null; store.fetchSessions()
+        if (ttsOn.value && turn.reply) speak(turn.reply).catch(() => {}) // read the reply aloud when TTS is on
         if (pendingTitle.value != null) { control.setTitle(key.value, pendingTitle.value).then((r) => { if (r.ok) pendingTitle.value = null }).catch(() => {}) }
       },
       onError: (err) => { turn.streaming = false; turn.error = err; busy.value = false; streamCtrl = null }
@@ -276,6 +278,28 @@ async function doInject() {
   finally { busy.value = false }
 }
 
+// ---- voice: read replies aloud (TTS) + dictate messages (STT), both via the configured models ----
+const { speaking, speak, stopSpeaking, recording, transcribing, startRecording, stopRecording, cancelRecording } = useSpeech()
+const ttsOn = ref(false)
+try { ttsOn.value = localStorage.getItem('asmltr:tts') === '1' } catch (_) {}
+function toggleTts() {
+  ttsOn.value = !ttsOn.value
+  try { localStorage.setItem('asmltr:tts', ttsOn.value ? '1' : '0') } catch (_) {}
+  if (!ttsOn.value) stopSpeaking()
+}
+// Mic = push-to-talk: click to record, click again to stop → transcribe → append into the composer.
+async function toggleMic() {
+  if (recording.value) {
+    let text = ''
+    try { text = await stopRecording() } catch (e) { notice.value = { ok: false, text: 'transcription failed: ' + e.message } }
+    if (text) draft.value = (draft.value.trim() ? draft.value.trim() + ' ' : '') + text
+  } else {
+    try { await startRecording() } catch (e) { notice.value = { ok: false, text: 'microphone unavailable: ' + e.message } }
+  }
+}
+// Manually (re)read a specific message aloud — the speaker button on assistant bubbles.
+function readAloud(text) { speak(text).catch((e) => { notice.value = { ok: false, text: 'read-aloud failed: ' + e.message } }) }
+
 function onSend() { return isWeb.value ? webSend() : doInject() }
 
 async function onStop() {
@@ -295,7 +319,7 @@ async function onStop() {
   finally { busy.value = false }
 }
 
-onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} })
+onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} stopSpeaking(); cancelRecording() })
 
 const placeholder = computed(() => {
   if (isWeb.value) return 'Message this session… (Enter to send, Shift+Enter for a newline)'
@@ -390,6 +414,12 @@ const placeholder = computed(() => {
             <span v-if="r.streaming" class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse-dot rounded-sm bg-brand-violet/80 align-middle"></span>
             <span v-if="r.streaming && !r.text" class="text-slate-500">thinking…</span>
             <span v-if="r.error" class="block text-[11px] text-rose-400/80">⚠ {{ r.error }}</span>
+            <button
+              v-if="!r.streaming && !r.error && r.text"
+              type="button" title="Read this reply aloud (configured voice)"
+              class="mt-1 block text-[11px] text-slate-500 transition-colors hover:text-violet-300"
+              @click="readAloud(r.text)"
+            >{{ speaking ? '🔊 speaking…' : '🔊 read aloud' }}</button>
           </div>
         </div>
         <div v-else class="flex items-start gap-1.5 pl-1 text-[11px] text-slate-500">
@@ -437,6 +467,24 @@ const placeholder = computed(() => {
             @click="pickFile"
           >📎</button>
           <input ref="fileInput" type="file" multiple class="hidden" @change="onFile" />
+          <!-- read replies aloud (TTS) — configured voice/model; web sessions render the reply locally -->
+          <button
+            v-if="isWeb"
+            type="button"
+            :title="ttsOn ? 'Reading replies aloud is ON — click to mute (voice/model from Settings)' : 'Read replies aloud with the configured voice'"
+            class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
+            :class="ttsOn ? 'border-brand-violet/50 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+            @click="toggleTts"
+          >{{ ttsOn ? (speaking ? '🔊' : '🔊') : '🔈' }}</button>
+          <!-- dictate a message (STT) — push-to-talk, transcribed by the configured model -->
+          <button
+            type="button"
+            :disabled="transcribing"
+            :title="recording ? 'Stop &amp; transcribe' : 'Dictate — record and transcribe with the configured STT model'"
+            class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors disabled:opacity-40"
+            :class="recording ? 'border-rose-500/50 bg-rose-500/20 text-rose-200 animate-pulse' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+            @click="toggleMic"
+          >{{ transcribing ? '…' : (recording ? '⏺' : '🎙') }}</button>
           <textarea
             v-model="draft"
             rows="1"
