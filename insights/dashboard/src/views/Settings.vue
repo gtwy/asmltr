@@ -47,20 +47,28 @@ async function saveIdentity() {
   } catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
 
-// --- Updates (git code self-update) ---
+// --- Updates (code self-update: deterministic, versioned, channel-based) ---
 const upd = ref(null)
 const updAuto = ref(false)
+const updChannel = ref('edge')
 async function loadUpdates() {
   try { upd.value = await update.status(true) } catch (_) {}
   try { updAuto.value = (await update.getAuto()).auto } catch (_) {}
+  try { updChannel.value = (await update.getChannel()).channel } catch (_) {}
 }
 async function toggleUpdAuto() {
   busy.value = 'upd-auto'
   try { updAuto.value = (await update.setAuto(!updAuto.value)).auto } catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
+async function setChannel(ch) {
+  if (ch === updChannel.value) return
+  busy.value = 'upd-channel'; notice.value = ''
+  try { updChannel.value = (await update.setChannel(ch)).channel; upd.value = await update.status(true); notice.value = `Update channel set to “${ch}”.` }
+  catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
+}
 async function runUpdate() {
   busy.value = 'upd-run'; notice.value = ''
-  try { await update.run(); notice.value = 'Update session started — a background agent is running the update. Watch it in Live (session “self-update”); it health-checks + auto-rolls-back on failure.' }
+  try { await update.run(); notice.value = 'Update started — the deterministic updater is running (fetch → install → restart → verify, auto-rollback on failure). Watch it in Live (session “self-update”).' }
   catch (e) { notice.value = 'Failed to start: ' + e.message } finally { busy.value = '' }
 }
 
@@ -232,12 +240,25 @@ onMounted(async () => {
           <h3 class="mb-1 text-sm font-semibold text-slate-200">Updates</h3>
           <p class="mb-4 text-[12px] text-slate-500">{{ section('updates').desc }}</p>
           <template v-if="upd">
+            <!-- release channel -->
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <span class="text-sm text-slate-200">Release channel</span>
+                <span class="block text-[12px] text-slate-500">Stable pins to the newest release tag; edge tracks the latest commit.</span>
+              </div>
+              <div class="flex shrink-0 gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-0.5">
+                <button v-for="ch in ['stable','edge']" :key="ch" type="button" :disabled="busy === 'upd-channel'"
+                  class="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+                  :class="updChannel === ch ? 'bg-brand-violet/25 text-violet-200' : 'text-slate-400 hover:text-slate-200'"
+                  @click="setChannel(ch)">{{ ch }}</button>
+              </div>
+            </div>
             <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-white/5 bg-black/20 p-3">
               <div class="min-w-0">
-                <div class="text-[11px] uppercase tracking-wide text-slate-500">Code</div>
-                <div class="font-mono text-sm text-slate-200">{{ upd.head || '—' }}
+                <div class="text-[11px] uppercase tracking-wide text-slate-500">Version <span class="normal-case text-slate-600">· {{ upd.channel }}</span></div>
+                <div class="font-mono text-sm text-slate-200">v{{ upd.version || '?' }} <span class="text-slate-500">({{ upd.head || '—' }})</span>
                   <span v-if="!upd.available" class="ml-1 text-[11px] text-emerald-400">✓ up to date</span>
-                  <span v-else class="ml-1 text-[11px] text-amber-400">→ {{ upd.behind }} behind ({{ upd.remote }})</span>
+                  <span v-else class="ml-1 text-[11px] text-amber-400">→ {{ upd.behind }} behind{{ upd.latest_version ? ' · v' + upd.latest_version : '' }} ({{ upd.remote }})</span>
                 </div>
               </div>
               <button

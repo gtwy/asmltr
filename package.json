@@ -1,0 +1,22 @@
+{
+  "name": "asmltr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One channel-agnostic backend behind every chat surface for a single AI assistant.",
+  "repository": { "type": "git", "url": "https://github.com/jarethmt/asmltr.git" },
+  "comment": "Host workspaces only — these run on the host under PM2 and share one root install. The dashboard (insights/dashboard) is intentionally NOT a workspace: it is built + served inside Docker, so its heavy devDeps (vite/tailwind) never land in the host node_modules.",
+  "workspaces": [
+    "core",
+    "connectors",
+    "cli",
+    "insights/collector"
+  ],
+  "bin": { "asmltr": "cli/asmltr.js" },
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "update": "node scripts/update.js",
+    "release": "node scripts/release.js",
+    "setup": "node scripts/run-setup-steps.js",
+    "version:print": "node -e \"console.log(require('./shared/version').readVersion())\""
+  }
+}
