@@ -11,6 +11,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Added
 
 ### Changed
+
+### Fixed
+
+## [0.3.1] - 2026-07-15
+
+### Added
+
+### Changed
 - **Standardized on Node 24 LTS** (issue #21). `engines.node` raised to `>=24.0.0` across the root +
   every workspace, a root `.nvmrc` pinning `24`, and the dashboard build image bumped
   `node:20-alpine → node:24-alpine`. Clears the `EBADENGINE` from `@discordjs/voice@0.19.2`
