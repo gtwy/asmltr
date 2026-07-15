@@ -16,6 +16,11 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   goes through core (falls back to the manager if core is down).
 
 ### Fixed
+- **Multi-agent no-reply reliability.** When the model decides a message isn't for it, it should emit
+  the bare `[[NO_REPLY]]` token — but it often prose-refuses instead ("That's addressed to Moneo, not
+  me…"), which got posted as spam. Core now detects that short meta-refusal and stays silent (channel-
+  agnostic; length-capped + adjacency-specific to avoid suppressing real replies that merely mention
+  who a message was addressed to).
 - **Discord reply threading.** A message that uses Discord's reply feature now carries "↩ in reply to
   <author>: …" into the prompt (both addressed and observed paths), so in a busy multi-agent channel
   the agent can tell WHAT a peer replied to instead of losing the reference.

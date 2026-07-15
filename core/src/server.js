@@ -94,6 +94,17 @@ function withKeyLock(key, fn) {
 // In-flight turns by conversation_key → AbortController, for real-time kill.
 const inFlight = new Map();
 function truncate(v, n = 400) { try { const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > n ? s.slice(0, n) + '…' : s; } catch { return ''; } }
+
+// A model that decides a message isn't for it should emit the bare [[NO_REPLY]] token — but it often
+// PROSE-refuses instead ("That's addressed to Moneo, not me…"), which then gets POSTED as spam. This
+// catches that failure mode as a fallback silence: a SHORT reply whose whole content is meta-commentary
+// about not being the addressee / having nothing to add. Length-capped + adjacency-specific to avoid
+// suppressing a real reply that merely mentions who a message was addressed to. Channel-agnostic.
+function looksLikeNonReply(t) {
+  const s = (t || '').trim();
+  if (!s || s.length > 400) return false;
+  return /\b(?:not (?:addressed|meant|directed|intended)\s*(?:to|at|for)?\s*me\b|addressed to \w+[, ]+not me\b|(?:that(?:.s| is)?|this is|it.s) (?:addressed|meant|for|directed|intended) (?:to|for|at) \w+|nothing (?:here )?for me to (?:add|say|respond|do|answer|reply)|not my (?:turn|message|place|call|cue)|i.?ll (?:let|leave|defer to) \w+ (?:take|handle|answer|respond)|no (?:reply|response) (?:needed|required|from me))/i.test(s);
+}
 function toolResultText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((x) => (x && x.text) || (typeof x === 'string' ? x : '')).join(' ');
@@ -402,6 +413,15 @@ async function handle(envelope, opts = {}) {
   if (/\[\[NO_REPLY\]\]/i.test(result.text || '')) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });
+    return [];
+  }
+
+  // Fallback silence: the model decided this wasn't for it but prose-refused instead of emitting
+  // [[NO_REPLY]] (a common multi-agent-channel slip). Treat that meta-refusal as a no-reply so it
+  // doesn't get posted. Logged so we can see when it fires.
+  if (looksLikeNonReply(result.text)) {
+    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+      identity: resolved.user_key, source: 'core', payload: { action: 'no-reply', via: 'refusal-prose', text: truncate(result.text, 200) } });
     return [];
   }
 
