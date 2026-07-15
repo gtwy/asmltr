@@ -4,6 +4,7 @@
   "private": true,
   "description": "asmltr unified channel-agnostic agent backend (local Agent SDK, Max subscription)",
   "main": "src/server.js",
+  "engines": { "node": ">=24.0.0" },
   "scripts": {
     "start": "node src/server.js",
     "check": "node --check src/server.js && node --check src/runner.js && node --check src/moderation.js && node --check src/trust/store.js && node --check src/trust/seed.js && node --check src/sessions.js && node --check src/drafts.js && node --check src/envelope.js && node --check src/emitter.js"

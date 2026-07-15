@@ -19,7 +19,7 @@ git --version
 ffmpeg -version         # ONLY needed for Discord voice mode
 ```
 
-- **Node.js ≥ 18**
+- **Node.js ≥ 24**
 - **Claude Code CLI, installed and authenticated** (`claude` on PATH — the SDK uses its auth)
 - **PM2** to run the host services (`npm i -g pm2`)
 - **git**

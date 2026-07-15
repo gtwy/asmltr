@@ -103,7 +103,7 @@ renders a reply.
 
 ## Requirements
 
-- **Node.js ≥ 18** (for global `fetch`/`FormData`/`Blob`).
+- **Node.js ≥ 24** (current Active LTS, "Krypton"; `@discordjs/voice@0.19.2` needs ≥ 22.12). Pinned in `.nvmrc`.
 - **Claude Code CLI, installed and authenticated** (`claude` on PATH; the SDK uses its auth). This is the assistant's brain.
 - **PM2** (`npm i -g pm2`) to run the host services.
 - **ffmpeg** — only if you use the Discord voice mode (audio decode + playback).

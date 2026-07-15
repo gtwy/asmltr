@@ -12,7 +12,7 @@ wedges, rollback catches it, and worst case you re-provision). See
   the health check and trigger a rollback.
 - Its own secrets/connectors (the updater itself needs **no** external credentials — just git / npm /
   pm2 / docker).
-- `node >= 18`, `git`, `npm`, `pm2` on PATH. `docker` only if the box runs the dashboard.
+- `node >= 24`, `git`, `npm`, `pm2` on PATH. `docker` only if the box runs the dashboard.
 
 ## 1. Baseline
 
