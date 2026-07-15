@@ -54,6 +54,55 @@ def mux_session():
     return None, None
 
 
+def last_turn_reply(transcript_path):
+    """The assistant's TEXT for the just-completed turn, read from the Claude Code transcript JSONL.
+
+    Claude Code has no hook that carries the assistant's response, so on the Stop (turn-boundary)
+    hook we recover it from the transcript: walk backwards collecting assistant `text` blocks until
+    the real user prompt that started the turn (tool_result 'user' messages belong to the same turn
+    and are skipped). Returns the joined text, or None."""
+    if not transcript_path:
+        return None
+    try:
+        with open(transcript_path, "r") as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return None
+    texts = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        typ = obj.get("type")
+        content = (obj.get("message") or {}).get("content")
+        if typ == "assistant":
+            blocks = []
+            if isinstance(content, list):
+                for c in content:
+                    if isinstance(c, dict) and c.get("type") == "text" and c.get("text"):
+                        blocks.append(c["text"])
+            elif isinstance(content, str):
+                blocks.append(content)
+            for b in reversed(blocks):  # walking backwards → append reversed, undo at the end
+                texts.append(b)
+        elif typ == "user":
+            # A real prompt (string, or a list carrying a text block) ends the turn; a tool_result-
+            # only 'user' message is mid-turn plumbing, so keep going.
+            is_prompt = isinstance(content, str) or (
+                isinstance(content, list)
+                and any(isinstance(c, dict) and c.get("type") == "text" for c in content)
+            )
+            if is_prompt:
+                break
+    texts.reverse()
+    out = "\n\n".join(t.strip() for t in texts if t and t.strip())
+    return out or None
+
+
 def main():
     # The asmltr core runs claude via the Agent SDK with IS_SANDBOX=1; if that path ever fires user
     # hooks, we must NOT emit — those turns are already tracked as their real channel session. This
@@ -114,12 +163,18 @@ def main():
         except Exception:
             ti = None
         events.append({**base, "event_type": "tool", "payload": {"tool": tool, "input": ti}})
-    elif event_name in ("SessionEnd", "Stop"):
-        # Only SessionEnd truly ends the pane; Stop is just a turn boundary (ignore to keep it 'active').
-        if event_name == "SessionEnd":
-            events.append({**base, "event_type": "session-end", "payload": {}})
-        else:
+    elif event_name == "Stop":
+        # Turn boundary — recover the assistant's response from the transcript and emit it as the
+        # session's outbound (Claude Code has no hook that carries the reply text). Keeps the pane
+        # 'active'; only SessionEnd ends it.
+        reply = last_turn_reply(data.get("transcript_path"))
+        if not reply:
             return
+        if len(reply) > 8000:
+            reply = reply[:8000] + "…"
+        events.append({**base, "event_type": "outbound", "payload": {"text": reply}})
+    elif event_name == "SessionEnd":
+        events.append({**base, "event_type": "session-end", "payload": {}})
     else:
         return
 

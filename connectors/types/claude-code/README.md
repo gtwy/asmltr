@@ -14,6 +14,7 @@ event into the same shared event every other connector emits and POSTs it to the
 | `SessionStart`     | `session-start`| registers the session + working dir + pane (attach) |
 | `UserPromptSubmit` | `inbound`      | drives the **title** + **overview** generation      |
 | `PostToolUse`      | `tool`         | tool count + refines the overview                   |
+| `Stop`             | `outbound`     | the assistant's reply (recovered from the transcript) |
 | `SessionEnd`       | `session-end`  | marks the session ended                             |
 
 The collector's existing title/activity generators pick these up automatically (a claude-code
@@ -38,6 +39,7 @@ Add to `~/.claude/settings.json` (a project `.claude/settings.json` also works).
     "SessionStart":     [{ "hooks": [{ "type": "command", "command": "CMD" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "CMD" }] }],
     "PostToolUse":      [{ "matcher": "*", "hooks": [{ "type": "command", "command": "CMD" }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "command": "CMD" }] }],
     "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "CMD" }] }]
   }
 }
