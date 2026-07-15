@@ -9,6 +9,17 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Persistent update progress (GUI + TUI).** The updater writes `~/.asmltr/update-status.json`
+  through every phase (fetch → install → restart → verify); core exposes `GET /v2/update/progress`.
+  The GUI shows a persistent progress panel at the top of every page that survives the mid-update
+  service restart (spinner, phase, log tail, terminal result + dismiss); the TUI shows a matching
+  overlay reading the status file directly. Triggered from both the banner and Settings → Updates.
+- **Agent-name brand + browser tab title.** The header shows the configured agent name with an
+  "asmltr control plane" subtext; the running version sits by the collector-live pill; the tab title
+  is `<Agent> · <focused session, else active view>`.
+- **claude-code sessions now show the assistant's replies.** The connector recovers the reply from
+  the transcript on the `Stop` hook and emits it as an `outbound` event (previously only inbound/tool
+  events reached the dashboard). Requires wiring the `Stop` hook (README updated).
 - **Committed lockfile + `npm ci`** (issue #17): a root `package-lock.json` pins the whole transitive
   tree (incl. native modules); the updater prefers `npm ci` (exact-match) with an `npm install` fallback,
   and `release.js` regenerates the lock per tag so every release ships a matching lock.
