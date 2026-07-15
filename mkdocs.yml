@@ -84,6 +84,7 @@ nav:
     - The asmltr CLI: cli.md
     - The dashboard: dashboard.md
     - Versioning & updates: UPDATER-DESIGN.md
+    - Testing the updater: testing-the-updater.md
   - Coordination:
     - Steering & injection: coordination/injection.md
     - Cross-channel send: coordination/cross-channel.md
