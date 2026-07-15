@@ -101,8 +101,17 @@ const manifest = {
           set: { service: 'core', method: 'POST', path: '/v2/voice/ack', body: { enabled: '{value}' } },
         },
         {
+          id: 'tts_provider', label: 'TTS provider', type: 'choice', get: 'tts.provider',
+          desc: 'ElevenLabs (richer voices; needs elevenlabs_api_key) or OpenAI. The voice/model below depend on this — for ElevenLabs, enter a voice ID / eleven_* model in the custom field.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { provider: '{value}' } } },
+          choices: [
+            { id: 'elevenlabs', label: 'ElevenLabs', hint: 'richer voices' },
+            { id: 'openai', label: 'OpenAI', hint: 'built-in presets' },
+          ],
+        },
+        {
           id: 'tts_voice', label: 'TTS voice', type: 'choice', get: 'tts.voice', allowCustom: true,
-          desc: 'The spoken voice for read-aloud replies.',
+          desc: 'Spoken voice for read-aloud replies (OpenAI presets below; for ElevenLabs paste a voice ID).',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { voice: '{value}' } } },
           choices: [
             { id: 'alloy', label: 'Alloy', hint: 'neutral, balanced' },
@@ -116,8 +125,8 @@ const manifest = {
           ],
         },
         {
-          id: 'tts_model', label: 'TTS model', type: 'choice', get: 'tts.model',
-          desc: 'Quality vs. latency for speech synthesis.',
+          id: 'tts_model', label: 'TTS model', type: 'choice', get: 'tts.model', allowCustom: true,
+          desc: 'Quality vs. latency (OpenAI models below; for ElevenLabs paste an eleven_* model id).',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { model: '{value}' } } },
           choices: [
             { id: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts', hint: 'newest, steerable (recommended)' },

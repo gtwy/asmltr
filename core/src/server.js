@@ -588,6 +588,14 @@ app.post('/v2/tts', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Realtime STT — mint a short-lived ephemeral token for a streaming transcription session with
+// server-side VAD. The browser connects to OpenAI directly (WebRTC) with this token; the real key
+// never leaves the host. Body: { model? }.
+app.post('/v2/realtime/transcribe-token', async (req, res) => {
+  try { res.json(await stt.realtimeToken({ model: req.body && req.body.model })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Transcription — audio clip → text via a real STT model (default OpenAI gpt-4o-transcribe). Body is
 // JSON base64 (no multipart dep, mirrors /v2/upload): { data_base64, mime?, filename?, model?, language? }.
 app.post('/v2/transcribe', async (req, res) => {

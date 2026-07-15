@@ -98,8 +98,10 @@ async function updateSdk() {
 const ackOn = ref(true)
 function toggleAck() { ackOn.value = !ackOn.value; voice.setAck(ackOn.value).catch(() => {}) }
 // TTS voice/model + STT model — server-persisted config; the choice lists come from the manifest.
-const vcfg = ref(null) // { tts: { voice, model, … }, stt: { model, … } }
+const vcfg = ref(null) // { tts: { provider, voice, model, … }, stt: { model, … } }
 const customVoice = ref('')
+const customTtsModel = ref('')
+const ttsProviderChoices = computed(() => field('voice', 'tts_provider').choices || [])
 const ttsVoiceChoices = computed(() => field('voice', 'tts_voice').choices || [])
 const ttsModelChoices = computed(() => field('voice', 'tts_model').choices || [])
 const sttModelChoices = computed(() => field('voice', 'stt_model').choices || [])
@@ -110,6 +112,7 @@ async function setVoiceCfg(part) {
   catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
 async function setCustomVoice() { const v = customVoice.value.trim(); if (v) { await setVoiceCfg({ tts: { voice: v } }); customVoice.value = '' } }
+async function setCustomTtsModel() { const m = customTtsModel.value.trim(); if (m) { await setVoiceCfg({ tts: { model: m } }); customTtsModel.value = '' } }
 
 onMounted(async () => {
   try { manifest.value = await api.manifest() } catch (_) {}
@@ -277,6 +280,22 @@ onMounted(async () => {
           </label>
 
           <template v-if="vcfg">
+            <!-- TTS provider -->
+            <div class="mb-5">
+              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_provider').label }}
+                <span class="normal-case text-slate-600">— {{ field('voice','tts_provider').desc }}</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button v-for="c in ttsProviderChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                  :class="vcfg.tts?.provider === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                  @click="setVoiceCfg({ tts: { provider: c.id } })">
+                  <div class="font-semibold">{{ c.label }}</div>
+                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                </button>
+              </div>
+            </div>
+
             <!-- TTS voice -->
             <div class="mb-5">
               <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_voice').label }}
@@ -312,6 +331,12 @@ onMounted(async () => {
                   <div class="font-semibold">{{ c.label }}</div>
                   <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
                 </button>
+              </div>
+              <div v-if="field('voice','tts_model').allowCustom" class="mt-2 flex items-center gap-2">
+                <input v-model="customTtsModel" type="text" placeholder="or another model id (e.g. eleven_turbo_v2_5)"
+                  class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
+                  @keydown.enter.prevent="setCustomTtsModel" />
+                <button type="button" :disabled="!customTtsModel.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomTtsModel">Set</button>
               </div>
             </div>
 

@@ -279,7 +279,7 @@ async function doInject() {
 }
 
 // ---- voice: read replies aloud (TTS) + dictate messages (STT), both via the configured models ----
-const { speaking, speak, stopSpeaking, recording, transcribing, startRecording, stopRecording, cancelRecording } = useSpeech()
+const { speaking, speak, stopSpeaking, cancelRecording, live, listening, startLive, stopLive } = useSpeech()
 const ttsOn = ref(false)
 try { ttsOn.value = localStorage.getItem('asmltr:tts') === '1' } catch (_) {}
 function toggleTts() {
@@ -287,15 +287,15 @@ function toggleTts() {
   try { localStorage.setItem('asmltr:tts', ttsOn.value ? '1' : '0') } catch (_) {}
   if (!ttsOn.value) stopSpeaking()
 }
-// Mic = push-to-talk: click to record, click again to stop → transcribe → append into the composer.
+// Mic = hands-free voice: streaming transcription with server-side VAD. Partial text fills the
+// composer live; when the VAD detects you've stopped, the utterance auto-sends. Click again to stop.
 async function toggleMic() {
-  if (recording.value) {
-    let text = ''
-    try { text = await stopRecording() } catch (e) { notice.value = { ok: false, text: 'transcription failed: ' + e.message } }
-    if (text) draft.value = (draft.value.trim() ? draft.value.trim() + ' ' : '') + text
-  } else {
-    try { await startRecording() } catch (e) { notice.value = { ok: false, text: 'microphone unavailable: ' + e.message } }
-  }
+  if (live.value) { stopLive(); return }
+  await startLive({
+    onPartial: (t) => { draft.value = t },
+    onFinal: (t) => { draft.value = t; if (t.trim() && !busy.value) onSend() },
+    onError: (msg) => { notice.value = { ok: false, text: 'voice: ' + msg } },
+  })
 }
 // Manually (re)read a specific message aloud — the speaker button on assistant bubbles.
 function readAloud(text) { speak(text).catch((e) => { notice.value = { ok: false, text: 'read-aloud failed: ' + e.message } }) }
@@ -319,7 +319,7 @@ async function onStop() {
   finally { busy.value = false }
 }
 
-onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} stopSpeaking(); cancelRecording() })
+onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} stopSpeaking(); cancelRecording(); stopLive() })
 
 const placeholder = computed(() => {
   if (isWeb.value) return 'Message this session… (Enter to send, Shift+Enter for a newline)'
@@ -476,15 +476,14 @@ const placeholder = computed(() => {
             :class="ttsOn ? 'border-brand-violet/50 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
             @click="toggleTts"
           >{{ ttsOn ? (speaking ? '🔊' : '🔊') : '🔈' }}</button>
-          <!-- dictate a message (STT) — push-to-talk, transcribed by the configured model -->
+          <!-- hands-free voice (STT) — streaming transcription + server VAD → auto-sends when you pause -->
           <button
             type="button"
-            :disabled="transcribing"
-            :title="recording ? 'Stop &amp; transcribe' : 'Dictate — record and transcribe with the configured STT model'"
-            class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors disabled:opacity-40"
-            :class="recording ? 'border-rose-500/50 bg-rose-500/20 text-rose-200 animate-pulse' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+            :title="live ? 'Hands-free voice ON — speak; it auto-sends when you pause. Click to stop.' : 'Hands-free voice — stream + auto-send with the configured STT model'"
+            class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
+            :class="live ? (listening ? 'border-emerald-500/60 bg-emerald-500/20 text-emerald-200 animate-pulse' : 'border-rose-500/50 bg-rose-500/15 text-rose-200') : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
             @click="toggleMic"
-          >{{ transcribing ? '…' : (recording ? '⏺' : '🎙') }}</button>
+          >{{ live ? (listening ? '🎙' : '🎧') : '🎙' }}</button>
           <textarea
             v-model="draft"
             rows="1"

@@ -18,6 +18,9 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder } = require('discord.js');
+// THE shared asmltr speech layer — same TTS/STT used by the dashboard + core /v2/speak (DRY).
+const sharedTts = require('../../../shared/speech/tts');
+const sharedStt = require('../../../shared/speech/stt');
 
 // Assistant identity — the display name AND the spoken wake word for voice.
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -541,17 +544,14 @@ RESPONSE RULES:
   // --- voice transcription helper: per-utterance WAV → OpenAI STT → text --------
   const voiceText = new Map(); // guildId -> text channel to post the live transcript
   async function sttTranscribe(wav) {
-    const key = await ctx.secrets.get('openai_api_key');
-    const fd = new FormData();
-    fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'utt.wav');
-    fd.append('model', 'gpt-4o-transcribe');
-    const lang = cfg.stt_language === undefined ? 'en' : cfg.stt_language;
-    if (lang) fd.append('language', lang); // constrain output → stops foreign-character hallucinations
-    fd.append('prompt', `Casual voice-chat speech; the speaker may address an assistant named ${NAME}.`); // bias toward the wake word
-    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: fd });
-    if (!r.ok) throw new Error(`stt ${r.status}`);
-    const j = await r.json();
-    return j.text || '';
+    // Unified STT (shared/speech/stt). Per-instance language + wake-word prompt bias; model/key follow
+    // the shared config (Settings > Voice) unless overridden. lang '' = auto-detect.
+    const language = cfg.stt_language === undefined ? 'en' : cfg.stt_language;
+    const { text } = await sharedStt.transcribe(wav, {
+      mime: 'audio/wav', filename: 'utt.wav', language,
+      prompt: `Casual voice-chat speech; the speaker may address an assistant named ${NAME}.`,
+    });
+    return text || '';
   }
 
   // --- gatekeeper: does this spoken utterance ADDRESS the assistant? (heuristic v1) --------
@@ -572,16 +572,16 @@ RESPONSE RULES:
   ].join(' ');
 
   async function elevenLabsTTS(text) {
+    // Unified TTS (shared/speech/tts). ElevenLabs provider with this instance's voice/model/key;
+    // the exact same module the dashboard + core /v2/speak use. Returns the audio Buffer (mp3), or null.
     try {
-      const key = await ctx.secrets.get(cfg.elevenlabs_key_name || 'elevenlabs_api_key');
-      const voiceId = cfg.voice_id || '21m00Tcm4TlvDq8ikWAM'; // TODO: drop in the assistant's real voice
-      const model = cfg.tts_model || 'eleven_turbo_v2_5';
-      const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-        method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, model_id: model }),
+      const { audio } = await sharedTts.synthesize(text, {
+        provider: 'elevenlabs',
+        voice: cfg.voice_id || undefined,
+        model: cfg.tts_model || undefined,
+        keyName: cfg.elevenlabs_key_name || 'elevenlabs_api_key',
       });
-      if (!r.ok) { ctx.log(`[voice] tts ${r.status}`); return null; }
-      return Buffer.from(await r.arrayBuffer());
+      return audio;
     } catch (e) { ctx.log(`[voice] tts failed: ${e.message}`); return null; }
   }
 
