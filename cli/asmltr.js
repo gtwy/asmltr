@@ -522,6 +522,40 @@ function cmdHelp() {
   collector: ${BASE}   core: ${CORE_BASE}   ${TOKEN ? '(token set)' : A.dim('(no token — dev mode)')}`);
 }
 
+// --- version + update --------------------------------------------------------
+async function cmdVersion() {
+  const v = require('../shared/version');
+  const info = v.info();
+  console.log(A.bold('asmltr ') + A.grn('v' + info.version) + '  ' + A.dim(info.sha + (info.tag ? ' · ' + info.tag : '') + ' · ' + info.channel + ' channel'));
+  for (const [name, base] of [['core', CORE_BASE], ['collector', BASE], ['manager', MANAGER_BASE]]) {
+    try { const r = await fetch(base + '/version').then((x) => x.json()); console.log('  ' + pad(name, 10) + 'v' + (r.version || '?') + '  ' + A.dim('sha ' + (r.sha || '?'))); }
+    catch (_) { console.log('  ' + pad(name, 10) + A.dim('offline')); }
+  }
+  try {
+    const u = await fetch(CORE_BASE + '/v2/update/status').then((x) => x.json());
+    if (u && u.available) console.log(A.yel(`\n  update available: ${u.behind} commit(s) behind on ${u.channel} (${u.target}) — run: asmltr update`));
+    else if (u && u.ok) console.log(A.dim(`\n  up to date on the ${u.channel} channel`));
+  } catch (_) {}
+}
+
+async function cmdUpdate(rest, f) {
+  const path = require('path');
+  const has = (x) => rest.includes('--' + x);
+  if (has('agent')) { // LLM escape-hatch updater (detached via core)
+    const r = await fetch(CORE_BASE + '/v2/update/run?mode=agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ by: 'cli' }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+    return console.log(r && r.ok ? A.grn(`agent update session started (pid ${r.pid}) — watch it in the dashboard`) : A.red('failed: ' + (r && r.error)));
+  }
+  const args = [path.join(__dirname, '..', 'scripts', 'update.js')];
+  if (has('dry-run') || has('n')) args.push('--dry-run');
+  if (has('force')) args.push('--force');
+  const channel = f.channel || (has('stable') ? 'stable' : has('edge') ? 'edge' : null);
+  if (channel) args.push('--channel', channel);
+  args.push('--by', 'cli');
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, args, { stdio: 'inherit' });
+  process.exit(r.status || 0);
+}
+
 // --- main --------------------------------------------------------------------
 (async () => {
   const [, , cmd, ...rest] = process.argv;
@@ -571,6 +605,8 @@ function cmdHelp() {
       case 'kill': return await cmdKill(rest[0], f);
       case 'stop': return await cmdStop(rest[0]);
       case 'diff': return await cmdDiff(rest[0]);
+      case 'update': return await cmdUpdate(rest, f);
+      case 'version': case '--version': return await cmdVersion();
       case 'help': case '--help': case '-h': return cmdHelp();
       default: console.error(`unknown command: ${cmd}\n`); return cmdHelp();
     }

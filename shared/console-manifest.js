@@ -74,7 +74,7 @@ const manifest = {
     },
     {
       id: 'updates', label: 'Updates', icon: '↑',
-      desc: "asmltr's own code. New commits on origin/main are detected every 15 min; installing runs a background agent session that health-checks and auto-rolls-back on failure.",
+      desc: "asmltr's own code. Updates are detected every 15 min; installing runs the deterministic updater (fetch → install → restart → verify) which health-checks and auto-rolls-back on failure — no LLM in the loop.",
       load: { service: 'core', method: 'GET', path: '/v2/update/status' },
       fields: [
         {

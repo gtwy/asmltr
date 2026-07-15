@@ -445,7 +445,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core'
 // (not just /health, which returns 200 even on stale code) to confirm the restart actually landed.
 const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
 const STARTED_AT = new Date().toISOString();
-app.get('/version', (req, res) => res.json({ service: 'asmltr-core', sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
+app.get('/version', (req, res) => res.json({ service: 'asmltr-core', ...require('../../shared/version').info(), sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
 
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
@@ -811,15 +811,20 @@ app.post('/v2/session/forget', (req, res) => {
 });
 
 // --- self-update ------------------------------------------------------------
-app.get('/v2/update/status', async (req, res) => res.json(await selfUpdate.getUpdateStatus({ fetch: req.query.fetch !== '0' })));
+app.get('/v2/update/status', async (req, res) => res.json(await selfUpdate.getUpdateStatus({ fetch: req.query.fetch !== '0', channel: req.query.channel })));
 app.get('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.isAutoUpdate() }));
 app.post('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.setAutoUpdate(!!(req.body && req.body.enabled)) }));
-// Kick off a self-update: spawns a DETACHED agent session that runs UPDATE-WITH-AGENT.md and
-// restarts via restart-with-rollback.sh (auto-rollback on failure). Returns immediately.
+// Release channel: stable (newest release tag) vs edge (origin/main).
+app.get('/v2/update/channel', (req, res) => res.json({ channel: selfUpdate.getChannel() }));
+app.post('/v2/update/channel', (req, res) => { try { res.json({ channel: selfUpdate.setChannel(req.body && req.body.channel) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+// Kick off a self-update: spawns the DETACHED DETERMINISTIC updater (scripts/update.js) — scripted,
+// verified, auto-rollback. `?mode=agent` runs the LLM update session instead (escape hatch). Returns
+// immediately; progress streams to the dashboard under the self-update session.
 app.post('/v2/update/run', (req, res) => {
   try {
-    const r = selfUpdate.spawnUpdateSession();
-    record({ surface: 'core', session_id: 'self-update', event_type: 'control', identity: (req.body && req.body.by) || 'operator', source: 'core', payload: { action: 'self-update-started', pid: r.pid } });
+    const mode = (req.query.mode === 'agent') ? 'agent' : 'deterministic';
+    const r = selfUpdate.spawnUpdateSession({ by: (req.body && req.body.by) || 'operator', mode });
+    record({ surface: 'core', session_id: 'self-update', event_type: 'control', identity: (req.body && req.body.by) || 'operator', source: 'core', payload: { action: 'self-update-started', pid: r.pid, mode } });
     res.json({ ok: true, ...r });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

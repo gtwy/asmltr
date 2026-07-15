@@ -77,6 +77,9 @@ export const update = {
   run: () => postCore('/v2/update/run', { by: 'dashboard' }),
   getAuto: () => getCore('/v2/update/auto'),
   setAuto: (enabled) => postCore('/v2/update/auto', { enabled }),
+  // release channel: 'stable' (newest tag) | 'edge' (origin/main)
+  getChannel: () => getCore('/v2/update/channel'),
+  setChannel: (channel) => postCore('/v2/update/channel', { channel }),
 }
 
 // Web chat — the browser acts as a connector. Post an `eve-assistant-web` envelope to the core's

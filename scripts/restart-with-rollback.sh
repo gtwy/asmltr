@@ -19,7 +19,9 @@ restart_services(){
   # running the update and killed it before pm2 restart ran — see issue #8).
   pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager >/dev/null 2>&1
 }
-reinstall(){ for d in core connectors insights/collector cli; do (cd "$REPO/$d" && npm install) >>"$LOG" 2>&1; done; }
+# Root workspace install (core/connectors/cli/insights-collector are npm workspaces of the root
+# package.json). One install covers them all; the dashboard is built separately in Docker.
+reinstall(){ (cd "$REPO" && npm install --no-audit --no-fund) >>"$LOG" 2>&1; }
 
 # Verify each service is (a) up AND (b) actually running the expected code sha. /health alone is
 # not enough: a restart that silently never happened still returns 200 from the OLD process. We

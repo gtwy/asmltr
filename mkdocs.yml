@@ -83,6 +83,7 @@ nav:
   - Operating:
     - The asmltr CLI: cli.md
     - The dashboard: dashboard.md
+    - Versioning & updates: UPDATER-DESIGN.md
   - Coordination:
     - Steering & injection: coordination/injection.md
     - Cross-channel send: coordination/cross-channel.md

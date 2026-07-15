@@ -85,7 +85,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-conne
 // checks this (not just /health, which is 200 even on stale code) to confirm the restart landed.
 const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
 const STARTED_AT = new Date().toISOString();
-app.get('/version', (req, res) => res.json({ service: 'asmltr-connector-manager', sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
+app.get('/version', (req, res) => res.json({ service: 'asmltr-connector-manager', ...require('../../shared/version').info(), sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
 app.get('/types', requireToken, (req, res) => res.json({ types: Object.values(TYPES) }));
 
 app.get('/instances', requireToken, (req, res) => {

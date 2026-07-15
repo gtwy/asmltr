@@ -1,10 +1,12 @@
 'use strict';
 /**
- * asmltr self-update awareness — is a newer version available on origin/main?
+ * asmltr self-update awareness + trigger.
  *
- * Read-only detection (git fetch + compare) plus the persisted auto-update flag. The actual
- * update is performed by a spawned AGENT SESSION running UPDATE-WITH-AGENT.md (see
- * scripts/run-update-session.js) — never from here; this module only *senses* and stores intent.
+ * Detection is read-only (git fetch + compare) and CHANNEL-aware: `edge` compares against origin/main,
+ * `stable` against the newest release tag. The actual update is performed by the DETERMINISTIC updater
+ * (scripts/update.js) — a scripted, verified pipeline, no LLM. The old agent update session
+ * (scripts/run-update-session.js) is kept only as an escape hatch (`mode: 'agent'`) for when the
+ * deterministic path can't cope with a truly bespoke install.
  */
 const path = require('path');
 const fs = require('fs');
@@ -12,26 +14,34 @@ const os = require('os');
 const { execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const execFileP = promisify(execFile);
+const version = require('./version');
 
 const REPO = path.join(__dirname, '..'); // shared/ lives at the repo root
 const AUTO_FLAG = process.env.ASMLTR_AUTOUPDATE_FILE || path.join(os.homedir(), '.asmltr', 'auto-update');
 
 const git = async (...args) => (await execFileP('git', ['-C', REPO, ...args], { timeout: 60000 })).stdout.trim();
 
-/** Fetch origin and report how far behind origin/main we are, with a short changelog. Never throws. */
-async function getUpdateStatus({ fetch = true } = {}) {
+/** How far behind the channel target are we? Never throws. Includes version + channel + changelog. */
+async function getUpdateStatus({ fetch = true, channel } = {}) {
+  channel = channel || version.getChannel();
   try {
-    if (fetch) { try { await git('fetch', '--quiet', 'origin', 'main'); } catch (_) {} }
+    if (fetch) { try { await git('fetch', '--quiet', '--tags', 'origin', 'main'); } catch (_) {} }
     const head = await git('rev-parse', 'HEAD');
-    let remote = head, behind = 0, changelog = [];
-    try { remote = await git('rev-parse', 'origin/main'); } catch (_) {}
-    if (remote !== head) {
-      behind = Number(await git('rev-list', '--count', 'HEAD..origin/main')) || 0;
-      if (behind) changelog = (await git('log', '--oneline', '--no-decorate', '-20', 'HEAD..origin/main')).split('\n').filter(Boolean);
+    let target = head, targetName = 'HEAD', latestVersion = null;
+    if (channel === 'stable') {
+      const tag = (await git('tag', '-l', 'v*', '--sort=-version:refname').catch(() => '')).split('\n').filter(Boolean)[0] || null;
+      if (tag) { target = await git('rev-parse', tag); targetName = tag; latestVersion = tag.replace(/^v/, ''); }
+    } else {
+      try { target = await git('rev-parse', 'origin/main'); targetName = 'origin/main'; } catch (_) {}
     }
-    return { ok: true, behind, available: behind > 0, head: head.slice(0, 7), remote: remote.slice(0, 7), changelog, checked_at: Date.now() };
+    let behind = 0, changelog = [];
+    if (target !== head) {
+      behind = Number(await git('rev-list', '--count', `HEAD..${target}`)) || 0;
+      if (behind) changelog = (await git('log', '--oneline', '--no-decorate', '-20', `HEAD..${target}`)).split('\n').filter(Boolean);
+    }
+    return { ok: true, channel, version: version.readVersion(), latest_version: latestVersion, behind, available: behind > 0, head: head.slice(0, 7), remote: String(target).slice(0, 7), target: targetName, changelog, checked_at: Date.now() };
   } catch (e) {
-    return { ok: false, behind: 0, available: false, error: e.message, checked_at: Date.now() };
+    return { ok: false, channel, version: version.readVersion(), behind: 0, available: false, error: e.message, checked_at: Date.now() };
   }
 }
 
@@ -46,13 +56,21 @@ function setAutoUpdate(on) {
   } catch { return isAutoUpdate(); }
 }
 
-/** Spawn the DETACHED update session (runs UPDATE-WITH-AGENT.md via the local SDK). Returns its pid. */
-function spawnUpdateSession() {
-  const child = spawn(process.execPath, [path.join(__dirname, '..', 'scripts', 'run-update-session.js')], {
-    cwd: REPO, detached: true, stdio: 'ignore', env: process.env,
-  });
+/**
+ * Spawn the DETACHED update process (survives the restart it triggers). Default: the deterministic
+ * updater (scripts/update.js). `mode: 'agent'` runs the LLM update session as an escape hatch.
+ */
+function spawnUpdateSession({ by = 'operator', mode = 'deterministic', channel } = {}) {
+  const script = mode === 'agent' ? 'run-update-session.js' : 'update.js';
+  const args = [path.join(__dirname, '..', 'scripts', script)];
+  if (mode !== 'agent') { args.push('--by', by); if (channel) args.push('--channel', channel); }
+  const child = spawn(process.execPath, args, { cwd: REPO, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
-  return { pid: child.pid, started_at: Date.now() };
+  return { pid: child.pid, started_at: Date.now(), mode };
 }
 
-module.exports = { getUpdateStatus, isAutoUpdate, setAutoUpdate, spawnUpdateSession, REPO, AUTO_FLAG };
+// channel get/set live in shared/version; re-exported here so callers have one update surface.
+const getChannel = version.getChannel;
+const setChannel = version.setChannel;
+
+module.exports = { getUpdateStatus, isAutoUpdate, setAutoUpdate, spawnUpdateSession, getChannel, setChannel, REPO, AUTO_FLAG };
