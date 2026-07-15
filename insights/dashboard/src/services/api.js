@@ -84,7 +84,7 @@ export const update = {
 export const webChat = {
   // Stream one turn. `handlers` = { onDelta, onSegment, onTool, onThinking, onDone, onError }.
   // Returns an AbortController so the caller can cancel the fetch (the core also has /v2/abort).
-  send({ conversation_key, text, attachments = [], working_dir = null }, handlers = {}) {
+  send({ conversation_key, text, attachments = [], working_dir = null, system_prompt_extra = null }, handlers = {}) {
     const ac = new AbortController()
     const envelope = {
       channel: 'eve-assistant-web',
@@ -93,7 +93,8 @@ export const webChat = {
       content: { text, attachments },
       delivery: 'sync',
       public: false,
-      ...(working_dir ? { working_dir } : {})
+      ...(working_dir ? { working_dir } : {}),
+      ...(system_prompt_extra ? { system_prompt_extra } : {})
     }
     ;(async () => {
       let res

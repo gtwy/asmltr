@@ -11,6 +11,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import SessionDetail from '@/components/SessionDetail.vue'
+import ObserverChat from '@/components/ObserverChat.vue'
 import { useCollectorStore } from '@/stores/collector'
 import { api } from '@/services/api'
 import { surfaceMeta, truncate, fmtAge, fmtNum } from '@/lib/format'
@@ -185,6 +186,11 @@ function onGraphClick(p) {
         <span v-for="(t, i) in latest.threads" :key="'t' + i" class="pill border border-white/10 bg-white/5 text-[11px] text-slate-300">{{ t }}</span>
         <span v-for="(f, i) in latest.flags" :key="'f' + i" class="pill border border-amber-400/30 bg-amber-400/10 text-[11px] text-amber-300">⚠ {{ f }}</span>
       </div>
+    </div>
+
+    <!-- talk to the observer — the conversational face of proprioception -->
+    <div class="mb-4">
+      <ObserverChat :schema="schema" :assessment="assessment" />
     </div>
 
     <!-- body at a glance -->
