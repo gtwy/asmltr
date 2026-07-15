@@ -33,9 +33,12 @@ Spawned **detached** (survives the restart it triggers). Phases, in order:
 6. **setup steps** — run [`scripts/run-setup-steps.js`](../scripts/run-setup-steps.js) (below).
 7. **env reconcile** — [`scripts/reconcile-env.js`](../scripts/reconcile-env.js) surfaces newly-added
    `.env.example` keys into `.env` as commented placeholders (never touches existing values).
-8. **install** — one `npm install` at the repo root (core/connectors/cli/collector are npm
-   **workspaces**; the dashboard is built in Docker). If install fails, the code is rolled back
-   **before** any service restarts.
+8. **install** — deps at the repo root (core/connectors/cli/collector are npm **workspaces**; the
+   dashboard is built in Docker). Prefers **`npm ci`** from the committed `package-lock.json` — a
+   clean, exact-match install that pins the whole transitive tree incl. native modules (better-sqlite3,
+   opus, porcupine); falls back to `npm install` if there's no lock or `npm ci` fails on drift. Every
+   release regenerates the lockfile, so a tag's lock matches its manifests. If install fails, the code
+   is rolled back **before** any service restarts.
 9. **dashboard** — if a compose file + Docker are present: `docker compose up -d --build`
    (separate lifecycle; best-effort, doesn't gate the core update).
 10. **restart + verify + auto-rollback** — hands off to
@@ -47,7 +50,25 @@ Progress streams to the collector under a `self-update:<ts>` session, so it appe
 dashboard exactly like the old agent session.
 
 **Exit codes:** `0` ok · `2` rolled back (new build failed verify) · `3` manual intervention · `4`
-already up to date · `5` another update running.
+already up to date · `5` another update running · `6` externally managed (see below).
+
+## Externally-managed installs
+
+The updater assumes asmltr lives in a **writable git checkout it can `git reset` + install into** —
+true for the PM2-on-the-host default. It is **false** for package-based, image-based/read-only, or
+config-management (Ansible, golden-image) deploys, where updating in place fights the platform.
+
+Signal it with **`ASMLTR_UPDATE_MANAGED=<manager>`** (e.g. `apt`, `docker`, `host`) or a
+`~/.asmltr/managed` flag file whose contents name the manager. Then:
+
+- `asmltr update` / `scripts/update.js` exit early with a distinct **code 6** and a clear line
+  (`updates managed by <manager>; not updating in place`) — never the ambiguous "cannot update".
+- `GET /v2/update/status` reports `managed: true` + the manager (it still shows how far behind you are
+  for telemetry; the dashboard shows "managed by &lt;x&gt;" instead of an Update button).
+- `POST /v2/update/run` refuses and returns `{ managed: true, manager }` rather than spawning a process
+  that dies one line in.
+
+Updates on a managed install are the platform's job (pull a new package/image); asmltr steps aside.
 
 ## Self-healing setup steps ([`setup.d/`](../setup.d/))
 

@@ -19,6 +19,7 @@
  * Usage: node scripts/update.js [--channel stable|edge] [--ref <tag|sha>] [--dry-run] [--force]
  *                               [--no-dashboard] [--by <who>] [--json]
  * Exit: 0 ok · 1 preflight/usage · 2 rolled back · 3 manual intervention · 4 already up to date · 5 busy
+ *       · 6 externally managed (updates are the platform's job — see issue #18)
  */
 require('../shared/loadenv');
 const fs = require('fs');
@@ -98,6 +99,15 @@ function done(code, summary) {
 (function main() {
   if (!version.VALID_CHANNELS.includes(CHANNEL)) { log(`invalid channel '${CHANNEL}'`); if (JSON_OUT) console.log(JSON.stringify({ ok: false, error: 'invalid channel' })); process.exit(1); }
 
+  // Externally-managed install (package/image/config-management deploy): updating in place is the
+  // wrong move — step aside cleanly with a DISTINCT code (not the ambiguous exit 1). Issue #18.
+  const managed = version.getManaged();
+  if (managed.managed) {
+    log(`updates managed by ${managed.manager}; not updating in place`);
+    if (JSON_OUT) console.log(JSON.stringify({ ok: false, code: 6, managed: true, manager: managed.manager }));
+    process.exit(6);
+  }
+
   // preflight
   if (!fs.existsSync(path.join(REPO, '.git'))) { log('not a git checkout — cannot update'); process.exit(1); }
   if (git('rev-parse', 'HEAD').code !== 0) { log('git not usable'); process.exit(1); }
@@ -136,7 +146,7 @@ function done(code, summary) {
 
   if (DRY) {
     const plan = { ok: true, dryRun: true, channel: CHANNEL, from: fromSha, to: toShort, target: targetLabel, behind, changelog,
-      steps: ['git checkout ' + targetLabel, 'run setup.d steps', 'reconcile .env', 'npm install (root workspace)', NO_DASH ? 'skip dashboard' : 'docker compose up -d --build (dashboard)', 'restart-with-rollback.sh (pm2 restart + verify + auto-rollback)'] };
+      steps: ['git checkout ' + targetLabel, 'run setup.d steps', 'reconcile .env', (fs.existsSync(path.join(REPO, 'package-lock.json')) ? 'npm ci' : 'npm install') + ' (root workspace)', NO_DASH ? 'skip dashboard' : 'docker compose up -d --build (dashboard)', 'restart-with-rollback.sh (pm2 restart + verify + auto-rollback)'] };
     log('DRY RUN — no changes made.');
     if (JSON_OUT) console.log(JSON.stringify(plan, null, 2));
     releaseLock();
@@ -156,14 +166,21 @@ function done(code, summary) {
   phase('reconcile .env');
   run(process.execPath, [path.join(REPO, 'scripts', 'reconcile-env.js')]);
 
-  // deps (root workspace install). Failure here → roll the code back BEFORE touching services.
-  phase('npm install (root workspace)');
-  const inst = run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+  // deps (root workspace). Prefer `npm ci` (clean, exact-match from the committed lockfile — the
+  // deterministic path, incl. native-module versions); fall back to `npm install` if there's no lock
+  // or ci fails on drift. Failure → roll the code back BEFORE touching services (issue #17).
+  const hasLock = fs.existsSync(path.join(REPO, 'package-lock.json'));
+  phase(`npm ${hasLock ? 'ci' : 'install'} (root workspace)`);
+  let inst = run('npm', [hasLock ? 'ci' : 'install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+  if (inst.code !== 0 && hasLock) {
+    log('npm ci failed (lock drift or no build cache) — retrying with npm install');
+    inst = run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+  }
   if (inst.code !== 0) {
-    log('npm install FAILED — rolling back code (services untouched, still on old build)');
+    log('dependency install FAILED — rolling back code (services untouched, still on old build)');
     git('reset', '--hard', rollbackSha);
     run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
-    return done(2, { error: 'npm install failed; rolled back', from: fromSha, to: fromSha });
+    return done(2, { error: 'dependency install failed; rolled back', from: fromSha, to: fromSha });
   }
 
   // dashboard (Docker) — separate lifecycle; best-effort, does not gate the core update

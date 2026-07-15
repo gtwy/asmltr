@@ -73,7 +73,15 @@ fs.writeFileSync(VERSION_FILE, next + '\n');
 fs.writeFileSync(CHANGELOG, cl);
 for (const p of PKG_FILES) { try { fs.writeFileSync(p, bumpPkg(p)); } catch (e) { console.error('skip ' + p + ': ' + e.message); } }
 
-git('add', 'VERSION', 'CHANGELOG.md', ...PKG_FILES.map((p) => path.relative(REPO, p)));
+// Regenerate the committed lockfile so every tag ships a lock that matches its manifests (issue #17)
+// — the deterministic path (`npm ci`) needs it. --package-lock-only resolves the tree without building.
+const lockRel = 'package-lock.json';
+const lr = spawnSync('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund'], { cwd: REPO, encoding: 'utf8' });
+if (lr.status !== 0) console.error('warning: lockfile regen failed (' + ((lr.stderr || '').trim().slice(0, 120)) + ') — committing without a fresh lock');
+
+const toAdd = ['VERSION', 'CHANGELOG.md', ...PKG_FILES.map((p) => path.relative(REPO, p))];
+if (fs.existsSync(path.join(REPO, lockRel))) toAdd.push(lockRel);
+git('add', ...toAdd);
 git('commit', '-m', `release: ${tag}`);
 git('tag', '-a', tag, '-m', notes ? `${tag}\n\n${notes}` : tag);
 console.log(`✅ committed + tagged ${tag} (was v${cur})`);
