@@ -76,6 +76,9 @@ const _setEngineId = db.prepare('UPDATE sessions SET engine_session_id = ?, last
 const _touch = db.prepare('UPDATE sessions SET last_activity_at = ?, turn_count = turn_count + 1 WHERE conversation_key = ?');
 const _setClaim = db.prepare('UPDATE sessions SET claim_state = ?, claimed_by = ? WHERE conversation_key = ?');
 const _setRoute = db.prepare('UPDATE sessions SET outbound_instance_id = ?, outbound_target = ? WHERE conversation_key = ?');
+const _remove = db.prepare('DELETE FROM sessions WHERE conversation_key = ?');
+// Forget a session entirely: the next inbound on this key gets a FRESH engine session (new history).
+function remove(conversation_key) { return _remove.run(conversation_key).changes > 0; }
 
 const _insAnnounce = db.prepare('INSERT INTO announcements (target, text, priority, from_session, created_at, expires_at) VALUES (@target, @text, @priority, @from_session, @created_at, @expires_at)');
 const _liveAnnounce = db.prepare('SELECT * FROM announcements WHERE (expires_at IS NULL OR expires_at > @now) ORDER BY id ASC');
@@ -170,4 +173,4 @@ function setOutboundRoute(conversation_key, instance_id, target) {
   _setRoute.run(instance_id || null, target != null ? String(target) : null, conversation_key);
 }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, get, addAnnouncement, drainAnnouncements, listAnnouncements, DB_PATH };
+module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, DB_PATH };

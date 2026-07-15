@@ -62,7 +62,10 @@ export const control = {
   sendText: (session_id, text) => postCore('/api/control/send-keys', { session_id, text, enter: true }),
   sendKey: (session_id, keys) => postCore('/api/control/send-keys', { session_id, keys }),
   // manually set a session title (locks it against AI regeneration); '' reverts to AI
-  setTitle: (session_id, title) => postCore('/api/control/session-title', { session_id, title })
+  setTitle: (session_id, title) => postCore('/api/control/session-title', { session_id, title }),
+  // forget/delete a session — removes it from tracking + events (collector) and clears the core
+  // engine mapping, so the next inbound on this key starts a fresh session with new history
+  forget: (session_id) => postCore('/api/control/forget', { session_id })
 }
 
 // Self-update on the CORE (git code) — status (behind/available + changelog), toggle auto-install,

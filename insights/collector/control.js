@@ -50,6 +50,22 @@ function makeControl(db) {
     return { ok: true, pid, comm };
   }
 
+  // Forget a session: remove it from tracking (the UI) and purge its events. Distinct from kill
+  // (which signals a live process) — this is pure record removal. If it has a LIVE process, refuse
+  // (use stop/kill first) so we never orphan a running claude. The caller also tells the core to
+  // drop the engine mapping, so the next inbound on this key starts a fresh session + history.
+  function forget(session_id, actor) {
+    const row = getSession(session_id);
+    if (row && row.pid && pidAlive(row.pid)) {
+      audit({ actor, action: 'forget', target: session_id, result: 'denied', detail: `pid ${row.pid} still alive — stop/kill it first` });
+      return { ok: false, error: 'session has a live process — stop or kill it first' };
+    }
+    db.db.prepare('DELETE FROM sessions WHERE session_id = ?').run(session_id);
+    const ev = db.db.prepare('DELETE FROM events WHERE session_id = ?').run(session_id);
+    audit({ actor, action: 'forget', target: session_id, result: 'success', detail: `removed from tracking; purged ${ev.changes} events` });
+    return { ok: true, existed: !!row, events_purged: ev.changes };
+  }
+
   function stop(session_id, actor) {
     const row = getSession(session_id);
     if (!row || !row.pid || !pidAlive(row.pid)) { audit({ actor, action: 'stop', target: session_id, result: 'failure', detail: 'pid not alive' }); return { ok: false, error: 'pid not alive' }; }
@@ -103,7 +119,7 @@ function makeControl(db) {
 
   const recentAudit = (limit = 50) => db.db.prepare('SELECT * FROM control_audit ORDER BY ts DESC LIMIT ?').all(limit);
 
-  return { kill, stop, diff, restartDaemon, sendKeys, recentAudit };
+  return { kill, stop, forget, diff, restartDaemon, sendKeys, recentAudit };
 }
 
 module.exports = { makeControl };

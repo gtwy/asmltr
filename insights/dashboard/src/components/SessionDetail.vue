@@ -21,7 +21,7 @@ const props = defineProps({
   channelState: { type: Boolean, default: undefined },
   channelBusy: { type: Boolean, default: false }
 })
-defineEmits(['close', 'toggle-channel'])
+const emit = defineEmits(['close', 'toggle-channel'])
 
 const store = useCollectorStore()
 const key = computed(() => props.session.session_id)
@@ -56,6 +56,28 @@ function copyId() {
   const done = () => { copied.value = true; setTimeout(() => (copied.value = false), 1200) }
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(id).then(done).catch(done)
   else { try { const t = document.createElement('textarea'); t.value = id; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); done() } catch (_) {} }
+}
+
+// --- delete / forget this session (two-click confirm) ---
+// Removes it from tracking + purges its events, and clears the core's engine mapping so the NEXT
+// inbound on this key (e.g. the next message in this Discord channel) starts a fresh session.
+const confirmDelete = ref(false)
+const deleting = ref(false)
+let _confirmTimer = null
+async function onDelete() {
+  if (!confirmDelete.value) { // first click arms; auto-disarms after a few seconds
+    confirmDelete.value = true
+    clearTimeout(_confirmTimer); _confirmTimer = setTimeout(() => { confirmDelete.value = false }, 4000)
+    return
+  }
+  clearTimeout(_confirmTimer)
+  deleting.value = true
+  try {
+    const r = await control.forget(key.value)
+    if (r && r.ok !== false) emit('close')
+    else { notice.value = { ok: false, text: r?.error || 'Delete failed' }; confirmDelete.value = false }
+  } catch (e) { notice.value = { ok: false, text: 'Delete failed: ' + (e.message || e) }; confirmDelete.value = false }
+  finally { deleting.value = false }
 }
 
 // --- title (inline-editable, manual override locks against AI regeneration) ---
@@ -286,6 +308,14 @@ const placeholder = computed(() => {
         :title="copied ? 'Copied!' : 'Copy session id'"
         @click="copyId"
       >{{ copied ? '✓ copied' : '⧉ copy id' }}</button>
+      <button
+        type="button"
+        :disabled="deleting"
+        class="pill border transition-colors disabled:opacity-40"
+        :class="confirmDelete ? 'border-red-400/50 bg-red-500/20 text-red-200' : 'border-white/10 bg-white/5 text-slate-500 hover:border-red-400/40 hover:text-red-300'"
+        :title="confirmDelete ? 'Click again to permanently forget this session (the next message starts a fresh one)' : 'Delete this session — remove it from tracking and clear its history; the next inbound message starts a new session'"
+        @click="onDelete"
+      >{{ deleting ? '…' : (confirmDelete ? '✓ confirm delete' : '🗑 delete') }}</button>
     </div>
 
     <!-- transcript (fills the window) -->
