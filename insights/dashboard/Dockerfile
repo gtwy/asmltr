@@ -4,7 +4,7 @@
 # (127.0.0.1:3024), injecting the read + manager service bearers so the tokens
 # never reach the browser. Authelia 2FA is enforced at the Traefik edge.
 # Set ASMLTR_INSIGHTS_TOKEN and ASMLTR_MANAGER_TOKEN at container start.
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --no-audit --no-fund
