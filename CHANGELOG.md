@@ -9,6 +9,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.3.0] - 2026-07-15
+
+### Added
 - **Persistent update progress (GUI + TUI).** The updater writes `~/.asmltr/update-status.json`
   through every phase (fetch → install → restart → verify); core exposes `GET /v2/update/progress`.
   The GUI shows a persistent progress panel at the top of every page that survives the mid-update
