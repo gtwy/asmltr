@@ -10,6 +10,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
 import { api, control, webChat, parsePayload } from '@/services/api'
+import { manager } from '@/services/manager'
 import { statusMeta, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
 import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
@@ -21,7 +22,7 @@ const props = defineProps({
   channelState: { type: Boolean, default: undefined },
   channelBusy: { type: Boolean, default: false }
 })
-const emit = defineEmits(['close', 'toggle-channel'])
+const emit = defineEmits(['close', 'toggle-channel', 'channel-toggled'])
 
 const store = useCollectorStore()
 const key = computed(() => props.session.session_id)
@@ -41,13 +42,58 @@ const attachCmd = computed(() => {
   if (!isCli.value || !sess.value.tmux_target) return null
   return sess.value.multiplexer === 'screen' ? `screen -x ${sess.value.tmux_target}` : `tmux attach -t ${sess.value.tmux_target}`
 })
-const monitored = computed(() => props.channelState !== false)
+// --- per-channel monitoring, self-contained so the toggle works from ANY opener (Live, Self, …) ---
+// A connector advertises `mutable` (Discord: per-channel on/off). We resolve THIS session's channel
+// from the instance roster and toggle it directly here — no reliance on the parent wiring it in.
+const caps = ref({})       // instanceId -> mutable capability { label, … }
+const chStates = ref({})   // channel_id -> enabled
+const monBusy = ref(false)
+async function loadMuteState() {
+  try {
+    const r = await manager.instances()
+    const c = {}
+    for (const i of (r.instances || [])) if (i.mutable) c[i.id] = i.mutable
+    caps.value = c
+    const next = {}
+    for (const id of Object.keys(c)) { try { const cc = await manager.channels(id); for (const ch of (cc.channels || [])) next[ch.channel_id] = ch.enabled } catch (_) {} }
+    chStates.value = next
+  } catch (_) {}
+}
+onMounted(loadMuteState)
+watch(key, loadMuteState)
+// Resolve this session to its mutable unit: { instanceId, channelId, label } (a parent prop wins).
+const myMutable = computed(() => {
+  if (props.mutable) return props.mutable
+  const parts = String(key.value || '').split(':')
+  if (parts.length < 3) return null
+  const cap = caps.value[parts[1]]
+  if (!cap) return null
+  for (const seg of parts.slice(2)) if (Object.prototype.hasOwnProperty.call(chStates.value, seg)) return { instanceId: parts[1], channelId: seg, label: cap.label || 'channel' }
+  return null
+})
+const monitored = computed(() => {
+  const m = myMutable.value
+  if (m && Object.prototype.hasOwnProperty.call(chStates.value, m.channelId)) return chStates.value[m.channelId] !== false
+  return props.channelState !== false
+})
 const monitorTip = computed(() => {
-  const unit = props.mutable?.label || 'channel'
+  const unit = myMutable.value?.label || 'channel'
   return monitored.value
     ? `Monitored — the assistant reads this ${unit} and can respond autonomously. Click to mute (it stops reading & replying here; no restart).`
     : `Muted — the assistant ignores this ${unit}. Click to resume monitoring it.`
 })
+async function toggleMonitor() {
+  const m = myMutable.value
+  if (!m || monBusy.value) return
+  const cur = monitored.value
+  monBusy.value = true
+  try {
+    await manager.setChannel(m.instanceId, { channel_id: m.channelId, enabled: !cur })
+    chStates.value = { ...chStates.value, [m.channelId]: !cur }
+    emit('channel-toggled', key.value) // let a parent (e.g. Live) resync its own card view
+  } catch (_) {}
+  finally { monBusy.value = false }
+}
 
 // One-click copy of the session id.
 const copied = ref(false)
@@ -294,14 +340,14 @@ const placeholder = computed(() => {
       <span v-if="sess.tool_count" class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300">🛠 {{ fmtNum(sess.tool_count) }}</span>
       <span v-if="sess.last_activity_unix" class="text-slate-500">last {{ fmtAge(sess.last_activity_unix, now) }}</span>
       <button
-        v-if="mutable"
+        v-if="myMutable"
         type="button"
-        :disabled="channelBusy"
+        :disabled="monBusy"
         :title="monitorTip"
         class="pill border transition-colors disabled:opacity-40"
         :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'"
-        @click="$emit('toggle-channel', key)"
-      >{{ channelBusy ? '…' : (monitored ? '● monitored' : '○ muted') }}</button>
+        @click="toggleMonitor"
+      >{{ monBusy ? '…' : (monitored ? '● monitored' : '○ muted') }}</button>
       <button
         type="button"
         class="pill border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
