@@ -10,7 +10,7 @@ const props = defineProps({
   busy: { type: String, default: '' }, // action in flight for this instance
   now: { type: Number, default: () => Date.now() }
 })
-const emit = defineEmits(['toggle', 'restart', 'edit', 'logs', 'delete'])
+const emit = defineEmits(['toggle', 'restart', 'edit', 'logs', 'delete', 'servers'])
 
 const meta = computed(() => connectorTypeMeta(props.instance.type))
 const rt = computed(() => props.instance.runtime || {})
@@ -140,6 +140,7 @@ const summary = computed(() => {
       <button type="button" class="act" :disabled="isBusy" @click="emit('restart', instance)">
 <AppIcon glyph="↻" /> <template v-if="busy === 'restart'">…</template><template v-else>Restart</template>
       </button>
+      <button v-if="instance.type === 'discord'" type="button" class="act" :disabled="isBusy" @click="emit('servers', instance)"><AppIcon :name="['fab','discord']" /> Servers</button>
       <button type="button" class="act" :disabled="isBusy" @click="emit('edit', instance)"><AppIcon glyph="✎" /> Edit</button>
       <button type="button" class="act" :disabled="isBusy" @click="emit('logs', instance)"><AppIcon :name="['fas','file-lines']" /> Logs</button>
       <button

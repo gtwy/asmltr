@@ -8,6 +8,45 @@ is still the shared core.
 
 ---
 
+## Adding / removing the bot from a server
+
+**Adding the bot to a Discord server is a Discord OAuth authorization, not an asmltr config change.**
+One bot token drives one Discord application, and that application serves *every* server it's a
+member of. So you don't "configure a server" in asmltr — you invite the bot, and the running
+connector sees the new guild over the gateway **instantly, with no restart**.
+
+**The easy way (dashboard):** Integrations → the Discord instance card → **Servers**. The modal shows
+the **invite URL** (copy or open it) and every server the bot is already in, each with a **Leave**
+button. Open the invite as someone with **Manage Server** on the target, authorize, and the bot joins.
+
+**By hand:** build the invite URL from the application (client) ID + a permission integer:
+
+```
+https://discord.com/api/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot%20applications.commands&permissions=<PERMS>
+```
+
+- **Application ID** — the bot's application/client ID (Discord Developer Portal → your app → General
+  Information, or the numeric ID the dashboard's Servers modal shows).
+- **Permissions** — asmltr's default `3525696` covers view/send/read-history/embed/attach/react/
+  external-emoji plus voice connect + speak. Adjust in the Developer Portal's OAuth2 URL Generator if
+  you want a narrower or wider set.
+- **Scopes** — `bot` is required; `applications.commands` future-proofs slash commands.
+
+The connector also exposes this over its control API (proxied by the manager):
+
+```
+GET  /instances/<id>/servers          # → { invite_url, application_id, servers: [{id,name,member_count}] }
+POST /instances/<id>/servers { "leave": "<guildId>" }   # bot leaves that server
+```
+
+**Removing:** click **Leave** in the Servers modal, `POST …/servers {leave}`, or — from Discord —
+Server Settings → Members → kick the bot. Leaving is immediate; the gateway drops the guild.
+
+> Per-channel monitoring (which channels it actually listens in once it's in a server) is separate —
+> see **Channel enable/disable** below.
+
+---
+
 ## Message flow — when does it respond?
 
 Every message runs through this gauntlet in `messageCreate` (first `return` wins). Understanding the
