@@ -139,10 +139,12 @@ function drainObserved(key) {
   if (!arr || !arr.length) return '';
   observed.delete(key);
   const lines = arr.map((m) => `- ${m.author}: ${m.text}`).join('\n');
-  return `[Channel activity since you last replied — CONTEXT ONLY, for your awareness. You were not ` +
-    `addressed in these (they were for other people/agents or ambient chatter). Do not reply to them; ` +
-    `just factor them into your understanding. Then apply your normal rules to the message that follows ` +
-    `— which may or may not itself be for you.]\n${lines}\n[End of catch-up]\n\n`;
+  return `[Channel activity since you last replied — CONTEXT ONLY, for your awareness. Each line is what ` +
+    `ANOTHER participant said, quoted in THEIR OWN voice: any "I", "me", or "my" in these lines refers to ` +
+    `that named speaker, NOT to you — do not absorb their words as your own. You were not addressed in these ` +
+    `(they were for other people/agents or ambient chatter). Do not reply to them; just factor them into your ` +
+    `understanding. Then apply your normal rules to the message that follows — which may or may not itself be ` +
+    `for you.]\n${lines}\n[End of catch-up]\n\n`;
 }
 
 /**
@@ -370,7 +372,16 @@ async function handle(envelope, opts = {}) {
     return [];
   }
 
-  const actions = [env.reply(result.text || "I'm here — what would you like to know?", { segments: result.segments || [] })];
+  // Empty turn (interrupted mid-reply, tool-only, or the agent chose not to speak) → post NOTHING.
+  // NEVER emit a canned greeting: on a busy multi-agent channel a content-free "I'm here — what would
+  // you like to know?" is noise the other agents dutifully answer, spiralling into a loop.
+  if (!(result.text || '').trim()) {
+    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+      identity: resolved.user_key, source: 'core', payload: { action: 'empty-no-reply' } });
+    return [];
+  }
+
+  const actions = [env.reply(result.text, { segments: result.segments || [] })];
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'outbound',
     identity: resolved.user_key, source: 'core', payload: { text: truncate(result.text, 500), chars: (result.text || '').length } });
 
