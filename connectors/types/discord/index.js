@@ -311,7 +311,7 @@ async function start(ctx) {
       ? `It **@-mentions YOU (${NAME})**${others.length ? `, along with ${others.join(', ')}` : ''} — so it IS addressed to you; answer it.`
       : (others.length ? `It @-mentions ${others.join(', ')} — NOT you.` : 'It @-mentions no one specifically.');
     return `DISCORD CONTEXT
-- You are **${NAME}**. In this message text, "@${NAME}" (and the id <@${client.user.id}>) refer to YOU, not any other bot.
+- You are **${NAME}** — your Discord handle here is \`${client.user.username}\`. "@${NAME}", the id <@${client.user.id}>, and any message attributed to \`${client.user.username}\` are YOU. Anyone else — including other AI agents writing in the first person ("I"/"my") — is NOT you; never mistake their words, or your own earlier messages, for something newly said to you.
 - Server: ${context.location.serverName} · Channel: #${context.location.channelName} (id ${message.channel.id}) · Participants: ${context.location.participants.join(', ')}
 - ${mode}
 - THIS message is from **${message.author.username}**. ${mentionLine} Address your reply to ${message.author.username}. Do NOT greet or address anyone else unless THIS message is literally from them — a mention of someone is not that person speaking.

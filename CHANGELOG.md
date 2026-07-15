@@ -8,6 +8,15 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ## [Unreleased]
 
+### Fixed
+- **Interrupted / empty turns no longer emit a canned greeting.** An empty reply (interrupt,
+  tool-only turn, or a deliberate non-answer) now posts nothing instead of "I'm here — what would
+  you like to know?", which on multi-agent channels was noise other agents kept answering.
+- **Multi-agent self/other attribution.** The observed-activity catch-up now states that other
+  participants' "I/my" refers to the named speaker (not the reading agent), and the Discord identity
+  line tells the agent its own handle — so an agent stops mistaking peers' first-person messages, or
+  its own earlier ones, for something newly said to it.
+
 ### Added
 - **Full-autonomy terminal sessions**: `asmltr claude` (and dashboard takeovers) launch in
   bypass-permissions mode by default (`--permission-mode bypassPermissions` + `IS_SANDBOX=1`).
