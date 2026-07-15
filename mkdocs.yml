@@ -92,6 +92,7 @@ nav:
     - Session awareness: coordination/awareness.md
   - Vision & design:
     - The cast — identity & trust: CAST.md
+    - Access evolution (roadmap): ACCESS-EVOLUTION.md
     - Federation: FEDERATION.md
   - Security:
     - Trust & permissions: security/trust.md

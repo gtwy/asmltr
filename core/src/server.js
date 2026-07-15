@@ -231,6 +231,18 @@ async function handle(envelope, opts = {}) {
     return [env.reply('Access has been revoked for this account.')];
   }
 
+  // Cast engagement override (per-scope): 'ignore' → drop entirely (mute this member here); 'observe' →
+  // ingest for awareness but never reply; default 'engage' → normal. Retires per-connector bot lists.
+  if (resolved.engagement === 'ignore') {
+    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control', identity: resolved.user_key, source: 'core', payload: { action: 'engagement-ignore' } });
+    return [];
+  }
+  if (resolved.engagement === 'observe' && !e.observe_only) {
+    pushObserved(e.conversation_key, resolved.display_name || (e.sender && e.sender.raw_username), e.content.text);
+    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control', identity: resolved.user_key, source: 'core', payload: { action: 'engagement-observe' } });
+    return [];
+  }
+
   // 2) system prompt + moderation
   // Medium awareness FIRST (applies to every channel) — the model's runtime is
   // Claude Code, but the USER is on this connector's channel. Without this, "what
@@ -238,6 +250,9 @@ async function handle(envelope, opts = {}) {
   // IDENTITY FIRST — the anchor (who you are, asserted not inferred; the anti-drift fix from the Thor
   // incident) + the living layer (preferences + story). Applies to every channel.
   let systemPrompt = identity.fullIdentity() + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
+  // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
+  const relPrompt = trust.buildRelationshipPrompt(resolved, e);
+  if (relPrompt) systemPrompt += '\n\n' + relPrompt;
   if (e.system_prompt_extra) systemPrompt += '\n\n' + e.system_prompt_extra; // connector-supplied context (e.g. Discord)
   if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
     systemPrompt += '\n\nASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
@@ -1082,6 +1097,16 @@ app.post('/trust/principals/:id/grants', (req, res) => res.json({ id: trust.gran
 app.delete('/trust/grants/:gid', (req, res) => res.json({ ok: trust.grants.remove(Number(req.params.gid)) }));
 // resolve preview (debugging "what can this person do here?")
 app.post('/trust/resolve', (req, res) => res.json(trust.resolve(req.body)));
+
+// --- THE CAST: profiles, relationships, engagement (Access-evolution Phase 0) ----------------
+app.get('/trust/profiles/:id', (req, res) => res.json(trust.profiles.get(req.params.id) || {}));
+app.post('/trust/profiles/:id', (req, res) => res.json(trust.profiles.upsert(req.params.id, req.body || {})));
+app.get('/trust/relationships', (req, res) => res.json({ relationships: trust.relationships.list() }));
+app.post('/trust/relationships', (req, res) => res.json({ id: trust.relationships.upsert(req.body || {}) }));
+app.delete('/trust/relationships/:id', (req, res) => res.json({ ok: trust.relationships.remove(Number(req.params.id)) }));
+app.get('/trust/engagement', (req, res) => res.json({ engagement: trust.engagement.list() }));
+app.post('/trust/engagement', (req, res) => res.json({ id: trust.engagement.set(req.body || {}) }));
+app.delete('/trust/engagement/:id', (req, res) => res.json({ ok: trust.engagement.remove(Number(req.params.id)) }));
 
 if (require.main === module) {
   const server = app.listen(PORT, HOST, () => {
