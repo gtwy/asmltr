@@ -142,6 +142,13 @@ const ingestEvent = db.transaction((raw) => {
       const loc = fmtLocation(evt.payload.server, evt.payload.channel);
       if (loc) _setLocation.run(loc, row.session_id);
     }
+    // attach/control metadata (working dir, multiplexer, pane, pid) rides on a session-start event
+    if (row.event_type === 'session-start' && evt.payload) {
+      const p = evt.payload;
+      if (p.working_dir || p.multiplexer || p.tmux_target || p.pid || p.task) {
+        _setSessionMeta.run(p.working_dir || null, p.multiplexer || null, p.tmux_target || null, p.pid || null, p.task || null, row.session_id);
+      }
+    }
   }
 
   return evt;
@@ -232,6 +239,12 @@ function setTitleManual(session_id, title) {
 const _setActivity = db.prepare('UPDATE sessions SET activity = ? WHERE session_id = ?');
 function setActivity(session_id, activity) { _setActivity.run(activity || null, session_id); }
 const _setLocation = db.prepare('UPDATE sessions SET location = ? WHERE session_id = ?');
+// attach/control metadata carried on a session-start event (e.g. from the claude-code hook):
+// working dir + multiplexer + pane target + pid. COALESCE so a null never clobbers a known value.
+const _setSessionMeta = db.prepare(`UPDATE sessions SET
+  working_dir = COALESCE(?, working_dir), multiplexer = COALESCE(?, multiplexer),
+  tmux_target = COALESCE(?, tmux_target), pid = COALESCE(?, pid), task = COALESCE(?, task)
+  WHERE session_id = ?`);
 const _getTitle = db.prepare('SELECT title, title_locked FROM sessions WHERE session_id = ?');
 function getTitle(session_id) { const r = _getTitle.get(session_id); return r ? r.title : null; }
 function isTitleLocked(session_id) { const r = _getTitle.get(session_id); return !!(r && r.title_locked); }

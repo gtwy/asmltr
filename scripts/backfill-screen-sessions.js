@@ -60,7 +60,7 @@ for (const s of screens) {
   if (!cpid) continue;                        // not a claude session
   const started = startUnix(cpid) || startUnix(s.pid);
   found.push({
-    session_id: s.name.replace(/^claude-/, ''), // match the historical id scheme (strip the claude- prefix)
+    session_id: s.name, // the full screen session name — same id the claude-code hook derives from $STY, so they unify
     surface: 'claude-code',
     kind: 'ephemeral',
     identity: IDENTITY,

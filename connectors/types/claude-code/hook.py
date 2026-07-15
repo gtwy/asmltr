@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""
+asmltr claude-code connector — Claude Code hook → asmltr event emitter.
+
+Claude Code fires hooks with a JSON payload on stdin (session_id, cwd, transcript_path,
+hook_event_name, and event-specific fields). This script turns those into the SAME shared
+events every other asmltr connector emits, POSTed to the collector's /ingest — so a terminal
+claude session becomes a first-class session in the dashboard with a generated title, a live
+"what it's doing" overview, token/tool counts, and attach info. No pane-scraping, no polling.
+
+Wire it into ~/.claude/settings.json (see README) on: SessionStart, UserPromptSubmit,
+PostToolUse, SessionEnd. It is passive (emits no stdout), never blocks meaningfully, and never
+fails the session (all errors swallowed, always exits 0).
+
+Session identity: a claude session lives in a screen/tmux PANE that you attach to, so we key by
+the multiplexer session name when present (unifying with the tracker + `asmltr claude` wrapper);
+otherwise we fall back to the claude session UUID.
+"""
+import sys, os, json, re, subprocess, urllib.request
+
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+def load_env():
+    """Pull the collector token/port from the repo .env (KEY=VALUE), env vars win."""
+    cfg = {}
+    try:
+        with open(os.path.join(REPO, ".env"), "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                cfg[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    cfg.update({k: v for k, v in os.environ.items() if k.startswith("ASMLTR_")})
+    return cfg
+
+
+def mux_session():
+    """(multiplexer, session_name) for this pane, or (None, None) if not in one."""
+    sty = os.environ.get("STY")  # screen: "<pid>.<name>"
+    if sty:
+        return "screen", re.sub(r"^\d+\.", "", sty)
+    if os.environ.get("TMUX"):
+        try:
+            name = subprocess.run(["tmux", "display-message", "-p", "#S"],
+                                  capture_output=True, text=True, timeout=1).stdout.strip()
+            if name:
+                return "tmux", name
+        except Exception:
+            pass
+    return None, None
+
+
+def main():
+    # The asmltr core runs claude via the Agent SDK with IS_SANDBOX=1; if that path ever fires user
+    # hooks, we must NOT emit — those turns are already tracked as their real channel session. This
+    # hook is only for INTERACTIVE terminal claude sessions.
+    if os.environ.get("IS_SANDBOX"):
+        return
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return  # nothing parseable → do nothing
+
+    cfg = load_env()
+    token = cfg.get("ASMLTR_INSIGHTS_TOKEN", "")
+    port = cfg.get("ASMLTR_INSIGHTS_PORT", "3017")
+    url = cfg.get("ASMLTR_INSIGHTS_URL", f"http://127.0.0.1:{port}/ingest")
+    identity = cfg.get("ASMLTR_TRACKER_IDENTITY") or os.environ.get("USER") or "root"
+
+    event_name = data.get("hook_event_name", "")
+    cwd = data.get("cwd") or None
+    mux, mux_name = mux_session()
+    sid = mux_name or data.get("session_id")  # pane name unifies with the tracker; else the uuid
+    if not sid:
+        return
+
+    base = {"surface": "claude-code", "session_id": sid, "identity": identity, "source": "claude-code-hook"}
+    events = []
+
+    if event_name == "SessionStart":
+        pid = None
+        try:  # the claude pid is our nearest 'claude' ancestor
+            p = os.getppid()
+            for _ in range(6):
+                comm = open(f"/proc/{p}/comm").read().strip()
+                if comm == "claude":
+                    pid = p
+                    break
+                p = int(open(f"/proc/{p}/stat").read().split()[3])
+        except Exception:
+            pass
+        events.append({**base, "event_type": "session-start", "payload": {
+            "working_dir": cwd, "multiplexer": mux, "tmux_target": mux_name, "pid": pid,
+            "task": f"claude — {os.path.basename(cwd)}" if cwd else "claude",
+        }})
+    elif event_name == "UserPromptSubmit":
+        prompt = (data.get("prompt") or "").strip()
+        if not prompt:
+            return
+        events.append({**base, "event_type": "inbound", "payload": {"text": prompt[:4000], "working_dir": cwd}})
+    elif event_name == "PostToolUse":
+        tool = data.get("tool_name") or "tool"
+        ti = data.get("tool_input")
+        # cap the input so a big file write / long command can't blow the ingest body limit
+        try:
+            s = ti if isinstance(ti, str) else json.dumps(ti)
+            if len(s) > 1500:
+                s = s[:1500] + "…"
+            ti = s
+        except Exception:
+            ti = None
+        events.append({**base, "event_type": "tool", "payload": {"tool": tool, "input": ti}})
+    elif event_name in ("SessionEnd", "Stop"):
+        # Only SessionEnd truly ends the pane; Stop is just a turn boundary (ignore to keep it 'active').
+        if event_name == "SessionEnd":
+            events.append({**base, "event_type": "session-end", "payload": {}})
+        else:
+            return
+    else:
+        return
+
+    body = json.dumps(events if len(events) > 1 else events[0]).encode()
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          **({"Authorization": f"Bearer {token}"} if token else {})})
+    try:
+        urllib.request.urlopen(req, timeout=2).read()
+    except Exception:
+        pass  # collector down / slow → never block or fail the claude session
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        pass
+    sys.exit(0)
