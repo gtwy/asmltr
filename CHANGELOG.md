@@ -9,6 +9,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.2.0] - 2026-07-15
+
+First deterministic-updater release: LLM-free versioned self-update, pinned releases, stable/edge channels, self-healing setup steps.
+
+### Added
 - **Deterministic installer + updater** (no LLM on the happy path): `scripts/update.js` runs the
   full update as a scripted, verified pipeline (fetch → resolve channel target → setup-steps →
   npm install → dashboard build → restart-with-rollback → announce). The agent-driven updater
