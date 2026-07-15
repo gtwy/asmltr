@@ -227,6 +227,9 @@ export const drafts = {
 // Speech-to-text — record audio in the browser, send it to the core's transcription model (the STT
 // model chosen in Settings), get text back. Base64 JSON body (mirrors webChat.upload; no multipart).
 export const stt = {
+  // Mint an ephemeral token for a streaming realtime transcription session (server VAD). The browser
+  // then connects to OpenAI directly over WebRTC with this token — the real key stays server-side.
+  realtimeToken: () => postCore('/v2/realtime/transcribe-token', {}),
   async transcribe(blob, { model, language } = {}) {
     const data_base64 = await new Promise((resolve, reject) => {
       const r = new FileReader()

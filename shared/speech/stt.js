@@ -46,15 +46,17 @@ function setConfig(partial) {
 }
 
 /**
- * Transcribe an audio buffer → { text, model }.
- * @param {Buffer} buffer  encoded audio (webm/opus, mp4, wav, mp3…)
- * @param {object} [opts]  { filename, mime, model, language } — model/language override the config
+ * Transcribe an audio buffer → { text, model }. THE one STT entry point for all of asmltr
+ * (core /v2/transcribe + connectors like Discord voice). Pass per-call overrides to vary
+ * model/language/key/prompt without touching global config.
+ * @param {Buffer} buffer  encoded audio (webm/opus, wav, mp4, mp3…)
+ * @param {object} [opts]  { filename, mime, model, language, keyName, prompt }
  */
 async function transcribe(buffer, opts = {}) {
   const cfg = config();
   if (cfg.provider !== 'openai') throw new Error(`unknown STT provider: ${cfg.provider}`);
-  const key = await secrets.get(cfg.keyName);
-  if (!key) throw new Error(`no STT key (secret '${cfg.keyName}' is empty)`);
+  const key = await secrets.get(opts.keyName || cfg.keyName);
+  if (!key) throw new Error(`no STT key (secret '${opts.keyName || cfg.keyName}' is empty)`);
   const model = opts.model || cfg.model;
   const language = opts.language !== undefined ? opts.language : cfg.language;
 
@@ -62,6 +64,7 @@ async function transcribe(buffer, opts = {}) {
   fd.append('file', new Blob([buffer], { type: opts.mime || 'audio/webm' }), opts.filename || 'audio.webm');
   fd.append('model', model);
   if (language) fd.append('language', language);
+  if (opts.prompt) fd.append('prompt', opts.prompt); // bias the decoder (e.g. toward a wake word)
   fd.append('response_format', 'json');
 
   const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -72,4 +75,41 @@ async function transcribe(buffer, opts = {}) {
   return { text: (j.text || '').trim(), model };
 }
 
-module.exports = { transcribe, config, setConfig };
+/**
+ * Mint a short-lived ephemeral token for an OpenAI Realtime *transcription* session (streaming STT
+ * with server-side VAD). The browser uses this token to connect to OpenAI directly (WebRTC) and
+ * receive streaming transcript deltas + speech-start/stop events — the real key never leaves here.
+ * @param {object} [opts] { model } — overrides the configured STT model
+ * @returns {{ value:string, expires_at:number, model:string }}
+ */
+async function realtimeToken(opts = {}) {
+  const cfg = config();
+  if (cfg.provider !== 'openai') throw new Error(`realtime STT requires the openai provider (have ${cfg.provider})`);
+  const key = await secrets.get(cfg.keyName);
+  if (!key) throw new Error(`no STT key (secret '${cfg.keyName}' is empty)`);
+  const model = opts.model || cfg.model;
+  const transcription = { model };
+  if (cfg.language) transcription.language = cfg.language;
+  const body = {
+    session: {
+      type: 'transcription',
+      audio: {
+        input: {
+          format: { type: 'audio/pcm', rate: 24000 },
+          transcription,
+          // server_vad = OpenAI detects speech start/stop; ~600ms of silence ends a turn (auto-send trigger).
+          turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 },
+          noise_reduction: { type: 'near_field' },
+        },
+      },
+    },
+  };
+  const r = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+    method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || `realtime token ${r.status}`);
+  return { value: j.value, expires_at: j.expires_at, model };
+}
+
+module.exports = { transcribe, config, setConfig, realtimeToken };

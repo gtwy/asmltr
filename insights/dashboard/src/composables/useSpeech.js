@@ -68,5 +68,53 @@ export function useSpeech() {
     stopTracks(); mediaRec = null; chunks = []; recording.value = false
   }
 
-  return { speaking, speak, stopSpeaking, recording, transcribing, startRecording, stopRecording, cancelRecording }
+  // ---- realtime hands-free dictation: streaming transcript + server VAD + auto-turn detection ----
+  // Connects the mic straight to OpenAI's Realtime transcription API over WebRTC (via an ephemeral
+  // token minted server-side). Emits partial text as you speak (onPartial) and a final transcript
+  // when the server VAD decides you've stopped (onFinal) — the caller auto-sends on final.
+  const live = ref(false)       // hands-free listening session active
+  const listening = ref(false)  // VAD currently detects speech
+  let pc = null, dc = null, rtStream = null
+  function stopLive() {
+    live.value = false; listening.value = false
+    try { dc && dc.close() } catch (_) {} dc = null
+    try { pc && pc.close() } catch (_) {} pc = null
+    if (rtStream) { for (const t of rtStream.getTracks()) { try { t.stop() } catch (_) {} } rtStream = null }
+  }
+  async function startLive({ onPartial, onFinal, onError } = {}) {
+    if (live.value) return
+    const fail = (m) => { onError && onError(m); stopLive() }
+    let tok
+    try { tok = await stt.realtimeToken() } catch (e) { return fail('token: ' + (e.message || e)) }
+    if (!tok || !tok.value) return fail('no realtime token')
+    try { rtStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) }
+    catch (e) { return fail('microphone: ' + (e.message || e)) }
+    try {
+      pc = new RTCPeerConnection()
+      pc.addTrack(rtStream.getAudioTracks()[0], rtStream)
+      dc = pc.createDataChannel('oai-events')
+      let pending = ''
+      dc.onmessage = (ev) => {
+        let m; try { m = JSON.parse(ev.data) } catch { return }
+        const t = m.type || ''
+        if (t === 'input_audio_buffer.speech_started') listening.value = true
+        else if (t === 'input_audio_buffer.speech_stopped') listening.value = false
+        else if (t.endsWith('input_audio_transcription.delta')) { pending += (m.delta || ''); onPartial && onPartial(pending) }
+        else if (t.endsWith('input_audio_transcription.completed')) { const text = (m.transcript || pending || '').trim(); pending = ''; if (text) onFinal && onFinal(text) }
+        else if (t === 'error') onError && onError((m.error && m.error.message) || 'realtime error')
+      }
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      const r = await fetch('https://api.openai.com/v1/realtime/calls', {
+        method: 'POST', body: offer.sdp,
+        headers: { Authorization: 'Bearer ' + tok.value, 'Content-Type': 'application/sdp' },
+      })
+      if (!r.ok) return fail('connect ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 120))
+      const answer = await r.text()
+      await pc.setRemoteDescription({ type: 'answer', sdp: answer })
+      live.value = true
+    } catch (e) { return fail('webrtc: ' + (e.message || e)) }
+  }
+
+  return { speaking, speak, stopSpeaking, recording, transcribing, startRecording, stopRecording, cancelRecording, live, listening, startLive, stopLive }
 }
