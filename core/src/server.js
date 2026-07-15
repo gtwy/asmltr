@@ -133,6 +133,38 @@ function pushObserved(key, author, text) {
   while (arr.length > OBSERVE_MAX) arr.shift(); // sliding window — keep the most recent
   observed.set(key, arr);
 }
+// --- self-sent assimilation buffer ------------------------------------------
+// When the assistant cross-posts a message INTO this channel from ANOTHER of its sessions (via
+// POST /v2/send), the destination session's SDK history never learned it "said" that — it was posted
+// by the bot, filtered from the connector's own-message ingest. So it looks foreign on the next read.
+// We buffer such messages per destination conversation_key and fold them into the next real turn as
+// the session's OWN prior output — assimilating the context so identity stays coherent.
+const selfSent = new Map(); // conversation_key -> [{ text, from }]
+const SELFSENT_MAX = 20;
+function pushSelfSent(key, text, from) {
+  const t = String(text || '').trim();
+  if (!t || !key) return;
+  const arr = selfSent.get(key) || [];
+  arr.push({ text: t.slice(0, 1500), from: from || null });
+  while (arr.length > SELFSENT_MAX) arr.shift();
+  selfSent.set(key, arr);
+}
+function drainSelfSent(key) {
+  const arr = selfSent.get(key);
+  if (!arr || !arr.length) return '';
+  selfSent.delete(key);
+  const lines = arr.map((m) => `- ${m.text}`).join('\n');
+  // Framed as a VERIFIABLE CHANNEL EVENT ("this message is visibly in the channel, attributed to you"),
+  // NOT a memory claim ("you remember saying this") — a model trusts observable channel facts but rightly
+  // rejects unverifiable self-authorship claims (it checks its transcript, finds nothing, and refuses).
+  // So this stays a user-turn preamble (believable channel context), not a system assertion.
+  return `[Channel event — your OTHER sessions can post here too, and the message(s) below were just ` +
+    `posted INTO THIS CHANNEL under YOUR name/handle by one of your parallel sessions. They are now ` +
+    `visibly in the channel, on the record as yours — already delivered. You may not have composed them ` +
+    `in THIS session, so don't expect them in your memory here; just treat them as your own side of the ` +
+    `conversation (don't re-post, don't answer them as if a stranger said them, don't dispute they are yours):\n${lines}\n[End of your cross-posted messages]\n\n`;
+}
+
 // Drain the buffer into a context preamble for the next real turn (and clear it).
 function drainObserved(key) {
   const arr = observed.get(key);
@@ -311,9 +343,10 @@ async function handle(envelope, opts = {}) {
     const images = (e.content.attachments || [])
       .filter((a) => a && a.type === 'image' && a.data && a.media_type)
       .map((a) => ({ media_type: a.media_type, data: a.data }));
-    // Prepend any observed-but-not-replied channel activity so the session catches up before it
-    // answers — then the buffer is cleared. Keeps the resumed session authoritative for history.
-    const catchUp = drainObserved(e.conversation_key);
+    // User-turn preamble, in channel-chronology framing the model trusts: (1) messages this session
+    // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2)
+    // observed-but-not-replied activity from others. Both buffers are drained + cleared each turn.
+    const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
     result = await runTurn({
       prompt: catchUp + e.content.text,
       systemPrompt,
@@ -882,6 +915,33 @@ app.post('/v2/announce', (req, res) => {
   res.json({ ok: true, id: r.id, created_at: r.created_at, target: target || '*' });
 });
 app.get('/v2/announcements', (req, res) => res.json({ announcements: sessions.listAnnouncements() }));
+
+// Cross-channel SEND with ASSIMILATION. An agent working in ANY session posts a message into another
+// channel, AND the destination session folds it into its own context as its OWN prior output — so it
+// doesn't look foreign on the next read there (the multi-session identity fix). Delivers via the
+// manager's unified /send (which returns the destination conversation_key from the connector).
+// Body: { channel|instance_id, target, text, kind?, path?, caption?, subject?, from_session? }.
+app.post('/v2/send', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if ((!b.channel && !b.instance_id) || !b.target) return res.status(400).json({ error: 'need channel|instance_id + target' });
+    const mgr = (process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024').replace(/\/$/, '');
+    const headers = { 'Content-Type': 'application/json' };
+    if (process.env.ASMLTR_MANAGER_TOKEN) headers.Authorization = 'Bearer ' + process.env.ASMLTR_MANAGER_TOKEN;
+    const r = await fetch(`${mgr}/send`, { method: 'POST', headers, body: JSON.stringify(b) });
+    const j = await r.json().catch(() => ({}));
+    const key = j && j.conversation_key;
+    // Assimilate a TEXT post into the destination session (skip if it IS the sending session).
+    let assimilated = false;
+    if (r.ok && b.text && String(b.text).trim() && key && key !== b.from_session) {
+      pushSelfSent(key, b.text, b.from_session || null);
+      assimilated = true;
+      record({ surface: 'core', session_id: key, event_type: 'control', identity: 'assistant', source: 'core',
+        payload: { action: 'self-sent-assimilated', from: b.from_session || null, chars: String(b.text).length } });
+    }
+    res.status(r.ok ? 200 : 502).json({ ...j, assimilated });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 
 app.post('/v2/abort', (req, res) => {
   const key = req.body && req.body.conversation_key;

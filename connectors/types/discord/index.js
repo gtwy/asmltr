@@ -382,6 +382,7 @@ RESPONSE RULES:
       // channel and continuing to address Moneo.
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
       let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
+      text = (await replyRef(message)) + text; // if this is a Discord reply, tell the model WHAT it answers (multi-agent threading)
       // Vision: download supported image attachments and pass them as real image
       // content (base64) so the assistant actually SEES them — not a CDN URL she can't open.
       // Non-image / oversized / unsupported attachments stay as a text URL mention.
@@ -493,7 +494,22 @@ RESPONSE RULES:
   // records it (backend visibility) and buffers it as context for the next real turn. This is how
   // we stay current on messages addressed to OTHER agents (or ambient chatter) without answering
   // them — decoupling "receive" from "reply" (the OpenClaw model). Fire-and-forget; returns [].
-  function observe(message) {
+  // Discord "reply" reference → a short prefix so the model knows WHAT a message is answering. Without
+  // it, in a busy multi-agent channel the agent can't tell that e.g. Moneo replied to one specific
+  // earlier line vs. spoke into the room. Resolves the referenced message's author + a snippet; marks
+  // the assistant's own messages as "(you)". Best-effort (deleted/unfetchable reference → no prefix).
+  async function replyRef(message) {
+    try {
+      if (!message.reference || !message.reference.messageId) return '';
+      const ref = await message.fetchReference().catch(() => null);
+      if (!ref) return '';
+      const who = ref.author && ref.author.id === client.user.id ? `${NAME} (you)` : ((ref.author && ref.author.username) || 'someone');
+      const full = (ref.cleanContent || ref.content || '').replace(/\s+/g, ' ');
+      return `[↩ in reply to ${who}: "${full.slice(0, 160)}${full.length > 160 ? '…' : ''}"]\n`;
+    } catch (_) { return ''; }
+  }
+
+  async function observe(message) {
     try {
       const cid = message.channel.id;
       const sid = message.guild?.id;
@@ -501,6 +517,7 @@ RESPONSE RULES:
       let text = (message.cleanContent || message.content || '').trim();
       if (message.attachments.size) text += ` [sent ${message.attachments.size} attachment(s)]`;
       if (!text) return;
+      text = (await replyRef(message)) + text; // thread Discord replies so awareness keeps the reference
       ctx.core.handle({
         channel: 'discord',
         conversation_key: conversationKey,
@@ -838,7 +855,13 @@ RESPONSE RULES:
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
       if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
       const m = isFile ? await channel.send({ content: caption || text || '', files: [filePath] }) : await channel.send(text);
-      res.json({ ok: true, messageId: m.id });
+      // Report the conversation_key this target maps to (matches an inbound from the same place), so a
+      // core-mediated send can ASSIMILATE this message into that session's context (it was posted from
+      // ANOTHER session; without this the destination session never learns it "said" it).
+      const conversation_key = channel.type === 1
+        ? `discord:${ctx.instanceId}:dm:${(channel.recipient && channel.recipient.id) || tg}`
+        : `discord:${ctx.instanceId}:channel:${channel.id}`;
+      res.json({ ok: true, messageId: m.id, conversation_key });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   // --- channel enable/disable control (TUI/GUI drive this) -------------------------------
