@@ -13,8 +13,9 @@ const store = useCollectorStore()
 const route = useRoute()
 const windows = useWindows()
 
-// Turn-complete notifications (bell toggle in the header).
-const { enabled: notifyOn, supported: notifySupported, toggle: toggleNotify } = useTurnNotifications(store)
+// Start the turn-complete notification watcher (singleton). The enable toggle lives in Settings →
+// Notifications; here we just keep the fire-on-new-turn watcher alive at the app root.
+useTurnNotifications(store)
 // Live update progress (persistent panel, survives the mid-update restart).
 const { status: updProgress, active: updActive, begin: updBegin, dismiss: updDismiss } = useUpdateProgress()
 
@@ -109,16 +110,9 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- right side: notifications bell + (mobile) connection pill -->
+        <!-- right side: (mobile) connection pill. The turn-complete notification toggle lives in
+             Settings → Notifications; the ✦ Notifications nav item shows the history. -->
         <div class="flex items-center gap-2">
-          <button
-            v-if="notifySupported"
-            type="button"
-            :title="notifyOn ? 'Turn-complete notifications: on — click to mute' : 'Notify me when a session turn completes'"
-            class="rounded-lg border px-2 py-1 text-sm transition-colors"
-            :class="notifyOn ? 'border-brand-violet/50 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-400 hover:text-slate-200'"
-            @click="toggleNotify"
-          ><AppIcon :glyph="notifyOn ? '🔔' : '🔕'" /></button>
           <div class="flex items-center gap-2 lg:hidden">
             <span
               class="h-2 w-2 rounded-full"

@@ -7,9 +7,12 @@ import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { api, runtime, voice, identity, update } from '@/services/api'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
+import { useTurnNotifications } from '@/composables/useTurnNotifications'
 
 // Shared progress poller — calling begin() pops the global App.vue progress panel immediately.
 const { begin: updBegin } = useUpdateProgress()
+// Turn-complete browser notifications (moved here from the sidebar). Shared singleton state.
+const { supported: notifySupported, enabled: notifyOn, permission: notifyPerm, toggle: toggleNotify } = useTurnNotifications()
 
 const manifest = ref(null)
 const tab = ref('identity')
@@ -18,7 +21,12 @@ const notice = ref('')
 
 // --- manifest-derived definitions (single source of truth) ---
 const sections = computed(() => manifest.value?.settings || [])
-const TABS = computed(() => sections.value.map((s) => ({ id: s.id, label: s.label, icon: s.icon })))
+// The manifest drives the shared GUI+TUI tabs; "Notifications" is appended GUI-only because it's a
+// browser capability (Notification API) with no meaning in the terminal.
+const TABS = computed(() => [
+  ...sections.value.map((s) => ({ id: s.id, label: s.label, icon: s.icon })),
+  { id: 'notifications', label: 'Notifications', icon: '✦' },
+])
 function section(id) { return sections.value.find((s) => s.id === id) || { fields: [] } }
 function field(sectionId, fieldId) { return (section(sectionId).fields || []).find((f) => f.id === fieldId) || {} }
 const identityFields = computed(() => section('identity').fields || [])
@@ -396,6 +404,30 @@ onMounted(async () => {
               </div>
             </div>
           </template>
+        </div>
+
+        <!-- Notifications — GUI-only (browser Notification API); the ✦ Notifications page shows history -->
+        <div v-show="tab === 'notifications'" class="glass p-5">
+          <h3 class="mb-1 text-sm font-semibold text-slate-200">Notifications</h3>
+          <p class="mb-4 text-[12px] text-slate-500">Desktop/mobile alerts from this browser when a session turn completes — so you know a reply is ready while you're on another tab.</p>
+          <label class="flex cursor-pointer items-center justify-between gap-3">
+            <span>
+              <span class="text-sm text-slate-200">Notify me when a turn completes</span>
+              <span class="block text-[12px] text-slate-500">
+                <template v-if="!notifySupported">This browser doesn't support notifications.</template>
+                <template v-else-if="notifyPerm === 'denied'">Blocked in the browser — allow notifications for this site to enable.</template>
+                <template v-else>Fires a notification for each completed reply (skips the web chats you're already viewing).</template>
+              </span>
+            </span>
+            <button type="button" class="relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40"
+              :class="notifyOn ? 'bg-brand-violet' : 'bg-white/15'"
+              :disabled="!notifySupported || notifyPerm === 'denied'" @click="toggleNotify">
+              <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="notifyOn ? 'left-[22px]' : 'left-0.5'"></span>
+            </button>
+          </label>
+          <RouterLink to="/notifications" class="mt-4 inline-flex items-center gap-1.5 text-[12px] text-brand-violet hover:underline">
+            <AppIcon glyph="✦" /> View notification history
+          </RouterLink>
         </div>
 
         <p v-if="notice" class="mt-4 text-center text-[12px] text-slate-400">{{ notice }}</p>
