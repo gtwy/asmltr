@@ -138,21 +138,26 @@ app.post('/instances/:id/restart', requireToken, (req, res) => {
 });
 // --- per-channel enable/disable: proxy to the connector's own /channels endpoint (no restart).
 // Lets the TUI/GUI see every channel a connector can reach and toggle whether it relays to core.
-async function proxyChannels(id, method, body) {
+// Proxy a control request to a running connector instance's HTTP surface (its declared `endpoints`,
+// e.g. Discord's `channels` + `servers`). Generic so a new connector endpoint needs no manager change.
+async function proxyEndpoint(id, endpoint, method, body) {
   const inst = registry.get(id);
   if (!inst) return { status: 404, json: { ok: false, error: 'not found' } };
   const port = instancePort(inst);
   if (!port) return { status: 400, json: { ok: false, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` } };
   try {
-    const r = await fetch(`http://127.0.0.1:${port}/channels`, {
+    const r = await fetch(`http://127.0.0.1:${port}/${endpoint}`, {
       method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
     });
     const j = await r.json().catch(() => ({}));
     return { status: r.status, json: { instance_id: id, type: inst.type, name: inst.name, ...j } };
   } catch (e) { return { status: 502, json: { ok: false, error: `connector unreachable: ${e.message}` } }; }
 }
-app.get('/instances/:id/channels', requireToken, async (req, res) => { const r = await proxyChannels(req.params.id, 'GET'); res.status(r.status).json(r.json); });
-app.post('/instances/:id/channels', requireToken, async (req, res) => { const r = await proxyChannels(req.params.id, 'POST', req.body || {}); res.status(r.status).json(r.json); });
+app.get('/instances/:id/channels', requireToken, async (req, res) => { const r = await proxyEndpoint(req.params.id, 'channels', 'GET'); res.status(r.status).json(r.json); });
+app.post('/instances/:id/channels', requireToken, async (req, res) => { const r = await proxyEndpoint(req.params.id, 'channels', 'POST', req.body || {}); res.status(r.status).json(r.json); });
+// Discord server membership: GET → invite URL + guilds the bot is in; POST { leave } → leave a guild.
+app.get('/instances/:id/servers', requireToken, async (req, res) => { const r = await proxyEndpoint(req.params.id, 'servers', 'GET'); res.status(r.status).json(r.json); });
+app.post('/instances/:id/servers', requireToken, async (req, res) => { const r = await proxyEndpoint(req.params.id, 'servers', 'POST', req.body || {}); res.status(r.status).json(r.json); });
 
 app.delete('/instances/:id', requireToken, (req, res) => {
   supervisor.stopInstance(req.params.id);

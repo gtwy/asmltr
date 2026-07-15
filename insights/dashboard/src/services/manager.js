@@ -49,5 +49,9 @@ export const manager = {
 
   // per-channel enable/disable (Discord etc.) — GET lists channels + enabled state; POST toggles one
   channels: (id) => request('GET', `/instances/${id}/channels`),
-  setChannel: (id, body) => request('POST', `/instances/${id}/channels`, body)
+  setChannel: (id, body) => request('POST', `/instances/${id}/channels`, body),
+
+  // Discord server membership — GET → { invite_url, servers[] }; leave a guild
+  servers: (id) => request('GET', `/instances/${id}/servers`),
+  leaveServer: (id, guildId) => request('POST', `/instances/${id}/servers`, { leave: guildId })
 }

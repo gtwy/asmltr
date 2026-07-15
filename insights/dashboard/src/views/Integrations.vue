@@ -10,6 +10,7 @@ import StatTile from '@/components/StatTile.vue'
 import InstanceCard from '@/components/InstanceCard.vue'
 import InstanceForm from '@/components/InstanceForm.vue'
 import LogsModal from '@/components/LogsModal.vue'
+import ServersModal from '@/components/ServersModal.vue'
 import { connectorTypeMeta } from '@/lib/format'
 
 const store = useManagerStore()
@@ -20,6 +21,7 @@ let ticker = null
 const formType = ref(null) // connector type def => InstanceForm open
 const formInstance = ref(null) // present => edit mode
 const logsInstance = ref(null) // present => LogsModal open
+const serversInstance = ref(null) // present => ServersModal open (Discord)
 
 const running = computed(() => store.instances.filter((i) => i.runtime?.status === 'running').length)
 const failed = computed(() => store.instances.filter((i) => i.runtime?.status === 'failed').length)
@@ -202,6 +204,7 @@ onUnmounted(() => {
           @restart="onRestart"
           @edit="openEdit"
           @logs="logsInstance = inst"
+          @servers="serversInstance = inst"
           @delete="onDelete"
         />
       </div>
@@ -221,6 +224,11 @@ onUnmounted(() => {
       v-if="logsInstance"
       :instance="logsInstance"
       @close="logsInstance = null"
+    />
+    <ServersModal
+      v-if="serversInstance"
+      :instance="serversInstance"
+      @close="serversInstance = null"
     />
   </div>
 </template>

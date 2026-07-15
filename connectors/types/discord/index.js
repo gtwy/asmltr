@@ -893,6 +893,34 @@ RESPONSE RULES:
       res.json({ ok: true, default_enabled: channelsDefault, channel_id: channel_id != null ? String(channel_id) : null, enabled: channel_id != null ? channelEnabled(channel_id) : null });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
+  // GET /servers → the OAuth invite URL (to add the bot to a NEW server) + the guilds it's already
+  // in. POST /servers { leave: <guildId> } → leave a guild. Adding is a Discord OAuth action, not a
+  // config change — an admin of the target server authorizes the invite URL and the gateway sees the
+  // new guild instantly (no restart). Removing here is the inverse (the bot leaves).
+  const INVITE_PERMISSIONS = '3525696'; // view/send/history/embed/attach/react/external-emoji + voice connect/speak
+  const inviteUrl = () => client.user
+    ? `https://discord.com/api/oauth2/authorize?client_id=${client.user.id}&scope=bot%20applications.commands&permissions=${INVITE_PERMISSIONS}`
+    : null;
+  app.get('/servers', (req, res) => {
+    try {
+      const servers = [...client.guilds.cache.values()]
+        .map((g) => ({ id: g.id, name: g.name, member_count: g.memberCount ?? null }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.json({ ok: true, bot_name: client.user?.username || null, application_id: client.user?.id || null, invite_url: inviteUrl(), permissions: INVITE_PERMISSIONS, servers });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+  app.post('/servers', async (req, res) => {
+    try {
+      const guildId = req.body && (req.body.leave || req.body.guild_id);
+      if (!guildId) return res.status(400).json({ ok: false, error: 'provide { leave: <guildId> }' });
+      const g = client.guilds.cache.get(String(guildId));
+      if (!g) return res.status(404).json({ ok: false, error: 'not a member of that guild' });
+      const name = g.name;
+      await g.leave();
+      ctx.log(`left guild ${name} (${guildId})`);
+      res.json({ ok: true, left: { id: String(guildId), name } });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
   const httpServer = app.listen(cfg.http_port || 3016, '127.0.0.1', () => ctx.log(`send-message API on 127.0.0.1:${cfg.http_port || 3016}`));
 
   await client.login(token);
