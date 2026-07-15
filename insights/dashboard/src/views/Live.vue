@@ -314,6 +314,6 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
     </section>
 
     <!-- conversation details + takeover pane -->
-    <SessionDetail v-if="selected" :session="selected" :now="now" :mutable="mutableBySession[selected.session_id]" :channel-state="channelStates[mutableBySession[selected.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[selected.session_id]?.channelId]" @close="selected = null" @toggle-channel="toggleChannel" />
+    <SessionDetail v-if="selected" :session="selected" :now="now" :mutable="mutableBySession[selected.session_id]" :channel-state="channelStates[mutableBySession[selected.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[selected.session_id]?.channelId]" @close="selected = null" @toggle-channel="toggleChannel" @channel-toggled="loadMuteState" />
   </div>
 </template>
