@@ -15,6 +15,7 @@ import { useSpeech } from '@/composables/useSpeech'
 import { statusMeta, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
 import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
+import FileArtifacts from './FileArtifacts.vue'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -420,6 +421,8 @@ const placeholder = computed(() => {
               class="mt-1 block text-[11px] text-slate-500 transition-colors hover:text-violet-300"
               @click="readAloud(r.text)"
             >{{ speaking ? '🔊 speaking…' : '🔊 read aloud' }}</button>
+            <!-- auto-detected local files the agent created → click to download through asmltr -->
+            <FileArtifacts v-if="r.text" :text="r.text" :streaming="!!r.streaming" />
           </div>
         </div>
         <div v-else class="flex items-start gap-1.5 pl-1 text-[11px] text-slate-500">

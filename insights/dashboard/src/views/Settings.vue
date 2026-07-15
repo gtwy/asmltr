@@ -88,6 +88,11 @@ async function toggleAuto() {
   try { const r = await runtime.setAutoUpdate(!rt.value.autoUpdate); rt.value.autoUpdate = r.autoUpdate }
   catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
+async function toggleCliBypass() {
+  busy.value = 'cli-bypass'
+  try { const r = await runtime.setCliBypass(!rt.value.cliBypass); rt.value.cliBypass = r.cliBypass; notice.value = `Terminal sessions now launch in ${r.cliBypass ? 'bypass-permissions (full-autonomy)' : 'normal-permission'} mode — applies to the next ‘asmltr claude’.` }
+  catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
+}
 async function updateSdk() {
   busy.value = 'update'; notice.value = ''
   try {
@@ -208,6 +213,15 @@ onMounted(async () => {
               </span>
               <button type="button" :disabled="busy === 'auto'" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="rt.autoUpdate ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleAuto">
                 <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.autoUpdate ? 'left-[22px]' : 'left-0.5'"></span>
+              </button>
+            </label>
+            <label class="mb-5 flex cursor-pointer items-center justify-between gap-3">
+              <span>
+                <span class="text-sm text-slate-200">{{ field('runtime','cliBypass').label }}</span>
+                <span class="block text-[12px] text-slate-500">{{ field('runtime','cliBypass').desc }}</span>
+              </span>
+              <button type="button" :disabled="busy === 'cli-bypass'" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="rt.cliBypass ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleCliBypass">
+                <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.cliBypass ? 'left-[22px]' : 'left-0.5'"></span>
               </button>
             </label>
             <div>

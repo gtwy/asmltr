@@ -588,6 +588,30 @@ app.post('/v2/tts', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Serve a local artifact the agent created, for download through the dashboard chat. Guarded by
+// Authelia (jareth-only) in front of the /v2 proxy + localhost-only core. `?stat=1` returns metadata
+// (the chat uses it to decide whether to show a download chip); otherwise streams as an attachment.
+app.get('/v2/file', (req, res) => {
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const isStat = !!req.query.stat;
+  const miss = (code, err) => (isStat ? res.json({ exists: false }) : res.status(code).json({ error: err }));
+  try {
+    let p = String(req.query.path || '');
+    if (!p) return res.status(400).json({ error: 'path required' });
+    if (p === '~' || p.startsWith('~/')) p = path.join(os.homedir(), p.slice(1));
+    if (!path.isAbsolute(p)) return miss(400, 'path must be absolute');
+    let real, st;
+    try { real = fs.realpathSync(p); st = fs.statSync(real); } catch (_) { return miss(404, 'not found'); }
+    if (!st.isFile()) return miss(400, 'not a file');
+    const name = path.basename(real);
+    if (isStat) return res.json({ exists: true, name, size: st.size });
+    res.setHeader('Content-Disposition', `attachment; filename="${name.replace(/["\\]/g, '')}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(st.size));
+    fs.createReadStream(real).on('error', () => { try { res.destroy(); } catch (_) {} }).pipe(res);
+  } catch (e) { return miss(500, e.message); }
+});
+
 // Realtime STT — mint a short-lived ephemeral token for a streaming transcription session with
 // server-side VAD. The browser connects to OpenAI directly (WebRTC) with this token; the real key
 // never leaves the host. Body: { model? }.
@@ -618,6 +642,13 @@ app.get('/v2/runtime', async (req, res) => {
 });
 app.post('/v2/runtime/model', (req, res) => res.json({ model: runtime.setModel(req.body && req.body.model) }));
 app.post('/v2/runtime/auto-update', (req, res) => res.json({ autoUpdate: runtime.setSdkAutoUpdate(!!(req.body && req.body.enabled)) }));
+// Permission mode for interactive `asmltr claude` sessions. Body: { enabled } (toggle → bypassPermissions|default)
+// or { mode } (explicit: default|acceptEdits|bypassPermissions|plan). Applies to the NEXT `asmltr claude` launch.
+app.post('/v2/runtime/cli-permission-mode', (req, res) => {
+  const b = req.body || {};
+  const m = runtime.setCliPermissionMode(b.mode || (b.enabled ? 'bypassPermissions' : 'default'));
+  res.json({ cliPermissionMode: m, cliBypass: m === 'bypassPermissions' });
+});
 app.post('/v2/runtime/update', (req, res) => {
   const r = runtime.updateSdk();
   record({ surface: 'core', session_id: null, event_type: 'control', identity: (req.body && req.body.by) || 'operator', source: 'core', payload: { action: 'sdk-update-started', pid: r.pid } });

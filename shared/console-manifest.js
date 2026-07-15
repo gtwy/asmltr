@@ -65,6 +65,11 @@ const manifest = {
           desc: 'Check every 6h and upgrade + restart automatically, so the model never silently goes stale.',
           set: { service: 'core', method: 'POST', path: '/v2/runtime/auto-update', body: { enabled: '{value}' } },
         },
+        {
+          id: 'cliBypass', label: 'Full-autonomy terminal sessions', type: 'toggle', get: 'cliBypass',
+          desc: '`asmltr claude` (and takeovers) launch in bypass-permissions mode — no per-action approval. Off = normal permission prompts. Channel sessions always run autonomously; this is only the terminal ones.',
+          set: { service: 'core', method: 'POST', path: '/v2/runtime/cli-permission-mode', body: { enabled: '{value}' } },
+        },
       ],
       // read-only status widget (SDK version + an update action)
       status: {
