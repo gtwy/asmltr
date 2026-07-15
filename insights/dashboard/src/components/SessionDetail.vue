@@ -24,7 +24,11 @@ const props = defineProps({
   // floating-window manager props (forwarded to FloatingWindow)
   z: { type: Number, default: 70 },
   focused: { type: Boolean, default: true },
-  minimized: { type: Boolean, default: false }
+  minimized: { type: Boolean, default: false },
+  // special-mode hooks (the observer drives the SAME chat window through these):
+  contextProvider: { type: Function, default: null }, // web sends → its return becomes system_prompt_extra
+  accent: { type: String, default: '' },              // window accent color (styling)
+  titleOverride: { type: String, default: '' }        // force the header title (skip AI-generated)
 })
 const emit = defineEmits(['close', 'toggle-channel', 'channel-toggled', 'minimize', 'focus'])
 
@@ -135,7 +139,7 @@ const localTitle = ref(null)   // optimistic manual title (before the collector 
 const pendingTitle = ref(null) // manual title set before the session row exists yet → retry after 1st turn
 const editingTitle = ref(false)
 const titleDraft = ref('')
-const displayTitle = computed(() => localTitle.value ?? sess.value.title ?? sess.value.identity ?? (isWeb.value ? 'Web session' : 'Conversation'))
+const displayTitle = computed(() => props.titleOverride || localTitle.value || sess.value.title || sess.value.identity || (isWeb.value ? 'Web session' : 'Conversation'))
 const titleLocked = computed(() => localTitle.value != null || !!sess.value.title_locked)
 function startEditTitle() { titleDraft.value = displayTitle.value === 'Web session' ? '' : displayTitle.value; editingTitle.value = true; nextTick(() => titleField.value?.focus()) }
 const titleField = ref(null)
@@ -241,7 +245,7 @@ function webSend() {
   localTurns.value = [...localTurns.value, turn]
   draft.value = ''; attached.value = []; notice.value = null; busy.value = true
   streamCtrl = webChat.send(
-    { conversation_key: key.value, text: body, attachments: files.map((f) => ({ type: f.kind === 'image' ? 'image' : 'file', path: f.path, name: f.name, media_type: f.mime })), working_dir: sess.value.working_dir || null },
+    { conversation_key: key.value, text: body, attachments: files.map((f) => ({ type: f.kind === 'image' ? 'image' : 'file', path: f.path, name: f.name, media_type: f.mime })), working_dir: sess.value.working_dir || null, system_prompt_extra: props.contextProvider ? props.contextProvider() : null },
     {
       onDelta: (t) => { turn.reply += t },
       onTool: (name) => { if (name && !turn.tools.includes(name)) turn.tools = [...turn.tools, name] },
@@ -301,7 +305,7 @@ const placeholder = computed(() => {
 </script>
 
 <template>
-  <FloatingWindow :storage-key="'asmltr:win:' + key" :subtitle="key" :z="z" :focused="focused" :minimized="minimized"
+  <FloatingWindow :storage-key="'asmltr:win:' + key" :subtitle="key" :z="z" :focused="focused" :minimized="minimized" :accent="accent"
                   @close="$emit('close')" @minimize="$emit('minimize')" @focus="$emit('focus')">
     <!-- editable title -->
     <template #title>

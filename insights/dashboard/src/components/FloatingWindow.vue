@@ -13,7 +13,8 @@ const props = defineProps({
   minH: { type: Number, default: 320 },
   z: { type: Number, default: 70 },            // stacking order (window manager bumps it on focus)
   focused: { type: Boolean, default: true },   // frontmost window — only it closes on Esc + gets the ring
-  minimized: { type: Boolean, default: false } // hidden (kept mounted so chat state survives), shown in the taskbar
+  minimized: { type: Boolean, default: false }, // hidden (kept mounted so chat state survives), shown in the taskbar
+  accent: { type: String, default: '' }        // optional accent color (e.g. the observer) — top bar + header tint
 })
 const emit = defineEmits(['close', 'minimize', 'focus'])
 
@@ -85,13 +86,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     <div
       v-show="!minimized"
       class="glass fixed flex flex-col overflow-hidden shadow-2xl shadow-black/50 transition-shadow"
-      :class="focused ? 'ring-1 ring-brand-violet/40' : 'ring-1 ring-transparent'"
-      :style="{ left: pos.x + 'px', top: pos.y + 'px', width: size.w + 'px', height: size.h + 'px', zIndex: z }"
+      :class="!accent && focused ? 'ring-1 ring-brand-violet/40' : 'ring-1 ring-transparent'"
+      :style="{ left: pos.x + 'px', top: pos.y + 'px', width: size.w + 'px', height: size.h + 'px', zIndex: z,
+                ...(accent ? { borderTop: '2px solid ' + accent, boxShadow: focused ? '0 0 0 1px ' + accent + '66, 0 12px 40px rgba(0,0,0,0.5)' : undefined } : {}) }"
       @pointerdown="emit('focus')"
     >
       <!-- header (drag handle) -->
       <header
         class="flex shrink-0 cursor-move touch-none items-start justify-between gap-3 border-b border-white/10 px-4 py-3"
+        :style="accent ? { background: accent + '14' } : {}"
         @pointerdown="onDown('drag', $event)"
       >
         <div class="min-w-0 flex-1">
