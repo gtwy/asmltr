@@ -262,11 +262,17 @@ async function cmdSend(rest) {
   const body = file
     ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject }
     : { channel, target, kind: 'text', text, subject };
-  const headers = { 'Content-Type': 'application/json' };
-  if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
-  const r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) })
-    .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
-  console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
+  // Route through the CORE (/v2/send) so a cross-channel post is ASSIMILATED into the destination
+  // session's context (it learns it "said" this, instead of it looking foreign on the next read).
+  // Fall back to the manager's /send if the core is unreachable — delivery still works, just no assimilation.
+  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => null);
+  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+  console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 async function cmdMap() {
   // where sessions are ACTIVELY working, from recent tool activity → grouped by git repo

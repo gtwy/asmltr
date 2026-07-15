@@ -8,7 +8,17 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ## [Unreleased]
 
+### Added
+- **Cross-session send with assimilation** (`POST /v2/send`, channel-agnostic). An agent in any
+  session can post into another channel AND the destination session folds the message into its own
+  context (it was posted under its name from a parallel session). Connectors' `/out` now return the
+  destination `conversation_key` (Discord + Telegram) so core can route the assimilation. `asmltr send`
+  goes through core (falls back to the manager if core is down).
+
 ### Fixed
+- **Discord reply threading.** A message that uses Discord's reply feature now carries "↩ in reply to
+  <author>: …" into the prompt (both addressed and observed paths), so in a busy multi-agent channel
+  the agent can tell WHAT a peer replied to instead of losing the reference.
 - **Interrupted / empty turns no longer emit a canned greeting.** An empty reply (interrupt,
   tool-only turn, or a deliberate non-answer) now posts nothing instead of "I'm here — what would
   you like to know?", which on multi-agent channels was noise other agents kept answering.

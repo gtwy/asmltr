@@ -167,7 +167,9 @@ async function start(ctx) {
       if (kind === 'photo') m = await bot.sendPhoto(to, filePath, { caption: caption || '' });
       else if (kind === 'document') m = await bot.sendDocument(to, filePath, { caption: caption || '' });
       else m = await bot.sendMessage(to, text);
-      res.json({ ok: true, messageId: m.message_id });
+      // Report the destination conversation_key (matches an inbound from the same chat) so a
+      // core-mediated send can assimilate a cross-posted message into that session — channel-agnostic.
+      res.json({ ok: true, messageId: m.message_id, conversation_key: `telegram:${ctx.instanceId}:user:${to}` });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   const httpServer = app.listen(cfg.http_port || 3008, '127.0.0.1', () => ctx.log(`outbound HTTP on :${cfg.http_port || 3008}`));
