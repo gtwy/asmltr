@@ -30,7 +30,9 @@ export const api = {
   // proprioception — the body-schema graph (parts + structural edges)
   selfSchema: (params) => get('/self/schema', params),
   // proprioception 1b — the deduced goal / threads / flags / semantic relations + history
-  selfAssessment: () => get('/self/assessment')
+  selfAssessment: () => get('/self/assessment'),
+  // the console manifest — single source of truth for settings/actions/screens (shared with the TUI)
+  manifest: () => get('/manifest')
 }
 
 // Control plane on the CORE (served at root under /v2/...). Used by the live

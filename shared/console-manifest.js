@@ -1,0 +1,125 @@
+'use strict';
+/**
+ * The console manifest — ONE declarative source of truth for the assistant's control surfaces
+ * (screens + settings + actions), consumed by BOTH the web dashboard (GUI) and the terminal TUI.
+ *
+ * - The GUI imports this at build time (Settings renders its fields from `settings`).
+ * - The TUI `require()`s it (renders a self-generating settings screen + wires session actions).
+ * - It is also served at `GET /api/manifest` (collector) for remote/other clients.
+ *
+ * Add a setting or action here → it shows up in BOTH the GUI and the TUI. Keep this PURE DATA
+ * (no process.env / no imports) so it's safe to bundle into the browser build.
+ *
+ * Endpoints are declared as { service, method, path }:
+ *   service: 'collector' (/api/*)  |  'core' (/v2/*)  |  'manager' (connector manager)
+ * A client resolves the base per service. Request bodies use `{placeholder}` tokens the caller
+ * fills at call time (e.g. {session}, {text}, {value}, {instance}, {channel}).
+ */
+
+const manifest = {
+  version: 1,
+
+  // Top-level screens. The GUI renders rich views for these; the TUI shows them as a menu.
+  surfaces: [
+    { id: 'live', label: 'Live', icon: '◉', desc: 'Active sessions across every surface' },
+    { id: 'self', label: 'Self', icon: '🧠', desc: 'Proprioception — live parts + the deduced goal' },
+    { id: 'drafts', label: 'Drafts', icon: '✎', desc: 'Replies held for human approval' },
+    { id: 'settings', label: 'Settings', icon: '⚙', desc: 'Identity, runtime, updates, voice' },
+  ],
+
+  // Settings — grouped sections; each field is declarative. `type` ∈ text | textarea | toggle | choice.
+  // `load` fetches the group's current values; a field reads its value at `get` (dot-path) and writes
+  // via `save` (group-level, PATCH-style) or its own `set` endpoint.
+  settings: [
+    {
+      id: 'identity', label: 'Identity', icon: '🪪',
+      desc: 'Who this agent is. Asserted at the top of every session (terminal + all channels) so identity is declared, not inferred — the fix for cross-agent drift.',
+      load: { service: 'core', method: 'GET', path: '/v2/identity' },
+      save: { service: 'core', method: 'POST', path: '/v2/identity' }, // body = changed fields only
+      fields: [
+        { id: 'name', label: 'Name', type: 'text' },
+        { id: 'self_description', label: 'Essence', type: 'textarea', rows: 5, desc: 'the stable core, asserted in the anchor', placeholder: 'Who you are, in your own words…' },
+        { id: 'preferences', label: 'Preferences', type: 'textarea', rows: 4, desc: 'tendencies & working style (not rules; self-updatable over time)', placeholder: 'How you tend to work, what you value…' },
+        { id: 'story', label: 'Story & context', type: 'textarea', rows: 5, desc: 'the narrative you carry (grows over time)', placeholder: 'Formative events, relationships, the accumulated narrative…' },
+      ],
+      preview: { get: 'preamble', label: 'the anchor every session sees' },
+    },
+    {
+      id: 'runtime', label: 'Runtime', icon: '⚙',
+      desc: 'The Agent SDK gates which models are reachable — an old SDK silently pins you to an old model. Keep it current and use a model alias to track the latest.',
+      load: { service: 'core', method: 'GET', path: '/v2/runtime' },
+      fields: [
+        {
+          id: 'model', label: 'Model', type: 'choice',
+          get: 'model.configured', resolvedGet: 'model.resolved', allowCustom: true,
+          set: { service: 'core', method: 'POST', path: '/v2/runtime/model', body: { model: '{value}' } },
+          choices: [
+            { id: 'opus', label: 'Opus', hint: 'latest Opus (recommended)' },
+            { id: 'sonnet', label: 'Sonnet', hint: 'faster, latest Sonnet' },
+            { id: 'haiku', label: 'Haiku', hint: 'fastest, lightest' },
+            { id: '', label: 'SDK default', hint: '1M-context Opus' },
+          ],
+        },
+        {
+          id: 'autoUpdate', label: 'Auto-update the SDK', type: 'toggle', get: 'autoUpdate',
+          desc: 'Check every 6h and upgrade + restart automatically, so the model never silently goes stale.',
+          set: { service: 'core', method: 'POST', path: '/v2/runtime/auto-update', body: { enabled: '{value}' } },
+        },
+      ],
+      // read-only status widget (SDK version + an update action)
+      status: {
+        kind: 'sdk', installedGet: 'sdk.installed', latestGet: 'sdk.latest', availableGet: 'sdk.updateAvailable',
+        action: { id: 'sdk-update', label: 'Update now', service: 'core', method: 'POST', path: '/v2/runtime/update' },
+      },
+    },
+    {
+      id: 'updates', label: 'Updates', icon: '↑',
+      desc: "asmltr's own code. New commits on origin/main are detected every 15 min; installing runs a background agent session that health-checks and auto-rolls-back on failure.",
+      load: { service: 'core', method: 'GET', path: '/v2/update/status' },
+      fields: [
+        {
+          id: 'auto', label: 'Auto-install updates', type: 'toggle',
+          load: { service: 'core', method: 'GET', path: '/v2/update/auto' }, get: 'auto',
+          desc: 'When a new commit is detected, run the update session automatically (with rollback safety).',
+          set: { service: 'core', method: 'POST', path: '/v2/update/auto', body: { enabled: '{value}' } },
+        },
+      ],
+      status: {
+        kind: 'code', headGet: 'head', availableGet: 'available', behindGet: 'behind', changelogGet: 'changelog', remoteGet: 'remote',
+        action: { id: 'code-update', label: 'Update now', service: 'core', method: 'POST', path: '/v2/update/run' },
+      },
+    },
+    {
+      id: 'voice', label: 'Voice', icon: '🎙',
+      fields: [
+        {
+          id: 'ack', label: 'Spoken acknowledgment', type: 'toggle',
+          load: { service: 'core', method: 'GET', path: '/v2/voice/ack' }, get: 'enabled',
+          desc: 'A short spoken "on it" plays while the agent works, so a long turn isn\'t silent.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/ack', body: { enabled: '{value}' } },
+        },
+      ],
+    },
+  ],
+
+  // Session-scoped + global actions. `hotkey` drives the TUI; the GUI wires the same verbs in its
+  // own components. `input:'text'` prompts for a message; `confirm:true` guards destructive actions.
+  actions: [
+    { id: 'watch', label: 'Watch', scope: 'session', hotkey: 'enter', desc: 'Live event stream for the selected session' },
+    { id: 'steer', label: 'Steer / inject', scope: 'session', hotkey: 'i', input: 'text',
+      desc: 'Inject a message into a live turn; the reply routes back to its origin channel',
+      run: { service: 'core', method: 'POST', path: '/v2/inject', body: { conversation_key: '{session}', text: '{text}', by: 'tui' } } },
+    { id: 'stop', label: 'Stop in-flight turn', scope: 'session', hotkey: 's',
+      desc: 'Abort the current turn (session stays resumable)',
+      run: { service: 'core', method: 'POST', path: '/v2/abort', body: { conversation_key: '{session}' } } },
+    { id: 'forget', label: 'Delete / forget session', scope: 'session', hotkey: 'd', confirm: true,
+      desc: 'Remove from tracking + clear history; next inbound starts fresh',
+      run: { service: 'collector', method: 'POST', path: '/api/control/forget', body: { session_id: '{session}' } } },
+    { id: 'code-update', label: 'Update asmltr', scope: 'global',
+      run: { service: 'core', method: 'POST', path: '/v2/update/run' } },
+  ],
+};
+
+// CommonJS — required by the collector (to serve /api/manifest) and the TUI. The GUI fetches the
+// served copy at runtime, so there's exactly one source and no build coupling.
+module.exports = manifest;
