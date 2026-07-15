@@ -33,7 +33,7 @@ onUnmounted(() => { clearInterval(nowTimer); clearInterval(obsTimer) })
 
 // synthetic "session" for the observer — a web session on a stable key
 const observerSession = { session_id: 'web:self-observer', surface: 'eve-assistant-web', kind: 'ephemeral', status: 'active', identity: 'proprioception', working_dir: null }
-const observerTitle = computed(() => `🧠 The Observer — ${obsName.value} as a whole`)
+const observerTitle = computed(() => `The Observer — ${obsName.value} as a whole`)
 
 // per-turn system-prompt context: the live body (parts + links) + the reflector's deduced goal
 function observerContext() {
@@ -66,7 +66,7 @@ function observerContext() {
 }
 
 function label(w) {
-  if (w.kind === 'observer') return '🧠 Observer'
+  if (w.kind === 'observer') return 'Observer'
   const p = w.payload || {}
   return p.title || p.activity || String(p.session_id || 'session').split(':').slice(0, 2).join(':')
 }
@@ -90,8 +90,8 @@ function label(w) {
     <div v-if="minimized.length" class="fixed bottom-3 left-1/2 z-[95] flex max-w-[92vw] -translate-x-1/2 flex-wrap justify-center gap-2">
       <div v-for="w in minimized" :key="w.id"
            class="glass glass-hover flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-slate-200 shadow-lg shadow-black/40">
-        <button class="max-w-[200px] truncate" :title="label(w)" @click="focus(w.id)">{{ label(w) }}</button>
-        <button class="text-slate-500 hover:text-rose-300" title="Close" @click="close(w.id)">✕</button>
+        <button class="flex max-w-[200px] items-center gap-1.5 truncate" :title="label(w)" @click="focus(w.id)"><AppIcon v-if="w.kind === 'observer'" glyph="🧠" class="text-brand-violet" /><span class="truncate">{{ label(w) }}</span></button>
+        <button class="text-slate-500 hover:text-rose-300" title="Close" @click="close(w.id)"><AppIcon glyph="✕" /></button>
       </div>
     </div>
   </div>

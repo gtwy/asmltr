@@ -74,6 +74,8 @@ export const control = {
 // or run the update session now (a background agent session that runs UPDATE-WITH-AGENT.md).
 export const update = {
   status: (fetch = true) => getCore('/v2/update/status' + (fetch ? '' : '?fetch=0')),
+  // live progress of a running/last update — from the status file, survives the mid-update restart
+  progress: () => getCore('/v2/update/progress'),
   run: () => postCore('/v2/update/run', { by: 'dashboard' }),
   getAuto: () => getCore('/v2/update/auto'),
   setAuto: (enabled) => postCore('/v2/update/auto', { enabled }),

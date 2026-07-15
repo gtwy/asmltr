@@ -50,7 +50,23 @@ const CHANNEL = opt('channel', version.getChannel());
 const REF = opt('ref', null);
 
 // ---- io ----
-function log(m) { const line = `[${new Date().toISOString()}] ${m}`; try { fs.mkdirSync(path.dirname(LOG), { recursive: true }); fs.appendFileSync(LOG, line + '\n'); } catch (_) {} if (!JSON_OUT) console.error(line); }
+// Persistent status FILE (survives the mid-update service restart that drops the collector event
+// stream) — the GUI polls it via /v2/update/progress and the TUI reads it directly. Not written for
+// dry-runs (they must not clobber a real update's status).
+const STATUS_FILE = process.env.ASMLTR_UPDATE_STATUS || path.join(STATE, 'update-status.json');
+const _status = { state: 'running', phase: 'starting', from: null, to: null, channel: CHANNEL, code: null, message: null, log: [], pid: process.pid, started_at: Date.now(), updated_at: Date.now() };
+function writeStatus(partial) {
+  if (DRY) return;
+  if (partial) Object.assign(_status, partial);
+  _status.updated_at = Date.now();
+  try { fs.mkdirSync(STATE, { recursive: true }); fs.writeFileSync(STATUS_FILE, JSON.stringify(_status)); } catch (_) {}
+}
+function log(m) {
+  const line = `[${new Date().toISOString()}] ${m}`;
+  try { fs.mkdirSync(path.dirname(LOG), { recursive: true }); fs.appendFileSync(LOG, line + '\n'); } catch (_) {}
+  _status.log.push(m); if (_status.log.length > 40) _status.log.shift(); writeStatus();
+  if (!JSON_OUT) console.error(line);
+}
 let _emit = () => {};
 try {
   const { buildEvent } = require('../shared/events');
@@ -62,7 +78,7 @@ try {
     } catch (_) {}
   };
 } catch (_) {}
-const phase = (msg) => { log('▸ ' + msg); _emit({ event_type: 'control', payload: { action: 'update-phase', text: msg } }); };
+const phase = (msg) => { writeStatus({ phase: msg }); log('▸ ' + msg); _emit({ event_type: 'control', payload: { action: 'update-phase', text: msg } }); };
 
 // ---- shell ----
 function git(...args) { const r = spawnSync('git', ['-C', REPO, ...args], { encoding: 'utf8' }); return { code: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() }; }
@@ -89,6 +105,8 @@ function releaseLock() { try { fs.unlinkSync(LOCK); } catch (_) {} }
 
 function done(code, summary) {
   releaseLock();
+  const state = code === 0 ? 'success' : code === 2 ? 'rolled-back' : code === 4 ? 'up-to-date' : code === 6 ? 'managed' : 'failed';
+  writeStatus({ state, phase: 'done', code, to: summary.to || _status.to, message: summary.error || summary.message || null, version: version.readVersion() });
   const result = { ok: code === 0, code, ...summary };
   _emit({ event_type: code === 0 ? 'outbound' : 'control', payload: code === 0 ? { text: `update complete → ${summary.to || ''} (v${version.readVersion()})` } : { action: 'update-result', ...result } });
   if (JSON_OUT) console.log(JSON.stringify(result, null, 2));
@@ -117,6 +135,7 @@ function done(code, summary) {
 
   const fromSha = gitOut('rev-parse', '--short', 'HEAD');
   const rollbackSha = gitOut('rev-parse', 'HEAD');
+  writeStatus({ from: fromSha, version: version.readVersion(), by: BY });
   log(`update start — channel=${CHANNEL} from=${fromSha} v${version.readVersion()} by=${BY}${DRY ? ' (dry-run)' : ''}`);
   if (!DRY) _emit({ event_type: 'control', payload: { action: 'self-update-started', pid: process.pid, channel: CHANNEL } });
 
@@ -141,6 +160,7 @@ function done(code, summary) {
   if (targetSha === rollbackSha && !FORCE) { log(`already up to date (${fromSha} on ${targetLabel})`); return done(4, { message: 'up to date', from: fromSha, to: fromSha }); }
 
   const toShort = targetSha.slice(0, 7);
+  writeStatus({ to: toShort, target: targetLabel, behind });
   log(`target ${targetLabel} = ${toShort} · ${behind} commit(s) ahead`);
   if (changelog.length) log('changelog:\n  ' + changelog.join('\n  '));
 

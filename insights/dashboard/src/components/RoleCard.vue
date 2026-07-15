@@ -21,8 +21,8 @@ const r = computed(() => props.role)
         <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500" :title="r.id">{{ r.id }}</div>
       </div>
       <div class="flex shrink-0 items-center gap-1.5">
-        <span v-if="r.bypass_moderation" class="pill border border-pink-400/30 bg-pink-400/10 text-pink-300" title="bypasses moderation">⚡</span>
-        <span v-if="r.strict_mode" class="pill border border-white/10 bg-white/5 text-slate-300" title="strict mode">🔒</span>
+        <span v-if="r.bypass_moderation" class="pill border border-pink-400/30 bg-pink-400/10 text-pink-300" title="bypasses moderation"><AppIcon glyph="⚡" /></span>
+        <span v-if="r.strict_mode" class="pill border border-white/10 bg-white/5 text-slate-300" title="strict mode"><AppIcon glyph="🔒" /></span>
       </div>
     </div>
 
@@ -50,8 +50,8 @@ const r = computed(() => props.role)
     <p v-if="r.notes" class="text-xs text-slate-500">{{ r.notes }}</p>
 
     <div class="mt-1 flex items-center gap-2 border-t border-white/5 pt-3">
-      <button type="button" class="act" :disabled="busy" @click="emit('edit', r)">✎ Edit</button>
-      <button type="button" class="act-danger ml-auto" :disabled="busy" @click="emit('delete', r)">🗑 Delete</button>
+      <button type="button" class="act" :disabled="busy" @click="emit('edit', r)"><AppIcon glyph="✎" /> Edit</button>
+      <button type="button" class="act-danger ml-auto" :disabled="busy" @click="emit('delete', r)"><AppIcon glyph="🗑" /> Delete</button>
     </div>
   </div>
 </template>

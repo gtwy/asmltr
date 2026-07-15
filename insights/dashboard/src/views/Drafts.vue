@@ -38,7 +38,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   <div>
     <PageHeader title="Drafts" subtitle="Replies held for your approval before they go out">
       <template #actions>
-        <button class="glass glass-hover px-3 py-1.5 text-sm text-slate-300" @click="load()">↻ Refresh</button>
+        <button class="glass glass-hover px-3 py-1.5 text-sm text-slate-300" @click="load()"><AppIcon glyph="↻" /> Refresh</button>
       </template>
     </PageHeader>
 
@@ -58,7 +58,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         <p class="mt-2 whitespace-pre-wrap text-sm text-slate-300">{{ d.body }}</p>
 
         <div v-if="d.attachments && d.attachments.length" class="mt-2 font-mono text-[11px] text-slate-500">
-          📎 {{ d.attachments.length }} attachment(s)
+          <AppIcon glyph="📎" /> {{ d.attachments.length }} attachment(s)
         </div>
         <p v-if="d.reason" class="mt-2 font-mono text-[11px] text-slate-600">held: {{ d.reason }}</p>
 
@@ -66,7 +66,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
           <button
             class="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-40"
             :disabled="busy === d.id" @click="approve(d)"
-          >{{ busy === d.id ? '…' : '✓ Approve & send' }}</button>
+          ><template v-if="busy === d.id">…</template><template v-else><AppIcon glyph="✓" /> Approve & send</template></button>
           <button
             class="rounded bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/10 disabled:opacity-40"
             :disabled="busy === d.id" @click="discard(d)"
@@ -76,7 +76,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
     </div>
 
     <div v-else class="glass px-4 py-12 text-center">
-      <div class="mb-2 text-3xl opacity-50">✎</div>
+      <div class="mb-2 text-3xl opacity-50"><AppIcon glyph="✎" /></div>
       <p class="text-sm text-slate-400">{{ loading ? 'Loading…' : 'No drafts awaiting approval.' }}</p>
     </div>
   </div>

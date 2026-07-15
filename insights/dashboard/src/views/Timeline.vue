@@ -88,7 +88,7 @@ onMounted(() => {
             "
             @click="toggle(selectedSurfaces, s)"
           >
-            {{ surfaceMeta(s).icon }} {{ surfaceMeta(s).label }}
+            <AppIcon :glyph="surfaceMeta(s).icon" /> {{ surfaceMeta(s).label }}
           </button>
         </div>
 

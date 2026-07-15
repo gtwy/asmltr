@@ -20,7 +20,7 @@ onMounted(() => {
           class="glass glass-hover px-3 py-1.5 text-sm text-slate-300"
           @click="store.fetchNotifications()"
         >
-          ↻ Refresh
+          <AppIcon glyph="↻" /> Refresh
         </button>
       </template>
     </PageHeader>
@@ -49,7 +49,7 @@ onMounted(() => {
     </div>
 
     <div v-else class="glass px-4 py-12 text-center">
-      <div class="mb-2 text-3xl opacity-50">✦</div>
+      <div class="mb-2 text-3xl opacity-50"><AppIcon glyph="✦" /></div>
       <p class="text-sm text-slate-400">
         {{ store.loading.notifications ? 'Loading…' : 'No notifications recorded yet.' }}
       </p>

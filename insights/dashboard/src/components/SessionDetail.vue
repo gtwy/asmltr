@@ -336,14 +336,14 @@ const placeholder = computed(() => {
     <template #title>
       <div v-if="!editingTitle" class="flex min-w-0 items-center gap-1.5">
         <h2 class="truncate text-base font-bold tracking-tight"><span class="gradient-text">{{ displayTitle }}</span></h2>
-        <span v-if="titleLocked" class="shrink-0 text-[10px] text-slate-500" title="Manual title — AI won't override it">🔒</span>
+        <span v-if="titleLocked" class="shrink-0 text-[10px] text-slate-500" title="Manual title — AI won't override it"><AppIcon glyph="🔒" /></span>
         <button
           type="button"
           class="shrink-0 rounded px-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
           title="Rename this session (overrides the AI-generated title)"
           @pointerdown.stop
           @click="startEditTitle"
-        >✎</button>
+        ><AppIcon glyph="✎" /></button>
       </div>
       <div v-else class="flex min-w-0 items-center gap-1.5" @pointerdown.stop>
         <input
@@ -356,22 +356,22 @@ const placeholder = computed(() => {
           @keydown.esc.prevent="cancelEditTitle"
         />
         <button type="button" class="shrink-0 rounded bg-brand-gradient px-2 py-1 text-xs font-semibold text-white" @click="saveTitle">Save</button>
-        <button type="button" class="shrink-0 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-400 hover:text-slate-200" @click="cancelEditTitle">✕</button>
+        <button type="button" class="shrink-0 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-400 hover:text-slate-200" @click="cancelEditTitle"><AppIcon glyph="✕" /></button>
       </div>
     </template>
 
     <!-- meta strip -->
     <div class="mb-2 flex shrink-0 flex-wrap items-center gap-2 text-[11px]">
       <SurfaceBadge :surface="sess.surface" />
-      <span v-if="sess.working_dir" class="pill border border-white/10 bg-white/5 font-mono text-slate-400" :title="'working dir: ' + sess.working_dir">📂 {{ truncate(sess.working_dir, 30) }}</span>
-      <span v-if="sess.location" class="pill border border-white/10 bg-white/5 text-slate-300" :title="'origin: ' + sess.location">💬 {{ sess.location }}</span>
+      <span v-if="sess.working_dir" class="pill border border-white/10 bg-white/5 font-mono text-slate-400" :title="'working dir: ' + sess.working_dir"><AppIcon glyph="📂" /> {{ truncate(sess.working_dir, 30) }}</span>
+      <span v-if="sess.location" class="pill border border-white/10 bg-white/5 text-slate-300" :title="'origin: ' + sess.location"><AppIcon :name="['fas','comments']" /> {{ sess.location }}</span>
       <span v-if="sess.kind" class="pill border border-white/10 bg-white/5 text-slate-300">{{ sess.kind }}</span>
       <span class="flex items-center gap-1.5" :style="{ color: st.color }">
         <span class="h-2 w-2 rounded-full" :class="st.pulse ? 'animate-pulse-dot' : ''" :style="{ backgroundColor: st.color }"></span>
         {{ st.label }}
       </span>
       <span v-if="sess.tokens_total" class="pill border border-violet-400/30 bg-violet-400/10 text-violet-300">⟁ {{ fmtNum(sess.tokens_total) }} tok</span>
-      <span v-if="sess.tool_count" class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300">🛠 {{ fmtNum(sess.tool_count) }}</span>
+      <span v-if="sess.tool_count" class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300"><AppIcon glyph="🛠" /> {{ fmtNum(sess.tool_count) }}</span>
       <span v-if="sess.last_activity_unix" class="text-slate-500">last {{ fmtAge(sess.last_activity_unix, now) }}</span>
       <button
         v-if="myMutable"
@@ -381,13 +381,13 @@ const placeholder = computed(() => {
         class="pill border transition-colors disabled:opacity-40"
         :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'"
         @click="toggleMonitor"
-      >{{ monBusy ? '…' : (monitored ? '● monitored' : '○ muted') }}</button>
+      ><template v-if="monBusy">…</template><template v-else><AppIcon :glyph="monitored ? '●' : '○'" /> {{ monitored ? 'monitored' : 'muted' }}</template></button>
       <button
         type="button"
         class="pill border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
         :title="copied ? 'Copied!' : 'Copy session id'"
         @click="copyId"
-      >{{ copied ? '✓ copied' : '⧉ copy id' }}</button>
+      ><AppIcon :glyph="copied ? '✓' : '⧉'" /> {{ copied ? 'copied' : 'copy id' }}</button>
       <button
         type="button"
         :disabled="deleting"
@@ -395,7 +395,7 @@ const placeholder = computed(() => {
         :class="confirmDelete ? 'border-red-400/50 bg-red-500/20 text-red-200' : 'border-white/10 bg-white/5 text-slate-500 hover:border-red-400/40 hover:text-red-300'"
         :title="confirmDelete ? 'Click again to permanently forget this session (the next message starts a fresh one)' : 'Delete this session — remove it from tracking and clear its history; the next inbound message starts a new session'"
         @click="onDelete"
-      >{{ deleting ? '…' : (confirmDelete ? '✓ confirm delete' : '🗑 delete') }}</button>
+      ><template v-if="deleting">…</template><template v-else-if="confirmDelete"><AppIcon glyph="✓" /> confirm delete</template><template v-else><AppIcon glyph="🗑" /> delete</template></button>
     </div>
 
     <!-- transcript (fills the window) -->
@@ -414,19 +414,19 @@ const placeholder = computed(() => {
             <span>{{ r.text }}</span>
             <span v-if="r.streaming" class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse-dot rounded-sm bg-brand-violet/80 align-middle"></span>
             <span v-if="r.streaming && !r.text" class="text-slate-500">thinking…</span>
-            <span v-if="r.error" class="block text-[11px] text-rose-400/80">⚠ {{ r.error }}</span>
+            <span v-if="r.error" class="block text-[11px] text-rose-400/80"><AppIcon glyph="⚠" /> {{ r.error }}</span>
             <button
               v-if="!r.streaming && !r.error && r.text"
               type="button" title="Read this reply aloud (configured voice)"
               class="mt-1 block text-[11px] text-slate-500 transition-colors hover:text-violet-300"
               @click="readAloud(r.text)"
-            >{{ speaking ? '🔊 speaking…' : '🔊 read aloud' }}</button>
+            ><AppIcon glyph="🔊" /> {{ speaking ? 'speaking…' : 'read aloud' }}</button>
             <!-- auto-detected local files the agent created → click to download through asmltr -->
             <FileArtifacts v-if="r.text" :text="r.text" :streaming="!!r.streaming" />
           </div>
         </div>
         <div v-else class="flex items-start gap-1.5 pl-1 text-[11px] text-slate-500">
-          <span class="shrink-0 select-none opacity-80">{{ r.icon }}</span>
+          <AppIcon :glyph="r.icon" class="shrink-0 select-none opacity-80" />
           <span class="shrink-0 font-semibold uppercase tracking-wide text-slate-500/90">{{ r.label }}</span>
           <span
             v-if="r.text"
@@ -448,8 +448,8 @@ const placeholder = computed(() => {
         <div v-if="notice" class="mb-2 text-xs" :class="notice.ok ? 'text-emerald-300' : 'text-rose-300'">{{ notice.text }}</div>
         <div v-if="attached.length || uploading" class="mb-2 flex flex-wrap items-center gap-1.5">
           <span v-for="(a, i) in attached" :key="a.path" class="pill flex items-center gap-1 border border-white/10 bg-white/5 text-slate-300">
-            📎 {{ truncate(a.name, 26) }}
-            <button type="button" class="text-slate-500 hover:text-rose-300" title="remove" @click="removeAttachment(i)">✕</button>
+            <AppIcon glyph="📎" /> {{ truncate(a.name, 26) }}
+            <button type="button" class="text-slate-500 hover:text-rose-300" title="remove" @click="removeAttachment(i)"><AppIcon glyph="✕" /></button>
           </span>
           <span v-if="uploading" class="text-[11px] text-slate-500">uploading…</span>
         </div>
@@ -460,7 +460,7 @@ const placeholder = computed(() => {
             :title="isCli ? 'Send an interrupt (Escape)' : 'Abort the in-flight turn — the session survives'"
             class="shrink-0 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/20 disabled:opacity-40"
             @click="onStop"
-          >{{ isCli ? '⎋ Interrupt' : '⏹ Stop' }}</button>
+          ><template v-if="isCli">⎋ Interrupt</template><template v-else><AppIcon glyph="⏹" /> Stop</template></button>
           <button
             v-if="isWeb"
             type="button"
@@ -468,7 +468,7 @@ const placeholder = computed(() => {
             title="Attach a file — saved to the shared upload area and referenced so the agent can read it"
             class="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/10 disabled:opacity-40"
             @click="pickFile"
-          >📎</button>
+          ><AppIcon glyph="📎" /></button>
           <input ref="fileInput" type="file" multiple class="hidden" @change="onFile" />
           <!-- read replies aloud (TTS) — configured voice/model; web sessions render the reply locally -->
           <button
@@ -478,7 +478,7 @@ const placeholder = computed(() => {
             class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
             :class="ttsOn ? 'border-brand-violet/50 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
             @click="toggleTts"
-          >{{ ttsOn ? (speaking ? '🔊' : '🔊') : '🔈' }}</button>
+          ><AppIcon :glyph="ttsOn ? '🔊' : '🔈'" /></button>
           <!-- hands-free voice (STT) — streaming transcription + server VAD → auto-sends when you pause -->
           <button
             type="button"
@@ -486,7 +486,7 @@ const placeholder = computed(() => {
             class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
             :class="live ? (listening ? 'border-emerald-500/60 bg-emerald-500/20 text-emerald-200 animate-pulse' : 'border-rose-500/50 bg-rose-500/15 text-rose-200') : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
             @click="toggleMic"
-          >{{ live ? (listening ? '🎙' : '🎧') : '🎙' }}</button>
+          ><AppIcon :glyph="live ? (listening ? '🎙' : '🎧') : '🎙'" /></button>
           <textarea
             v-model="draft"
             rows="1"

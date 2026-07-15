@@ -120,7 +120,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             title="Close"
             @pointerdown.stop
             @click="emit('close')"
-          >✕</button>
+          ><AppIcon glyph="✕" /></button>
         </div>
       </header>
 

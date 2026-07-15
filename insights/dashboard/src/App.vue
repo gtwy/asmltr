@@ -1,21 +1,56 @@
 <script setup>
-import { onMounted, onUnmounted, computed, ref } from 'vue'
+import { onMounted, onUnmounted, computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useCollectorStore } from '@/stores/collector'
-import { api, update as updateApi } from '@/services/api'
+import { api, update as updateApi, identity } from '@/services/api'
 import { NAV_ROUTES } from '@/router'
 import WindowHost from '@/components/WindowHost.vue'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
+import { useUpdateProgress } from '@/composables/useUpdateProgress'
+import { useWindows } from '@/stores/windows'
 
 const store = useCollectorStore()
 const route = useRoute()
+const windows = useWindows()
 
 // Turn-complete notifications (bell toggle in the header).
 const { enabled: notifyOn, supported: notifySupported, toggle: toggleNotify } = useTurnNotifications(store)
+// Live update progress (persistent panel, survives the mid-update restart).
+const { status: updProgress, active: updActive, begin: updBegin, dismiss: updDismiss } = useUpdateProgress()
 
 const navItems = NAV_ROUTES
 
 const statusText = computed(() => (store.connected ? 'live' : 'offline'))
+
+// The configured agent's name + the running version — shown in the brand + the browser tab title, so
+// the operator always knows which agent's control plane they're looking at.
+const agentName = ref('asmltr')
+const appVersion = ref('')
+
+// Browser tab title = "<Agent> · <focused session, else active view>".
+const focusedTitle = computed(() => {
+  const top = windows.topId?.value
+  if (top) {
+    const w = windows.state.list.find((x) => x.id === top)
+    if (w) {
+      if (w.kind === 'observer') return 'Observer'
+      const p = w.payload || {}
+      return p.title || p.task || p.activity || p.identity || 'session'
+    }
+  }
+  return route.meta?.title || 'asmltr' // no window open → the active view
+})
+watch([agentName, focusedTitle], ([name, sub]) => { document.title = `${name} · ${sub}` }, { immediate: true })
+
+// Progress state → human copy for the panel.
+const UPD_STATE_COPY = {
+  running: { label: 'Updating…', tone: 'violet' }, restarting: { label: 'Restarting services…', tone: 'violet' },
+  success: { label: 'Update complete', tone: 'emerald' }, 'rolled-back': { label: 'Update failed — rolled back to the previous build', tone: 'amber' },
+  failed: { label: 'Update failed — manual intervention needed', tone: 'rose' }, 'up-to-date': { label: 'Already up to date', tone: 'emerald' },
+  managed: { label: 'Managed externally', tone: 'slate' },
+}
+const updCopy = computed(() => UPD_STATE_COPY[updProgress.value.state] || { label: updProgress.value.state, tone: 'slate' })
+const updTerminal = computed(() => ['success', 'rolled-back', 'failed', 'up-to-date', 'managed'].includes(updProgress.value.state))
 
 // --- self-update banner ---
 const upd = ref({ available: false, behind: 0, changelog: [] })
@@ -29,10 +64,15 @@ async function loadUpd() {
 }
 async function runUpdate() {
   updBusy.value = true
+  updBegin() // show the progress panel immediately, before the updater's first status write
   try { await updateApi.run(); updStarted.value = true } catch (_) {}
   updBusy.value = false
 }
 async function toggleAuto() { try { auto.value = (await updateApi.setAuto(!auto.value)).auto } catch (_) {} }
+async function loadIdentityVersion() {
+  try { const id = await identity.get(); if (id && id.name) agentName.value = id.name } catch (_) {}
+  try { const s = await updateApi.status(false); if (s && s.version) appVersion.value = s.version } catch (_) {}
+}
 
 onMounted(() => {
   store.connectSocket()
@@ -41,6 +81,7 @@ onMounted(() => {
   store.fetchSessions()
   store.fetchBrief()
   loadUpd()
+  loadIdentityVersion()
   updTimer = setInterval(loadUpd, 90000)
 })
 
@@ -57,14 +98,14 @@ onUnmounted(() => {
       class="lg:sticky lg:top-0 lg:h-screen lg:w-60 lg:shrink-0 lg:border-r lg:border-white/10 lg:bg-black/20 lg:backdrop-blur-xl"
     >
       <div class="flex items-center justify-between px-4 py-4 lg:flex-col lg:items-stretch lg:gap-6">
-        <!-- Brand -->
+        <!-- Brand — the configured AGENT's name, so you always know whose control plane this is -->
         <div class="flex items-center gap-3">
           <img src="/logo.svg" alt="asmltr" class="h-9 w-9 drop-shadow-[0_2px_8px_rgba(139,92,246,0.35)]" />
           <div class="leading-tight">
             <div class="text-sm font-bold tracking-tight">
-              <span class="gradient-text">asmltr</span> insights
+              <span class="gradient-text">{{ agentName }}</span>
             </div>
-            <div class="text-[11px] text-slate-400">observability plane</div>
+            <div class="text-[11px] text-slate-400">asmltr control plane</div>
           </div>
         </div>
 
@@ -77,7 +118,7 @@ onUnmounted(() => {
             class="rounded-lg border px-2 py-1 text-sm transition-colors"
             :class="notifyOn ? 'border-brand-violet/50 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-400 hover:text-slate-200'"
             @click="toggleNotify"
-          >{{ notifyOn ? '🔔' : '🔕' }}</button>
+          ><AppIcon :glyph="notifyOn ? '🔔' : '🔕'" /></button>
           <div class="flex items-center gap-2 lg:hidden">
             <span
               class="h-2 w-2 rounded-full"
@@ -99,11 +140,11 @@ onUnmounted(() => {
           class="group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-white/5"
           :class="route.name === item.name ? 'bg-white/[0.07] text-white gradient-border' : ''"
         >
-          <span
-            class="text-base"
+          <AppIcon
+            :glyph="item.meta.icon"
+            class="w-5 text-base"
             :class="route.name === item.name ? 'gradient-text' : 'text-slate-500 group-hover:text-slate-300'"
-            >{{ item.meta.icon }}</span
-          >
+          />
           <span class="whitespace-nowrap">{{ item.meta.title }}</span>
         </RouterLink>
       </nav>
@@ -118,7 +159,7 @@ onUnmounted(() => {
             ></span>
             <span class="text-xs text-slate-300">collector {{ statusText }}</span>
           </div>
-          <span class="text-[11px] text-slate-500">:3017</span>
+          <span v-if="appVersion" class="font-mono text-[11px] text-slate-500" title="asmltr version">v{{ appVersion }}</span>
         </div>
         <p v-if="store.lastError" class="mt-2 truncate text-[10px] text-rose-400/80" :title="store.lastError">
           {{ store.lastError }}
@@ -128,9 +169,30 @@ onUnmounted(() => {
 
     <!-- Main -->
     <main class="min-w-0 flex-1 px-4 py-5 lg:px-8 lg:py-7">
+      <!-- LIVE update progress (persistent; survives the mid-update service restart) -->
+      <div v-if="updActive" class="glass mb-4 border px-4 py-3"
+           :class="{ 'border-brand-violet/40 bg-brand-violet/10': ['violet'].includes(updCopy.tone), 'border-emerald-400/40 bg-emerald-500/10': updCopy.tone==='emerald', 'border-amber-400/40 bg-amber-500/10': updCopy.tone==='amber', 'border-rose-400/40 bg-rose-500/10': updCopy.tone==='rose', 'border-white/10': updCopy.tone==='slate' }">
+        <div class="flex items-center gap-3">
+          <span v-if="!updTerminal" class="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-brand-violet/30 border-t-brand-violet"></span>
+          <AppIcon v-else class="text-lg leading-none" :glyph="updProgress.state==='success' || updProgress.state==='up-to-date' ? '✓' : updProgress.state==='rolled-back' ? '↩' : updProgress.state==='managed' ? 'ⓘ' : '✗'" />
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-semibold"
+               :class="{ 'text-violet-200': updCopy.tone==='violet', 'text-emerald-200': updCopy.tone==='emerald', 'text-amber-200': updCopy.tone==='amber', 'text-rose-200': updCopy.tone==='rose', 'text-slate-200': updCopy.tone==='slate' }">
+              {{ updCopy.label }}
+              <span v-if="updProgress.from" class="ml-1 font-mono text-[11px] font-normal text-slate-400">{{ updProgress.from }}{{ updProgress.to ? ' → ' + updProgress.to : '' }}</span>
+              <span v-if="updProgress.version && updTerminal" class="ml-1 text-[11px] font-normal text-slate-400">v{{ updProgress.version }}</span>
+            </p>
+            <p v-if="!updTerminal && updProgress.phase" class="mt-0.5 truncate text-[12px] text-slate-400"><AppIcon glyph="›" class="mr-1 opacity-70" />{{ updProgress.phase }}</p>
+            <p v-if="updProgress.message && updTerminal" class="mt-0.5 text-[12px] text-slate-400">{{ updProgress.message }}</p>
+          </div>
+          <button v-if="updTerminal" type="button" class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10" @click="updDismiss">Dismiss</button>
+        </div>
+        <pre v-if="updProgress.log && updProgress.log.length" class="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/30 p-2 font-mono text-[10.5px] leading-relaxed text-slate-400">{{ updProgress.log.slice(-6).join('\n') }}</pre>
+      </div>
+
       <!-- self-update banner -->
       <div v-if="upd.available" class="glass mb-4 flex flex-wrap items-center gap-3 border border-violet-400/30 bg-violet-500/10 px-4 py-3">
-        <span class="text-lg">⬆</span>
+        <AppIcon glyph="⬆" class="text-lg text-violet-300" />
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold text-violet-200">A newer asmltr is available — {{ upd.behind }} new commit{{ upd.behind === 1 ? '' : 's' }}.</p>
           <p v-if="upd.changelog && upd.changelog.length" class="mt-0.5 truncate font-mono text-[11px] text-slate-400" :title="upd.changelog.join('\n')">

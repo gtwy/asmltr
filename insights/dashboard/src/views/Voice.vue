@@ -70,7 +70,7 @@ function stop() { try { ctrl?.abort() } catch (_) {} stopAllAudio(); busy.value 
           :class="ackOn ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-white/10 bg-white/5 text-slate-400'"
           :title="ackOn ? 'A short spoken “on it” plays while the agent works. Click to turn off.' : 'No spoken acknowledgment. Click to turn on.'"
           @click="toggleAck"
-        >{{ ackOn ? '● spoken ack on' : '○ spoken ack off' }}</button>
+        ><AppIcon :glyph="ackOn ? '●' : '○'" /> {{ ackOn ? 'spoken ack on' : 'spoken ack off' }}</button>
       </template>
     </PageHeader>
 
@@ -89,13 +89,13 @@ function stop() { try { ctrl?.abort() } catch (_) {} stopAllAudio(); busy.value 
             :disabled="busy || !prompt.trim()"
             class="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity disabled:opacity-40"
             @click="speak"
-          >▶ Speak</button>
+          ><AppIcon glyph="▶" /> Speak</button>
           <button
             v-if="busy"
             type="button"
             class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-500/20"
             @click="stop"
-          >⏹ Stop</button>
+          ><AppIcon glyph="⏹" /> Stop</button>
           <span class="ml-auto text-xs text-slate-500">{{ status }}</span>
         </div>
       </div>

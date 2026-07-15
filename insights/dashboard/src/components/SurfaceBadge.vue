@@ -20,7 +20,7 @@ const meta = computed(() => surfaceMeta(props.surface))
     }"
   >
     <span v-if="dot" class="h-1.5 w-1.5 rounded-full" :style="{ backgroundColor: meta.color }"></span>
-    <span v-else aria-hidden="true">{{ meta.icon }}</span>
+    <AppIcon v-else :glyph="meta.icon" aria-hidden="true" />
     {{ meta.label }}
   </span>
 </template>

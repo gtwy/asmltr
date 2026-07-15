@@ -110,7 +110,7 @@ async function removeGrant(gid) {
           }"
           :title="`${id.surface}: ${id.value}`"
         >
-          <span aria-hidden="true">{{ idMeta(id.surface).icon }}</span>
+          <AppIcon :glyph="idMeta(id.surface).icon" aria-hidden="true" />
           <span class="font-mono text-[11px]">{{ id.value }}</span>
           <button
             type="button"
@@ -118,7 +118,7 @@ async function removeGrant(gid) {
             :aria-label="`remove identifier ${id.value}`"
             @click="removeIdentifier(id.id)"
           >
-            ✕
+            <AppIcon glyph="✕" />
           </button>
         </span>
       </div>
@@ -159,15 +159,15 @@ async function removeGrant(gid) {
             <span v-if="grantCounts(g).r" class="text-[11px] text-amber-300/80">{{ grantCounts(g).r }} appr</span>
             <span v-if="grantCounts(g).f" class="text-[11px] text-rose-300/80">{{ grantCounts(g).f }} forbid</span>
           </template>
-          <span v-if="g.bypass_moderation" class="text-[11px] text-pink-300/80" title="bypasses moderation">⚡bypass</span>
-          <span v-if="g.strict_mode" class="text-[11px] text-slate-400" title="strict mode">🔒strict</span>
+          <span v-if="g.bypass_moderation" class="text-[11px] text-pink-300/80" title="bypasses moderation"><AppIcon glyph="⚡" />bypass</span>
+          <span v-if="g.strict_mode" class="text-[11px] text-slate-400" title="strict mode"><AppIcon glyph="🔒" />strict</span>
           <button
             type="button"
             class="ml-auto shrink-0 rounded-md border border-rose-500/20 bg-rose-500/5 px-1.5 py-0.5 text-[10px] text-rose-400/80 transition-colors hover:bg-rose-500/15"
             :aria-label="`remove grant ${g.id}`"
             @click="removeGrant(g.id)"
           >
-            ✕
+            <AppIcon glyph="✕" />
           </button>
         </div>
       </div>
@@ -176,7 +176,7 @@ async function removeGrant(gid) {
 
     <!-- action row -->
     <div class="mt-1 flex flex-wrap items-center gap-2 border-t border-white/5 pt-3">
-      <button type="button" class="act" :disabled="isBusy" @click="emit('edit', p)">✎ Edit</button>
+      <button type="button" class="act" :disabled="isBusy" @click="emit('edit', p)"><AppIcon glyph="✎" /> Edit</button>
       <button type="button" class="act" :disabled="isBusy" title="Merge this user into another (combine split records)" @click="emit('merge', p)">
         {{ busy === 'merge' ? '…' : '⤵ Merge' }}
       </button>
@@ -186,7 +186,7 @@ async function removeGrant(gid) {
         :disabled="isBusy"
         @click="emit('delete', p)"
       >
-        {{ busy === 'delete' ? '…' : '🗑 Delete' }}
+        <template v-if="busy === 'delete'">…</template><template v-else><AppIcon glyph="🗑" /> Delete</template>
       </button>
     </div>
   </div>
