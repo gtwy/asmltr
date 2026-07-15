@@ -228,13 +228,20 @@ async function generateSelfAssessment(digest) {
     'assistant\'s proprioception: a NEUTRAL inner observer of the WHOLE. Read the snapshot and reflect.\n\n' +
     'Reply with ONLY a JSON object, no preamble, no code fence, exactly this shape:\n' +
     '{\n' +
-    '  "goal": "<one honest sentence: what the whole seems to be working toward right now, or \'no single goal — the parts are unrelated\' if they genuinely are>",\n' +
+    '  "goal": "<one honest sentence naming the THROUGH-LINE the parts share — climb to whatever altitude ' +
+    'makes them cohere: a specific shared aim if they have one, else the common subject, domain, or mode of ' +
+    'work (e.g. \'advancing the platform on several fronts\', \'supporting the operator\'s current priorities\'). ' +
+    'A single part\'s aim IS the goal. Only say \'no shared thread yet — the parts are genuinely unrelated\' ' +
+    'when there is truly no common subject, domain, or direction.>",\n' +
     '  "threads": ["<short phrase per distinct workstream in flight>"],\n' +
     '  "flags": ["<short phrase per tension worth noticing: duplication, drift, two parts on the same file, a stuck part — [] if none>"],\n' +
     '  "relations": [{"a": <part number>, "b": <part number>, "rel": "feeds|duplicates|same-subject|loops-back"}]\n' +
     '}\n' +
     'Rules: deduce, do not instruct — this is a mirror, never advice. Reference parts only by their [n]. ' +
-    'If two parts are unrelated, do not invent a relation. Keep every phrase under 10 words.\n\n---\n' +
+    'For the GOAL, actively look for the loosest honest through-line before concluding there is none — parts ' +
+    'usually share a subject, a domain, a mode, or a direction of travel even when they look different on the ' +
+    'surface; name that rather than giving up. "Unrelated" is a rare last resort, not a default. RELATIONS are ' +
+    'stricter: never invent an edge between two parts that are genuinely unrelated. Keep threads/flags under 10 words each.\n\n---\n' +
     String(digest || '').slice(0, 8000);
   const options = {
     stream: true, permissionMode: 'bypassPermissions', model, maxTurns: 1,
