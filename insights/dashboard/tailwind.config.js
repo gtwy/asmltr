@@ -4,9 +4,11 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Driven by CSS vars (RGB channels) so the identity "signature colors" can retheme the UI
+        // live. Channels (not hex) keep Tailwind's `/opacity` modifiers working. Defaults in main.css.
         brand: {
-          violet: '#8B5CF6',
-          pink: '#EC4899'
+          violet: 'rgb(var(--brand-violet) / <alpha-value>)',
+          pink: 'rgb(var(--brand-pink) / <alpha-value>)'
         }
       },
       fontFamily: {
@@ -14,7 +16,7 @@ export default {
         mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace']
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)'
+        'brand-gradient': 'linear-gradient(135deg, rgb(var(--brand-violet)) 0%, rgb(var(--brand-pink)) 100%)'
       },
       borderRadius: {
         '2xl': '1rem'

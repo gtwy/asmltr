@@ -5,6 +5,12 @@
 @tailwind utilities;
 
 @layer base {
+  /* Brand colors as RGB channels — the identity "signature colors" override these live at runtime
+     (useBrandTheme). Defaults = Eve's violet/pink. */
+  :root {
+    --brand-violet: 139 92 246;
+    --brand-pink: 236 72 153;
+  }
   html,
   body,
   #app {
@@ -13,8 +19,8 @@
   body {
     @apply bg-[#0a0a12] text-slate-200 font-sans antialiased;
     background-image:
-      radial-gradient(900px circle at 12% -10%, rgba(139, 92, 246, 0.16), transparent 55%),
-      radial-gradient(900px circle at 100% 0%, rgba(236, 72, 153, 0.12), transparent 50%);
+      radial-gradient(900px circle at 12% -10%, rgb(var(--brand-violet) / 0.16), transparent 55%),
+      radial-gradient(900px circle at 100% 0%, rgb(var(--brand-pink) / 0.12), transparent 50%);
     background-attachment: fixed;
   }
 }
@@ -40,7 +46,7 @@
     inset: 0;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(135deg, #8b5cf6, #ec4899);
+    background: linear-gradient(135deg, rgb(var(--brand-violet)), rgb(var(--brand-pink)));
     -webkit-mask:
       linear-gradient(#fff 0 0) content-box,
       linear-gradient(#fff 0 0);
