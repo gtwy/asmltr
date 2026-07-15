@@ -359,6 +359,21 @@ app.post('/api/control/stop', requireControl, (req, res) => {
   io.emit('control', { action: 'stop', target: req.body.session_id, ok: r.ok });
   res.status(r.ok ? 200 : 400).json(r);
 });
+// Forget/delete a session: remove it from tracking + purge its events (collector), AND clear the
+// core's engine mapping so the next inbound on this key starts a FRESH session with new history.
+// For channel sessions the collector session_id IS the core conversation_key.
+app.post('/api/control/forget', requireControl, async (req, res) => {
+  const { session_id } = req.body || {};
+  if (!session_id) return res.status(400).json({ error: 'session_id required' });
+  const r = control.forget(session_id, req.actor);
+  if (r.ok) {
+    try { await fetch(CORE_BASE + '/v2/session/forget', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_key: session_id, by: req.actor || 'dashboard' }) }); }
+    catch (e) { console.warn('[forget] core notify failed:', e.message); } // local (non-channel) sessions have no core row — fine
+    io.emit('sessions-changed', {});
+  }
+  io.emit('control', { action: 'forget', target: session_id, ok: r.ok });
+  res.status(r.ok ? 200 : 400).json(r);
+});
 // inject into a tmux-backed `asmltr claude` session (steer / interrupt)
 app.post('/api/control/send-keys', requireControl, (req, res) => {
   const { session_id, text, keys, enter } = req.body || {};

@@ -743,6 +743,20 @@ app.post('/v2/self-assessment', async (req, res) => {
   finally { _assessBusy = false; }
 });
 
+// Forget a session — delete its engine mapping so the NEXT inbound on this conversation_key starts
+// a FRESH session (new history), abort any in-flight turn, and drop its buffered observed context.
+// The dashboard "delete session" button calls this (the collector purges its own row + events).
+app.post('/v2/session/forget', (req, res) => {
+  const key = req.body && req.body.conversation_key;
+  if (!key) return res.status(400).json({ error: 'conversation_key required' });
+  const ac = inFlight.get(key); if (ac) { try { ac.abort(); } catch (_) {} }
+  observed.delete(key);
+  const existed = sessions.remove(key);
+  record({ surface: String(key).split(':')[0] || 'core', session_id: key, event_type: 'control',
+    source: 'core', payload: { action: 'forgotten', by: (req.body && req.body.by) || 'dashboard' } });
+  res.json({ ok: true, existed });
+});
+
 // --- self-update ------------------------------------------------------------
 app.get('/v2/update/status', async (req, res) => res.json(await selfUpdate.getUpdateStatus({ fetch: req.query.fetch !== '0' })));
 app.get('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.isAutoUpdate() }));
