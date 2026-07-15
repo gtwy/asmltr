@@ -11,8 +11,17 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Added
 
 ### Changed
+- **Standardized on Node 24 LTS** (issue #21). `engines.node` raised to `>=24.0.0` across the root +
+  every workspace, a root `.nvmrc` pinning `24`, and the dashboard build image bumped
+  `node:20-alpine → node:24-alpine`. Clears the `EBADENGINE` from `@discordjs/voice@0.19.2`
+  (needs `>=22.12`); docs updated from ">= 18".
+- **Turn-complete notification toggle moved to Settings → Notifications.** The sidebar header no
+  longer carries the toggle; it lives in a GUI-only Settings tab (with permission state + a link to
+  the history page). The ✦ Notifications nav item still shows notification history.
 
 ### Fixed
+- **Documented `ASMLTR_UPDATE_MANAGED` in `.env.example`** (issue #23) — the managed-mode work (#18)
+  added the variable but not the example entry CLAUDE.md calls for.
 
 ## [0.3.0] - 2026-07-15
 
