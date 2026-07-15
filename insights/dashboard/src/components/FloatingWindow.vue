@@ -10,9 +10,12 @@ const props = defineProps({
   subtitle: { type: String, default: '' },
   storageKey: { type: String, default: 'asmltr:floatwin' },
   minW: { type: Number, default: 380 },
-  minH: { type: Number, default: 320 }
+  minH: { type: Number, default: 320 },
+  z: { type: Number, default: 70 },            // stacking order (window manager bumps it on focus)
+  focused: { type: Boolean, default: true },   // frontmost window — only it closes on Esc + gets the ring
+  minimized: { type: Boolean, default: false } // hidden (kept mounted so chat state survives), shown in the taskbar
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'minimize', 'focus'])
 
 const DEFAULT = { w: 660, h: 580 }
 const pos = ref({ x: 0, y: 0 })
@@ -36,9 +39,10 @@ onMounted(() => {
     pos.value = { x: saved.x, y: saved.y }
     size.value = { w: saved.w || DEFAULT.w, h: saved.h || DEFAULT.h }
   } else {
-    // first open: center in the viewport
+    // first open: center, then cascade by stacking order so multiple new windows don't perfectly overlap
     size.value = { w: Math.min(DEFAULT.w, window.innerWidth - 24), h: Math.min(DEFAULT.h, window.innerHeight - 24) }
-    pos.value = { x: Math.max(8, (window.innerWidth - size.value.w) / 2), y: Math.max(8, (window.innerHeight - size.value.h) / 2) }
+    const step = ((props.z % 6)) * 30
+    pos.value = { x: Math.max(8, (window.innerWidth - size.value.w) / 2 + step), y: Math.max(8, (window.innerHeight - size.value.h) / 2 + step) }
   }
   clamp()
   window.addEventListener('resize', clamp)
@@ -71,7 +75,7 @@ function onUp() {
   persist()
 }
 
-function onKey(e) { if (e.key === 'Escape') emit('close') }
+function onKey(e) { if (e.key === 'Escape' && props.focused && !props.minimized) emit('close') }
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
@@ -79,8 +83,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 <template>
   <Teleport to="body">
     <div
-      class="glass fixed z-[70] flex flex-col overflow-hidden shadow-2xl shadow-black/50"
-      :style="{ left: pos.x + 'px', top: pos.y + 'px', width: size.w + 'px', height: size.h + 'px' }"
+      v-show="!minimized"
+      class="glass fixed flex flex-col overflow-hidden shadow-2xl shadow-black/50 transition-shadow"
+      :class="focused ? 'ring-1 ring-brand-violet/40' : 'ring-1 ring-transparent'"
+      :style="{ left: pos.x + 'px', top: pos.y + 'px', width: size.w + 'px', height: size.h + 'px', zIndex: z }"
+      @pointerdown="emit('focus')"
     >
       <!-- header (drag handle) -->
       <header
@@ -96,13 +103,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           </div>
           <p v-if="subtitle" class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{{ subtitle }}</p>
         </div>
-        <button
-          type="button"
-          class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-sm text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
-          title="Close"
-          @pointerdown.stop
-          @click="emit('close')"
-        >✕</button>
+        <div class="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            class="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-sm text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
+            title="Minimize"
+            @pointerdown.stop
+            @click="emit('minimize')"
+          >—</button>
+          <button
+            type="button"
+            class="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-sm text-slate-400 transition-colors hover:bg-rose-500/20 hover:text-rose-200"
+            title="Close"
+            @pointerdown.stop
+            @click="emit('close')"
+          >✕</button>
+        </div>
       </header>
 
       <!-- body (fills remaining height; child manages its own scroll) -->

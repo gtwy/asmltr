@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { useCollectorStore } from '@/stores/collector'
 import { api, update as updateApi } from '@/services/api'
 import { NAV_ROUTES } from '@/router'
+import WindowHost from '@/components/WindowHost.vue'
 
 const store = useCollectorStore()
 const route = useRoute()
@@ -137,5 +138,8 @@ onUnmounted(() => {
         </Transition>
       </RouterView>
     </main>
+
+    <!-- floating chat windows (session chats + the observer) live here, above everything -->
+    <WindowHost />
   </div>
 </template>

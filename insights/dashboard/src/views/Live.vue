@@ -3,19 +3,17 @@ import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
 import PageHeader from '@/components/PageHeader.vue'
 import SessionCard from '@/components/SessionCard.vue'
-import SessionDetail from '@/components/SessionDetail.vue'
 import ModalShell from '@/components/ModalShell.vue'
 import StatTile from '@/components/StatTile.vue'
 import { fmtNum, surfaceMeta } from '@/lib/format'
 import { manager } from '@/services/manager'
 import { api } from '@/services/api'
+import { useWindows } from '@/stores/windows'
 
 const store = useCollectorStore()
+const windows = useWindows()
 const now = ref(Date.now())
 let ticker = null
-
-// which session's details pane is open (a snapshot — its history streams live)
-const selected = ref(null)
 
 // --- new web session ---------------------------------------------------------
 // Start a fresh session right from the browser: the dashboard acts as a connector
@@ -31,7 +29,7 @@ function openNew() { newWorkdir.value = ''; newOpen.value = true }
 function startNew() {
   const uuid = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.floor(Math.random() * 1e6))
   const wd = newWorkdir.value.trim()
-  selected.value = {
+  windows.openSession({
     session_id: `web:${uuid}`,
     surface: 'eve-assistant-web',
     kind: 'ephemeral',
@@ -45,7 +43,7 @@ function startNew() {
     last_activity_unix: Date.now(),
     tokens_total: 0,
     tool_count: 0
-  }
+  })
   newOpen.value = false
 }
 
@@ -288,7 +286,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         v-if="ephemeral.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :mutable="mutableBySession[s.session_id]" :channel-state="channelStates[mutableBySession[s.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[s.session_id]?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
+        <SessionCard v-for="s in ephemeral" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :mutable="mutableBySession[s.session_id]" :channel-state="channelStates[mutableBySession[s.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[s.session_id]?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="windows.openSession($event)" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No ephemeral sessions right now.
@@ -306,14 +304,10 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         v-if="persistent.length"
         class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
       >
-        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :mutable="mutableBySession[s.session_id]" :channel-state="channelStates[mutableBySession[s.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[s.session_id]?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="selected = $event" @toggle-channel="toggleChannel" />
+        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :mutable="mutableBySession[s.session_id]" :channel-state="channelStates[mutableBySession[s.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[s.session_id]?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="windows.openSession($event)" @toggle-channel="toggleChannel" />
       </div>
       <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
         No persistent daemons registered.
       </p>
-    </section>
-
-    <!-- conversation details + takeover pane -->
-    <SessionDetail v-if="selected" :session="selected" :now="now" :mutable="mutableBySession[selected.session_id]" :channel-state="channelStates[mutableBySession[selected.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[selected.session_id]?.channelId]" @close="selected = null" @toggle-channel="toggleChannel" @channel-toggled="loadMuteState" />
-  </div>
+    </section>  </div>
 </template>

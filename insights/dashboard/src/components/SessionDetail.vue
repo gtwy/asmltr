@@ -20,9 +20,13 @@ const props = defineProps({
   now: { type: Number, default: () => Date.now() },
   mutable: { type: Object, default: null }, // { instanceId, channelId, label } if this session's channel can be muted
   channelState: { type: Boolean, default: undefined },
-  channelBusy: { type: Boolean, default: false }
+  channelBusy: { type: Boolean, default: false },
+  // floating-window manager props (forwarded to FloatingWindow)
+  z: { type: Number, default: 70 },
+  focused: { type: Boolean, default: true },
+  minimized: { type: Boolean, default: false }
 })
-const emit = defineEmits(['close', 'toggle-channel', 'channel-toggled'])
+const emit = defineEmits(['close', 'toggle-channel', 'channel-toggled', 'minimize', 'focus'])
 
 const store = useCollectorStore()
 const key = computed(() => props.session.session_id)
@@ -297,7 +301,8 @@ const placeholder = computed(() => {
 </script>
 
 <template>
-  <FloatingWindow storage-key="asmltr:sessionwin" :subtitle="key" @close="$emit('close')">
+  <FloatingWindow :storage-key="'asmltr:win:' + key" :subtitle="key" :z="z" :focused="focused" :minimized="minimized"
+                  @close="$emit('close')" @minimize="$emit('minimize')" @focus="$emit('focus')">
     <!-- editable title -->
     <template #title>
       <div v-if="!editingTitle" class="flex min-w-0 items-center gap-1.5">
