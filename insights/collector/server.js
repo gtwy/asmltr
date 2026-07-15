@@ -231,6 +231,13 @@ function _repoRoot(dir) {
   _repoCache.set(dir, root);
   return root;
 }
+// Console manifest — the ONE declarative source of truth for control surfaces (settings + actions +
+// screens), consumed by both the web dashboard and the terminal TUI. Add a setting/action there → both.
+app.get('/api/manifest', requireToken, (req, res) => {
+  try { res.json(require('../../shared/console-manifest')); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Proprioception — the body-schema graph (parts + structural edges). The live vital sign.
 const selfSchema = require('./self-schema');
 app.get('/api/self/schema', requireToken, (req, res) => {
