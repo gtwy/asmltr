@@ -6,6 +6,9 @@
 >
 > Companion doc: [CAST.md](CAST.md) — the outward-facing identity/relationships model (how an
 > assistant knows, verifies, and relates to the others in its world) and the distributed trust ledger.
+>
+> **New here?** Start with the plain-language overview: [how-it-works.md](how-it-works.md) — the whole
+> picture (self, others, proprioception, awareness, the cast, trust) in human terms, no jargon.
 
 ## The one-sentence thesis
 

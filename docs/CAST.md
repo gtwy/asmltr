@@ -4,6 +4,9 @@
 > companion to [FEDERATION.md](FEDERATION.md) and the proprioception/Self work. Where FEDERATION
 > describes *how sovereign instances collaborate*, this describes *how an assistant knows, verifies,
 > and relates to the others in its world* — human and machine — and where that trust comes from.
+>
+> **New here?** Start with the plain-language overview: [how-it-works.md](how-it-works.md) — self,
+> others, proprioception, awareness, the cast, and trust, in human terms with no jargon.
 
 ## The one-sentence thesis
 
