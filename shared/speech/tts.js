@@ -12,16 +12,42 @@
  *   ASMLTR_TTS_PROVIDER (openai) · ASMLTR_TTS_VOICE (alloy) · ASMLTR_TTS_MODEL (tts-1)
  *   ASMLTR_TTS_FORMAT (mp3) · ASMLTR_TTS_KEY_NAME (openai_api_key)
  */
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const secrets = require('../secrets');
 
+// GUI/TUI-set voice + model persist to the asmltr state dir (like the agent model selection), so a
+// change applies on the NEXT synthesized clip with no restart. Persisted values win over env defaults.
+function stateDir() {
+  const d = process.env.ASMLTR_STATE_DIR || path.join(os.homedir(), '.asmltr');
+  try { fs.mkdirSync(d, { recursive: true }); } catch (_) {}
+  return d;
+}
+const cfgFile = () => path.join(stateDir(), 'tts-config');
+function persisted() { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')) || {}; } catch (_) { return {}; } }
+
 function config() {
+  const p = persisted();
   return {
-    provider: process.env.ASMLTR_TTS_PROVIDER || 'openai',
-    voice: process.env.ASMLTR_TTS_VOICE || 'alloy',
-    model: process.env.ASMLTR_TTS_MODEL || 'tts-1',
-    format: process.env.ASMLTR_TTS_FORMAT || 'mp3',
+    provider: p.provider || process.env.ASMLTR_TTS_PROVIDER || 'openai',
+    voice: p.voice || process.env.ASMLTR_TTS_VOICE || 'alloy',
+    model: p.model || process.env.ASMLTR_TTS_MODEL || 'tts-1',
+    format: p.format || process.env.ASMLTR_TTS_FORMAT || 'mp3',
     keyName: process.env.ASMLTR_TTS_KEY_NAME || 'openai_api_key',
   };
+}
+
+// Persist a partial override ({voice, model, provider, format}). '' clears a key back to the env default.
+function setConfig(partial) {
+  const next = persisted();
+  for (const k of ['provider', 'voice', 'model', 'format']) {
+    if (!partial || partial[k] === undefined) continue;
+    if (partial[k] === '' || partial[k] === null) delete next[k];
+    else next[k] = String(partial[k]);
+  }
+  try { fs.writeFileSync(cfgFile(), JSON.stringify(next)); } catch (_) {}
+  return config();
 }
 
 function mimeFor(fmt) {
@@ -60,4 +86,4 @@ async function synthesize(text, overrides = {}, onChunk) {
   throw new Error(`unknown TTS provider: ${opts.provider}`);
 }
 
-module.exports = { synthesize, config, mimeFor };
+module.exports = { synthesize, config, setConfig, mimeFor };

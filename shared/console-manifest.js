@@ -91,12 +91,49 @@ const manifest = {
     },
     {
       id: 'voice', label: 'Voice', icon: '🎙',
+      desc: 'Text-to-speech (how replies are spoken) and speech-to-text (how your voice is transcribed). Uses real models via the OpenAI key; changes apply to the next clip with no restart.',
+      load: { service: 'core', method: 'GET', path: '/v2/voice/config' }, // { tts:{voice,model,…}, stt:{model,…} }
       fields: [
         {
           id: 'ack', label: 'Spoken acknowledgment', type: 'toggle',
           load: { service: 'core', method: 'GET', path: '/v2/voice/ack' }, get: 'enabled',
           desc: 'A short spoken "on it" plays while the agent works, so a long turn isn\'t silent.',
           set: { service: 'core', method: 'POST', path: '/v2/voice/ack', body: { enabled: '{value}' } },
+        },
+        {
+          id: 'tts_voice', label: 'TTS voice', type: 'choice', get: 'tts.voice', allowCustom: true,
+          desc: 'The spoken voice for read-aloud replies.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { voice: '{value}' } } },
+          choices: [
+            { id: 'alloy', label: 'Alloy', hint: 'neutral, balanced' },
+            { id: 'nova', label: 'Nova', hint: 'warm, bright' },
+            { id: 'shimmer', label: 'Shimmer', hint: 'soft, expressive' },
+            { id: 'echo', label: 'Echo', hint: 'measured, calm' },
+            { id: 'fable', label: 'Fable', hint: 'storytelling' },
+            { id: 'onyx', label: 'Onyx', hint: 'deep, grounded' },
+            { id: 'coral', label: 'Coral', hint: 'friendly, lively' },
+            { id: 'sage', label: 'Sage', hint: 'gentle, even' },
+          ],
+        },
+        {
+          id: 'tts_model', label: 'TTS model', type: 'choice', get: 'tts.model',
+          desc: 'Quality vs. latency for speech synthesis.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { model: '{value}' } } },
+          choices: [
+            { id: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts', hint: 'newest, steerable (recommended)' },
+            { id: 'tts-1', label: 'tts-1', hint: 'fast, lowest latency' },
+            { id: 'tts-1-hd', label: 'tts-1-hd', hint: 'higher fidelity' },
+          ],
+        },
+        {
+          id: 'stt_model', label: 'STT model (transcription)', type: 'choice', get: 'stt.model',
+          desc: 'The model that turns your microphone audio into text (voice input in the chat).',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { model: '{value}' } } },
+          choices: [
+            { id: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe', hint: 'most accurate (recommended)' },
+            { id: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe', hint: 'faster, cheaper' },
+            { id: 'whisper-1', label: 'whisper-1', hint: 'classic Whisper' },
+          ],
         },
       ],
     },

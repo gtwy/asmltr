@@ -5,9 +5,13 @@ import { useCollectorStore } from '@/stores/collector'
 import { api, update as updateApi } from '@/services/api'
 import { NAV_ROUTES } from '@/router'
 import WindowHost from '@/components/WindowHost.vue'
+import { useTurnNotifications } from '@/composables/useTurnNotifications'
 
 const store = useCollectorStore()
 const route = useRoute()
+
+// Turn-complete notifications (bell toggle in the header).
+const { enabled: notifyOn, supported: notifySupported, toggle: toggleNotify } = useTurnNotifications(store)
 
 const navItems = NAV_ROUTES
 
@@ -64,13 +68,23 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Connection pill (mobile, inline) -->
-        <div class="flex items-center gap-2 lg:hidden">
-          <span
-            class="h-2 w-2 rounded-full"
-            :class="store.connected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-rose-500'"
-          ></span>
-          <span class="text-xs text-slate-400">{{ statusText }}</span>
+        <!-- right side: notifications bell + (mobile) connection pill -->
+        <div class="flex items-center gap-2">
+          <button
+            v-if="notifySupported"
+            type="button"
+            :title="notifyOn ? 'Turn-complete notifications: on — click to mute' : 'Notify me when a session turn completes'"
+            class="rounded-lg border px-2 py-1 text-sm transition-colors"
+            :class="notifyOn ? 'border-brand-violet/50 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-400 hover:text-slate-200'"
+            @click="toggleNotify"
+          >{{ notifyOn ? '🔔' : '🔕' }}</button>
+          <div class="flex items-center gap-2 lg:hidden">
+            <span
+              class="h-2 w-2 rounded-full"
+              :class="store.connected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-rose-500'"
+            ></span>
+            <span class="text-xs text-slate-400">{{ statusText }}</span>
+          </div>
         </div>
       </div>
 

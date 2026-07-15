@@ -68,6 +68,10 @@ server {
         proxy_set_header Authorization "Bearer ${ASMLTR_INSIGHTS_TOKEN}";
     }
 
+    # PWA: correct manifest MIME, and never cache the service worker (so updates propagate).
+    location = /manifest.webmanifest { default_type application/manifest+json; }
+    location = /sw.js { add_header Cache-Control "no-cache"; }
+
     # SPA history fallback
     location / {
         try_files $uri $uri/ /index.html;

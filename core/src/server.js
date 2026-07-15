@@ -44,6 +44,8 @@ const drafts = require('./drafts'); // shared hold-for-approval queue (any conne
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
+const tts = require('../../shared/speech/tts'); // TTS config (voice/model), persisted + GUI/TUI-settable
+const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
 const { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel } = require('./runner');
@@ -554,6 +556,49 @@ app.get('/v2/voice/asset/:name', (req, res) => {
   if (!a) return res.status(404).json({ error: 'unknown asset' });
   res.set('Content-Type', a.mime); res.set('Cache-Control', 'public, max-age=86400');
   res.sendFile(a.path);
+});
+
+// TTS + STT model/voice config (persisted; applies to the next clip, no restart). The key names are
+// intentionally NOT returned. POST body: { tts?: {voice,model,provider,format}, stt?: {model,language} }.
+app.get('/v2/voice/config', (req, res) => {
+  const { keyName: _t, ...ttsCfg } = tts.config();
+  const { keyName: _s, ...sttCfg } = stt.config();
+  res.json({ tts: ttsCfg, stt: sttCfg });
+});
+app.post('/v2/voice/config', (req, res) => {
+  const b = req.body || {};
+  const ttsCfg = b.tts ? tts.setConfig(b.tts) : tts.config();
+  const sttCfg = b.stt ? stt.setConfig(b.stt) : stt.config();
+  const { keyName: _t, ...t } = ttsCfg; const { keyName: _s, ...s } = sttCfg;
+  res.json({ tts: t, stt: s });
+});
+
+// Synthesize arbitrary text → one audio clip, WITHOUT running an agent turn (that's what /v2/speak
+// does). This is the "read this reply aloud" primitive for the chat's TTS toggle. Uses the configured
+// voice/model (overridable per call). Returns base64 so the browser can decode+play. Body: { text, voice?, model? }.
+app.post('/v2/tts', async (req, res) => {
+  try {
+    const text = String((req.body && req.body.text) || '').trim();
+    if (!text) return res.status(400).json({ error: 'no text' });
+    const overrides = {};
+    if (req.body.voice) overrides.voice = String(req.body.voice);
+    if (req.body.model) overrides.model = String(req.body.model);
+    const { audio, mime } = await tts.synthesize(text.slice(0, 4000), overrides);
+    res.json({ mime, b64: audio.toString('base64') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Transcription — audio clip → text via a real STT model (default OpenAI gpt-4o-transcribe). Body is
+// JSON base64 (no multipart dep, mirrors /v2/upload): { data_base64, mime?, filename?, model?, language? }.
+app.post('/v2/transcribe', async (req, res) => {
+  try {
+    const { data_base64, mime, filename, model, language } = req.body || {};
+    if (!data_base64) return res.status(400).json({ error: 'no audio (data_base64 required)' });
+    const buf = Buffer.from(data_base64, 'base64');
+    if (!buf.length) return res.status(400).json({ error: 'empty audio' });
+    const out = await stt.transcribe(buf, { filename: filename || 'audio.webm', mime: mime || 'audio/webm', model, language });
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Agent runtime settings — the SDK version (installed vs latest-on-npm) that gates model availability,

@@ -159,6 +159,12 @@ export const webChat = {
 export const voice = {
   getAck: () => getCore('/v2/voice/ack'),
   setAck: (enabled) => postCore('/v2/voice/ack', { enabled }),
+  // TTS voice/model + STT model config (persisted server-side; applies to the next clip). Shape:
+  // { tts: { voice, model, provider, format }, stt: { model, language } }. Partial updates merge.
+  getConfig: () => getCore('/v2/voice/config'),
+  setConfig: (body) => postCore('/v2/voice/config', body),
+  // Synthesize text → one audio clip (no agent turn). Returns { mime, b64 } for the chat read-aloud.
+  tts: (text, opts = {}) => postCore('/v2/tts', { text, ...opts }),
   assetUrl: (name) => `/v2/voice/asset/${name}`,
   // handlers: { onCue(name), onText({seq,text}), onAudio({seq,role,mime,b64}), onDone(actions), onError(msg) }
   speak({ conversation_key, text }, handlers = {}) {
@@ -216,6 +222,20 @@ export const drafts = {
   list: (status = 'pending') => getCore(`/v2/drafts?status=${encodeURIComponent(status)}`),
   approve: (id) => postCore(`/v2/drafts/${id}/approve`),
   discard: (id) => postCore(`/v2/drafts/${id}/discard`)
+}
+
+// Speech-to-text — record audio in the browser, send it to the core's transcription model (the STT
+// model chosen in Settings), get text back. Base64 JSON body (mirrors webChat.upload; no multipart).
+export const stt = {
+  async transcribe(blob, { model, language } = {}) {
+    const data_base64 = await new Promise((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result).split(',')[1] || '')
+      r.onerror = () => reject(new Error('read failed'))
+      r.readAsDataURL(blob)
+    })
+    return postCore('/v2/transcribe', { data_base64, mime: blob.type || 'audio/webm', model, language })
+  }
 }
 
 // payload arrives as a JSON *string* over REST. Be defensive.
