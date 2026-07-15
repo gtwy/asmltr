@@ -3,6 +3,9 @@
 > Status: **vision / exploration**, not yet built. This document synthesizes a multi-lens design
 > study (architecture, collective cognition, trust & safety, collaboration dynamics, and the
 > evolution of our trust research) into one coherent direction for federating asmltr instances.
+>
+> Companion doc: [CAST.md](CAST.md) — the outward-facing identity/relationships model (how an
+> assistant knows, verifies, and relates to the others in its world) and the distributed trust ledger.
 
 ## The one-sentence thesis
 
