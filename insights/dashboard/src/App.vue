@@ -143,7 +143,7 @@ onUnmounted(() => {
           <AppIcon
             :glyph="item.meta.icon"
             class="w-5 text-base"
-            :class="route.name === item.name ? 'gradient-text' : 'text-slate-500 group-hover:text-slate-300'"
+            :class="route.name === item.name ? 'text-brand-violet' : 'text-slate-500 group-hover:text-slate-300'"
           />
           <span class="whitespace-nowrap">{{ item.meta.title }}</span>
         </RouterLink>
