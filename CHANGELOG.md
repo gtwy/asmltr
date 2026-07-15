@@ -9,6 +9,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **The cast (Access-evolution Phase 0)** — the identity/relationship layer, built on the existing
+  trust store (no second store). New `principal_profile` (who a member is + how to relate), pairwise
+  directional `relationships`, per-scope `engagement` (engage|observe|ignore, retiring per-connector
+  bot lists), and `verification_strength` on identifiers. `resolve()` now returns a member's profile,
+  ALL cross-channel identities, the self→them relationship, and engagement policy. `buildRelationshipPrompt`
+  injects into the system prompt: who you're talking to, their **cross-channel identity** (one person
+  across all their channels), your relationship, and the peer agents present (recognition without
+  per-channel config). `/trust/{profiles,relationships,engagement}` endpoints. Roadmap: docs/ACCESS-EVOLUTION.md.
 - **Cross-session send with assimilation** (`POST /v2/send`, channel-agnostic). An agent in any
   session can post into another channel AND the destination session folds the message into its own
   context (it was posted under its name from a parallel session). Connectors' `/out` now return the

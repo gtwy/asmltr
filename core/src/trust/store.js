@@ -48,7 +48,55 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_grants_principal ON grants(principal_id);
+
+  -- THE CAST (Access-evolution Phase 0). All hang off principals.id — NO second trust store.
+  -- principal_profile: WHO a cast member is + HOW to relate to them (narrative, not capability).
+  CREATE TABLE IF NOT EXISTS principal_profile (
+    principal_id       TEXT PRIMARY KEY REFERENCES principals(id) ON DELETE CASCADE,
+    kind               TEXT NOT NULL DEFAULT 'human',   -- human | agent | self
+    who_they_are       TEXT,                            -- the narrative identity
+    how_to_relate      TEXT,                            -- tone / deference / how to weight their input
+    expertise          TEXT,                            -- domains they own
+    decision_authority TEXT,                            -- what they can direct/decide
+    provenance         TEXT,                            -- how we know them / who vouched
+    updated_at         INTEGER NOT NULL
+  );
+  -- relationships: pairwise, DIRECTIONAL edges (the cast is about edges, not entities). Optional scope.
+  CREATE TABLE IF NOT EXISTS relationships (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    principal_a  TEXT NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+    principal_b  TEXT NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+    role_a_to_b  TEXT,                                  -- A's role toward B ("mentor", "owner", "peer agent")
+    role_b_to_a  TEXT,
+    note         TEXT,
+    scope_surface TEXT, scope_id TEXT,
+    expires_at   INTEGER,
+    created_at   INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_rel_a ON relationships(principal_a);
+  CREATE INDEX IF NOT EXISTS idx_rel_b ON relationships(principal_b);
+  -- engagement: per-(principal, scope) override of how the assistant engages this cast member here.
+  -- Retires per-connector allowed_bot_names — the connector/core asks the cast instead.
+  CREATE TABLE IF NOT EXISTS engagement (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    principal_id TEXT NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+    scope_surface TEXT, scope_id TEXT,
+    policy       TEXT NOT NULL DEFAULT 'engage',        -- engage | observe | ignore
+    created_at   INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_engage ON engagement(principal_id);
 `);
+
+// verification_strength on identifiers (0 claimed · 1 channel-owned[default] · 2 vouched · 3 cryptographic).
+// Idempotent ALTER — the ledger tiers (2/3) are no-ops today; the column is the seam for later phases.
+try {
+  const cols = db.prepare('PRAGMA table_info(identifiers)').all().map((c) => c.name);
+  if (!cols.includes('verification_strength')) db.exec('ALTER TABLE identifiers ADD COLUMN verification_strength INTEGER NOT NULL DEFAULT 1');
+} catch (_) {}
+
+// The assistant is itself a cast member — the 'self' principal is the anchor for directional
+// relationships (self→other). Configurable id so multi-assistant installs don't collide.
+const SELF_ID = process.env.ASMLTR_SELF_PRINCIPAL || 'self';
 
 const J = (s) => { try { return JSON.parse(s || '[]'); } catch { return []; } };
 const now = () => Date.now();
@@ -115,6 +163,62 @@ const grants = {
   remove: (id) => db.prepare('DELETE FROM grants WHERE id=?').run(id).changes > 0,
 };
 
+// --- THE CAST: profiles, relationships, engagement ---------------------------
+const profiles = {
+  get: (pid) => db.prepare('SELECT * FROM principal_profile WHERE principal_id=?').get(pid) || null,
+  upsert: (pid, f = {}) => {
+    const cur = profiles.get(pid) || {};
+    db.prepare(`INSERT INTO principal_profile (principal_id,kind,who_they_are,how_to_relate,expertise,decision_authority,provenance,updated_at)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(principal_id) DO UPDATE SET kind=excluded.kind, who_they_are=excluded.who_they_are, how_to_relate=excluded.how_to_relate,
+        expertise=excluded.expertise, decision_authority=excluded.decision_authority, provenance=excluded.provenance, updated_at=excluded.updated_at`)
+      .run(pid, f.kind ?? cur.kind ?? 'human', f.who_they_are ?? cur.who_they_are ?? null, f.how_to_relate ?? cur.how_to_relate ?? null,
+        f.expertise ?? cur.expertise ?? null, f.decision_authority ?? cur.decision_authority ?? null, f.provenance ?? cur.provenance ?? null, now());
+    return profiles.get(pid);
+  },
+};
+const relationships = {
+  // Every edge touching a principal, normalized to that principal's POV (me→them, them→me).
+  forPrincipal: (pid, { surface, scopeId } = {}) => {
+    const rows = db.prepare('SELECT * FROM relationships WHERE principal_a=? OR principal_b=?').all(pid, pid);
+    return rows
+      .filter((r) => !r.expires_at || r.expires_at > now())
+      .filter((r) => !r.scope_surface || (r.scope_surface === surface && (!r.scope_id || r.scope_id === scopeId)))
+      .map((r) => {
+        const meIsA = r.principal_a === pid;
+        return { id: r.id, other: meIsA ? r.principal_b : r.principal_a,
+          me_to_them: meIsA ? r.role_a_to_b : r.role_b_to_a, them_to_me: meIsA ? r.role_b_to_a : r.role_a_to_b,
+          note: r.note, scope_surface: r.scope_surface, scope_id: r.scope_id };
+      });
+  },
+  list: () => db.prepare('SELECT * FROM relationships ORDER BY created_at DESC').all(),
+  upsert: (r) => {
+    if (r.id) { db.prepare('UPDATE relationships SET role_a_to_b=?, role_b_to_a=?, note=?, scope_surface=?, scope_id=?, expires_at=? WHERE id=?')
+      .run(r.role_a_to_b ?? null, r.role_b_to_a ?? null, r.note ?? null, r.scope_surface ?? null, r.scope_id ?? null, r.expires_at ?? null, r.id); return r.id; }
+    return db.prepare('INSERT INTO relationships (principal_a,principal_b,role_a_to_b,role_b_to_a,note,scope_surface,scope_id,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(r.principal_a, r.principal_b, r.role_a_to_b ?? null, r.role_b_to_a ?? null, r.note ?? null, r.scope_surface ?? null, r.scope_id ?? null, r.expires_at ?? null, now()).lastInsertRowid;
+  },
+  remove: (id) => db.prepare('DELETE FROM relationships WHERE id=?').run(id).changes > 0,
+};
+const engagement = {
+  // Most specific matching policy wins: (surface+scope_id) > (surface) > (global). Default 'engage'.
+  policy: (pid, surface, scopeId) => {
+    const rows = db.prepare('SELECT * FROM engagement WHERE principal_id=?').all(pid);
+    let best = null, bestScore = -1;
+    for (const r of rows) {
+      if (r.scope_surface && r.scope_surface !== surface) continue;
+      if (r.scope_id && r.scope_id !== scopeId) continue;
+      const score = (r.scope_surface ? 1 : 0) + (r.scope_id ? 2 : 0);
+      if (score > bestScore) { best = r.policy; bestScore = score; }
+    }
+    return best || 'engage';
+  },
+  list: () => db.prepare('SELECT * FROM engagement ORDER BY created_at DESC').all(),
+  set: (e) => db.prepare('INSERT INTO engagement (principal_id,scope_surface,scope_id,policy,created_at) VALUES (?,?,?,?,?)')
+    .run(e.principal_id, e.scope_surface ?? null, e.scope_id ?? null, e.policy || 'engage', now()).lastInsertRowid,
+  remove: (id) => db.prepare('DELETE FROM engagement WHERE id=?').run(id).changes > 0,
+};
+
 // --- resolution --------------------------------------------------------------
 const _identBySurfaceVal = db.prepare('SELECT principal_id FROM identifiers WHERE surface=? AND value=?');
 
@@ -162,9 +266,17 @@ function resolve(envelope) {
     }
   }
 
+  // Cast enrichment: who they are, ALL their identities (cross-channel), the self→them relationship,
+  // and the per-scope engagement policy. Extra fields; existing consumers ignore what they don't use.
+  const prof = profiles.get(pid);
+  const identities = db.prepare('SELECT surface, value, verification_strength FROM identifiers WHERE principal_id=?').all(pid);
+  const rel = relationships.forPrincipal(SELF_ID, { surface, scopeId }).find((r) => r.other === pid) || null;
+  const engagementPolicy = engagement.policy(pid, surface, scopeId);
+
   return { user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier,
     permissions: [...eff.allow], requires_approval: [...eff.requires_approval], forbidden: [...eff.forbidden],
-    bypass_moderation: eff.bypass, strict_mode: eff.strict, revoked: false, is_default: false, scope_label: scopeLabel };
+    bypass_moderation: eff.bypass, strict_mode: eff.strict, revoked: false, is_default: false, scope_label: scopeLabel,
+    kind: (prof && prof.kind) || 'human', profile: prof || null, identities, relationship: rel, engagement: engagementPolicy };
 }
 
 /** Data-driven authz section of the system prompt (replaces TIER prose). */
@@ -180,4 +292,53 @@ function buildAuthzPrompt(resolved, channel) {
   return lines.join('\n');
 }
 
-module.exports = { db, principals, identifiers, roles, grants, resolve, buildAuthzPrompt, DB_PATH };
+// The CAST section of the system prompt: who you're talking to, their cross-channel identity, your
+// relationship with them, and the peer agents who share this space. This is the identity/relationship
+// layer (Access-evolution Phase 0) — recognition + how-to-relate, NOT capability (that's buildAuthzPrompt).
+const _peerAgentsOnSurface = db.prepare(`
+  SELECT DISTINCT pr.id, pr.display_name, pp.who_they_are
+  FROM principals pr
+  JOIN principal_profile pp ON pp.principal_id = pr.id AND pp.kind = 'agent'
+  JOIN identifiers i ON i.principal_id = pr.id AND i.surface = ?
+  WHERE pr.id != ? AND pr.id != ? AND pr.revoked = 0
+`);
+function buildRelationshipPrompt(resolved, envelope) {
+  const surface = envelope.channel;
+  const parts = [];
+
+  if (!resolved.is_default && resolved.profile) {
+    const p = resolved.profile;
+    const who = [`WHO YOU'RE TALKING TO — ${resolved.display_name}${p.kind && p.kind !== 'human' ? ` (${p.kind})` : ''}.`];
+    if (p.who_they_are) who.push(p.who_they_are);
+    if (p.expertise) who.push(`Expertise: ${p.expertise}.`);
+    if (p.decision_authority) who.push(`They can direct: ${p.decision_authority}.`);
+    if (p.how_to_relate) who.push(`How to relate: ${p.how_to_relate}`);
+    parts.push(who.join(' '));
+  }
+
+  if (resolved.identities && resolved.identities.length > 1) {
+    const across = resolved.identities.map((i) => `${i.surface}:${i.value}`).join(', ');
+    parts.push(`CROSS-CHANNEL IDENTITY — ${resolved.display_name} is the SAME person you also know as ${across}. It is one relationship across channels, not several strangers; recognize them on any of these.`);
+  }
+
+  if (resolved.relationship) {
+    const r = resolved.relationship;
+    const bits = [];
+    if (r.me_to_them) bits.push(`you are their ${r.me_to_them}`);
+    if (r.them_to_me) bits.push(`they are your ${r.them_to_me}`);
+    parts.push(`YOUR RELATIONSHIP — ${bits.join('; ') || 'known peer'}.${r.note ? ' ' + r.note : ''}`);
+  }
+
+  // Peer AGENTS present on this surface — so a message directed at one of them isn't mistaken for yours.
+  try {
+    const peers = _peerAgentsOnSurface.all(surface, SELF_ID, resolved.user_key || '');
+    if (peers.length) {
+      const list = peers.map((pe) => `${pe.display_name} (a peer AI agent${pe.who_they_are ? ' — ' + String(pe.who_they_are).slice(0, 80) : ''})`).join('; ');
+      parts.push(`OTHERS IN THIS SPACE — you share this channel with: ${list}. They are conversational peers, not tools or data sources. A message addressed to one of THEM is not for you — recognize them by name.`);
+    }
+  } catch (_) {}
+
+  return parts.length ? 'CAST & RELATIONSHIPS\n' + parts.join('\n') : '';
+}
+
+module.exports = { db, principals, identifiers, roles, grants, profiles, relationships, engagement, resolve, buildAuthzPrompt, buildRelationshipPrompt, SELF_ID, DB_PATH };
