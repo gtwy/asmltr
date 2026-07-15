@@ -21,6 +21,39 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
   const CONTROL_TOKEN = process.env.ASMLTR_INSIGHTS_CONTROL_TOKEN || '';
   function ctlHeaders() { const h = { 'Content-Type': 'application/json' }; const tk = CONTROL_TOKEN || TOKEN; if (tk) h.Authorization = 'Bearer ' + tk; return h; }
 
+  // The console manifest — the ONE declarative source of truth (surfaces / settings / actions),
+  // shared with the web dashboard. The app-settings screen + session actions render straight from
+  // it, so a setting/action added there shows up here automatically. Prefer the in-repo copy;
+  // fall back to the served /api/manifest if the file isn't reachable (installed elsewhere).
+  let MANIFEST = null;
+  try { MANIFEST = require('../shared/console-manifest'); } catch (_) { /* fetched below */ }
+
+  // Resolve an endpoint declared as { service, method, path } to a real base + headers.
+  function svcBase(service) { return service === 'core' ? CORE_BASE : service === 'manager' ? MGR.base : BASE; }
+  function svcHeaders(service) { return service === 'manager' ? mgrHeaders() : ctlHeaders(); }
+  function getPath(o, p) { return p ? String(p).split('.').reduce((a, k) => (a == null ? a : a[k]), o) : o; }
+  function fillTokens(obj, tokens) { // {value}/{session}… → real values; coerce bool-ish strings
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (typeof v === 'string') {
+        const s = v.replace(/\{(\w+)\}/g, (m, t) => (t in tokens ? tokens[t] : m));
+        out[k] = s === 'true' ? true : s === 'false' ? false : s;
+      } else out[k] = v;
+    }
+    return out;
+  }
+  async function httpCall(service, method, path, bodyObj) { // raw call (body used verbatim — for user text)
+    const opt = { method: method || 'GET', headers: svcHeaders(service) };
+    if (method && method !== 'GET') opt.body = JSON.stringify(bodyObj || {});
+    const r = await fetch(svcBase(service) + path, opt);
+    return r.ok ? await r.json().catch(() => ({})) : null;
+  }
+  async function callEP(ep, tokens) { // endpoint whose declared body carries {token} placeholders
+    if (!ep) return null;
+    const body = ep.body ? fillTokens(ep.body, tokens || {}) : undefined;
+    return httpCall(ep.service, ep.method, ep.path, body);
+  }
+
   // alacritty's terminfo carries label caps (e.g. plab_norm) that blessed's
   // terminfo compiler mis-parses and dumps to stderr as "Error on alacritty.<cap>".
   // xterm-256color renders this dashboard identically and compiles clean, so map
@@ -30,8 +63,8 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
   const grid = new contrib.grid({ rows: 12, cols: 12, screen });
 
   const sessTable = grid.set(0, 0, 8, 8, contrib.table, {
-    keys: true, label: ' active sessions  (↑↓ select · ENTER watch · k kill · s settings · q quit) ', interactive: true,
-    columnSpacing: 2, columnWidth: [14, 11, 6, 7, 8, 6],
+    keys: true, label: ' active sessions  (ENTER watch · d forget · e settings · g self · t drafts · c connectors · k kill · q quit) ', interactive: true,
+    columnSpacing: 2, columnWidth: [14, 22, 9, 5, 5, 7, 5],
     border: { type: 'line' }, fg: 'white', selectedFg: 'black', selectedBg: 'magenta',
   });
   const cpuLine = grid.set(0, 8, 8, 4, contrib.line, {
@@ -126,10 +159,10 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
       const { sessions } = await res.json();
       sessionIds = sessions.map((s) => s.session_id);
       sessTable.setData({
-        headers: ['session', 'kind', 'age', 'idle', 'tok', 'mux'],
-        data: sessions.map((s) => [String(s.session_id).slice(0, 14), s.kind, ageOf(s.started_unix), ageOf(s.last_activity_unix), String(s.tokens_total || 0), s.multiplexer || '-']),
+        headers: ['session', 'title', 'kind', 'age', 'idle', 'tok', 'mux'],
+        data: sessions.map((s) => [String(s.session_id).slice(0, 14), String(s.title || '—').slice(0, 22), s.kind, ageOf(s.started_unix), ageOf(s.last_activity_unix), String(s.tokens_total || 0), s.multiplexer || '-']),
       });
-      sessTable.setLabel(` active sessions (${sessions.length})  (↑↓ select · ENTER watch · k kill · s settings · q quit) `);
+      sessTable.setLabel(` active sessions (${sessions.length})  (ENTER watch · d forget · e settings · g self · t drafts · c connectors · k kill · q quit) `);
       if (!watchSessionId) screen.render();
     } catch (e) { log.log('{red-fg}sessions fetch failed: ' + e.message + '{/red-fg}'); }
   }
@@ -171,6 +204,22 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
         const j = await r.json();
         log.log(j.ok ? (j.forgotten ? `{gray-fg}✘ forgot ${id} (no live process — removed){/gray-fg}` : `{red-fg}⏹ killed ${id} (pid ${j.pid}, ${j.comm}){/red-fg}`) : `{yellow-fg}⏹ ${j.error}{/yellow-fg}`);
       } catch (e) { log.log(`{red-fg}kill failed: ${e.message}{/red-fg}`); }
+      refreshSessions(); screen.render();
+    });
+  }
+
+  // forget/delete the selected session — manifest `forget` action (clears history; next inbound
+  // starts fresh). Distinct from kill: kill SIGTERMs a live process, forget wipes the mapping.
+  function forgetSelected() {
+    const id = sessionIds[sessTable.rows.selected];
+    if (!id) return;
+    const act = (MANIFEST && MANIFEST.actions || []).find((a) => a.id === 'forget');
+    if (!act) { log.log('{yellow-fg}forget action unavailable (no manifest){/yellow-fg}'); return; }
+    question.ask(`Forget session "${id}"?  (clears history — next inbound starts fresh)`, async (err, ok) => {
+      sessTable.focus();
+      if (!ok) { screen.render(); return; }
+      try { const j = await callEP(act.run, { session: id }); log.log(j ? `{gray-fg}✘ forgot ${id}{/gray-fg}` : `{yellow-fg}forget: no response{/yellow-fg}`); }
+      catch (e) { log.log(`{red-fg}forget failed: ${e.message}{/red-fg}`); }
       refreshSessions(); screen.render();
     });
   }
@@ -333,10 +382,226 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
     if ((spec.type === 'integer' || spec.type === 'number') && Number.isNaN(coerced)) { screen.render(); return; }
     patchConfig(key, coerced);
   });
-  screen.key(['s'], () => { if (!watchSessionId && settingsMode === null) openSettings(); });
+  // ================= manifest-driven APP SETTINGS (identity / runtime / updates / voice) =========
+  // A self-generating settings screen built entirely from MANIFEST.settings — the same declarations
+  // that drive the web dashboard's Settings view. Add a field to the manifest → it appears here too.
+  const appBox = blessed.list({
+    parent: screen, hidden: true, top: 0, left: 0, width: '100%', height: '100%',
+    label: ' settings ', border: { type: 'line' }, tags: true, keys: true, mouse: true,
+    style: { border: { fg: 'cyan' }, selected: { bg: 'cyan', fg: 'black' } },
+    scrollable: true, scrollbar: { ch: ' ', style: { bg: 'cyan' } },
+  });
+  // single-line editor (name, custom model id)
+  const appEditor = blessed.textbox({
+    parent: screen, hidden: true, bottom: 0, left: 0, width: '100%', height: 3,
+    border: { type: 'line' }, label: ' edit — ENTER save · ESC cancel ',
+    style: { border: { fg: 'cyan' } }, inputOnFocus: true, keys: true, mouse: true,
+  });
+  // multi-line editor (essence / preferences / story)
+  const appTextarea = blessed.textarea({
+    parent: screen, hidden: true, bottom: 0, left: 0, width: '100%', height: 8,
+    border: { type: 'line' }, label: ' edit — Ctrl-S save · ESC cancel ',
+    style: { border: { fg: 'cyan' } }, inputOnFocus: true, keys: true, mouse: true,
+  });
+  // choice picker (model)
+  const choiceBox = blessed.list({
+    parent: screen, hidden: true, top: 'center', left: 'center', width: '55%', height: '45%',
+    label: ' pick ', border: { type: 'line' }, tags: true, keys: true, mouse: true,
+    style: { border: { fg: 'cyan' }, selected: { bg: 'cyan', fg: 'black' } },
+  });
+  let appMode = null;   // null(closed) | 'sections'
+  let appRows = [];     // index-aligned metadata for the current list
+  let appData = {};     // "sectionId" -> loaded values ; "sectionId:fieldId" -> field-level load
+
+  function fieldVal(sec, f) {
+    const src = (f.load && appData[sec.id + ':' + f.id]) || appData[sec.id] || {};
+    return getPath(src, f.get || f.id); // fields without an explicit `get` read their own id (e.g. identity)
+  }
+  async function loadApp() {
+    appData = {};
+    for (const sec of (MANIFEST.settings || [])) {
+      appData[sec.id] = (sec.load ? await callEP(sec.load) : {}) || {};
+      for (const f of (sec.fields || [])) if (f.load) appData[sec.id + ':' + f.id] = (await callEP(f.load)) || {};
+    }
+  }
+  function renderApp() {
+    appMode = 'sections'; appRows = [];
+    const items = [];
+    for (const sec of (MANIFEST.settings || [])) {
+      items.push(`{bold}${sec.icon || ''} ${sec.label}{/bold}`); appRows.push({ kind: 'sep' });
+      for (const f of (sec.fields || [])) {
+        const v = fieldVal(sec, f);
+        if (f.type === 'toggle') {
+          items.push(`  ${v ? '[{green-fg}x{/green-fg}]' : '[ ]'} ${f.label}`);
+          appRows.push({ kind: 'toggle', sec, f, value: !!v });
+        } else if (f.type === 'choice') {
+          const resolved = getPath(appData[sec.id] || {}, f.resolvedGet);
+          const shown = (v === '' || v == null) ? 'SDK default' : v;
+          items.push(`  ${f.label}: {cyan-fg}${shown}{/cyan-fg}${resolved ? ` {gray-fg}(→ ${resolved}){/gray-fg}` : ''}  {gray-fg}· ENTER change{/gray-fg}`);
+          appRows.push({ kind: 'choice', sec, f, value: v });
+        } else {
+          const cur = v == null ? '' : String(v);
+          const disp = cur === '' ? '{gray-fg}—{/gray-fg}' : `{cyan-fg}${cur.replace(/\s+/g, ' ').slice(0, 48)}${cur.length > 48 ? '…' : ''}{/cyan-fg}`;
+          items.push(`  ${f.label}: ${disp}  {gray-fg}· ENTER edit{/gray-fg}`);
+          appRows.push({ kind: 'text', sec, f, value: cur });
+        }
+      }
+      if (sec.status) { // read-only status widget + optional "update now" action row
+        const st = sec.status, d = appData[sec.id] || {};
+        if (st.kind === 'sdk') {
+          const inst = getPath(d, st.installedGet), latest = getPath(d, st.latestGet), avail = getPath(d, st.availableGet);
+          items.push(`  {gray-fg}SDK ${inst || '—'}${avail ? ` → ${latest} available{/gray-fg}  {yellow-fg}· u update` : ' ✓ up to date'}{/}`);
+        } else if (st.kind === 'code') {
+          const head = getPath(d, st.headGet), avail = getPath(d, st.availableGet), behind = getPath(d, st.behindGet);
+          items.push(`  {gray-fg}code ${head || '—'}${avail ? ` → ${behind} behind{/gray-fg}  {yellow-fg}· u update` : ' ✓ up to date'}{/}`);
+        }
+        appRows.push(getPath(d, st.availableGet) ? { kind: 'status', action: st.action } : { kind: 'sep' });
+      }
+      items.push(''); appRows.push({ kind: 'sep' });
+    }
+    appBox.setLabel(' settings  (↑↓ · SPACE/ENTER edit · u run update on a status row · r reload · ESC close) ');
+    appBox.setItems(items);
+    let first = appRows.findIndex((r) => r.kind !== 'sep' && r.kind !== 'status');
+    appBox.select(first < 0 ? 0 : first);
+    screen.render();
+  }
+  async function openApp() {
+    if (!MANIFEST) { try { const r = await fetch(BASE + '/api/manifest', { headers }); MANIFEST = await r.json(); } catch (_) {} }
+    if (!MANIFEST) { log.log('{red-fg}manifest unavailable{/red-fg}'); return; }
+    appMode = 'sections'; appBox.show(); appBox.focus(); appBox.setItems(['{gray-fg}loading…{/gray-fg}']); screen.render();
+    await loadApp(); renderApp();
+  }
+  function closeApp() { appMode = null; appBox.hide(); sessTable.focus(); screen.render(); }
+  function openEditor(row) {
+    const multi = (row.f.rows || 1) > 1;
+    const w = multi ? appTextarea : appEditor;
+    w._row = row; w.setValue(row.value == null ? '' : String(row.value));
+    w.setLabel(` edit ${row.f.label} — ${multi ? 'Ctrl-S save' : 'ENTER save'} · ESC cancel `);
+    w.show(); w.focus(); screen.render();
+  }
+  async function saveRow(row, value) {
+    try {
+      if (row.kind === 'choice-custom') await callEP(row.f.set, { value: String(value).trim() });
+      else if (row.sec && row.sec.save) await httpCall(row.sec.save.service, row.sec.save.method, row.sec.save.path, { [row.f.id]: value });
+      else if (row.f.set) await callEP(row.f.set, { value });
+    } catch (e) { log.log(`{red-fg}save failed: ${e.message}{/red-fg}`); }
+    await loadApp(); renderApp();
+  }
+  async function appActivate() {
+    const row = appRows[appBox.selected];
+    if (!row) return;
+    if (row.kind === 'toggle') { await callEP(row.f.set, { value: !row.value }); await loadApp(); return renderApp(); }
+    if (row.kind === 'text') return openEditor(row);
+    if (row.kind === 'status') { if (row.action) { await callEP(row.action); log.log(`{cyan-fg}⚙ ${row.action.label} started{/cyan-fg}`); } return; }
+    if (row.kind === 'choice') {
+      const choices = row.f.choices || [];
+      const items = choices.map((c) => `${row.value === c.id ? '{green-fg}✓{/green-fg} ' : '  '}${c.label}  {gray-fg}${c.hint || ''}{/gray-fg}`);
+      if (row.f.allowCustom) items.push('  {cyan-fg}✎ custom model id…{/cyan-fg}');
+      choiceBox._row = row; choiceBox._choices = choices;
+      choiceBox.setLabel(` ${row.f.label}  (ENTER select · ESC cancel) `);
+      choiceBox.setItems(items); choiceBox.show(); choiceBox.focus(); choiceBox.select(0); screen.render();
+    }
+  }
+  appBox.key(['space', 'enter'], appActivate);
+  appBox.key(['u'], () => { const row = appRows[appBox.selected]; if (row && row.kind === 'status' && row.action) appActivate(); });
+  appBox.key(['r'], async () => { appBox.setItems(['{gray-fg}reloading…{/gray-fg}']); screen.render(); await loadApp(); renderApp(); });
+  appBox.key(['escape'], closeApp);
+  choiceBox.key(['escape'], () => { choiceBox.hide(); appBox.focus(); screen.render(); });
+  choiceBox.key(['enter'], async () => {
+    const row = choiceBox._row, choices = choiceBox._choices || [], idx = choiceBox.selected;
+    choiceBox.hide(); appBox.focus(); screen.render();
+    if (idx < choices.length) await saveRow({ kind: 'choice', sec: row.sec, f: row.f }, choices[idx].id); // saveRow reloads+rerenders
+    else openEditor({ kind: 'choice-custom', sec: row.sec, f: row.f, value: '' });
+  });
+  appEditor.key(['escape'], () => { appEditor.hide(); appBox.focus(); screen.render(); });
+  appEditor.on('submit', async (val) => { const row = appEditor._row; appEditor.hide(); appBox.focus(); screen.render(); if (row) await saveRow(row, String(val == null ? '' : val)); });
+  appTextarea.key(['escape'], () => { appTextarea.hide(); appBox.focus(); screen.render(); });
+  appTextarea.key(['C-s'], async () => { const row = appTextarea._row; const val = appTextarea.getValue(); appTextarea.hide(); appBox.focus(); screen.render(); if (row) await saveRow(row, val); });
+
+  // ================= SELF — proprioception (deduced goal + live parts) ===========================
+  const selfBox = blessed.box({
+    parent: screen, hidden: true, top: 0, left: 0, width: '100%', height: '100%',
+    label: ' self — proprioception ', border: { type: 'line' }, tags: true,
+    style: { border: { fg: 'magenta' } }, scrollable: true, keys: true, mouse: true,
+    alwaysScroll: true, scrollbar: { ch: ' ', style: { bg: 'magenta' } },
+  });
+  let selfOpen = false;
+  selfBox.key(['escape', 'q'], () => { selfOpen = false; selfBox.hide(); sessTable.focus(); screen.render(); });
+  async function openSelf() {
+    selfOpen = true; selfBox.setContent('{gray-fg}loading…{/gray-fg}'); selfBox.show(); selfBox.focus(); screen.render();
+    const [schema, assess] = await Promise.all([
+      fetch(BASE + '/api/self/schema', { headers }).then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch(BASE + '/api/self/assessment', { headers }).then((r) => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    const L = [];
+    const a = assess && assess.latest;
+    if (a) {
+      L.push('{bold}{magenta-fg}Deduced goal{/magenta-fg}{/bold}');
+      L.push('  ' + (a.goal || '{gray-fg}—{/gray-fg}'));
+      L.push(`  {gray-fg}${a.parts != null ? a.parts + ' parts' : ''}${a.edges != null ? ' · ' + a.edges + ' edges' : ''}${a.ts ? ' · assessed ' + ageOf(a.ts) + ' ago' : ''}{/gray-fg}`, '');
+      if ((a.threads || []).length) { L.push('{bold}Active threads{/bold}'); for (const t of a.threads) L.push(`  {cyan-fg}•{/cyan-fg} ${t}`); L.push(''); }
+      if ((a.flags || []).length) { L.push('{bold}Flags{/bold}'); for (const f of a.flags) L.push(`  {yellow-fg}⚑{/yellow-fg} ${f}`); L.push(''); }
+      if ((a.relations || []).length) { L.push(`{bold}Relations{/bold} {gray-fg}(${a.relations.length}){/gray-fg}`); for (const r of a.relations.slice(0, 12)) L.push(`  {gray-fg}${String(r.from).slice(0, 34)} —${r.rel}→ ${String(r.to).slice(0, 34)}{/gray-fg}`); L.push(''); }
+    }
+    const nodes = (schema && schema.nodes) || [];
+    L.push(`{bold}Parts{/bold} {gray-fg}(${nodes.length} live)${schema && schema.window_ms ? ' · ' + Math.round(schema.window_ms / 3600000) + 'h window' : ''}{/gray-fg}`);
+    for (const n of nodes) {
+      L.push(`  {cyan-fg}${n.surface}{/cyan-fg} {bold}${(n.title || n.session_id || '').slice(0, 40)}{/bold}  {gray-fg}${n.status || ''} · ${n.tokens || 0} tok · ${n.age_min != null ? n.age_min + 'm' : ''}{/gray-fg}`);
+      if (n.activity) L.push(`      {gray-fg}${String(n.activity).slice(0, 70)}{/gray-fg}`);
+    }
+    if (!a && !nodes.length) L.push('{gray-fg}no proprioception data{/gray-fg}');
+    selfBox.setContent(L.join('\n')); selfBox.setScroll(0); screen.render();
+  }
+
+  // ================= DRAFTS — replies held for human approval =====================================
+  const draftsBox = blessed.list({
+    parent: screen, hidden: true, top: 0, left: 0, width: '100%', height: '100%',
+    label: ' drafts ', border: { type: 'line' }, tags: true, keys: true, mouse: true,
+    style: { border: { fg: 'cyan' }, selected: { bg: 'cyan', fg: 'black' } },
+    scrollable: true, scrollbar: { ch: ' ', style: { bg: 'cyan' } },
+  });
+  let draftsMode = false;
+  let draftRows = [];
+  draftsBox.key(['escape', 'q'], () => { draftsMode = false; draftsBox.hide(); sessTable.focus(); screen.render(); });
+  async function renderDrafts() {
+    const data = await fetch(CORE_BASE + '/v2/drafts?status=pending', { headers: { 'Content-Type': 'application/json' } }).then((r) => r.ok ? r.json() : null).catch(() => null);
+    const list = (data && data.drafts) || [];
+    draftRows = []; const items = [];
+    draftsBox.setLabel(` drafts — ${list.length} pending  (↑↓ · a approve · x discard · r reload · ESC close) `);
+    if (!list.length) { items.push('{gray-fg}no pending drafts{/gray-fg}'); draftRows.push(null); }
+    for (const d of list) {
+      const who = d.recipient || d.conversation_key || '?';
+      items.push(`{cyan-fg}${d.channel || '?'}{/cyan-fg} → ${String(who).slice(0, 40)}${d.subject ? '  {bold}' + String(d.subject).slice(0, 36) + '{/bold}' : ''}  {gray-fg}${d.created_at ? ageOf(d.created_at) + ' ago' : ''}{/gray-fg}`);
+      const body = String(d.body || '').replace(/\s+/g, ' ').slice(0, 100);
+      items.push(`  {gray-fg}${body}${d.reason ? '  · held: ' + d.reason : ''}{/gray-fg}`);
+      draftRows.push(d, null); // the body line isn't actionable
+    }
+    draftsBox.setItems(items);
+    const first = draftRows.findIndex(Boolean); draftsBox.select(first < 0 ? 0 : first);
+    screen.render();
+  }
+  async function openDrafts() { draftsMode = true; draftsBox.show(); draftsBox.focus(); draftsBox.setItems(['{gray-fg}loading…{/gray-fg}']); screen.render(); await renderDrafts(); }
+  async function draftAction(verb) {
+    const d = draftRows[draftsBox.selected];
+    if (!d) return;
+    try { await httpCall('core', 'POST', `/v2/drafts/${d.id}/${verb}`, {}); log.log(`{green-fg}✎ draft ${d.id} ${verb}d{/green-fg}`); }
+    catch (e) { log.log(`{red-fg}draft ${verb} failed: ${e.message}{/red-fg}`); }
+    await renderDrafts();
+  }
+  draftsBox.key(['a'], () => draftAction('approve'));
+  draftsBox.key(['x'], () => draftAction('discard'));
+  draftsBox.key(['r'], renderDrafts);
+
+  // top-level openers (guarded so they don't fire while any overlay owns the screen)
+  function anyOverlay() { return watchSessionId || settingsMode !== null || appMode || selfOpen || draftsMode; }
+  sessTable.rows.key(['d'], () => { if (!anyOverlay()) forgetSelected(); });
+  screen.key(['c'], () => { if (!anyOverlay()) openSettings(); });     // connector settings
+  screen.key(['e'], () => { if (!anyOverlay()) openApp(); });          // app settings (manifest)
+  screen.key(['g'], () => { if (!anyOverlay()) openSelf(); });         // self / proprioception
+  screen.key(['t'], () => { if (!anyOverlay()) openDrafts(); });       // drafts
 
   screen.key(['q', 'C-c'], () => { socket.close(); process.exit(0); });
-  screen.key(['escape'], () => { if (settingsMode !== null || watchSessionId) return; socket.close(); process.exit(0); });
+  screen.key(['escape'], () => { if (anyOverlay()) return; socket.close(); process.exit(0); });
 
   refreshSessions(); seedCpu();
   const timer = setInterval(refreshSessions, 2500);
