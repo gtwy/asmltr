@@ -934,6 +934,7 @@ app.post('/v2/update/run', (req, res) => {
   try {
     const mode = (req.query.mode === 'agent') ? 'agent' : 'deterministic';
     const r = selfUpdate.spawnUpdateSession({ by: (req.body && req.body.by) || 'operator', mode });
+    if (r.managed) return res.json({ ok: false, managed: true, manager: r.manager, message: `updates are managed by ${r.manager}; not updating in place` });
     record({ surface: 'core', session_id: 'self-update', event_type: 'control', identity: (req.body && req.body.by) || 'operator', source: 'core', payload: { action: 'self-update-started', pid: r.pid, mode } });
     res.json({ ok: true, ...r });
   } catch (e) { res.status(500).json({ error: e.message }); }

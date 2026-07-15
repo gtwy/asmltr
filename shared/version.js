@@ -14,6 +14,7 @@ const { execFileSync } = require('child_process');
 
 const REPO = path.join(__dirname, '..');
 const CHANNEL_FILE = process.env.ASMLTR_UPDATE_CHANNEL_FILE || path.join(os.homedir(), '.asmltr', 'update-channel');
+const MANAGED_FILE = process.env.ASMLTR_MANAGED_FILE || path.join(os.homedir(), '.asmltr', 'managed');
 
 function git(...args) {
   try { return execFileSync('git', ['-C', REPO, ...args], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
@@ -42,9 +43,20 @@ function setChannel(c) {
   return getChannel();
 }
 
+// Is this install's code managed EXTERNALLY (package/image/config-management deploy) rather than
+// pulled in place by asmltr? Then the deterministic updater must NOT git-reset/npm-install here — it
+// should step aside cleanly. Signalled by ASMLTR_UPDATE_MANAGED=<manager> or a ~/.asmltr/managed flag
+// file (its contents name the manager, e.g. apt|docker|host). See issue #18.
+function getManaged() {
+  const env = process.env.ASMLTR_UPDATE_MANAGED;
+  if (env && env.trim()) return { managed: true, manager: env.trim() };
+  try { const m = fs.readFileSync(MANAGED_FILE, 'utf8').trim(); if (m) return { managed: true, manager: m }; } catch (_) {}
+  return { managed: false, manager: null };
+}
+
 // Compact object the /version endpoints and the updater share.
 function info() {
   return { version: readVersion(), sha: gitSha(), tag: gitTag(), channel: getChannel() };
 }
 
-module.exports = { readVersion, gitSha, gitTag, getChannel, setChannel, info, REPO, VALID_CHANNELS };
+module.exports = { readVersion, gitSha, gitTag, getChannel, setChannel, getManaged, info, REPO, VALID_CHANNELS };

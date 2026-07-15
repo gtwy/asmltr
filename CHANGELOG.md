@@ -9,6 +9,12 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Committed lockfile + `npm ci`** (issue #17): a root `package-lock.json` pins the whole transitive
+  tree (incl. native modules); the updater prefers `npm ci` (exact-match) with an `npm install` fallback,
+  and `release.js` regenerates the lock per tag so every release ships a matching lock.
+- **Externally-managed update mode** (issue #18): `ASMLTR_UPDATE_MANAGED=<manager>` / a `~/.asmltr/managed`
+  flag makes the updater step aside cleanly (distinct exit code 6, `getUpdateStatus.managed`,
+  `/v2/update/run` refuses) on package/image/config-managed installs instead of crash-looping.
 - **The cast (Access-evolution Phase 0)** — the identity/relationship layer, built on the existing
   trust store (no second store). New `principal_profile` (who a member is + how to relate), pairwise
   directional `relationships`, per-scope `engagement` (engage|observe|ignore, retiring per-connector

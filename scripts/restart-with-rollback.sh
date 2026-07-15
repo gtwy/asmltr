@@ -20,8 +20,12 @@ restart_services(){
   pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager >/dev/null 2>&1
 }
 # Root workspace install (core/connectors/cli/insights-collector are npm workspaces of the root
-# package.json). One install covers them all; the dashboard is built separately in Docker.
-reinstall(){ (cd "$REPO" && npm install --no-audit --no-fund) >>"$LOG" 2>&1; }
+# package.json). One install covers them all; the dashboard is built separately in Docker. Prefer
+# `npm ci` from the committed lockfile (exact-match, deterministic); fall back to `npm install`.
+reinstall(){
+  if [ -f "$REPO/package-lock.json" ]; then (cd "$REPO" && npm ci --no-audit --no-fund) >>"$LOG" 2>&1 && return 0; fi
+  (cd "$REPO" && npm install --no-audit --no-fund) >>"$LOG" 2>&1;
+}
 
 # Verify each service is (a) up AND (b) actually running the expected code sha. /health alone is
 # not enough: a restart that silently never happened still returns 200 from the OLD process. We
