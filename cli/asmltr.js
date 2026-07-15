@@ -206,10 +206,15 @@ async function cmdAttach(key, f) {
   console.log(A.grn('claimed') + A.dim(` — channel paused; engine=${claim.engine_session_id.slice(0, 8)} cwd=${claim.working_dir}`));
   const name = tmuxName(key);
   if (!tmuxHasSession(name)) {
-    // Strip nested-Claude env so `claude` can spawn inside tmux.
-    const env = { ...process.env, IS_SANDBOX: 'true' };
+    // Strip nested-Claude env so `claude` can spawn inside tmux. IS_SANDBOX=1 (not 'true') + the
+    // configured permission mode → the resumed takeover runs at the same autonomy as `asmltr claude`.
+    let permMode = 'bypassPermissions';
+    try { permMode = require('../shared/runtime').getCliPermissionMode(); } catch (_) {}
+    const env = { ...process.env };
+    if (permMode === 'bypassPermissions') env.IS_SANDBOX = '1';
     delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
-    const r = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', claim.working_dir, `claude --resume ${claim.engine_session_id}`], { env });
+    const permFlag = permMode !== 'default' ? `--permission-mode ${permMode} ` : '';
+    const r = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', claim.working_dir, `claude ${permFlag}--resume ${claim.engine_session_id}`], { env });
     if (r.status !== 0) { await coreApi('/v2/release', 'POST', { conversation_key: key }); throw new Error('tmux new-session failed: ' + (r.stderr || '')); }
     console.log(A.dim(`tmux session '${name}' created (claude --resume)`));
   }

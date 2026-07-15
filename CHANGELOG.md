@@ -9,10 +9,11 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
-
-### Changed
-
-### Fixed
+- **Full-autonomy terminal sessions**: `asmltr claude` (and dashboard takeovers) launch in
+  bypass-permissions mode by default (`--permission-mode bypassPermissions` + `IS_SANDBOX=1`).
+  GUI/TUI-toggleable via Settings → Runtime and `/v2/runtime/cli-permission-mode`.
+- **Downloadable artifacts in chat**: the GUI auto-detects local file paths in an assistant's reply
+  and renders a download chip that streams the file through `GET /v2/file` (Authelia-gated).
 
 ## [0.2.0] - 2026-07-15
 

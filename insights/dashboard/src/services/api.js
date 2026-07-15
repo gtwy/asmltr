@@ -217,6 +217,8 @@ export const runtime = {
   get: (fetch = true) => getCore('/v2/runtime' + (fetch ? '' : '?fetch=0')),
   setModel: (model) => postCore('/v2/runtime/model', { model }),
   setAutoUpdate: (enabled) => postCore('/v2/runtime/auto-update', { enabled }),
+  // bypass-permissions for interactive `asmltr claude` terminal sessions (default on)
+  setCliBypass: (enabled) => postCore('/v2/runtime/cli-permission-mode', { enabled }),
   update: () => postCore('/v2/runtime/update', { by: 'dashboard' })
 }
 
@@ -225,6 +227,13 @@ export const drafts = {
   list: (status = 'pending') => getCore(`/v2/drafts?status=${encodeURIComponent(status)}`),
   approve: (id) => postCore(`/v2/drafts/${id}/approve`),
   discard: (id) => postCore(`/v2/drafts/${id}/discard`)
+}
+
+// Local artifacts — when the agent mentions a file it created on its host, the chat offers a download
+// link that streams it through the core (Authelia-gated). stat() decides whether the chip shows.
+export const files = {
+  stat: (path) => getCore('/v2/file?stat=1&path=' + encodeURIComponent(path)),
+  downloadUrl: (path) => '/v2/file?path=' + encodeURIComponent(path)
 }
 
 // Speech-to-text — record audio in the browser, send it to the core's transcription model (the STT

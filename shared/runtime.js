@@ -27,6 +27,7 @@ function stateDir() {
 }
 const modelFile = () => path.join(stateDir(), 'model');
 const sdkAutoFile = () => path.join(stateDir(), 'sdk-auto-update');
+const cliPermFile = () => path.join(stateDir(), 'cli-permission-mode');
 
 // Model selection: GUI-set file wins → ASMLTR_MODEL env → 'opus' (alias tracks the latest Opus).
 // runner.js calls this every turn, so a GUI change applies on the NEXT turn with no restart.
@@ -42,6 +43,21 @@ function setModel(m) {
 
 function isSdkAutoUpdate() { try { return fs.readFileSync(sdkAutoFile(), 'utf8').trim() === '1'; } catch (_) { return false; } }
 function setSdkAutoUpdate(b) { try { fs.writeFileSync(sdkAutoFile(), b ? '1' : '0'); } catch (_) {} return isSdkAutoUpdate(); }
+
+// Permission mode for INTERACTIVE `asmltr claude` (terminal) sessions. Default 'bypassPermissions'
+// (full-autonomy — no per-action approval), matching how channel sessions already run. Persisted so
+// the GUI/TUI can toggle it; asmltr-claude.js reads it at launch. Channel/SDK sessions are unaffected.
+const VALID_PERM = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
+function getCliPermissionMode() {
+  try { const v = fs.readFileSync(cliPermFile(), 'utf8').trim(); if (VALID_PERM.includes(v)) return v; } catch (_) {}
+  const env = process.env.ASMLTR_CLI_PERMISSION_MODE;
+  return VALID_PERM.includes(env) ? env : 'bypassPermissions';
+}
+function setCliPermissionMode(m) {
+  const v = VALID_PERM.includes(m) ? m : 'bypassPermissions';
+  try { fs.writeFileSync(cliPermFile(), v); } catch (_) {}
+  return getCliPermissionMode();
+}
 
 function sdkVersion() {
   try { return require(path.join(CORE_DIR, 'node_modules', SDK_PKG, 'package.json')).version; } catch (_) { return null; }
@@ -74,7 +90,9 @@ async function status({ fetch = true } = {}) {
     sdk: { package: SDK_PKG, installed, latest, updateAvailable: !!(installed && latest && installed !== latest) },
     model: { configured: getModel() },
     autoUpdate: isSdkAutoUpdate(),
+    cliPermissionMode: getCliPermissionMode(),
+    cliBypass: getCliPermissionMode() === 'bypassPermissions',
   };
 }
 
-module.exports = { getModel, setModel, isSdkAutoUpdate, setSdkAutoUpdate, sdkVersion, latestSdkVersion, updateSdk, status };
+module.exports = { getModel, setModel, isSdkAutoUpdate, setSdkAutoUpdate, getCliPermissionMode, setCliPermissionMode, sdkVersion, latestSdkVersion, updateSdk, status };
