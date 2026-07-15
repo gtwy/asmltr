@@ -4,14 +4,18 @@
 // deduced goal. It's a normal web-chat session (browser-as-connector, streams through the core) on a
 // persistent `self-observer` key, but each turn we inject a fresh snapshot of the body as system-prompt
 // context — so the observer always knows its current parts — and frame it to guide (announce), not command.
-import { ref, computed, nextTick } from 'vue'
-import { webChat } from '@/services/api'
-import { surfaceMeta, truncate } from '@/lib/format'
+import { ref, computed, nextTick, onMounted } from 'vue'
+import { webChat, identity } from '@/services/api'
 
 const props = defineProps({
   schema: { type: Object, default: null },     // { nodes, edges, counts }
   assessment: { type: Object, default: null }  // { latest: { goal, threads, flags } }
 })
+
+// The dashboard is viewed by the OPERATOR, so the chrome refers to the assistant by name (it's the
+// assistant's whole self being talked to, not the operator's). Name comes from the identity plane.
+const name = ref('the assistant')
+onMounted(() => { identity.get().then((d) => { if (d && d.name) name.value = d.name }).catch(() => {}) })
 
 const KEY = 'eve-assistant-web:self-observer'
 const messages = ref([])          // { role: 'user'|'assistant', text, tools?: [] }
@@ -27,7 +31,7 @@ function bodyContext() {
   const s = props.schema
   const latest = props.assessment?.latest
   const lines = ['[YOU ARE THE OBSERVER — proprioception]',
-    'You are Eve reflecting on yourself AS A WHOLE — the observer of all your working sessions, not any single one. Jareth is talking to you here about your overall state. Speak as the whole ("I have N parts working on…"), be honest about what you observe.']
+    'You are reflecting on yourself AS A WHOLE — the observer of all your working sessions, not any single one. You are being asked about your overall state. Speak as the whole ("I have N parts working on…"), and be honest about what you observe.']
   if (s?.nodes?.length) {
     lines.push('', `YOUR BODY RIGHT NOW — ${s.nodes.length} part(s):`)
     for (const n of s.nodes.slice(0, 40)) {
@@ -73,8 +77,8 @@ async function send() {
 function stop() { try { ac && ac.abort() } catch (_) {} busy.value = false }
 
 const placeholder = computed(() => props.schema?.nodes?.length
-  ? 'Ask the observer about your whole self — what are you working on, what\'s stuck, what should converge?'
-  : 'The body is at rest. Ask the observer anything about your overall state.')
+  ? `Ask ${name.value} about the whole — what's being worked on across all parts, what's stuck, what should converge?`
+  : `${name.value} is at rest — no active parts. Ask about the overall state.`)
 </script>
 
 <template>
@@ -82,15 +86,15 @@ const placeholder = computed(() => props.schema?.nodes?.length
     <div class="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
       <div class="flex items-center gap-2">
         <span class="text-sm font-semibold text-slate-200">🧠 The Observer</span>
-        <span class="text-[11px] text-slate-500">— talk to your whole self</span>
+        <span class="text-[11px] text-slate-500">— {{ name }} as a whole</span>
       </div>
       <button v-if="messages.length" class="text-[11px] text-slate-500 hover:text-slate-300" @click="messages = []">clear</button>
     </div>
 
     <div ref="scrollBox" class="min-h-[120px] flex-1 space-y-2.5 overflow-y-auto p-4" style="max-height: 340px">
       <p v-if="!messages.length" class="py-6 text-center text-xs leading-relaxed text-slate-500">
-        This is you, reflecting on yourself as a whole — grounded in your live parts and deduced goal.<br />
-        Ask about the big picture; the observer can inspect parts and send them awareness notes.
+        Talk to {{ name }} as a whole — the observer of all its sessions, grounded in the live parts and deduced goal.<br />
+        Ask about the big picture; it can inspect parts and send them awareness notes.
       </p>
       <div v-for="(m, i) in messages" :key="i" :class="m.role === 'user' ? 'flex justify-end' : ''">
         <div v-if="m.role === 'user'" class="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm border border-brand-violet/30 bg-brand-violet/15 px-3 py-2 text-[13px] leading-snug text-violet-100">{{ m.text }}</div>
