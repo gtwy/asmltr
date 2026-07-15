@@ -16,7 +16,7 @@ collector. Execution uses the **local Claude Agent SDK on the user's Claude subs
 Run these and confirm each; if any fails, tell the user what to install and stop:
 
 ```bash
-node --version          # must be >= 18
+node --version          # must be >= 24 (see .nvmrc; `nvm use` picks it up)
 claude --version        # Claude Code CLI must be installed AND logged in (this is the brain)
 pm2 --version           # process manager; if missing: npm i -g pm2
 git --version
