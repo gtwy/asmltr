@@ -34,14 +34,16 @@ const modelChoices = computed(() => field('runtime', 'model').choices || [])
 
 // --- Identity (the Self / Likeness plane) ---
 const idn = ref(null)
-const d = reactive({ name: '', self_description: '', preferences: '', story: '' })
+const d = reactive({ name: '', self_description: '', preferences: '', story: '', aesthetic: '', palette: '' })
 const showPreamble = ref(false)
 const nameDirty = computed(() => idn.value && d.name.trim() && d.name.trim() !== idn.value.name)
 const idnDirty = computed(() => idn.value && (nameDirty.value
   || d.self_description !== idn.value.self_description
   || d.preferences !== idn.value.preferences
-  || d.story !== idn.value.story))
-function syncIdentity() { Object.assign(d, { name: idn.value.name, self_description: idn.value.self_description, preferences: idn.value.preferences || '', story: idn.value.story || '' }) }
+  || d.story !== idn.value.story
+  || d.aesthetic !== (idn.value.aesthetic || '')
+  || d.palette !== (idn.value.palette || '')))
+function syncIdentity() { Object.assign(d, { name: idn.value.name, self_description: idn.value.self_description, preferences: idn.value.preferences || '', story: idn.value.story || '', aesthetic: idn.value.aesthetic || '', palette: idn.value.palette || '' }) }
 async function loadIdentity() { try { idn.value = await identity.get(); syncIdentity() } catch (_) {} }
 async function saveIdentity() {
   busy.value = 'identity'; notice.value = ''
@@ -52,6 +54,8 @@ async function saveIdentity() {
     if (d.self_description !== idn.value.self_description) body.self_description = d.self_description
     if (d.preferences !== idn.value.preferences) body.preferences = d.preferences
     if (d.story !== idn.value.story) body.story = d.story
+    if (d.aesthetic !== (idn.value.aesthetic || '')) body.aesthetic = d.aesthetic
+    if (d.palette !== (idn.value.palette || '')) body.palette = d.palette
     idn.value = await identity.set(body); syncIdentity()
     notice.value = renamed
       ? `Saved. The core uses “${idn.value.name}” from the next turn — but connector-level name (Discord wake word, the shell alias, the bot's own username) needs a service restart + re-provision to fully realign.`

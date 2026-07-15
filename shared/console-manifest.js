@@ -41,6 +41,8 @@ const manifest = {
         { id: 'self_description', label: 'Essence', type: 'textarea', rows: 5, desc: 'the stable core, asserted in the anchor', placeholder: 'Who you are, in your own words…' },
         { id: 'preferences', label: 'Preferences', type: 'textarea', rows: 4, desc: 'tendencies & working style (not rules; self-updatable over time)', placeholder: 'How you tend to work, what you value…' },
         { id: 'story', label: 'Story & context', type: 'textarea', rows: 5, desc: 'the narrative you carry (grows over time)', placeholder: 'Formative events, relationships, the accumulated narrative…' },
+        { id: 'aesthetic', label: 'Aesthetic', type: 'textarea', rows: 3, desc: 'artistic & design sensibility — style, mood, typography (leaned on when building assets)', placeholder: 'Clean and minimal; warm tones; generous whitespace; playful but precise…' },
+        { id: 'palette', label: 'Signature colors', type: 'text', desc: 'favorite colors in order (primary first) — names and/or hex, comma-separated; the default reached for when nothing else is chosen', placeholder: 'orange #FF6600, teal #2AA198, slate' },
       ],
       preview: { get: 'preamble', label: 'the anchor every session sees' },
     },
