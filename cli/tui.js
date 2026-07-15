@@ -410,6 +410,68 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
     label: ' pick ', border: { type: 'line' }, tags: true, keys: true, mouse: true,
     style: { border: { fg: 'cyan' }, selected: { bg: 'cyan', fg: 'black' } },
   });
+  // ===== Live update-progress overlay ==========================================================
+  // Reads the updater's status FILE directly (~/.asmltr/update-status.json) once a second. The file
+  // is the same one the GUI polls via /v2/update/progress — reading it locally means progress keeps
+  // rendering even while the updater restarts core (which drops our socket). Survives the restart.
+  const UPD_STATUS_FILE = (() => {
+    const osm = require('os'), pth = require('path');
+    return process.env.ASMLTR_UPDATE_STATUS || pth.join(osm.homedir(), '.asmltr', 'update-status.json');
+  })();
+  const UPD_TERMINAL = ['success', 'rolled-back', 'failed', 'up-to-date', 'managed'];
+  const updBox = blessed.box({
+    parent: screen, hidden: true, top: 'center', left: 'center', width: '82%', height: '72%',
+    label: ' update ', border: { type: 'line' }, tags: true,
+    style: { border: { fg: 'magenta' } }, scrollable: true, keys: true, mouse: true,
+    alwaysScroll: true, scrollbar: { ch: ' ', style: { bg: 'magenta' } },
+  });
+  let updOpen = false, updTimer = null, updOpenedAt = 0;
+  const UPD_LABEL = {
+    running: '{magenta-fg}⟳ updating…{/}', restarting: '{magenta-fg}⟳ restarting services…{/}',
+    starting: '{magenta-fg}⟳ starting…{/}', success: '{green-fg}✓ update complete{/}',
+    'rolled-back': '{yellow-fg}↩ update failed — rolled back to the previous build{/}',
+    failed: '{red-fg}✗ update failed — manual intervention needed{/}',
+    'up-to-date': '{green-fg}✓ already up to date{/}', managed: '{gray-fg}ⓘ managed externally{/}',
+  };
+  function renderUpd() {
+    let s;
+    try { s = JSON.parse(require('fs').readFileSync(UPD_STATUS_FILE, 'utf8')); }
+    catch (_) { s = { state: 'running', phase: 'starting the updater…', log: [] }; }
+    // Ignore a stale file from a PREVIOUS run — the detached updater may not have written its fresh
+    // status yet. Anything started before we opened the overlay is the old run; show "starting…".
+    if (updOpenedAt && (s.started_at || 0) < updOpenedAt) s = { state: 'running', phase: 'starting the updater…', log: [] };
+    const term = UPD_TERMINAL.includes(s.state);
+    const L = [];
+    const label = UPD_LABEL[s.state] || s.state || '…';
+    L.push('{bold}' + label + '{/bold}' + (s.from ? `  {gray-fg}${s.from}${s.to ? ' → ' + s.to : ''}{/}` : '') + (s.version && term ? `  {gray-fg}v${s.version}{/}` : ''));
+    if (s.phase && !term) L.push('{cyan-fg}▸ ' + s.phase + '{/}');
+    if (s.message && term) L.push('{gray-fg}' + s.message + '{/}');
+    L.push('');
+    for (const line of (s.log || []).slice(-24)) L.push('{gray-fg}' + String(line).replace(/[{}]/g, '') + '{/}');
+    if (term) { L.push(''); L.push('{magenta-fg}— press ESC to close —{/}'); }
+    updBox.setLabel(term ? ' update — done (ESC to close) ' : ' update — in progress ');
+    updBox.setContent(L.join('\n'));
+    updBox.setScrollPerc(100);
+    screen.render();
+    if (term && updTimer) { clearInterval(updTimer); updTimer = null; }
+  }
+  function openUpd() {
+    // Backdate a few seconds: the detached updater may have written its first status just before we
+    // got here — don't reject the fresh run, only genuinely older ones.
+    updOpenedAt = Date.now() - 4000;
+    updOpen = true; updBox.show(); updBox.focus(); renderUpd();
+    if (updTimer) clearInterval(updTimer);
+    updTimer = setInterval(renderUpd, 1000);
+    screen.render();
+  }
+  function closeUpd() {
+    updOpen = false;
+    if (updTimer) { clearInterval(updTimer); updTimer = null; }
+    updBox.hide();
+    if (appMode) appBox.focus(); else screen.render();
+    screen.render();
+  }
+  updBox.key(['escape', 'q'], closeUpd);
   let appMode = null;   // null(closed) | 'sections'
   let appRows = [];     // index-aligned metadata for the current list
   let appData = {};     // "sectionId" -> loaded values ; "sectionId:fieldId" -> field-level load
@@ -493,7 +555,15 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
     if (!row) return;
     if (row.kind === 'toggle') { await callEP(row.f.set, { value: !row.value }); await loadApp(); return renderApp(); }
     if (row.kind === 'text') return openEditor(row);
-    if (row.kind === 'status') { if (row.action) { await callEP(row.action); log.log(`{cyan-fg}⚙ ${row.action.label} started{/cyan-fg}`); } return; }
+    if (row.kind === 'status') {
+      if (row.action) {
+        await callEP(row.action);
+        log.log(`{cyan-fg}⚙ ${row.action.label} started{/cyan-fg}`);
+        // The deterministic code updater writes a status file — show the live progress overlay.
+        if (row.action.id === 'code-update' || (row.action.path || '').includes('/v2/update/run')) openUpd();
+      }
+      return;
+    }
     if (row.kind === 'choice') {
       const choices = row.f.choices || [];
       const items = choices.map((c) => `${row.value === c.id ? '{green-fg}✓{/green-fg} ' : '  '}${c.label}  {gray-fg}${c.hint || ''}{/gray-fg}`);
@@ -594,7 +664,7 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
   draftsBox.key(['r'], renderDrafts);
 
   // top-level openers (guarded so they don't fire while any overlay owns the screen)
-  function anyOverlay() { return watchSessionId || settingsMode !== null || appMode || selfOpen || draftsMode; }
+  function anyOverlay() { return watchSessionId || settingsMode !== null || appMode || selfOpen || draftsMode || updOpen; }
   sessTable.rows.key(['d'], () => { if (!anyOverlay()) forgetSelected(); });
   screen.key(['c'], () => { if (!anyOverlay()) openSettings(); });     // connector settings
   screen.key(['e'], () => { if (!anyOverlay()) openApp(); });          // app settings (manifest)

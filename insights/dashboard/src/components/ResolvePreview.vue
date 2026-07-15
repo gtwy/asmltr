@@ -114,7 +114,7 @@ function chanMeta(s) {
             backgroundColor: chanMeta(form.channel).color + '1a'
           }"
         >
-          {{ chanMeta(form.channel).icon }} {{ chanMeta(form.channel).label }}
+          <AppIcon :glyph="chanMeta(form.channel).icon" /> {{ chanMeta(form.channel).label }}
         </span>
         <span class="text-sm font-semibold text-slate-100">{{ result.display_name }}</span>
         <span class="font-mono text-[11px] text-slate-500">{{ result.user_key }}</span>
@@ -127,12 +127,12 @@ function chanMeta(s) {
           class="pill border border-rose-500/40 bg-rose-500/15 text-rose-300"
           title="no matching principal — default-deny applied"
         >
-          🚫 default-deny
+          <AppIcon glyph="🚫" /> default-deny
         </span>
         <span v-else class="pill border border-emerald-400/30 bg-emerald-400/10 text-emerald-300">matched principal</span>
         <span v-if="result.revoked" class="pill border border-rose-500/40 bg-rose-500/15 text-rose-300">revoked</span>
-        <span v-if="result.bypass_moderation" class="pill border border-pink-400/30 bg-pink-400/10 text-pink-300">⚡ bypass moderation</span>
-        <span v-if="result.strict_mode" class="pill border border-white/10 bg-white/5 text-slate-300">🔒 strict</span>
+        <span v-if="result.bypass_moderation" class="pill border border-pink-400/30 bg-pink-400/10 text-pink-300"><AppIcon glyph="⚡" /> bypass moderation</span>
+        <span v-if="result.strict_mode" class="pill border border-white/10 bg-white/5 text-slate-300"><AppIcon glyph="🔒" /> strict</span>
         <span v-if="result.scope_label" class="pill border border-white/10 bg-white/5 font-mono text-[11px] text-slate-400">@ {{ result.scope_label }}</span>
       </div>
 

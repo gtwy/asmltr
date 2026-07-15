@@ -925,6 +925,19 @@ app.get('/v2/update/status', async (req, res) => res.json(await selfUpdate.getUp
 app.get('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.isAutoUpdate() }));
 app.post('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.setAutoUpdate(!!(req.body && req.body.enabled)) }));
 // Release channel: stable (newest release tag) vs edge (origin/main).
+// Live progress of a running/last update — read from the status FILE the updater writes, so it
+// survives the mid-update service restart that drops the event stream. The GUI polls this; the TUI
+// reads the file directly. { state: idle|running|success|rolled-back|up-to-date|managed|failed, phase, log[], … }.
+app.get('/v2/update/progress', (req, res) => {
+  try {
+    const fsm = require('fs'), osm = require('os'), pth = require('path');
+    const f = process.env.ASMLTR_UPDATE_STATUS || pth.join(osm.homedir(), '.asmltr', 'update-status.json');
+    const s = JSON.parse(fsm.readFileSync(f, 'utf8'));
+    // A 'running' status that hasn't updated in >6 min (and whose pid is gone) is stale — the updater died.
+    if (s.state === 'running' && Date.now() - (s.updated_at || 0) > 6 * 60 * 1000) s.stale = true;
+    res.json(s);
+  } catch (_) { res.json({ state: 'idle' }); }
+});
 app.get('/v2/update/channel', (req, res) => res.json({ channel: selfUpdate.getChannel() }));
 app.post('/v2/update/channel', (req, res) => { try { res.json({ channel: selfUpdate.setChannel(req.body && req.body.channel) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 // Kick off a self-update: spawns the DETACHED DETERMINISTIC updater (scripts/update.js) — scripted,

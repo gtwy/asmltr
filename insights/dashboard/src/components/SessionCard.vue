@@ -110,8 +110,8 @@ const claimLabel = computed(() => {
           class="shrink-0 rounded px-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
           :title="copied ? 'Copied!' : 'Copy session id (for `asmltr context <id>`)'"
           @click.stop="copyId"
-        >{{ copied ? '✓' : '⧉' }}</button>
-        <span v-if="session.location" class="shrink-0 text-slate-600" :title="session.location">· 💬 {{ truncate(session.location, 30) }}</span>
+        ><AppIcon :glyph="copied ? '✓' : '⧉'" /></button>
+        <span v-if="session.location" class="shrink-0 text-slate-600" :title="session.location">· <AppIcon :name="['fas','comments']" /> {{ truncate(session.location, 30) }}</span>
       </div>
       <!-- live activity preview (falls back to task/context, then a hint) -->
       <div
@@ -119,7 +119,7 @@ const claimLabel = computed(() => {
         class="mt-1 flex items-start gap-1.5 text-[13px] leading-snug text-slate-300"
         :title="previewLine.text"
       >
-        <span class="shrink-0 select-none opacity-80">{{ previewLine.icon }}</span>
+        <AppIcon :glyph="previewLine.icon" class="shrink-0 select-none opacity-80" />
         <span class="min-w-0 truncate">{{ truncate(previewLine.text, 84) }}</span>
       </div>
       <div
@@ -140,13 +140,13 @@ const claimLabel = computed(() => {
 
     <!-- search match snippet (why this card matched) -->
     <div v-if="searchSnippet" class="truncate rounded-md border border-brand-violet/20 bg-brand-violet/5 px-2 py-1 text-[11px] text-violet-300/90" :title="searchSnippet">
-      🔍 …{{ truncate(searchSnippet, 90) }}…
+      <AppIcon glyph="🔍" /> …{{ truncate(searchSnippet, 90) }}…
     </div>
 
     <!-- meta chips -->
     <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
       <span class="pill border border-white/10 bg-white/5 text-slate-300" title="session age">
-        ⏱ {{ age }}
+        <AppIcon glyph="⏱" /> {{ age }}
       </span>
       <span class="pill border border-white/10 bg-white/5 text-slate-300" title="last activity">
         last {{ lastSeen }}
@@ -162,21 +162,21 @@ const claimLabel = computed(() => {
         class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300"
         title="tool calls"
       >
-        🛠 {{ fmtNum(session.tool_count) }}
+        <AppIcon glyph="🛠" /> {{ fmtNum(session.tool_count) }}
       </span>
       <span
         v-if="muxLabel"
         class="pill border border-cyan-400/30 bg-cyan-400/10 text-cyan-300"
         title="multiplexer"
       >
-        ▣ {{ muxLabel }}
+        <AppIcon glyph="▣" /> {{ muxLabel }}
       </span>
       <span
         v-if="claimLabel"
         class="pill border border-pink-400/30 bg-pink-400/10 text-pink-300"
         title="claim state"
       >
-        🔒 {{ claimLabel }}
+        <AppIcon glyph="🔒" /> {{ claimLabel }}
       </span>
       <span
         v-if="session.pid"
@@ -198,7 +198,7 @@ const claimLabel = computed(() => {
         :class="monitored ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20' : 'border-white/10 bg-white/5 text-slate-500 hover:text-slate-300'"
         @click.stop="$emit('toggle-channel', session.session_id)"
       >
-        {{ channelBusy ? '…' : (monitored ? '● monitored' : '○ muted') }}
+<template v-if="channelBusy">…</template><template v-else><AppIcon :glyph="monitored ? '●' : '○'" /> {{ monitored ? 'monitored' : 'muted' }}</template>
       </button>
       <span v-else></span>
       <button

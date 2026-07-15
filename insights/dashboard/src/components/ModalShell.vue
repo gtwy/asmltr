@@ -41,7 +41,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-sm text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
             @click="emit('close')"
           >
-            ✕
+            <AppIcon glyph="✕" />
           </button>
         </header>
 

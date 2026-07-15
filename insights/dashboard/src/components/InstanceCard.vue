@@ -47,7 +47,7 @@ const summary = computed(() => {
           class="pill border"
           :style="{ color: meta.color, borderColor: meta.color + '40', backgroundColor: meta.color + '1a' }"
         >
-          {{ meta.icon }} {{ meta.label }}
+          <AppIcon :glyph="meta.icon" /> {{ meta.label }}
         </span>
       </div>
       <div class="flex items-center gap-1.5 text-xs" :style="{ color: st.color }">
@@ -86,7 +86,7 @@ const summary = computed(() => {
         class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300"
         title="restart count"
       >
-        ↻ {{ rt.restarts }} restart{{ rt.restarts === 1 ? '' : 's' }}
+        <AppIcon glyph="↻" /> {{ rt.restarts }} restart{{ rt.restarts === 1 ? '' : 's' }}
       </span>
       <span
         v-if="rt.pid"
@@ -100,7 +100,7 @@ const summary = computed(() => {
         class="pill border border-white/10 bg-white/5 text-slate-400"
         title="uptime"
       >
-        ⏱ {{ startedAge }}
+        <AppIcon glyph="⏱" /> {{ startedAge }}
       </span>
       <span
         v-for="chip in summary"
@@ -138,17 +138,17 @@ const summary = computed(() => {
       </button>
 
       <button type="button" class="act" :disabled="isBusy" @click="emit('restart', instance)">
-        {{ busy === 'restart' ? '↻…' : '↻ Restart' }}
+<AppIcon glyph="↻" /> <template v-if="busy === 'restart'">…</template><template v-else>Restart</template>
       </button>
-      <button type="button" class="act" :disabled="isBusy" @click="emit('edit', instance)">✎ Edit</button>
-      <button type="button" class="act" :disabled="isBusy" @click="emit('logs', instance)">▤ Logs</button>
+      <button type="button" class="act" :disabled="isBusy" @click="emit('edit', instance)"><AppIcon glyph="✎" /> Edit</button>
+      <button type="button" class="act" :disabled="isBusy" @click="emit('logs', instance)"><AppIcon :name="['fas','file-lines']" /> Logs</button>
       <button
         type="button"
         class="act-danger ml-auto"
         :disabled="isBusy"
         @click="emit('delete', instance)"
       >
-        {{ busy === 'delete' ? '…' : '🗑 Delete' }}
+        <template v-if="busy === 'delete'">…</template><template v-else><AppIcon glyph="🗑" /> Delete</template>
       </button>
     </div>
   </div>

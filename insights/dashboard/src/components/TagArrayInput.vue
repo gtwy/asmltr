@@ -70,7 +70,7 @@ function remove(idx) {
         :aria-label="`remove ${tag}`"
         @click="remove(idx)"
       >
-        ✕
+        <AppIcon glyph="✕" />
       </button>
     </span>
     <input

@@ -94,7 +94,7 @@ onUnmounted(() => {
           class="glass glass-hover px-3 py-1.5 text-sm text-slate-300"
           @click="store.fetchInstances()"
         >
-          ↻ Refresh
+          <AppIcon glyph="↻" /> Refresh
         </button>
       </template>
     </PageHeader>
@@ -139,7 +139,7 @@ onUnmounted(() => {
                 backgroundColor: connectorTypeMeta(t.type, t.displayName).color + '1a'
               }"
             >
-              {{ connectorTypeMeta(t.type, t.displayName).icon }} {{ t.displayName }}
+              <AppIcon :glyph="connectorTypeMeta(t.type, t.displayName).icon" /> {{ t.displayName }}
             </span>
             <span
               v-if="t.supportsMultiple"
@@ -157,7 +157,7 @@ onUnmounted(() => {
               class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300"
               title="required Bitwarden secret key"
             >
-              🔑 {{ key }}
+              <AppIcon glyph="🔑" /> {{ key }}
             </span>
             <span
               v-if="t.capabilities?.max_message_chars"

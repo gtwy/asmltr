@@ -103,7 +103,7 @@ function toNum(raw) {
           v-if="field.isCredential"
           class="pill border border-amber-400/30 bg-amber-400/10 text-amber-300"
         >
-          🔑 secret key
+          <AppIcon glyph="🔑" /> secret key
         </span>
       </label>
 
@@ -156,7 +156,7 @@ function toNum(raw) {
             :value="item"
             @input="updateScalar(field.key, idx, $event.target.value, field.def.items && field.def.items.type)"
           />
-          <button type="button" class="row-remove" @click="removeScalar(field.key, idx)">✕</button>
+          <button type="button" class="row-remove" @click="removeScalar(field.key, idx)"><AppIcon glyph="✕" /></button>
         </div>
         <button type="button" class="row-add" @click="addScalar(field)">+ Add</button>
       </div>
@@ -179,7 +179,7 @@ function toNum(raw) {
               @input="updateObject(field.key, idx, subKey, $event.target.value)"
             />
           </div>
-          <button type="button" class="row-remove" @click="removeObject(field.key, idx)">✕</button>
+          <button type="button" class="row-remove" @click="removeObject(field.key, idx)"><AppIcon glyph="✕" /></button>
         </div>
         <button type="button" class="row-add" @click="addObject(field)">+ Add row</button>
       </div>

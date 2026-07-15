@@ -6,6 +6,10 @@
 import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { api, runtime, voice, identity, update } from '@/services/api'
+import { useUpdateProgress } from '@/composables/useUpdateProgress'
+
+// Shared progress poller — calling begin() pops the global App.vue progress panel immediately.
+const { begin: updBegin } = useUpdateProgress()
 
 const manifest = ref(null)
 const tab = ref('identity')
@@ -68,7 +72,8 @@ async function setChannel(ch) {
 }
 async function runUpdate() {
   busy.value = 'upd-run'; notice.value = ''
-  try { await update.run(); notice.value = 'Update started — the deterministic updater is running (fetch → install → restart → verify, auto-rollback on failure). Watch it in Live (session “self-update”).' }
+  updBegin() // show the persistent progress panel immediately
+  try { await update.run(); notice.value = 'Update started — the deterministic updater is running (fetch → install → restart → verify, auto-rollback on failure). Progress shows at the top of every page and survives the restart.' }
   catch (e) { notice.value = 'Failed to start: ' + e.message } finally { busy.value = '' }
 }
 
@@ -148,7 +153,7 @@ onMounted(async () => {
             class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
             :class="tab === t.id ? 'bg-brand-violet/20 text-violet-200' : 'text-slate-400 hover:text-slate-200'"
             @click="tab = t.id"
-          >{{ t.icon }} {{ t.label }}</button>
+          ><AppIcon :glyph="t.icon" class="mr-1" /> {{ t.label }}</button>
         </div>
 
         <!-- Identity — fields from the manifest -->
@@ -194,7 +199,7 @@ onMounted(async () => {
               <div class="min-w-0">
                 <div class="text-[11px] uppercase tracking-wide text-slate-500">Agent SDK</div>
                 <div class="font-mono text-sm text-slate-200">{{ rt.sdk.installed || '—' }}
-                  <span v-if="rt.sdk.latest && !rt.sdk.updateAvailable" class="ml-1 text-[11px] text-emerald-400">✓ up to date</span>
+                  <span v-if="rt.sdk.latest && !rt.sdk.updateAvailable" class="ml-1 text-[11px] text-emerald-400"><AppIcon glyph="✓" /> up to date</span>
                   <span v-else-if="rt.sdk.updateAvailable" class="ml-1 text-[11px] text-amber-400">→ {{ rt.sdk.latest }} available</span>
                 </div>
               </div>
@@ -204,7 +209,7 @@ onMounted(async () => {
                 class="ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
                 :class="rt.sdk.updateAvailable ? 'border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'border-white/10 bg-white/5 text-slate-500'"
                 @click="updateSdk"
-              >{{ busy === 'update' ? 'starting…' : (rt.sdk.updateAvailable ? '↑ Update now' : 'Latest') }}</button>
+              >{{ busy === 'update' ? 'starting…' : (rt.sdk.updateAvailable ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
             </div>
             <label class="mb-5 flex cursor-pointer items-center justify-between gap-3">
               <span>
@@ -271,7 +276,7 @@ onMounted(async () => {
               <div class="min-w-0">
                 <div class="text-[11px] uppercase tracking-wide text-slate-500">Version <span class="normal-case text-slate-600">· {{ upd.channel }}</span></div>
                 <div class="font-mono text-sm text-slate-200">v{{ upd.version || '?' }} <span class="text-slate-500">({{ upd.head || '—' }})</span>
-                  <span v-if="!upd.available" class="ml-1 text-[11px] text-emerald-400">✓ up to date</span>
+                  <span v-if="!upd.available" class="ml-1 text-[11px] text-emerald-400"><AppIcon glyph="✓" /> up to date</span>
                   <span v-else class="ml-1 text-[11px] text-amber-400">→ {{ upd.behind }} behind{{ upd.latest_version ? ' · v' + upd.latest_version : '' }} ({{ upd.remote }})</span>
                 </div>
               </div>
@@ -281,7 +286,7 @@ onMounted(async () => {
                 class="ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
                 :class="upd.available ? 'border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'border-white/10 bg-white/5 text-slate-500'"
                 @click="runUpdate"
-              >{{ busy === 'upd-run' ? 'starting…' : (upd.available ? '↑ Update now' : 'Latest') }}</button>
+              >{{ busy === 'upd-run' ? 'starting…' : (upd.available ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
             </div>
             <div v-if="upd.available && upd.changelog?.length" class="mb-4 max-h-40 overflow-y-auto rounded-lg border border-white/5 bg-black/20 p-3">
               <div class="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Incoming ({{ upd.behind }})</div>

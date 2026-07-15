@@ -179,7 +179,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
             placeholder="Search session contents…"
             class="w-56 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 pl-8 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06] sm:w-72"
           />
-          <span class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500">{{ searching ? '⏳' : '🔍' }}</span>
+          <span class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"><AppIcon :glyph="searching ? '⏳' : '🔍'" /></span>
         </div>
         <button
           class="rounded-lg bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30"
@@ -192,7 +192,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
           class="glass glass-hover px-3 py-1.5 text-sm text-slate-300"
           @click="store.fetchSessions()"
         >
-          ↻ Refresh
+          <AppIcon glyph="↻" /> Refresh
         </button>
       </template>
     </PageHeader>
@@ -263,7 +263,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         :title="surfaceFilter === surface ? 'Click to clear filter' : 'Filter to ' + surfaceMeta(surface).label"
         @click="toggleSurface(surface)"
       >
-        {{ surfaceMeta(surface).icon }} {{ surfaceMeta(surface).label }} · {{ count }}
+        <AppIcon :glyph="surfaceMeta(surface).icon" /> {{ surfaceMeta(surface).label }} · {{ count }}
       </button>
       <button
         v-if="surfaceFilter"
@@ -271,7 +271,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
         class="pill border border-white/15 bg-white/5 text-slate-400 hover:text-slate-200"
         @click="surfaceFilter = null"
       >
-        ✕ clear
+        <AppIcon glyph="✕" /> clear
       </button>
     </div>
 

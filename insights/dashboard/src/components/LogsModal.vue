@@ -59,7 +59,7 @@ onMounted(load)
         class="glass glass-hover px-3 py-1.5 text-sm text-slate-300 disabled:opacity-50"
         @click="load"
       >
-        {{ loading ? '↻ Refreshing…' : '↻ Refresh' }}
+<AppIcon glyph="↻" /> {{ loading ? 'Refreshing…' : 'Refresh' }}
       </button>
     </template>
   </ModalShell>

@@ -166,8 +166,8 @@ function onGraphClick(p) {
                   @click="setWindow(w.key)">{{ w.label }}</button>
         </div>
         <button class="rounded-lg border border-brand-violet/40 bg-brand-violet/15 px-3 py-1.5 text-sm font-medium text-violet-100 transition hover:bg-brand-violet/25"
-                title="Open a chat with the observer — talk to your whole self" @click="openObserver">🧠 Talk to the Observer</button>
-        <button class="glass glass-hover px-3 py-1.5 text-sm text-slate-300" @click="load">↻</button>
+                title="Open a chat with the observer — talk to your whole self" @click="openObserver"><AppIcon glyph="🧠" /> Talk to the Observer</button>
+        <button class="glass glass-hover px-3 py-1.5 text-sm text-slate-300" @click="load"><AppIcon glyph="↻" /></button>
       </template>
     </PageHeader>
 
@@ -186,7 +186,7 @@ function onGraphClick(p) {
 
       <div v-if="latest && (latest.threads?.length || latest.flags?.length)" class="mt-3 flex flex-wrap gap-1.5">
         <span v-for="(t, i) in latest.threads" :key="'t' + i" class="pill border border-white/10 bg-white/5 text-[11px] text-slate-300">{{ t }}</span>
-        <span v-for="(f, i) in latest.flags" :key="'f' + i" class="pill border border-amber-400/30 bg-amber-400/10 text-[11px] text-amber-300">⚠ {{ f }}</span>
+        <span v-for="(f, i) in latest.flags" :key="'f' + i" class="pill border border-amber-400/30 bg-amber-400/10 text-[11px] text-amber-300"><AppIcon glyph="⚠" /> {{ f }}</span>
       </div>
     </div>
 

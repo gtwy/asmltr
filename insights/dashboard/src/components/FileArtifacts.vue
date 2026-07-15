@@ -54,6 +54,6 @@ const url = files.downloadUrl
       v-for="a in artifacts" :key="a.path"
       :href="url(a.path)" :download="a.name" :title="'Download ' + a.path"
       class="inline-flex items-center gap-1 rounded-md border border-brand-violet/30 bg-brand-violet/10 px-2 py-1 text-[11px] text-violet-200 transition-colors hover:bg-brand-violet/20"
-    >⬇ {{ a.name }} <span class="text-slate-400">· {{ human(a.size) }}</span></a>
+    ><AppIcon glyph="⬇" /> {{ a.name }} <span class="text-slate-400">· {{ human(a.size) }}</span></a>
   </div>
 </template>

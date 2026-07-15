@@ -111,7 +111,7 @@ onMounted(() => {
           class="glass glass-hover px-3 py-1.5 text-sm text-slate-300"
           @click="refresh"
         >
-          ↻ Refresh
+          <AppIcon glyph="↻" /> Refresh
         </button>
         <button
           class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity hover:opacity-90"
