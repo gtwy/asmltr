@@ -8,6 +8,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import { api, runtime, voice, identity, update } from '@/services/api'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
+import { applyPalette } from '@/composables/useBrandTheme'
 
 // Shared progress poller — calling begin() pops the global App.vue progress panel immediately.
 const { begin: updBegin } = useUpdateProgress()
@@ -57,6 +58,7 @@ async function saveIdentity() {
     if (d.aesthetic !== (idn.value.aesthetic || '')) body.aesthetic = d.aesthetic
     if (d.palette !== (idn.value.palette || '')) body.palette = d.palette
     idn.value = await identity.set(body); syncIdentity()
+    applyPalette(idn.value.palette) // retint the whole UI live from the saved signature colors
     notice.value = renamed
       ? `Saved. The core uses “${idn.value.name}” from the next turn — but connector-level name (Discord wake word, the shell alias, the bot's own username) needs a service restart + re-provision to fully realign.`
       : 'Identity saved — applies to the next turn on every surface.'

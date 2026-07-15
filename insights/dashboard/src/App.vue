@@ -8,6 +8,7 @@ import WindowHost from '@/components/WindowHost.vue'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useWindows } from '@/stores/windows'
+import { applyPalette } from '@/composables/useBrandTheme'
 
 const store = useCollectorStore()
 const route = useRoute()
@@ -71,7 +72,7 @@ async function runUpdate() {
 }
 async function toggleAuto() { try { auto.value = (await updateApi.setAuto(!auto.value)).auto } catch (_) {} }
 async function loadIdentityVersion() {
-  try { const id = await identity.get(); if (id && id.name) agentName.value = id.name } catch (_) {}
+  try { const id = await identity.get(); if (id) { if (id.name) agentName.value = id.name; applyPalette(id.palette) } } catch (_) {}
   try { const s = await updateApi.status(false); if (s && s.version) appVersion.value = s.version } catch (_) {}
 }
 
