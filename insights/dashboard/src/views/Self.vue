@@ -10,19 +10,18 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
-import SessionDetail from '@/components/SessionDetail.vue'
-import ObserverChat from '@/components/ObserverChat.vue'
 import { useCollectorStore } from '@/stores/collector'
+import { useWindows } from '@/stores/windows'
 import { api } from '@/services/api'
 import { surfaceMeta, truncate, fmtAge, fmtNum } from '@/lib/format'
 
 const store = useCollectorStore()
+const windows = useWindows()
 const schema = ref(null)          // polled live — drives the HTML panels (goal, list, counts)
 const assessment = ref(null)      // { latest, history }
 const graphData = ref(null)       // topology SNAPSHOT for the chart — only replaced on a real change
 const loading = ref(true)
 const now = ref(Date.now())
-const selected = ref(null)        // clicked part → opens the chat pane
 let timer = null
 let lastTopoSig = ''
 
@@ -143,13 +142,14 @@ const option = computed(() => {
   }
 })
 
-// Click a part → open its chat (web sessions stream through the core; channel sessions inject).
+// Click a part → open its chat in a floating window (many can be open at once).
 function openPart(sid) {
   if (!sid) return
   const node = nodes.value.find((n) => n.session_id === sid)
-  selected.value = node ? { ...node } : { session_id: sid }
+  windows.openSession(node ? { ...node } : { session_id: sid })
   store.fetchSessions?.() // freshen so SessionDetail live-merges the real collector row
 }
+function openObserver() { windows.openObserver() }
 function onGraphClick(p) {
   if (!p || p.dataType !== 'node') return
   openPart(p.data?.name || p.name)
@@ -165,6 +165,8 @@ function onGraphClick(p) {
                   :class="windowKey === w.key ? 'bg-brand-violet/30 text-violet-200' : 'text-slate-400 hover:text-slate-200'"
                   @click="setWindow(w.key)">{{ w.label }}</button>
         </div>
+        <button class="rounded-lg border border-brand-violet/40 bg-brand-violet/15 px-3 py-1.5 text-sm font-medium text-violet-100 transition hover:bg-brand-violet/25"
+                title="Open a chat with the observer — talk to your whole self" @click="openObserver">🧠 Talk to the Observer</button>
         <button class="glass glass-hover px-3 py-1.5 text-sm text-slate-300" @click="load">↻</button>
       </template>
     </PageHeader>
@@ -186,11 +188,6 @@ function onGraphClick(p) {
         <span v-for="(t, i) in latest.threads" :key="'t' + i" class="pill border border-white/10 bg-white/5 text-[11px] text-slate-300">{{ t }}</span>
         <span v-for="(f, i) in latest.flags" :key="'f' + i" class="pill border border-amber-400/30 bg-amber-400/10 text-[11px] text-amber-300">⚠ {{ f }}</span>
       </div>
-    </div>
-
-    <!-- talk to the observer — the conversational face of proprioception -->
-    <div class="mb-4">
-      <ObserverChat :schema="schema" :assessment="assessment" />
     </div>
 
     <!-- body at a glance -->
@@ -260,7 +257,5 @@ function onGraphClick(p) {
       </details>
     </div>
 
-    <!-- clicked part → the same chat pane as Live (web streams via core; channel = inject) -->
-    <SessionDetail v-if="selected" :session="selected" :now="now" @close="selected = null" />
   </div>
 </template>
