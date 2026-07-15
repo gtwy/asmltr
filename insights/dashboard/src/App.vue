@@ -5,6 +5,7 @@ import { useCollectorStore } from '@/stores/collector'
 import { api, update as updateApi, identity } from '@/services/api'
 import { NAV_ROUTES } from '@/router'
 import WindowHost from '@/components/WindowHost.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useWindows } from '@/stores/windows'
@@ -102,7 +103,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between px-4 py-4 lg:flex-col lg:items-stretch lg:gap-6">
         <!-- Brand — the configured AGENT's name, so you always know whose control plane this is -->
         <div class="flex items-center gap-3">
-          <img src="/logo.svg" alt="asmltr" class="h-9 w-9 drop-shadow-[0_2px_8px_rgba(139,92,246,0.35)]" />
+          <BrandLogo class="h-9 w-9" />
           <div class="leading-tight">
             <div class="text-sm font-bold tracking-tight">
               <span class="gradient-text">{{ agentName }}</span>
