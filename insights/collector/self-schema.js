@@ -42,7 +42,12 @@ function buildSchema(dbmod, { since } = {}) {
   // 24h shows the parts that actually did something today (~10) and drops the ancient ~45. The GUI
   // can widen or narrow via ?since — proprioception with an adjustable depth of field.
   since = since || now - 24 * 3600000;
-  const sessions = dbmod.q.activeSessions.all().filter((s) => (s.last_activity_unix || 0) > since);
+  // A part is either RECENTLY ACTIVE (any surface, within the window) OR a PERSISTENT LIVE session —
+  // an interactive claude-code pane (screen/tmux) whose pid reconcile still sees alive. Those are
+  // long-running limbs, not ephemeral message turns, so they belong in the body even when idle
+  // (they render dimmed by age). Without this, an idle terminal session you left open vanishes.
+  const isPersistent = (s) => s.surface === 'claude-code' && (s.multiplexer === 'screen' || s.multiplexer === 'tmux');
+  const sessions = dbmod.q.activeSessions.all().filter((s) => (s.last_activity_unix || 0) > since || isPersistent(s));
   const byId = {}; for (const s of sessions) byId[s.session_id] = s;
 
   const nodes = sessions.map((s) => ({
