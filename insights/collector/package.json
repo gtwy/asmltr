@@ -1,6 +1,6 @@
 {
   "name": "asmltr-insights-collector",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "asmltr-insights telemetry collector — ingest, reconcile, sample, serve",
   "main": "server.js",
