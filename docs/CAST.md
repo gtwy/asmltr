@@ -180,6 +180,19 @@ opted in (config-defaulted off), so it never breaks the current identifier-match
 
 ## 6. Where trust comes from — the local authority vs. the ledger oracle
 
+### What the ledger *is* — the core of the TRUST Protocol
+
+The [TRUST Protocol](https://github.com/jarethmt/trust-protocol) shipped first as a *credential
+broker* (store secrets an agent can use but never see) — but that is **one feature**, not the point.
+Its core purpose is an **evolving, on-chain identity & reputation store for agents**: participation
+and actions logged immutably, so that **agents can verify other agents** from a history no one can
+forge or quietly rewrite. That verifiable history is what everything else draws on — **skill/package
+signing** (a signature checked against a publisher's on-chain identity + its on-chain revocation),
+**relationship and trust tiers** (a machine member's tier *derived from* its recorded behavior rather
+than set by fiat — the "trust evolves through behavior" the credential-broker code left aspirational),
+and the vouch graph. The cast is the consumer of that ledger; §3's Face C (verification) and §5's
+per-member tiers are where it plugs in.
+
 The clean separation, non-negotiable:
 
 - **The ledger is the identity/reputation *oracle*** — the shared, verifiable *evidence* of who has
