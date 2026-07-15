@@ -737,7 +737,7 @@ app.post('/v2/runtime/update', (req, res) => {
 // Identity (the Likeness "Self"): the name (ASSISTANT_NAME) + editable self-description, and a live
 // preview of the anchor injected into EVERY session's system prompt. The GUI edits it here.
 function identitySnapshot() {
-  return { name: identity.name(), self_description: identity.identityFile(), preferences: identity.getFacet('preferences'), story: identity.getFacet('story'), preamble: identity.fullIdentity() };
+  return { name: identity.name(), self_description: identity.identityFile(), preferences: identity.getFacet('preferences'), story: identity.getFacet('story'), aesthetic: identity.getFacet('aesthetic'), palette: identity.getFacet('palette'), preamble: identity.fullIdentity() };
 }
 app.get('/v2/identity', (req, res) => res.json(identitySnapshot()));
 app.post('/v2/identity', (req, res) => {
@@ -746,6 +746,8 @@ app.post('/v2/identity', (req, res) => {
   if (b.self_description != null && !identity.setIdentity(b.self_description)) return res.status(500).json({ error: 'could not write identity file' });
   if (b.preferences != null && !identity.setFacet('preferences', b.preferences)) return res.status(500).json({ error: 'could not write preferences' });
   if (b.story != null && !identity.setFacet('story', b.story)) return res.status(500).json({ error: 'could not write story' });
+  if (b.aesthetic != null && !identity.setFacet('aesthetic', b.aesthetic)) return res.status(500).json({ error: 'could not write aesthetic' });
+  if (b.palette != null && !identity.setFacet('palette', b.palette)) return res.status(500).json({ error: 'could not write palette' });
   res.json({ ok: true, ...identitySnapshot() });
 });
 

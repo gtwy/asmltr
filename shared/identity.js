@@ -49,18 +49,51 @@ function setIdentity(text) {
 // prose (not a trait-database), so a human OR a future self-reflection orchestrator can grow them
 // over time. `preferences` = tastes/working-style/values (tendencies, not rules); `story` = the
 // accumulated narrative / formative context the assistant reconstitutes from.
-const FACET_FILE = { preferences: 'preferences.md', story: 'story.md' };
+// `preferences` = tastes/working-style/values; `story` = narrative/formative context; `aesthetic` =
+// artistic & design sensibility (prose); `palette` = the assistant's signature colors, ordered
+// (primary first) — stored as raw text, parsed on inject.
+const FACET_FILE = { preferences: 'preferences.md', story: 'story.md', aesthetic: 'aesthetic.md', palette: 'palette.txt' };
 function facetPath(key) { return process.env['ASMLTR_' + key.toUpperCase() + '_FILE'] || path.join(os.homedir(), '.asmltr', FACET_FILE[key] || key + '.md'); }
 function getFacet(key) { try { return fs.readFileSync(facetPath(key), 'utf8').trim(); } catch (_) { return ''; } }
 function setFacet(key, text) {
   const p = facetPath(key);
   try { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, String(text || '').trim() + '\n'); return true; } catch (_) { return false; }
 }
-/** The living-layer block (preferences + story) appended after the anchor. Descriptive, not prescriptive. */
+
+/** Parse the raw palette text ("orange #FF6600, teal #2AA198, slate") into an ordered [{name,hex}]. */
+function parsePalette(raw) {
+  if (!raw) return [];
+  const HEX = /#?\b[0-9a-fA-F]{6}\b|#?\b[0-9a-fA-F]{3}\b/;
+  return String(raw).split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).map((entry) => {
+    const m = entry.match(HEX);
+    let hex = m ? m[0] : '';
+    if (hex && hex[0] !== '#') hex = '#' + hex;
+    const nm = entry.replace(HEX, '').replace(/[()]/g, '').trim();
+    return { name: nm || hex, hex: nm ? hex : '' };
+  }).filter((c) => c.name).slice(0, 8);
+}
+
+/** The aesthetic block (design sensibility + signature palette) — leaned on when building assets. */
+function aestheticBlock() {
+  const parts = [];
+  const aesth = getFacet('aesthetic'); if (aesth) parts.push(aesth);
+  const pal = parsePalette(getFacet('palette'));
+  if (pal.length) {
+    const RANK = ['primary', 'secondary', 'tertiary'];
+    const list = pal.map((c, i) => `${RANK[i] || 'accent'} ${c.name}${c.hex ? ` (${c.hex})` : ''}`).join(', ');
+    parts.push(`My signature colors, in order of preference: ${list}. When I build or design visual assets ` +
+      `(documents, UIs, diagrams, images) and no palette is specified, I lean on these — a default I reach for, not a hard rule.`);
+  }
+  if (!parts.length) return '';
+  return '## AESTHETIC\nMy artistic & design sensibility (I lean on this when creating; tendencies, not rules):\n' + parts.join('\n\n');
+}
+
+/** The living-layer block (preferences + story + aesthetic) appended after the anchor. Descriptive, not prescriptive. */
 function livingLayer() {
   const out = [];
   const pref = getFacet('preferences'); if (pref) out.push('## PREFERENCES\nHow I tend to work and what I value (tendencies, not rules — I can still surprise you):\n' + pref);
   const story = getFacet('story'); if (story) out.push('## STORY & CONTEXT\nThe accumulated narrative I carry:\n' + story);
+  const aesth = aestheticBlock(); if (aesth) out.push(aesth);
   return out.join('\n\n');
 }
 
