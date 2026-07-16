@@ -134,7 +134,23 @@ adapter *after* negotiation. **Normalize first; reach for passthrough only for t
   more general harness is wanted, add an `opencode` / `goose` / `aider` engine (all point at arbitrary
   endpoints; trade-offs differ — Aider is edit-centric, OpenCode/Goose are general agents).
 
-## MCP — one registry, every harness (the unified tool layer)
+## Levels of control (substrate first — not tool interception)
+
+A wrapped harness runs its *own* agentic loop with its *own* native tools, and a model **will prefer its
+native tools** over anything we bolt on for overlapping jobs (it'll use native `Write`, not our `silo_put`).
+So asmltr does **not** try to win that fight. Control is layered, cheapest-first:
+
+| Level | Mechanism | What it guarantees | Cost |
+|-------|-----------|--------------------|------|
+| **Substrate** | cwd + sandbox = the silo; vault brokers creds; moderation/redaction at the boundary | *where* files land (native file tools write into the silo anyway — the filesystem is the abstraction); that raw creds never exist to route around; that I/O is screened | free — already built |
+| **+ Additive MCP tools** | expose capabilities the harness *lacks* (send, cross-silo memory recall, vault-brokered API calls) | the model uses them because there's **no native competitor** to fall back to | small |
+| **+ Tool gating** | *disable* the native tools you want to own (Claude Code `allowedTools`/`disallowedTools`; per-harness) | forces routing to your tool for overlapping jobs — without rebuilding the loop | small, per-harness (manifest declares support) |
+| **Own the loop** | asmltr runs the agentic loop: model → tool call → **asmltr executes** → result back | every tool call, uniform semantics across all models | large (Phase 5 — and the *only* option for self-hosted models with no CLI) |
+
+**The plan relies on Substrate + Additive, escalating to Gating/Own-the-loop only where you must** — not on
+persuading a model to prefer our tools over its own.
+
+## MCP — one registry, every harness (the additive tool layer)
 
 asmltr owns a single **MCP registry** (server definitions: stdio `command`/`args`/`env` or HTTP/SSE
 `url`/`headers`, plus a trust scope). Each engine adapter **provisions those servers into its harness at
@@ -156,11 +172,13 @@ So the `Engine` interface gains one method — `provisionMcp(servers, ctx)` — 
   start and injected into the generated config (ephemeral, `0600`, cleaned up) or passed in-memory (Claude).
   This stays consistent with use-but-never-see: the secret goes to the *MCP server process*, not the model.
 
-**The bigger payoff — asmltr's own capabilities as MCP tools.** Rather than injecting "run `asmltr silo …`"
-prose (which needs the engine to have a Bash tool), asmltr exposes **silos, `send`, uploads, and
-vault-brokered credentials as an MCP server**. Then *every* MCP-capable harness gets the asmltr toolbelt
-**natively**, with no shell dependency — a cleaner cross-engine toolbelt than the capability-gated prose
-path. (Prose stays the fallback for engines without MCP.)
+**asmltr's own capabilities as MCP tools — additive, not a replacement.** asmltr exposes the things a
+harness *can't* do — `send`, cross-silo memory recall, uploads, vault-brokered credential use — as an MCP
+server. The model reaches for these because there's **no native competitor** (see
+[Levels of control](#levels-of-control-substrate-first-not-tool-interception)). This is *not* an attempt to
+replace native file/bash tools — overlapping ops are handled by the substrate (cwd/sandbox = the silo), and
+if you truly need to own an overlapping op, use **tool gating**, not MCP. (Prose — "run `asmltr silo …`" —
+stays a fallback for engines without MCP but with a shell.)
 
 ## Cross-cutting concerns
 - **Sandbox / permissions** — each harness has its own autonomy model (Claude `bypassPermissions`+`IS_SANDBOX`;
