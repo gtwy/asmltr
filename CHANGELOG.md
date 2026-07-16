@@ -17,14 +17,6 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [0.4.0] - 2026-07-16
 
 ### Added
-
-### Changed
-
-### Fixed
-
-## [0.4.0] - 2026-07-15
-
-### Added
 - **Aesthetic identity facets** — a free-text *aesthetic* sensibility + an ordered *signature palette*
   (primary/secondary/tertiary; names and/or hex), injected into the anchor every session sees, so an
   agent leans on its own colors/style when building assets and no other cue is given. Editable in
