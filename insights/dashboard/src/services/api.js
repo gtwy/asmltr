@@ -137,6 +137,13 @@ export const oidcApi = {
   removeClient: (id) => reqCore('DELETE', `/v2/oidc/clients/${encodeURIComponent(id)}`)
 }
 
+// Reasoning engines — pluggable agentic backends (claude/gemini/codex): registry + default + config.
+export const enginesApi = {
+  list: () => getCore('/v2/engines'),
+  setDefault: (id) => postCore('/v2/engines/default', { id }),
+  setConfig: (id, config) => reqCore('PATCH', `/v2/engines/${encodeURIComponent(id)}`, config)
+}
+
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
 export const backupApi = {
   list: (destination) => getCore('/v2/backups' + (destination && destination !== 'local' ? q({ destination }) : '')),
