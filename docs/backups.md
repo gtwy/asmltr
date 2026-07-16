@@ -38,16 +38,43 @@ passphrase**. There's no recovery if the passphrase is lost — GCM authenticati
 ```bash
 asmltr backup create [--label nightly] [--passphrase …]   # write a snapshot to ~/.asmltr/backups
 asmltr backup list                                        # newest first
-asmltr backup verify <file>                               # decrypt + check manifest + tar integrity
-asmltr backup restore <file> [--dry-run]                  # --dry-run prints the plan and changes nothing
+asmltr backup verify <file>                               # decrypt + tar integrity + per-file checksums
+asmltr backup restore <file> [--dry-run] [--activate]     # --dry-run prints the plan and changes nothing
 ```
 
-Restore decrypts, validates, then places each artifact back — **stashing any file it overwrites** under
-`~/.asmltr/backups/pre-restore-<ts>/` first. After a restore, bounce the services:
+**Integrity is verified two ways.** The GCM auth tag proves the archive is authentic and the passphrase
+is right; then every recorded artifact's **SHA-256 is recomputed against the manifest**. `verify` reports
+`N artifacts verified`; `restore` runs the same check **before it places anything** and aborts on a
+mismatch (override with `--force`).
+
+Restore places each artifact back — **stashing any file it overwrites** under
+`~/.asmltr/backups/pre-restore-<ts>/` first — then leaves the install stopped unless you activate it.
+
+### Bring the install online (`--activate`)
+
+`--activate` finishes the import: it runs the idempotent [`setup.d`](reference/config.md) steps (relink
+the CLI / skill / alias — important on a *fresh* box), restarts the host services, and **polls
+`/version` until the core is serving**:
 
 ```bash
-pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector
+asmltr backup restore <file> --activate
 ```
+
+Without `--activate`, restore prints the manual step instead:
+`pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector`.
+
+## Set up from a backup (import to a fresh box)
+
+To reconstitute an install elsewhere:
+
+1. Install asmltr (clone + `npm ci`) and put the backup passphrase in the environment
+   (`ASMLTR_BACKUP_PASSPHRASE`), plus the vault access keys if you use one.
+2. Copy the `.asmltrbk` archive over (or pull it from the remote destination it was pushed to).
+3. `asmltr backup verify <file>` — confirm integrity first.
+4. `asmltr backup restore <file> --activate` — reconstitutes the DBs, config, identity, and silos,
+   runs setup, and brings the services online.
+
+The restore is byte-accurate (checksum-gated) and idempotent; the pre-restore stash lets you roll back.
 
 ## Remote destinations
 
