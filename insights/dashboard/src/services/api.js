@@ -105,8 +105,17 @@ export const silosApi = {
 export const authApi = {
   status: () => getCore('/v2/auth/status'),
   setup: (username, password) => postCore('/v2/auth/setup', { username, password }),
-  login: (username, password) => postCore('/v2/auth/login', { username, password }),
-  logout: () => postCore('/v2/auth/logout')
+  // login returns a STRUCTURED result (never throws) so the caller can detect { totp_required }.
+  login: async (username, password, totp) => {
+    const res = await fetch('/v2/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ username, password, totp }) })
+    const json = await res.json().catch(() => ({}))
+    return { ok: res.ok, ...json }
+  },
+  logout: () => postCore('/v2/auth/logout'),
+  // TOTP 2FA enrollment (requires a session)
+  totpSetup: () => postCore('/v2/auth/totp/setup'),
+  totpEnable: (code) => postCore('/v2/auth/totp/enable', { code }),
+  totpDisable: (password) => postCore('/v2/auth/totp/disable', { password })
 }
 
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).

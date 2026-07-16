@@ -5,7 +5,8 @@
 // choices, toggle copy) are sourced from the manifest, so adding a setting updates both GUI and TUI.
 import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi } from '@/services/api'
+import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi } from '@/services/api'
+import QRCode from 'qrcode'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { applyPalette } from '@/composables/useBrandTheme'
@@ -26,9 +27,42 @@ const sections = computed(() => manifest.value?.settings || [])
 // browser capability (Notification API) with no meaning in the terminal.
 const TABS = computed(() => [
   ...sections.value.map((s) => ({ id: s.id, label: s.label, icon: s.icon })),
+  { id: 'security', label: 'Security', icon: '🔒' },
   { id: 'backups', label: 'Backups', icon: '🗄' },
   { id: 'notifications', label: 'Notifications', icon: '✦' },
 ])
+
+// --- security / 2FA ---
+const authStatus = ref({ enabled: false, configured: false, user: null, totp: false })
+const enroll = ref(null)      // { otpauth, secret, qr } during enrollment
+const enrollCode = ref('')
+const recoveryCodes = ref(null)
+const disablePass = ref('')
+const secBusy = ref(false)
+const secError = ref('')
+async function loadSecurity() { try { authStatus.value = await authApi.status() } catch (_) {} }
+async function beginEnroll() {
+  secBusy.value = true; secError.value = ''; recoveryCodes.value = null
+  try {
+    const r = await authApi.totpSetup()
+    const qr = await QRCode.toDataURL(r.otpauth, { margin: 1, width: 200 })
+    enroll.value = { otpauth: r.otpauth, secret: r.secret, qr }
+  } catch (e) { secError.value = e.message } finally { secBusy.value = false }
+}
+async function confirmEnroll() {
+  secBusy.value = true; secError.value = ''
+  try {
+    const r = await authApi.totpEnable(enrollCode.value)
+    recoveryCodes.value = r.codes; enroll.value = null; enrollCode.value = ''
+    await loadSecurity()
+  } catch (e) { secError.value = e.message } finally { secBusy.value = false }
+}
+async function disable2fa() {
+  if (!disablePass.value) { secError.value = 'Enter your password to disable 2FA.'; return }
+  secBusy.value = true; secError.value = ''
+  try { await authApi.totpDisable(disablePass.value); disablePass.value = ''; recoveryCodes.value = null; await loadSecurity() }
+  catch (e) { secError.value = e.message } finally { secBusy.value = false }
+}
 
 // --- backups (encrypted, restorable snapshots) ---
 const backups = ref([])
@@ -183,7 +217,7 @@ async function setCustomTtsModel() { const m = customTtsModel.value.trim(); if (
 
 onMounted(async () => {
   try { manifest.value = await api.manifest() } catch (_) {}
-  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups()])
+  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups(), loadSecurity()])
   try { ackOn.value = (await voice.getAck()).enabled } catch (_) {}
 })
 </script>
@@ -469,6 +503,67 @@ onMounted(async () => {
           <RouterLink to="/notifications" class="mt-4 inline-flex items-center gap-1.5 text-[12px] text-brand-violet hover:underline">
             <AppIcon glyph="✦" /> View notification history
           </RouterLink>
+        </div>
+
+        <div v-show="tab === 'security'" class="glass p-5">
+          <h3 class="mb-1 text-sm font-semibold text-slate-200">Security</h3>
+          <p class="mb-4 text-[12px] text-slate-500">
+            Built-in auth <span :class="authStatus.enabled ? 'text-emerald-300' : 'text-slate-400'">{{ authStatus.enabled ? 'is enforced' : 'is off' }}</span>.
+            Signed in as <span class="font-mono text-slate-300">{{ authStatus.user || '—' }}</span>.
+          </p>
+
+          <!-- 2FA -->
+          <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <span class="text-sm font-medium text-slate-200">Two-factor authentication (TOTP)</span>
+              <span class="pill border text-[11px]" :class="authStatus.totp ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-white/10 bg-white/5 text-slate-400'">
+                {{ authStatus.totp ? '● enabled' : '○ disabled' }}
+              </span>
+            </div>
+
+            <!-- freshly generated recovery codes (show once) -->
+            <div v-if="recoveryCodes" class="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3">
+              <p class="mb-2 text-[12px] font-semibold text-amber-200">Save these recovery codes — each works once, shown only now:</p>
+              <div class="grid grid-cols-2 gap-1 font-mono text-[12px] text-amber-100">
+                <span v-for="c in recoveryCodes" :key="c">{{ c }}</span>
+              </div>
+            </div>
+
+            <!-- enabled → offer disable -->
+            <template v-if="authStatus.totp && !enroll">
+              <div class="flex flex-wrap items-end gap-2">
+                <label class="flex flex-col gap-1">
+                  <span class="text-[11px] text-slate-500">Password (to disable)</span>
+                  <input v-model="disablePass" type="password" autocomplete="off" class="field-input w-56" />
+                </label>
+                <button type="button" :disabled="secBusy" class="act-danger" @click="disable2fa"><AppIcon glyph="🚫" /> Disable 2FA</button>
+              </div>
+            </template>
+
+            <!-- disabled → enroll -->
+            <template v-else-if="!authStatus.totp">
+              <div v-if="!enroll">
+                <button type="button" :disabled="secBusy" class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="beginEnroll">
+                  {{ secBusy ? 'Generating…' : 'Enable 2FA' }}
+                </button>
+              </div>
+              <div v-else class="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <img :src="enroll.qr" alt="TOTP QR" class="h-40 w-40 shrink-0 rounded-lg bg-white p-1" />
+                <div class="min-w-0 flex-1">
+                  <p class="text-[12px] text-slate-400">Scan with your authenticator, or enter this key manually:</p>
+                  <code class="mt-1 block break-all rounded bg-black/30 px-2 py-1 font-mono text-[11px] text-slate-300">{{ enroll.secret }}</code>
+                  <p class="mt-3 text-[12px] text-slate-400">Then enter the current 6-digit code to confirm:</p>
+                  <div class="mt-1 flex items-center gap-2">
+                    <input v-model="enrollCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" class="field-input w-28 text-center tracking-widest" />
+                    <button type="button" :disabled="secBusy || enrollCode.length < 6" class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="confirmEnroll">Confirm</button>
+                    <button type="button" class="act" @click="enroll = null">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <p v-if="secError" class="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{{ secError }}</p>
+          </div>
         </div>
 
         <div v-show="tab === 'backups'" class="glass p-5">

@@ -11,6 +11,8 @@ const props = defineProps({ configured: { type: Boolean, default: true }, agentN
 const username = ref('')
 const password = ref('')
 const confirm = ref('')
+const totp = ref('')
+const totpRequired = ref(false)
 const busy = ref(false)
 const error = ref('')
 const isSetup = computed(() => !props.configured)
@@ -25,8 +27,11 @@ async function submit() {
   busy.value = true
   try {
     if (isSetup.value) await authApi.setup(username.value, password.value)
-    await authApi.login(username.value, password.value)
-    window.location.reload()
+    const r = await authApi.login(username.value, password.value, totp.value || undefined)
+    if (r.ok) { window.location.reload(); return }
+    if (r.totp_required) { totpRequired.value = true; error.value = totp.value ? 'Invalid code — try again.' : ''; busy.value = false; return }
+    error.value = r.error || 'Authentication failed.'
+    busy.value = false
   } catch (e) {
     error.value = e.message || 'Authentication failed.'
     busy.value = false
@@ -53,15 +58,21 @@ async function submit() {
       </p>
 
       <form class="flex flex-col gap-3" @submit.prevent="submit">
-        <input v-model="username" type="text" autocomplete="username" placeholder="Username" class="field" />
-        <input v-model="password" type="password" :autocomplete="isSetup ? 'new-password' : 'current-password'" placeholder="Password" class="field" />
-        <input v-if="isSetup" v-model="confirm" type="password" autocomplete="new-password" placeholder="Confirm password" class="field" />
+        <template v-if="!totpRequired">
+          <input v-model="username" type="text" autocomplete="username" placeholder="Username" class="field" />
+          <input v-model="password" type="password" :autocomplete="isSetup ? 'new-password' : 'current-password'" placeholder="Password" class="field" />
+          <input v-if="isSetup" v-model="confirm" type="password" autocomplete="new-password" placeholder="Confirm password" class="field" />
+        </template>
+        <template v-else>
+          <p class="text-center text-[12px] text-slate-400">Enter the 6-digit code from your authenticator (or a recovery code).</p>
+          <input v-model="totp" type="text" inputmode="text" autocomplete="one-time-code" placeholder="2FA code" class="field text-center tracking-widest" autofocus />
+        </template>
 
         <p v-if="error" class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{{ error }}</p>
 
         <button type="submit" :disabled="busy"
           class="mt-1 rounded-xl bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity hover:opacity-90 disabled:opacity-40">
-          {{ busy ? 'Please wait…' : (isSetup ? 'Create account & sign in' : 'Sign in') }}
+          {{ busy ? 'Please wait…' : totpRequired ? 'Verify & sign in' : (isSetup ? 'Create account & sign in' : 'Sign in') }}
         </button>
       </form>
     </div>

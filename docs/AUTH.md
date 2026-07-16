@@ -67,11 +67,47 @@ linkage, OIDC provider) come *after* the session gate is solid.
 |-------|-------|-------|
 | **A — Session gate** | account store + scrypt password + signed-cookie sessions + login/logout/session endpoints + rate-limit; **enforcement flag off by default** | ✅ shipped |
 | **B — Enforcement + login UI** | nginx `auth_request` → `/v2/auth/verify` gates browser traffic; GUI login + first-run screen; then **replace Authelia** on this box | ✅ shipped (Authelia cutover pending first-run) |
-| **C — 2FA** | TOTP enrollment/verify, WebAuthn passkey register/login, recovery codes | |
+| **C — 2FA** | TOTP enrollment/verify + one-time recovery codes (✅); WebAuthn passkey (pending) | ✅ TOTP shipped |
 | **D — OIDC client** | external-IdP login option | |
-| **E — Forward-auth provider** | `/v2/auth/verify` + per-resource rules + identity headers (Authelia parity for other services) | |
+| **E — Forward-auth provider** | `/v2/auth/verify` + cookie-domain sessions + optional allowlist + identity header (Authelia parity for other services) | ✅ shipped |
 | **F — OIDC provider** | OAuth2/OIDC token issuance + client registry + consent | |
 | **G — Vault linkage** | envelope-wrapped vault key unwrapped on login; paranoid/unlinked mode | |
+
+## Two-factor (phase C)
+
+TOTP (RFC 6238) is built in — enroll under **Settings → Security** (scan the QR or enter the key, confirm
+a code) and you get **10 one-time recovery codes**. Login then requires a 6-digit code (or a recovery
+code) as a second step. Endpoints: `POST /v2/auth/totp/{setup,enable,disable}` (session-gated); the login
+returns `{ totp_required: true }` until a valid second factor is supplied. WebAuthn passkeys are a planned
+follow-on.
+
+## Gating other services (phase E — forward-auth)
+
+Any service behind a reverse proxy can be put behind asmltr's login using **forward-auth** to
+`/v2/auth/verify` — the same mechanism the dashboard uses. Set a **parent-domain cookie** so one login
+covers all subdomains:
+
+```bash
+ASMLTR_AUTH_COOKIE_DOMAIN=.example.com     # session cookie spans *.example.com
+ASMLTR_AUTH_ALLOW=alice,bob                # optional: only these users pass (empty = any signed-in user)
+```
+
+Traefik middleware (points at asmltr's verify; forwards the resolved user):
+
+```yaml
+http:
+  middlewares:
+    asmltr-auth:
+      forwardAuth:
+        address: "https://asmltr.example.com/v2/auth/verify"
+        authResponseHeaders:
+          - Remote-User
+```
+
+Attach `asmltr-auth@file` to any router. `verify` returns **200 + `Remote-User`** for a valid session,
+**401** otherwise (the proxy can redirect to asmltr's login), or **403** if an allowlist excludes the user.
+When `ASMLTR_AUTH` is off it returns 200 (break-glass). The full OAuth2/OIDC **provider** (phase F) is for
+apps that speak OIDC natively rather than trusting proxy headers.
 
 ## Security principles (non-negotiable)
 
