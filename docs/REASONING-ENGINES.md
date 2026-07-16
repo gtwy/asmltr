@@ -45,7 +45,8 @@ core/src/engines/types/<id>/index.js
     models,                                     // static list or a discovery fn
     configSchema,                               // keys (vault-backed), model, base_url, cwd, sandbox…
   }
-  async run({ prompt, systemPrompt, resume, cwd, images, onEvent, abortController })
+  async provisionMcp(servers, ctx)              // materialize asmltr's MCP registry into this harness
+  async run({ prompt, systemPrompt, resume, cwd, images, mcp, onEvent, abortController })
      → { engineSessionId, reply }               // events normalized to shared/events.js
 ```
 
@@ -105,10 +106,35 @@ The core **capability-gates features** instead of forcing a lowest common denomi
   more general harness is wanted, add an `opencode` / `goose` / `aider` engine (all point at arbitrary
   endpoints; trade-offs differ — Aider is edit-centric, OpenCode/Goose are general agents).
 
-## Cross-cutting concerns
+## MCP — one registry, every harness (the unified tool layer)
 
-- **MCP as the unifying tool bridge** — Claude, Codex, and Gemini all speak MCP, so asmltr's existing MCP
-  tools can be exposed to any MCP-capable engine uniformly (rather than re-implementing tools per engine).
+asmltr owns a single **MCP registry** (server definitions: stdio `command`/`args`/`env` or HTTP/SSE
+`url`/`headers`, plus a trust scope). Each engine adapter **provisions those servers into its harness at
+session start** — so a server defined once in asmltr is callable by *any* MCP-capable engine.
+
+Provisioning is per-harness but the registry is shared:
+
+- **Claude (SDK)** — pass the resolved servers as `mcpServers` in the `query()` options. **In-process, nothing
+  on disk.**
+- **CLI harnesses (Codex, Gemini, …)** — the adapter **generates that harness's native MCP config into an
+  ephemeral per-session home/cwd** (`config.toml` under a temp `CODEX_HOME`; `.gemini/settings.json` in the
+  session cwd) and invokes. Same registry, translated per harness.
+
+So the `Engine` interface gains one method — `provisionMcp(servers, ctx)` — and the core is responsible for:
+
+- **Which servers** a session gets — filtered by the [trust model](security/trust.md) (per principal/scope)
+  and the engine's `mcp` capability + supported transports.
+- **Secrets** — MCP server credentials are resolved from the [vault](security/trust-vault.md) at session
+  start and injected into the generated config (ephemeral, `0600`, cleaned up) or passed in-memory (Claude).
+  This stays consistent with use-but-never-see: the secret goes to the *MCP server process*, not the model.
+
+**The bigger payoff — asmltr's own capabilities as MCP tools.** Rather than injecting "run `asmltr silo …`"
+prose (which needs the engine to have a Bash tool), asmltr exposes **silos, `send`, uploads, and
+vault-brokered credentials as an MCP server**. Then *every* MCP-capable harness gets the asmltr toolbelt
+**natively**, with no shell dependency — a cleaner cross-engine toolbelt than the capability-gated prose
+path. (Prose stays the fallback for engines without MCP.)
+
+## Cross-cutting concerns
 - **Sandbox / permissions** — each harness has its own autonomy model (Claude `bypassPermissions`+`IS_SANDBOX`;
   Codex sandbox/approval modes; Gemini's yolo/non-interactive). The adapter maps asmltr's "run autonomously" to each.
 - **Skills** — Claude Code skills are Claude-specific. Other engines get none until (later) skills are lifted
@@ -136,9 +162,11 @@ sessions work immediately.
 ## Open questions
 
 - Exact headless invocation + streaming-event schema for Gemini CLI and Codex `exec` (verify in Phase 2/3).
-- Do we bridge asmltr's MCP tools into every MCP-capable engine (uniform tools), or accept each harness's
-  native toolset first and add the MCP bridge later?
-- Skills: leave Claude-only for now, or make lifting skills into an asmltr registry a Phase-1.5?
+- ~~Do we bridge asmltr's MCP tools into every engine?~~ **Decided: yes** — asmltr owns the MCP registry and
+  provisions it per harness at runtime (see [MCP — one registry, every harness](#mcp-one-registry-every-harness)),
+  and exposes its *own* toolbelt (silos/send/creds) as an MCP server so every MCP-capable engine gets it natively.
+- Skills: leave Claude-only for now, or make lifting skills into an asmltr registry a Phase-1.5? (An
+  asmltr *skills-as-MCP* server would ride the same bridge.)
 - Per-engine cost/telemetry — surface metered vs subscription usage distinctly in the Usage view.
 
 ## See also
