@@ -2,25 +2,65 @@
 
 <h1 align="center">asmltr</h1>
 
-**One channel-agnostic backend behind every chat surface for a single AI assistant — with a live insights dashboard.**
+<p align="center"><b>Run one AI assistant that's the same self on every channel — and owns its identity, memory, credentials, and login.</b></p>
 
-*Say it “assimilator.” It stands for **A**gentic **S**peech, **M**essaging, **L**ikeness, **T**rust, and **R**outing —
-one agent that assimilates every channel while staying recognizably itself.*
+<p align="center"><i>Say it “assimilator.” It stands for <b>A</b>gentic <b>S</b>peech, <b>M</b>essaging, <b>L</b>ikeness, <b>T</b>rust, and <b>R</b>outing — one agent that assimilates every channel while staying recognizably itself.</i></p>
 
-[![Documentation](https://img.shields.io/badge/docs-jarethmt.github.io%2Fasmltr-8B5CF6?style=for-the-badge&logo=materialformkdocs&logoColor=white)](https://jarethmt.github.io/asmltr/)
+<p align="center">
+  <a href="https://jarethmt.github.io/asmltr/"><img src="https://img.shields.io/badge/docs-jarethmt.github.io%2Fasmltr-8B5CF6?style=for-the-badge&logo=materialformkdocs&logoColor=white" alt="Documentation"/></a>
+  <img src="https://img.shields.io/badge/version-0.6.0-8B5CF6?style=for-the-badge" alt="Version"/>
+  <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-3C873A?style=for-the-badge&logo=node.js&logoColor=white" alt="Node ≥ 24"/>
+</p>
 
 ### 📚 Full documentation → **[jarethmt.github.io/asmltr](https://jarethmt.github.io/asmltr/)**
 
-Run *one* assistant (backed by your Claude subscription via the local Agent SDK) and let people
-reach it from **Discord, Telegram, an MCP client, GitHub issues, or any OpenAI-compatible client** — all through the same brain,
-with shared memory, a unified trust/permission model, moderation, and per-secret output redaction.
-A collector + dashboard give you one pane of glass over everything the assistant is doing.
+---
 
-> asmltr routes **messaging across channels** with first-class **monitoring** — and treats **speech as a
-> first-class citizen**, not an afterthought. The goal: voice lives as a shared capability layer in the
-> core (STT/TTS + realtime relays) that any connector can opt into, so a connector can be **text**,
-> **voice**, or **both**. *Live today:* the Discord connector's voice mode. *In progress:* lifting voice
-> into the core as that shared layer, and tightening speech round-trip latency for natural, direct talk.
+## What is asmltr?
+
+asmltr is a **self-hosted platform for a single AI assistant** — one that runs on *your* hardware, thinks
+on *your* Claude subscription (via the local Agent SDK, not a metered API key), and shows up as the **same
+self** wherever people reach it: Discord, Telegram, email, GitHub, an MCP client, any OpenAI-compatible
+app, the web dashboard, or your terminal.
+
+It started as a channel-agnostic router. It's grown into the whole assistant: a **persistent identity and
+memory**, a **use-but-never-see credential vault**, a **built-in login you can put in front of your other
+services**, encrypted **backups**, and a **live dashboard** over everything it does — all wrapped around
+that one brain.
+
+## Why you'd want it
+
+- **One assistant, reachable everywhere — same brain, same memory.** Not seven disconnected bots; one
+  agent with shared sessions, identity, and history across every surface.
+- **It's yours.** Your machine, your Claude subscription (no per-token billing, full filesystem + project
+  context + skills), your data. Nothing phones home.
+- **It has a self.** A persistent identity anchor, an aesthetic, a model of the people it talks to (the
+  *Cast*), and **[data silos](https://jarethmt.github.io/asmltr/silos/)** — its memory and the default
+  home for everything it creates — that travel with it across channels.
+- **Credentials it can use but never sees.** Secrets live in a [TRUST-Protocol vault](https://jarethmt.github.io/asmltr/security/trust-vault/)
+  (broker + KMS); the agent gets *use* of an API without the raw key ever entering its context. Data at
+  rest is AES-256-GCM encrypted with vault-held keys.
+- **It's also your login.** Built-in auth gates the dashboard (password + TOTP + **passkeys**) and can gate
+  *your other services* too — forward-auth (Authelia-style) **and** a full **OIDC provider**. asmltr can be
+  the identity plane for your whole stack.
+- **Portable and restorable.** Encrypted, vault-independent **[backups](https://jarethmt.github.io/asmltr/backups/)**
+  (local or off-box, scheduled with retention) and a deterministic, rollback-safe self-updater.
+- **One pane of glass.** A Vue dashboard + a terminal TUI over every session, token, and event — with live
+  **takeover**: stop or steer any running session from the browser or the terminal.
+
+## The five pillars
+
+The name maps to what it does:
+
+| | Pillar | What it means |
+|---|---|---|
+| **S** | **Speech** | Voice as a first-class capability, not an afterthought — shared STT/TTS in the core, realtime hands-free dictation, Discord voice mode, read-aloud + a PWA. |
+| **M** | **Messaging** | Every channel — Discord, Telegram, email, GitHub, MCP, OpenAI-compatible API, web, CLI — through one brain, with cross-channel identity and monitoring. |
+| **L** | **Likeness** | A persistent self: identity anchor + aesthetic injected into every turn, the *Cast* (who it's talking to, across channels), and data silos for memory + artifacts. |
+| **T** | **Trust** | Default-deny trust + LLM moderation + output redaction, the credential **vault** (use-but-never-see + KMS), and built-in **auth / identity provider**. |
+| **R** | **Routing** | The channel-agnostic core: normalize → resolve → moderate → run (local Agent SDK) → redact → reply. Add a channel by writing one thin adapter. |
+
+---
 
 ## ⚡ Quick setup — paste this to your AI agent
 
@@ -45,34 +85,56 @@ Download https://raw.githubusercontent.com/jarethmt/asmltr/main/UPDATE-WITH-AGEN
 
 ```mermaid
 flowchart LR
-  D[Discord]:::ch --> CONN
-  T[Telegram]:::ch --> CONN
-  M[MCP]:::ch --> CONN
-  G[GitHub]:::ch --> CONN
-
-  CONN(["connector<br/>thin adapter"]) --> ENV["normalized envelope"]
-  ENV --> CORE
-
-  subgraph CORE [core pipeline]
+  subgraph CH [ channels ]
     direction TB
-    R["resolve identity / trust"] --> SP["build system prompt"]
-    SP --> MOD["moderate<br/>LLM security screen"]
-    MOD --> SESS["conversation_key → session"]
-    SESS --> RUN["run turn<br/>local Agent SDK"]
-    RUN --> RED["redact secrets on public output"]
+    D[Discord]
+    T[Telegram]
+    G[GitHub]
+    E[Email]
+    M[MCP]
+    O[OpenAI API]
+    W[Web / CLI]
+  end
+  CH --> CONN(["connector<br/>thin adapter"]) --> CORE
+
+  subgraph CORE [ core ]
+    direction TB
+    R["resolve who + trust<br/>(the Cast)"] --> SP["build prompt<br/>identity + memory"]
+    SP --> MOD["moderate"] --> RUN["run turn<br/>local Agent SDK"] --> RED["redact secrets"]
   end
 
-  CORE --> OUT["outbound actions"]
-  OUT -->|back to the channel| CONN
-  CORE -. event stream .-> COL["collector"] --> UI["dashboard / CLI"]
+  CORE <--> VAULT[("TRUST vault<br/>credentials + KMS")]
+  CORE <--> SILO[("data silos<br/>memory + artifacts")]
+  CORE -. event stream .-> COL["collector"] --> UI["dashboard + CLI"]
+  CORE --> OUT["reply"] --> CONN
 
   classDef ch fill:#8B5CF6,stroke:#6D28D9,color:#fff;
+  class D,T,G,E,M,O,W ch;
 ```
 
 A **connector** is thin I/O: it knows *how* its channel works (tokens, polling, message shapes) and
-nothing else. Everything shared — sessions, identity, trust, moderation, prompt-building, execution,
-redaction — lives in the **core**. Add a channel by writing one adapter that emits an envelope and
-renders a reply.
+nothing else. Everything shared — identity, memory, trust, moderation, prompt-building, execution,
+redaction, credentials — lives in the **core**. Add a channel by writing one adapter that emits an
+envelope and renders a reply. → [How it works](https://jarethmt.github.io/asmltr/how-it-works/) ·
+[Architecture](https://jarethmt.github.io/asmltr/architecture/)
+
+---
+
+## What's inside
+
+| Area | Highlights | Docs |
+|------|-----------|------|
+| **Channels** | Discord (+ autonomous participation, multi-agent, voice), Telegram, Email (SMTP/IMAP), GitHub issues, MCP (OAuth 2.1), OpenAI-compatible API, web chat, CLI. | [Connectors](https://jarethmt.github.io/asmltr/connectors/discord/) |
+| **Identity & memory** | Self anchor + aesthetic injected every turn; the *Cast* (cross-channel relationships); **data silos** — the assistant's memory and the default home for its artifacts, with layered search. | [Silos](https://jarethmt.github.io/asmltr/silos/) |
+| **Credentials** | A [TRUST-Protocol vault](https://jarethmt.github.io/asmltr/security/trust-vault/): use-but-never-see credential broker + KMS envelope encryption; storage integrations (WebDAV / S3 / local) with encryption-at-rest. | [Vault](https://jarethmt.github.io/asmltr/security/trust-vault/) · [Integrations](https://jarethmt.github.io/asmltr/integrations/) |
+| **Auth / identity provider** | Login the dashboard with password + TOTP + **passkeys**; gate *other* services via forward-auth **and** a standards **OIDC provider**. | [Auth](https://jarethmt.github.io/asmltr/AUTH/) |
+| **Backups** | Encrypted, vault-independent snapshots (SQLite + config + identity + silos); local or off-box; scheduled with retention; verified restore. | [Backups](https://jarethmt.github.io/asmltr/backups/) |
+| **Observability** | Vue dashboard + terminal TUI: live sessions, cross-surface timeline, token usage, host metrics — and live **takeover** (stop / steer any session). | [Dashboard](https://jarethmt.github.io/asmltr/dashboard/) · [CLI](https://jarethmt.github.io/asmltr/cli/) |
+| **Operations** | Deterministic, rollback-safe self-updater with `stable` / `edge` channels; semver releases; a shared settings manifest that drives the GUI *and* the TUI. | [Updater](https://jarethmt.github.io/asmltr/UPDATER-DESIGN/) |
+
+*Roadmap:* OIDC **client** (log into asmltr via an external IdP), login→vault unlock, a
+[federation](https://jarethmt.github.io/asmltr/FEDERATION/) mesh of cooperating agents, and sleep/dream
+memory consolidation.
 
 ---
 
@@ -80,34 +142,36 @@ renders a reply.
 
 | Dir | What | Runs as |
 |---|---|---|
-| `core/` | **asmltr-core** — the channel-agnostic backend: envelope pipeline, sessions, trust, moderation, execution, redaction. | Host process (PM2), `127.0.0.1` |
-| `connectors/` | The connector **manager** (supervisor + config API) and the connector **types** (`discord`, `telegram`, `mcp`, `github`, `openai`). Each enabled instance runs as its own child process. | Host process (PM2), `127.0.0.1` |
-| `insights/collector/` | Telemetry collector — ingests the shared event stream, samples metrics, serves REST + socket.io. | Host process (PM2), `127.0.0.1` |
-| `insights/dashboard/` | Vue 3 dashboard: live sessions, cross-surface timeline, usage, the trust **Access** page. | Static build (front with your own proxy/auth) |
-| `cli/` | **`asmltr`** — terminal client + TUI over the collector API. | Host CLI |
-| `shared/` | Cross-cutting modules: the event-stream contract (`events.js`), the secret provider (`secrets.js`), the `.env` loader (`loadenv.js`), and the redaction layer (`redact.js`). | — |
+| `core/` | **asmltr-core** — the pipeline: envelope, identity/Cast, sessions, moderation, execution, redaction, vault, silos, auth + OIDC provider. | Host (PM2), `127.0.0.1` |
+| `connectors/` | The connector **manager** (supervisor + config API) and **types** (`discord`, `telegram`, `email`, `github`, `mcp`, `openai`). Each enabled instance is its own child process. | Host (PM2), `127.0.0.1` |
+| `insights/collector/` | Telemetry collector — ingests the shared event stream, samples metrics, serves REST + socket.io. | Host (PM2), `127.0.0.1` |
+| `insights/dashboard/` | Vue 3 dashboard: sessions, timeline, usage, silos explorer, vault + integrations, security (login/2FA/passkeys/OIDC clients), settings. | Static build (behind asmltr's own auth) |
+| `cli/` | **`asmltr`** — terminal client + TUI, plus `silo`, `backup`, and `vault` subcommands. | Host CLI |
+| `shared/` | Cross-cutting: events, secrets provider, `.env` loader, redaction, **vault** client, **storage** drivers, **silo** construct, **auth** (sessions/2FA), speech (STT/TTS). | — |
+| `scripts/` | Deterministic updater, release cutter, and **backup** (create / verify / restore). | — |
 
 ---
 
 ## Non-negotiables (read before changing anything)
 
-- **Execution is LOCAL via the Agent SDK** (`@anthropic-ai/claude-code`), on *your Claude
-  subscription* — the same auth Claude Code uses. **Do not introduce an `ANTHROPIC_API_KEY`
-  execution path**: it switches to metered billing and loses local filesystem / project-context / skills access.
-- **core and collector run on the host (PM2), not in Docker.** They spawn the local `claude`
-  binary (which needs `~/.claude` auth + host FS + your project context) and signal host pids.
-  Containerizing them breaks both. Connectors can run in Docker and reach the host via `host.docker.internal`.
-- **Bind `127.0.0.1` only.** Put a reverse proxy (with auth) in front of anything you expose.
+- **Execution is LOCAL via the Agent SDK** (`@anthropic-ai/claude-agent-sdk`), on *your Claude
+  subscription* — the same auth Claude Code uses. **Never introduce an `ANTHROPIC_API_KEY` execution
+  path**: it switches to metered billing and loses local filesystem / project-context / skills access.
+- **core and collector run on the host (PM2), not in Docker.** They spawn the local `claude` binary
+  (which needs `~/.claude` auth + host FS + your project context) and signal host pids. Containerizing
+  them breaks both. Connectors can run in Docker and reach the host via `host.docker.internal`.
+- **Bind `127.0.0.1` only.** Put a reverse proxy in front of anything you expose — asmltr's own built-in
+  auth can be that gate.
 
 ---
 
 ## Requirements
 
-- **Node.js ≥ 24** (current Active LTS, "Krypton"; `@discordjs/voice@0.19.2` needs ≥ 22.12). Pinned in `.nvmrc`.
-- **Claude Code CLI, installed and authenticated** (`claude` on PATH; the SDK uses its auth). This is the assistant's brain.
+- **Node.js ≥ 24** (current Active LTS; pinned in `.nvmrc`).
+- **Claude Code CLI, installed and authenticated** (`claude` on PATH — the SDK uses its auth). This is the assistant's brain.
 - **PM2** (`npm i -g pm2`) to run the host services.
-- **ffmpeg** — only if you use the Discord voice mode (audio decode + playback).
-- API keys as needed: **OpenAI** (moderation; Discord voice STT), **ElevenLabs** (Discord voice TTS, optional), plus each channel's bot token / PAT.
+- **ffmpeg** — only for the Discord voice mode.
+- Optional: a **[TRUST Protocol](https://github.com/jarethmt/trust-protocol)** instance for the vault; API keys as needed (**OpenAI** for moderation/voice, each channel's bot token / PAT).
 
 ---
 
@@ -121,10 +185,9 @@ for d in core connectors insights/collector cli; do (cd "$d" && npm install); do
 
 # 2. Configure
 cp .env.example .env                 # then edit: ASSISTANT_NAME, secrets, ports
-#   secrets: set OPENAI_API_KEY etc. directly, or point ASMLTR_SECRET_CMD at your vault
 
 # 3. Seed the trust store (DEFAULT-DENY — nobody has access until seeded)
-cp core/src/trust/seed.example.json core/src/trust/seed.json   # edit: add yourself as owner
+cp core/src/trust/seed.example.json core/src/trust/seed.json   # add yourself as owner
 node core/src/trust/seed.js
 
 # 4. Start the host services
@@ -139,46 +202,26 @@ curl -s -X POST 127.0.0.1:3024/instances -H 'Content-Type: application/json' -d 
 }'
 ```
 
-**Prefer to let an AI agent do all of this?** See **[INSTALL-WITH-AGENT.md](INSTALL-WITH-AGENT.md)** —
-`wget` it onto a box with Claude Code and the agent will install, configure, and prompt you for the values it needs.
-
----
-
-## Connectors
-
-Each connector's full config schema is discoverable at `GET /types` on the manager, or in its
-`meta.configSchema` (`connectors/types/<type>/index.js`). Highlights:
-
-- **discord** — mention/DM + autonomous participation, an `@mention` command system, multi-agent group
-  chats, and an optional **voice mode** (join a voice channel → live transcription → spoken replies).
-  **Full guide: [docs/connectors/discord.md](docs/connectors/discord.md).**
-- **telegram** — 1:1 bot with photo→vision. Key config: `bot_token_bws_key`, `allowed_chat_ids`.
-- **mcp** — OAuth 2.1 MCP server exposing an `ask_<assistant>` tool (SSE + Streamable HTTP). Pre-register
-  clients in `connectors/types/mcp/clients.json` (see `clients.example.json`); each client maps to a trust principal.
-- **github** — mention-driven, repo-aware issue assistant: clones the repo, answers in a live-updating
-  comment, authenticates as its own PAT account. Key config: `mention`, `pat_bws_key`, `repos`, `dry_run`.
-- **openai** — an **OpenAI-compatible REST API** (`POST /v1/chat/completions`, `GET /v1/models`, streaming
-  supported). Point any OpenAI-style client (SDKs, chat UIs, OpenRouter-style routers) at the install and it's
-  answered by the local SDK through the core — trust + moderation still apply. Bearer keys map to trust
-  identities in a gitignored `keys.json` (see `keys.example.json`). Key config: `port`, `model_name`, `require_key`.
+**Optional next steps:** turn on the [vault](https://jarethmt.github.io/asmltr/security/trust-vault/)
+(`asmltr vault init`), enable [built-in auth](https://jarethmt.github.io/asmltr/AUTH/) (`ASMLTR_AUTH=on`),
+and schedule [backups](https://jarethmt.github.io/asmltr/backups/). Prefer to let an AI agent do the whole
+install? See **[INSTALL-WITH-AGENT.md](INSTALL-WITH-AGENT.md)**.
 
 ---
 
 ## Security model
 
-- **Trust is default-deny.** Only principals seeded into the trust store (or added via the Access UI)
-  get access; each carries capability grants. `bypass_moderation` = full trust. See `core/src/trust/`.
-- **Moderation** — every inbound message gets an LLM security screen before execution (strict mode for
-  low-trust principals). Provider/model/key and alert routing are all configurable — see [docs/security/moderation.md](docs/security/moderation.md).
-- **Output redaction** — `shared/redact.js` masks tokens/keys/passwords/private-keys from replies on
-  **public** surfaces (and for any non-full-trust recipient). Private DMs with a full-trust owner see raw output.
-- **Steer & takeover** — reach into a live background session from the TUI or dashboard: stop its
-  in-flight turn, or inject a message to redirect it. Channel sessions resume via the SDK and the reply
-  routes back to the origin channel; `asmltr claude` sessions get keys typed into their tmux pane (or you
-  attach it). See [docs/coordination/injection.md](docs/coordination/injection.md).
-- **Secrets never live in the repo.** They resolve at runtime through the pluggable provider
-  (`shared/secrets.js`): env → secrets file → command. Config files that hold secrets
-  (`.env`, `clients.json`, `seed.json`, `channel-aliases.json`) are gitignored; commit only their `.example` twins.
+- **Trust is default-deny.** Only seeded principals (or ones added via the Access UI) get access; each
+  carries capability grants. → [Trust & permissions](https://jarethmt.github.io/asmltr/security/trust/)
+- **Moderation** — every inbound message gets an LLM security screen before execution (stricter for
+  low-trust principals). → [Moderation](https://jarethmt.github.io/asmltr/security/moderation/)
+- **Output redaction** — `shared/redact.js` masks tokens/keys/passwords from replies on public surfaces
+  and for any non-full-trust recipient.
+- **Credentials never in the repo, never in the model.** Secrets resolve at runtime through a pluggable
+  provider (env → file → **vault** → command); the vault brokers *use* of a secret without exposing the
+  raw value to the agent's context. → [Secrets](https://jarethmt.github.io/asmltr/security/secrets/)
+- **Built-in auth** — session gate with password + TOTP + passkeys; a forward-auth endpoint and OIDC
+  provider to gate the rest of your stack; instant break-glass (`ASMLTR_AUTH=off` + restart).
 
 ---
 
