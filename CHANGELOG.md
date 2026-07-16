@@ -9,6 +9,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.6.0] - 2026-07-16
+
+### Added
 - **Self silo (P3).** A directory becomes a silo via a `.silo/manifest.json` marker (git-style); the
   filesystem is the schema, structure comes from a template at creation (no enforced zones). The **Self
   silo** is the assistant's memory + the default home for artifacts — the core ensures it at boot and
