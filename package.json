@@ -1,6 +1,6 @@
 {
   "name": "asmltr",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "One channel-agnostic backend behind every chat surface for a single AI assistant.",
   "repository": { "type": "git", "url": "https://github.com/jarethmt/asmltr.git" },

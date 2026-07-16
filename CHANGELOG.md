@@ -14,6 +14,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.4.0] - 2026-07-16
+
+### Added
+
+### Changed
+
+### Fixed
+
 ## [0.4.0] - 2026-07-15
 
 ### Added
