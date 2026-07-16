@@ -22,11 +22,14 @@ const expand = (p) => (p && p.startsWith('~') ? path.join(HOME, p.slice(1)) : p)
 // `pkg` is the npm package used to install/update the harness from the GUI.
 const ENGINES = {
   claude: { id: 'claude', label: 'Claude', bin: 'claude', binEnv: 'ASMLTR_CLAUDE_BIN', pkg: '@anthropic-ai/claude-code',
-    binPaths: ['/usr/local/bin/claude', '/usr/bin/claude', '~/.claude/local/claude', '~/.local/bin/claude'] },
+    binPaths: ['/usr/local/bin/claude', '/usr/bin/claude', '~/.claude/local/claude', '~/.local/bin/claude'],
+    defaultModel: 'opus', models: [{ id: 'opus', label: 'Opus (latest)' }, { id: 'sonnet', label: 'Sonnet (latest)' }, { id: 'haiku', label: 'Haiku (latest)' }] },
   gemini: { id: 'gemini', label: 'Gemini', bin: 'gemini', binEnv: 'ASMLTR_GEMINI_BIN', pkg: '@google/gemini-cli',
-    binPaths: ['/usr/local/bin/gemini', '/usr/bin/gemini', '~/.local/bin/gemini'] },
+    binPaths: ['/usr/local/bin/gemini', '/usr/bin/gemini', '~/.local/bin/gemini'],
+    defaultModel: 'gemini-2.5-pro', models: [{ id: 'gemini-2.5-pro', label: '2.5 Pro' }, { id: 'gemini-2.5-flash', label: '2.5 Flash' }, { id: 'gemini-2.0-flash', label: '2.0 Flash' }] },
   codex: { id: 'codex', label: 'Codex', bin: 'codex', binEnv: 'ASMLTR_CODEX_BIN', pkg: '@openai/codex',
-    binPaths: ['/usr/local/bin/codex', '/usr/bin/codex', '~/.local/bin/codex'] },
+    binPaths: ['/usr/local/bin/codex', '/usr/bin/codex', '~/.local/bin/codex'],
+    defaultModel: 'gpt-5-codex', models: [{ id: 'gpt-5-codex', label: 'gpt-5-codex' }, { id: 'o3', label: 'o3' }, { id: 'o4-mini', label: 'o4-mini' }, { id: 'gpt-4.1', label: 'gpt-4.1' }] },
 };
 
 const isExecFile = (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } };
@@ -72,12 +75,16 @@ function setConfig(id, patch) { if (!known(id)) throw new Error('unknown engine:
 function list() {
   const def = getDefault();
   return Object.values(ENGINES).map((e) => ({
-    id: e.id, label: e.label, install: e.install,
+    id: e.id, label: e.label,
     installed: installed(e.id), version: version(e.id),
     isDefault: e.id === def,
     enabled: config(e.id).enabled !== false, // enabled unless explicitly disabled
+    models: e.models || [], model: config(e.id).model || e.defaultModel || null,
     config: config(e.id),
   }));
 }
 
-module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, list };
+/** The effective model for an engine: configured → engine default → null. */
+function modelFor(id) { const e = ENGINES[id]; if (!e) return null; return config(id).model || e.defaultModel || null; }
+
+module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, list };

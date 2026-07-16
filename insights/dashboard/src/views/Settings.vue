@@ -176,7 +176,10 @@ const fmtMB = (n) => (n / 1048576).toFixed(2) + ' MB'
 function section(id) { return sections.value.find((s) => s.id === id) || { fields: [] } }
 function field(sectionId, fieldId) { return (section(sectionId).fields || []).find((f) => f.id === fieldId) || {} }
 const identityFields = computed(() => section('identity').fields || [])
-const modelChoices = computed(() => field('runtime', 'model').choices || [])
+// Model choices come from the SELECTED (default) engine's own model list — not hardcoded Claude models.
+const activeEngine = computed(() => engines.value.find((e) => e.isDefault) || null)
+const modelChoices = computed(() => (activeEngine.value && activeEngine.value.models) || [])
+const activeModel = computed(() => activeEngine.value && activeEngine.value.model)
 
 // --- Identity (the Self / Likeness plane) ---
 const idn = ref(null)
@@ -239,11 +242,12 @@ async function runUpdate() {
 // --- Runtime (SDK + model) ---
 const rt = ref(null)
 const customModel = ref('')
-const isChoice = (id) => (rt.value?.model?.configured ?? '') === id
+const isChoice = (id) => activeModel.value === id
 async function loadRuntime(fetch = true) { try { rt.value = await runtime.get(fetch) } catch (e) { notice.value = 'Could not load runtime: ' + e.message } }
 async function pickModel(id) {
   busy.value = 'model'; notice.value = ''
-  try { const r = await runtime.setModel(id); rt.value.model.configured = r.model; notice.value = `Model set to “${r.model || 'SDK default'}” — applies on the next turn.` }
+  const eng = enginesDefault.value
+  try { await enginesApi.setConfig(eng, { model: id }); await loadEngines(); if (eng === 'claude') await loadRuntime(true); notice.value = `${eng} model set to “${id}” — applies on the next turn.` }
   catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
 async function setCustom() { const m = customModel.value.trim(); if (m) { await pickModel(m); customModel.value = '' } }
@@ -383,6 +387,8 @@ onMounted(async () => {
           <h3 class="mb-1 text-sm font-semibold text-slate-200">Model &amp; runtime <span class="text-[11px] font-normal text-slate-500">· {{ enginesDefault }} engine</span></h3>
           <p class="mb-4 text-[12px] text-slate-500">{{ section('runtime').desc }}</p>
           <template v-if="rt">
+            <!-- Agent SDK version + auto-update + CLI permission mode are Claude-engine-only (the SDK web runner). -->
+            <template v-if="enginesDefault === 'claude'">
             <div class="mb-5 flex flex-wrap items-center gap-3 rounded-lg border border-white/5 bg-black/20 p-3">
               <div class="min-w-0">
                 <div class="text-[11px] uppercase tracking-wide text-slate-500">Agent SDK</div>
@@ -417,9 +423,11 @@ onMounted(async () => {
                 <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.cliBypass ? 'left-[22px]' : 'left-0.5'"></span>
               </button>
             </label>
+            </template>
             <div>
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('runtime','model').label }}
-                <span v-if="rt.model.resolved" class="ml-1 font-mono text-slate-400">· running {{ rt.model.resolved }}</span>
+              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Model
+                <span v-if="enginesDefault === 'claude' && rt.model.resolved" class="ml-1 font-mono text-slate-400">· running {{ rt.model.resolved }}</span>
+                <span v-else-if="activeModel" class="ml-1 font-mono text-slate-400">· {{ activeModel }}</span>
               </div>
               <div class="flex flex-wrap gap-2">
                 <button v-for="c in modelChoices" :key="c.id"
@@ -431,8 +439,8 @@ onMounted(async () => {
                   <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
                 </button>
               </div>
-              <div v-if="field('runtime','model').allowCustom" class="mt-2 flex items-center gap-2">
-                <input v-model="customModel" type="text" placeholder="or a full model id (e.g. claude-opus-4-8)"
+              <div class="mt-2 flex items-center gap-2">
+                <input v-model="customModel" type="text" :placeholder="enginesDefault === 'claude' ? 'or a full model id (e.g. claude-opus-4-8)' : 'or a full model id for ' + enginesDefault"
                   class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
                   @keydown.enter.prevent="setCustom" />
                 <button type="button" :disabled="!customModel.trim() || busy === 'model'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustom">Set</button>
