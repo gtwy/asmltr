@@ -100,6 +100,35 @@ control on a session whose engine has `detail: false`; the core can warn ("this 
 nuance, an opt-in per-engine passthrough — `engineOptions: { claude: {…}, codex: {…} }` — is merged by the
 adapter *after* negotiation. **Normalize first; reach for passthrough only for the long tail.**
 
+## Tools across engines — normalize events, not names; derive the inventory from the harness
+
+Ask two engines "find the three largest files on my system" and they take different paths with differently
+*named* tools (Claude's `Bash` vs Codex's `shell`) and different event schemas. asmltr **does not unify tool
+names** — it unifies the tool-call **event shape**. Each adapter maps its harness's tool events into the one
+[event contract](architecture.md) (`{ type:'tool', engine, tool:<rawName>, category, detail }`), so the
+dashboard timeline renders both the same way (**🔧 shell · `find / …`**) with the raw name on hover. Same
+substrate → same answer; two trails, both captured.
+
+**"Which tools does this engine allow?" — derive it from the harness.** Three sources, best-first:
+
+1. **Runtime introspection (authoritative).** The harness reports its toolset at session start — the Claude
+   SDK's `system` init event carries `tools` + `mcp_servers` + `model`; Codex/Gemini expose the same via
+   their handshake or a list-tools call. So asmltr records exactly what *this* session can do, **including the
+   MCP servers it just injected**, reflecting the harness version/config.
+2. **A curated static tool list per engine** — for pre-session display (the Engines page shows the harness's
+   built-ins before anything runs). The coarse fallback.
+3. **asmltr's own MCP tools** — stable names/args everywhere, because asmltr defines them.
+
+Each tool carries an asmltr **category** (`shell`, `fs`, `web`, `memory`, `message`, `subagent`) so tools
+are comparable across engines even when named differently — for *display + reasoning*, never for invocation.
+
+This is a **different layer** from the coarse capability manifest:
+
+- **Capability manifest** (static, coarse): *does* the engine do vision / subagents / skills / localFs / mcp?
+  → drives UI gating + `negotiate()`.
+- **Tool inventory** (static + runtime, fine): the actual *named* tools this session has → drives the Engines
+  page + timeline labels.
+
 ## Sessions — where silos pay off
 
 - **`native`** (Claude SDK assigns + resumes ids; Codex has session ids): store `engineSessionId`, pass `resume`.
