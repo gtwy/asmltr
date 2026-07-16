@@ -70,7 +70,7 @@ linkage, OIDC provider) come *after* the session gate is solid.
 | **C — 2FA** | TOTP enrollment/verify + one-time recovery codes (✅); WebAuthn passkey (pending) | ✅ TOTP shipped |
 | **D — OIDC client** | external-IdP login option | |
 | **E — Forward-auth provider** | `/v2/auth/verify` + cookie-domain sessions + optional allowlist + identity header (Authelia parity for other services) | ✅ shipped |
-| **F — OIDC provider** | OAuth2/OIDC token issuance + client registry + consent | |
+| **F — OIDC provider** | OAuth2/OIDC token issuance (panva `oidc-provider`) + client registry + session-reuse login/consent | ✅ shipped |
 | **G — Vault linkage** | envelope-wrapped vault key unwrapped on login; paranoid/unlinked mode | |
 
 ## Two-factor (phase C)
@@ -108,6 +108,25 @@ Attach `asmltr-auth@file` to any router. `verify` returns **200 + `Remote-User`*
 **401** otherwise (the proxy can redirect to asmltr's login), or **403** if an allowlist excludes the user.
 When `ASMLTR_AUTH` is off it returns 200 (break-glass). The full OAuth2/OIDC **provider** (phase F) is for
 apps that speak OIDC natively rather than trusting proxy headers.
+
+## OIDC provider (phase F)
+
+`ASMLTR_OIDC=on` mounts a standards **OAuth2/OIDC provider** (panva `oidc-provider`) at `<origin>/oidc` —
+so apps can SSO against asmltr. Discovery is at `/oidc/.well-known/openid-configuration`; the signing
+keys (`/oidc/jwks`) and cookie keys are generated + persisted under `~/.asmltr/oidc`.
+
+- **Accounts** map to asmltr's local users (`findAccount`); **login + consent reuse the asmltr session** —
+  an unauthenticated authorize request bounces through the login screen (`/?next=…`) and, once you're
+  signed in, auto-completes (first-party clients are trusted, so consent is automatic).
+- **Clients** are registered under **Settings → Security → OIDC provider** (or `POST /v2/oidc/clients`):
+  give a name + redirect URI(s); the `client_secret` is shown once. Stored in `~/.asmltr/oidc/clients.json`;
+  **new clients take effect on the next core restart**. Confidential (`client_secret_basic`) and public
+  (PKCE) clients are both supported.
+- Standard authorization-code + refresh-token flow. Point any OIDC RP at the issuer above.
+
+!!! note "v1 scope"
+    The token/grant store is in-memory (grants + sessions reset on a core restart; users simply re-auth).
+    A persistent adapter is a natural follow-on for high-availability installs.
 
 ## Security principles (non-negotiable)
 

@@ -5,7 +5,7 @@
 // choices, toggle copy) are sourced from the manifest, so adding a setting updates both GUI and TUI.
 import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi } from '@/services/api'
+import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi } from '@/services/api'
 import QRCode from 'qrcode'
 import { startRegistration } from '@simplewebauthn/browser'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
@@ -60,6 +60,31 @@ async function addPasskey() {
 async function removePasskey(id) {
   if (!window.confirm('Remove this passkey?')) return
   try { await authApi.passkeyRemove(id); await loadSecurity() } catch (e) { secError.value = e.message }
+}
+
+// OIDC provider — client registry
+const oidcStatus = ref({ enabled: false, issuer: null })
+const oidcClients = ref([])
+const newClient = reactive({ client_name: '', redirect_uris: '' })
+const newClientSecret = ref(null) // shown once after creation
+async function loadOidc() {
+  try { oidcStatus.value = await oidcApi.status() } catch (_) {}
+  if (!oidcStatus.value.enabled) return
+  try { const r = await oidcApi.clients(); oidcClients.value = r.clients || []; oidcStatus.value.issuer = r.issuer || oidcStatus.value.issuer } catch (_) {}
+}
+async function addOidcClient() {
+  secError.value = ''; newClientSecret.value = null
+  try {
+    const uris = newClient.redirect_uris.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+    const c = await oidcApi.addClient({ client_name: newClient.client_name || undefined, redirect_uris: uris })
+    newClientSecret.value = { client_id: c.client_id, client_secret: c.client_secret }
+    newClient.client_name = ''; newClient.redirect_uris = ''
+    await loadOidc()
+  } catch (e) { secError.value = e.message }
+}
+async function removeOidcClient(id) {
+  if (!window.confirm('Delete this OIDC client? Apps using it will stop working.')) return
+  try { await oidcApi.removeClient(id); await loadOidc() } catch (e) { secError.value = e.message }
 }
 async function beginEnroll() {
   secBusy.value = true; secError.value = ''; recoveryCodes.value = null
@@ -237,7 +262,7 @@ async function setCustomTtsModel() { const m = customTtsModel.value.trim(); if (
 
 onMounted(async () => {
   try { manifest.value = await api.manifest() } catch (_) {}
-  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups(), loadSecurity()])
+  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups(), loadSecurity(), loadOidc()])
   try { ackOn.value = (await voice.getAck()).enabled } catch (_) {}
 })
 </script>
@@ -605,6 +630,48 @@ onMounted(async () => {
               </li>
             </ul>
             <p v-else class="text-[12px] text-slate-500">No passkeys registered yet.</p>
+          </div>
+
+          <!-- OIDC provider — register apps that SSO against asmltr -->
+          <div v-if="oidcStatus.enabled" class="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div class="mb-1 flex items-center justify-between gap-3">
+              <span class="text-sm font-medium text-slate-200">OIDC provider — apps</span>
+              <span class="pill border border-emerald-400/30 bg-emerald-400/10 text-[11px] text-emerald-300">● issuing</span>
+            </div>
+            <p class="mb-3 text-[12px] text-slate-500">
+              Other apps can SSO against asmltr. Issuer: <code class="font-mono text-slate-400">{{ oidcStatus.issuer }}</code>
+              (discovery at <span class="font-mono">/.well-known/openid-configuration</span>).
+            </p>
+
+            <div v-if="newClientSecret" class="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-[12px]">
+              <p class="mb-1 font-semibold text-amber-200">Client created — copy the secret now (shown only once):</p>
+              <p class="font-mono text-amber-100">client_id: {{ newClientSecret.client_id }}</p>
+              <p class="font-mono break-all text-amber-100">client_secret: {{ newClientSecret.client_secret }}</p>
+            </div>
+
+            <ul v-if="oidcClients.length" class="mb-3 divide-y divide-white/5">
+              <li v-for="c in oidcClients" :key="c.client_id" class="flex items-center gap-2 py-2 text-sm">
+                <AppIcon glyph="🧩" class="text-slate-500" />
+                <span class="min-w-0 flex-1 truncate">
+                  <span class="text-slate-200">{{ c.client_name }}</span>
+                  <span class="block truncate font-mono text-[10px] text-slate-500">{{ c.client_id }} · {{ (c.redirect_uris || []).join(', ') }}</span>
+                </span>
+                <button type="button" class="act-danger" @click="removeOidcClient(c.client_id)"><AppIcon glyph="🗑" /></button>
+              </li>
+            </ul>
+
+            <form class="flex flex-wrap items-end gap-2" @submit.prevent="addOidcClient">
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-slate-500">App name</span>
+                <input v-model="newClient.client_name" type="text" class="field-input w-44" placeholder="My App" />
+              </label>
+              <label class="flex flex-1 flex-col gap-1">
+                <span class="text-[11px] text-slate-500">Redirect URIs (space/comma separated)</span>
+                <input v-model="newClient.redirect_uris" type="text" class="field-input w-full" placeholder="https://app.example.com/callback" />
+              </label>
+              <button type="submit" :disabled="!newClient.redirect_uris" class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">Register app</button>
+            </form>
+            <p class="mt-2 text-[11px] text-slate-600">New clients take effect on the next core restart.</p>
           </div>
         </div>
 

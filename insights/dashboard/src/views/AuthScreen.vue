@@ -18,6 +18,13 @@ const busy = ref(false)
 const error = ref('')
 const isSetup = computed(() => !props.configured)
 
+// After a successful login, resume an OIDC interaction if we were sent here with ?next=, else reload.
+function afterLogin() {
+  const next = new URLSearchParams(window.location.search).get('next')
+  if (next && next.startsWith('/')) window.location.href = next
+  else window.location.reload()
+}
+
 async function submit() {
   error.value = ''
   if (!username.value || !password.value) { error.value = 'Enter a username and password.'; return }
@@ -29,7 +36,7 @@ async function submit() {
   try {
     if (isSetup.value) await authApi.setup(username.value, password.value)
     const r = await authApi.login(username.value, password.value, totp.value || undefined)
-    if (r.ok) { window.location.reload(); return }
+    if (r.ok) { afterLogin(); return }
     if (r.totp_required) { totpRequired.value = true; error.value = totp.value ? 'Invalid code — try again.' : ''; busy.value = false; return }
     error.value = r.error || 'Authentication failed.'
     busy.value = false
@@ -47,7 +54,7 @@ async function passkeyLogin() {
     const optionsJSON = await authApi.passkeyLoginOptions(username.value)
     const response = await startAuthentication({ optionsJSON })
     await authApi.passkeyLoginVerify(username.value, response)
-    window.location.reload()
+    afterLogin()
   } catch (e) {
     error.value = e.message === 'no passkeys registered for this account' ? 'No passkey registered for that user.' : (e.message || 'Passkey sign-in failed.')
     busy.value = false

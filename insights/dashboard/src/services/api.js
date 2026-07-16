@@ -125,6 +125,14 @@ export const authApi = {
   passkeyLoginVerify: (username, response) => postCore('/v2/auth/passkey/login/verify', { username, response })
 }
 
+// OIDC provider — client registry (asmltr issues tokens to registered apps). Session-gated.
+export const oidcApi = {
+  status: () => getCore('/v2/oidc/status'),
+  clients: () => getCore('/v2/oidc/clients'),
+  addClient: (payload) => postCore('/v2/oidc/clients', payload),
+  removeClient: (id) => reqCore('DELETE', `/v2/oidc/clients/${encodeURIComponent(id)}`)
+}
+
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
 export const backupApi = {
   list: (destination) => getCore('/v2/backups' + (destination && destination !== 'local' ? q({ destination }) : '')),
