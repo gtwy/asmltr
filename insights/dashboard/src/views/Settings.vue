@@ -7,6 +7,7 @@ import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi } from '@/services/api'
 import QRCode from 'qrcode'
+import { startRegistration } from '@simplewebauthn/browser'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { applyPalette } from '@/composables/useBrandTheme'
@@ -40,7 +41,26 @@ const recoveryCodes = ref(null)
 const disablePass = ref('')
 const secBusy = ref(false)
 const secError = ref('')
-async function loadSecurity() { try { authStatus.value = await authApi.status() } catch (_) {} }
+const passkeys = ref([])
+const pkBusy = ref(false)
+async function loadSecurity() {
+  try { authStatus.value = await authApi.status() } catch (_) {}
+  try { passkeys.value = (await authApi.passkeys()).passkeys || [] } catch (_) { passkeys.value = [] }
+}
+async function addPasskey() {
+  pkBusy.value = true; secError.value = ''
+  try {
+    const optionsJSON = await authApi.passkeyRegisterOptions()
+    const label = window.prompt('Name this passkey (e.g. "MacBook Touch ID"):') || 'passkey'
+    const response = await startRegistration({ optionsJSON })
+    await authApi.passkeyRegisterVerify(response, label)
+    await loadSecurity()
+  } catch (e) { secError.value = e.message || 'Passkey registration failed.' } finally { pkBusy.value = false }
+}
+async function removePasskey(id) {
+  if (!window.confirm('Remove this passkey?')) return
+  try { await authApi.passkeyRemove(id); await loadSecurity() } catch (e) { secError.value = e.message }
+}
 async function beginEnroll() {
   secBusy.value = true; secError.value = ''; recoveryCodes.value = null
   try {
@@ -563,6 +583,28 @@ onMounted(async () => {
             </template>
 
             <p v-if="secError" class="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{{ secError }}</p>
+          </div>
+
+          <!-- passkeys -->
+          <div class="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <span class="text-sm font-medium text-slate-200">Passkeys</span>
+                <span class="block text-[12px] text-slate-500">Passwordless, phishing-resistant sign-in (Touch ID, Windows Hello, a security key).</span>
+              </div>
+              <button type="button" :disabled="pkBusy" class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="addPasskey">
+                {{ pkBusy ? 'Waiting…' : '＋ Add a passkey' }}
+              </button>
+            </div>
+            <ul v-if="passkeys.length" class="divide-y divide-white/5">
+              <li v-for="p in passkeys" :key="p.id" class="flex items-center gap-2 py-2 text-sm">
+                <AppIcon glyph="🔑" class="text-slate-500" />
+                <span class="min-w-0 flex-1 truncate text-slate-200">{{ p.name || 'passkey' }}</span>
+                <span class="font-mono text-[10px] text-slate-600">{{ p.last_used ? 'used ' + new Date(p.last_used).toLocaleDateString() : 'never used' }}</span>
+                <button type="button" class="act-danger" @click="removePasskey(p.id)"><AppIcon glyph="🗑" /></button>
+              </li>
+            </ul>
+            <p v-else class="text-[12px] text-slate-500">No passkeys registered yet.</p>
           </div>
         </div>
 

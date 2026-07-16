@@ -144,6 +144,27 @@ function verifyRecoveryCode(username, code) {
   u.recovery.splice(i, 1); save(d); return true;
 }
 
+// ── WebAuthn passkey storage (crypto lives in core/src/passkey.js; this is just the account store) ──
+function accountExists(username) { return !!load().users[username]; }
+function listPasskeys(username) { const u = load().users[username]; return (u && u.webauthn && u.webauthn.credentials) || []; }
+function passkeysEnabled(username) { return listPasskeys(username).length > 0; }
+function addPasskey(username, cred) { // cred: { id, publicKey, counter, transports, name, added_at }
+  const d = load(); const u = d.users[username]; if (!u) throw new Error('no such account');
+  u.webauthn = u.webauthn || { credentials: [] };
+  if (u.webauthn.credentials.some((c) => c.id === cred.id)) throw new Error('passkey already registered');
+  u.webauthn.credentials.push(cred); save(d); return cred;
+}
+function updatePasskeyCounter(username, credId, counter) {
+  const d = load(); const u = d.users[username]; if (!u || !u.webauthn) return;
+  const c = u.webauthn.credentials.find((x) => x.id === credId); if (c) { c.counter = counter; c.last_used = Date.now(); save(d); }
+}
+function removePasskey(username, credId) {
+  const d = load(); const u = d.users[username]; if (!u || !u.webauthn) return false;
+  const before = u.webauthn.credentials.length;
+  u.webauthn.credentials = u.webauthn.credentials.filter((c) => c.id !== credId);
+  save(d); return u.webauthn.credentials.length < before;
+}
+
 // ── sessions (stateless, HMAC-signed) ──────────────────────────────────────────
 const b64u = (b) => Buffer.from(b).toString('base64url');
 function sign(payloadB64) { return crypto.createHmac('sha256', secret()).update(payloadB64).digest('base64url'); }
@@ -222,5 +243,6 @@ module.exports = {
   isLockedOut, recordFail, recordSuccess,
   sessionCookie, clearCookie, tokenFromReq, requireAuth,
   totpEnabledFor, verifySecondFactor, totpBeginEnroll, totpConfirmEnroll, totpDisable,
+  accountExists, listPasskeys, passkeysEnabled, addPasskey, updatePasskeyCounter, removePasskey,
   COOKIE, SESSION_TTL,
 };
