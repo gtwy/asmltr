@@ -15,7 +15,13 @@ command. Resolution order (first hit wins, cached):
    12-factor default: put secrets in the environment or a `.env` file. (`openai_api_key`
    resolves `OPENAI_API_KEY`.)
 2. **Secrets file** — a JSON `{ "<key>": "<value>" }` at `ASMLTR_SECRETS_FILE`.
-3. **Command provider** — `ASMLTR_SECRET_CMD`, a shell template run once per key. `{key}` in
+3. **TRUST vault** — once `ASMLTR_VAULT_URL` **and** `ASMLTR_VAULT_AGENT_KEY` are set, the
+   [TRUST vault](trust-vault.md) is the primary store: `get()` resolves a credential from it
+   before the command provider. This is how a fully migrated install resolves *everything*
+   (connector tokens, voice keys, integration creds) with no external secret manager. Opt-in
+   — skipped entirely when the vars are unset, so it never changes an install that hasn't
+   adopted it.
+4. **Command provider** — `ASMLTR_SECRET_CMD`, a shell template run once per key. `{key}` in
    the template is replaced with the (validated) key; trimmed stdout is the value. Good for a
    Bitwarden / Vault wrapper:
 
@@ -23,7 +29,9 @@ command. Resolution order (first hit wins, cached):
    ASMLTR_SECRET_CMD='vault-read {key}'
    ```
 
-Pick **one** approach. `get()` returns `null` when a key can't be resolved and never throws.
+The vault sits *before* the command provider so you can migrate at your pace: copy each secret
+into the vault, verify it resolves, then disable the old provider. `get()` returns `null` when
+a key can't be resolved and never throws.
 
 !!! tip "`*_bws_key` / `pat_bws_key` are NAMES, not tokens"
     Connector config fields such as `bot_token_bws_key`, `pat_bws_key`, and

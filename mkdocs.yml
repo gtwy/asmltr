@@ -80,6 +80,8 @@ nav:
     - GitHub: connectors/github.md
     - OpenAI-compatible: connectors/openai.md
     - CLI sessions: connectors/cli.md
+  - Integrations:
+    - Integrations & storage: integrations/index.md
   - Operating:
     - The asmltr CLI: cli.md
     - The dashboard: dashboard.md
@@ -96,6 +98,7 @@ nav:
     - Federation: FEDERATION.md
     - Vault · silos · backups (roadmap): ROADMAP-VAULT-SILOS-BACKUP.md
   - Security:
+    - TRUST vault (credentials & KMS): security/trust-vault.md
     - Trust & permissions: security/trust.md
     - Moderation: security/moderation.md
     - Secrets & config: security/secrets.md
