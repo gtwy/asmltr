@@ -5,7 +5,7 @@
 // choices, toggle copy) are sourced from the manifest, so adding a setting updates both GUI and TUI.
 import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { api, runtime, voice, identity, update, backupApi } from '@/services/api'
+import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi } from '@/services/api'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { applyPalette } from '@/composables/useBrandTheme'
@@ -35,18 +35,32 @@ const backups = ref([])
 const backupDir = ref('')
 const backupPass = ref('')
 const backupLabel = ref('manual')
+const backupDest = ref('local')
 const backupBusy = ref(false)
 const backupError = ref('')
+const storageIntegrations = ref([]) // storage integrations available as remote destinations
+const schedule = reactive({ enabled: false, every_hours: 24, destination: 'local', max_count: 14, max_age_days: 0, last_run: 0 })
+const scheduleBusy = ref(false)
 async function loadBackups() {
-  try { const r = await backupApi.list(); backups.value = r.backups || []; backupDir.value = r.dir || '' } catch (e) { backupError.value = e.message }
+  try {
+    const [r, ints] = await Promise.all([backupApi.list(), integrationsApi.list().catch(() => ({ integrations: [] }))])
+    backups.value = r.backups || []; backupDir.value = r.dir || ''
+    if (r.schedule) Object.assign(schedule, r.schedule)
+    storageIntegrations.value = (ints.integrations || [])
+  } catch (e) { backupError.value = e.message }
 }
 async function createBackup() {
   backupBusy.value = true; backupError.value = ''
   try {
-    await backupApi.create({ label: backupLabel.value || 'manual', passphrase: backupPass.value || undefined })
+    await backupApi.create({ label: backupLabel.value || 'manual', passphrase: backupPass.value || undefined, destination: backupDest.value })
     backupPass.value = ''
     await loadBackups()
   } catch (e) { backupError.value = e.message } finally { backupBusy.value = false }
+}
+async function saveSchedule() {
+  scheduleBusy.value = true; backupError.value = ''
+  try { const s = await backupApi.setSchedule({ enabled: schedule.enabled, every_hours: Number(schedule.every_hours), destination: schedule.destination, max_count: Number(schedule.max_count), max_age_days: Number(schedule.max_age_days) }); Object.assign(schedule, s) }
+  catch (e) { backupError.value = e.message } finally { scheduleBusy.value = false }
 }
 const fmtMB = (n) => (n / 1048576).toFixed(2) + ' MB'
 function section(id) { return sections.value.find((s) => s.id === id) || { fields: [] } }
@@ -468,11 +482,18 @@ onMounted(async () => {
           <form class="mb-4 flex flex-wrap items-end gap-2" @submit.prevent="createBackup">
             <label class="flex flex-col gap-1">
               <span class="text-[11px] text-slate-500">Label</span>
-              <input v-model="backupLabel" type="text" class="field-input w-40" placeholder="manual" />
+              <input v-model="backupLabel" type="text" class="field-input w-32" placeholder="manual" />
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-[11px] text-slate-500">Destination</span>
+              <select v-model="backupDest" class="field-input w-44">
+                <option value="local">local ({{ backupDir ? '~/.asmltr/backups' : 'default' }})</option>
+                <option v-for="it in storageIntegrations" :key="it.id" :value="it.id">{{ it.name }} ({{ it.type }})</option>
+              </select>
             </label>
             <label class="flex flex-col gap-1">
               <span class="text-[11px] text-slate-500">Passphrase <span class="text-slate-600">(blank → server default)</span></span>
-              <input v-model="backupPass" type="password" class="field-input w-64" placeholder="backup passphrase" autocomplete="off" />
+              <input v-model="backupPass" type="password" class="field-input w-56" placeholder="backup passphrase" autocomplete="off" />
             </label>
             <button type="submit" :disabled="backupBusy"
               class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">
@@ -484,6 +505,48 @@ onMounted(async () => {
           </form>
 
           <p v-if="backupError" class="mb-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{{ backupError }}</p>
+
+          <!-- scheduled backups + retention -->
+          <div class="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <label class="mb-3 flex cursor-pointer items-center justify-between gap-3">
+              <span>
+                <span class="text-sm font-medium text-slate-200">Scheduled backups</span>
+                <span class="block text-[12px] text-slate-500">Automatic snapshots on a timer, with retention. Needs a passphrase configured on the server (<span class="font-mono">ASMLTR_BACKUP_PASSPHRASE</span>).</span>
+              </span>
+              <button type="button" class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+                :class="schedule.enabled ? 'bg-brand-violet' : 'bg-white/15'" @click="schedule.enabled = !schedule.enabled">
+                <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="schedule.enabled ? 'left-[22px]' : 'left-0.5'"></span>
+              </button>
+            </label>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4" :class="schedule.enabled ? '' : 'opacity-50'">
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-slate-500">Every (hours)</span>
+                <input v-model="schedule.every_hours" type="number" min="1" class="field-input" :disabled="!schedule.enabled" />
+              </label>
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-slate-500">Destination</span>
+                <select v-model="schedule.destination" class="field-input" :disabled="!schedule.enabled">
+                  <option value="local">local</option>
+                  <option v-for="it in storageIntegrations" :key="it.id" :value="it.id">{{ it.name }}</option>
+                </select>
+              </label>
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-slate-500">Max stored</span>
+                <input v-model="schedule.max_count" type="number" min="0" class="field-input" :disabled="!schedule.enabled" />
+              </label>
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-slate-500">Max age (days)</span>
+                <input v-model="schedule.max_age_days" type="number" min="0" class="field-input" :disabled="!schedule.enabled" />
+              </label>
+            </div>
+            <div class="mt-3 flex items-center gap-3">
+              <button type="button" :disabled="scheduleBusy" class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="saveSchedule">
+                {{ scheduleBusy ? 'Saving…' : 'Save schedule' }}
+              </button>
+              <span v-if="schedule.last_run" class="text-[11px] text-slate-500">Last run: {{ new Date(schedule.last_run).toLocaleString() }}</span>
+              <span class="text-[11px] text-slate-600">0 = unlimited</span>
+            </div>
+          </div>
 
           <ul class="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/5">
             <li v-for="b in backups" :key="b.name" class="flex items-center gap-2 px-3 py-2 text-sm">

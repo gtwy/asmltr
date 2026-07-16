@@ -102,9 +102,11 @@ export const silosApi = {
 
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
 export const backupApi = {
-  list: () => getCore('/v2/backups'),
+  list: (destination) => getCore('/v2/backups' + (destination && destination !== 'local' ? q({ destination }) : '')),
   create: (payload) => postCore('/v2/backups', payload),
-  verify: (payload) => postCore('/v2/backups/verify', payload)
+  verify: (payload) => postCore('/v2/backups/verify', payload),
+  getSchedule: () => getCore('/v2/backups/schedule'),
+  setSchedule: (payload) => reqCore('PUT', '/v2/backups/schedule', payload)
 }
 
 export const control = {

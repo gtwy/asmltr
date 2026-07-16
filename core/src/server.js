@@ -618,10 +618,16 @@ app.delete('/v2/silos/:id/file', async (req, res) => { try { await openSilo(req.
 // Backups — encrypted, restorable snapshots (scripts/backup.js). Passphrase comes from the request or the
 // core env (ASMLTR_BACKUP_PASSPHRASE / vault password); restore stays CLI-only (a deliberate footgun guard).
 const backup = require('../../scripts/backup');
-app.get('/v2/backups', (req, res) => { try { res.json({ backups: backup.listBackups(), dir: backup.BACKUP_DIR }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/v2/backups', async (req, res) => {
+  try {
+    const out = { backups: backup.listBackups(), dir: backup.BACKUP_DIR, schedule: backup.getSchedule() };
+    if (req.query.destination && req.query.destination !== 'local') out.remote = await backup.listRemoteBackups(req.query.destination).catch((e) => ({ error: e.message }));
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/v2/backups', async (req, res) => {
   const b = req.body || {};
-  try { const r = await backup.createBackup({ label: b.label || 'manual', passphrase: b.passphrase }); res.status(201).json({ ok: true, file: r.file, bytes: r.bytes, manifest: r.manifest }); }
+  try { const r = await backup.createBackup({ label: b.label || 'manual', passphrase: b.passphrase, destination: b.destination }); res.status(201).json({ ok: true, file: r.file, bytes: r.bytes, remote: r.remote, manifest: r.manifest }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/v2/backups/verify', async (req, res) => {
@@ -629,6 +635,15 @@ app.post('/v2/backups/verify', async (req, res) => {
   try { const r = await backup.verifyBackup(b.file, { passphrase: b.passphrase }); res.json(r); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+app.get('/v2/backups/schedule', (req, res) => res.json(backup.getSchedule()));
+app.put('/v2/backups/schedule', (req, res) => {
+  const b = req.body || {};
+  const clean = {};
+  for (const k of ['enabled', 'every_hours', 'destination', 'max_count', 'max_age_days']) if (k in b) clean[k] = b[k];
+  try { res.json(backup.setSchedule(clean)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// In-process scheduler — fires runScheduled() when the interval elapses (needs a configured passphrase).
+try { backup.startScheduler({ log: (m) => console.log('[backup] ' + m) }); } catch (e) { console.log('[backup] scheduler not started: ' + e.message); }
 
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
