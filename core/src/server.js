@@ -50,6 +50,10 @@ const runtime = require('../../shared/runtime'); // agent runtime: SDK version, 
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
 const vault = require('../../shared/vault'); // TRUST vault (credential broker + KMS) — hard dependency
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
+const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
+// Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
+let SELF_SILO_DIR = null;
+try { SELF_SILO_DIR = silo.ensureSelf(identity.name()).dir; } catch (_) { /* non-fatal */ }
 const { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -275,6 +279,14 @@ async function handle(envelope, opts = {}) {
         'abandons its current turn; without it, your guidance is applied after the current turn finishes). Steer is ' +
         'coercive — it spends the other session\'s turn. Use it sparingly for time-sensitive redirection; prefer ' +
         'announce for everything else. Never steer a session into a loop (don\'t steer one that\'s steering you).';
+    }
+    if (SELF_SILO_DIR) {
+      systemPrompt += `\n\nSELF SILO — your persistent memory + the DEFAULT home for anything you create is a data silo at \`${SELF_SILO_DIR}\`. ` +
+        'When you produce an artifact (a document, image, app, export) and the task doesn\'t specify where, create it UNDER the Self silo — ' +
+        'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). Browse/recall it with the Bash tool:\n' +
+        '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
+        '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
+        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).';
     }
     // If THIS channel supports attachments, tell the agent exactly how — so it never claims it can't.
     if (e.capabilities && e.capabilities.supports_attachments_out) {
