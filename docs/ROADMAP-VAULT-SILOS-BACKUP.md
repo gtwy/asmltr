@@ -1,8 +1,12 @@
 # Roadmap: Vault · Auth · Self Silo · Data Silos · Backups
 
-> Status: **design agreed, build not started.** This is the canonical plan; progress is tracked in
-> the GitHub epic (see bottom). It turns asmltr into an identity/core platform whose credentials,
-> memory, and artifacts are portable and restorable — with the [TRUST Protocol](https://github.com/jarethmt/trust-protocol)
+> Status (v0.5.0): **P0–P2 substantially shipped** — the [TRUST vault](security/trust-vault.md) is live
+> (credential broker + KMS), the [storage substrate + integrations](integrations/index.md) (local /
+> WebDAV / S3) + EncryptedStorage are built, asmltr is fully de-BWS'd, and the dashboard has Vault +
+> Integrations planes. **Still ahead:** the Self silo (P3), backups (P4), the auth layer + passphrase-
+> unseal UX, and the guided `asmltr vault init` bootstrap. Progress is tracked in the GitHub epic (see
+> bottom). This plan turns asmltr into an identity/core platform whose credentials, memory, and
+> artifacts are portable and restorable — with the [TRUST Protocol](https://github.com/jarethmt/trust-protocol)
 > as a hard dependency (its first real-world home).
 
 ## The one-line vision

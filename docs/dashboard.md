@@ -21,8 +21,15 @@ The SPA is organised into a handful of routed views:
 | `/usage` | **Usage** | Token usage + attribution — stacked area and bar by surface, per-identity table. Framed as *attributed, not billed* for subscription surfaces. |
 | `/system` | **System** | Live CPU %, load 1/5, memory, and disk charts plus current stat tiles. |
 | `/notifications` | **Notifications** | Feed of outbound notifications. |
-| `/integrations` | **Integrations** | Connector integrations. |
+| `/connectors` | **Connectors** | Comms-channel connector instances — add/edit/restart/logs, per-Discord *Servers* (invite/leave). |
+| `/integrations` | **Integrations** | Third-party service links (storage: webdav/s3/local) — add/configure/**test**; credentials stored in the [TRUST vault](integrations/index.md). |
+| `/vault` | **Vault** | [TRUST vault](security/trust-vault.md) key management — status banner, keys (name·tier·access-count), add/delete. Values are write-only. |
 | `/access` | **Access** | Access / identity. |
+
+The header shows the **configured agent's name** (from Settings → Identity) over an "asmltr control
+plane" subtext, and the whole UI — accent, gradients, background glow, nav logo, and browser favicon —
+**retints in real time** from the identity's *signature palette* (Settings → Identity). So an agent's
+own colours drive the surface it lives in.
 
 The rest of this page focuses on the **Live** view, where the observe-and-control
 loop lives.
