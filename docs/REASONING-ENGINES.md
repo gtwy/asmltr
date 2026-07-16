@@ -1,7 +1,33 @@
 # Reasoning engines — pluggable agentic backends
 
-> Status: **design agreed, not built.** This is the plan for lifting the Claude dependency into a swappable
-> *reasoning-engine* layer — the same move asmltr made for channels (connectors) and storage (silos).
+> Status: **foundation shipped, being built out.** The engine **registry**, the `asmltr claude|gemini|codex`
+> **terminal commands**, a configurable **default engine**, and the **Settings → Engines** GUI are live (see
+> [Using it today](#using-it-today)). Still ahead: the headless **web-session adapters** (drive Gemini/Codex
+> for browser chat with normalized events) + per-session engine selection in the dashboard. This lifts the
+> Claude dependency into a swappable *reasoning-engine* layer — the same move asmltr made for channels
+> (connectors) and storage (silos).
+
+## Using it today
+
+asmltr ships a **registry** of known agentic-CLI harnesses — **Claude Code, Gemini CLI, Codex CLI** — and
+detects which are installed (with versions). From the terminal:
+
+```bash
+asmltr claude [args…]     # launch a wrapped, monitored, takeover-able session on any engine
+asmltr gemini [args…]     # (Gemini CLI)
+asmltr codex  [args…]     # (Codex CLI)
+```
+
+Each launches that harness inside a multiplexer, tracked in the dashboard (Live) and attachable — exactly
+like the original `asmltr claude`.
+
+- **Default engine.** Settings → **Engines** lists every known harness (installed? version? default?) and lets
+  you pick the **default** — which is what the `<agent-name>` terminal command points at (so `eve` ≡
+  `asmltr <default>`). Also `POST /v2/engines/default`.
+- **Config** lives in `~/.asmltr/engines.json` (default + per-engine settings); override a harness binary with
+  `ASMLTR_<ENGINE>_BIN`.
+
+The design below is the full plan the foundation is being built out toward.
 
 Today, one thing in asmltr knows it's talking to Claude: **`core/src/runner.js`** (the Agent-SDK `query()`
 call + a little in `shared/runtime.js` and the `IS_SANDBOX`/`permissionMode` setup). Everything else —

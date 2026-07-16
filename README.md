@@ -19,9 +19,9 @@
 ## What is asmltr?
 
 asmltr is a **self-hosted platform for a single AI assistant** — one that runs on *your* hardware, thinks
-on *your* Claude subscription (via the local Agent SDK, not a metered API key), and shows up as the **same
-self** wherever people reach it: Discord, Telegram, email, GitHub, an MCP client, any OpenAI-compatible
-app, the web dashboard, or your terminal.
+on *your* choice of agentic engine (Claude Code on your subscription by default; Gemini or Codex too), and
+shows up as the **same self** wherever people reach it: Discord, Telegram, email, GitHub, an MCP client,
+any OpenAI-compatible app, the web dashboard, or your terminal.
 
 It started as a channel-agnostic router. It's grown into the whole assistant: a **persistent identity and
 memory**, a **use-but-never-see credential vault**, a **built-in login you can put in front of your other
@@ -124,6 +124,7 @@ envelope and renders a reply. → [How it works](https://jarethmt.github.io/asml
 
 | Area | Highlights | Docs |
 |------|-----------|------|
+| **Reasoning engines** | Pluggable agentic backends — run on **Claude Code, Gemini CLI, or Codex CLI** (self-hosted models next). Registry with install detection, a configurable default engine, and `asmltr claude\|gemini\|codex` terminal commands. Capabilities + tools **derived from each harness at runtime**. | [Engines](https://jarethmt.github.io/asmltr/REASONING-ENGINES/) |
 | **Channels** | Discord (+ autonomous participation, multi-agent, voice), Telegram, Email (SMTP/IMAP), GitHub issues, MCP (OAuth 2.1), OpenAI-compatible API, web chat, CLI. | [Connectors](https://jarethmt.github.io/asmltr/connectors/discord/) |
 | **Identity & memory** | Self anchor + aesthetic injected every turn; the *Cast* (cross-channel relationships); **data silos** — the assistant's memory and the default home for its artifacts, with layered search. | [Silos](https://jarethmt.github.io/asmltr/silos/) |
 | **Credentials** | A [TRUST-Protocol vault](https://jarethmt.github.io/asmltr/security/trust-vault/): use-but-never-see credential broker + KMS envelope encryption; storage integrations (WebDAV / S3 / local) with encryption-at-rest. | [Vault](https://jarethmt.github.io/asmltr/security/trust-vault/) · [Integrations](https://jarethmt.github.io/asmltr/integrations/) |
@@ -132,9 +133,9 @@ envelope and renders a reply. → [How it works](https://jarethmt.github.io/asml
 | **Observability** | Vue dashboard + terminal TUI: live sessions, cross-surface timeline, token usage, host metrics — and live **takeover** (stop / steer any session). | [Dashboard](https://jarethmt.github.io/asmltr/dashboard/) · [CLI](https://jarethmt.github.io/asmltr/cli/) |
 | **Operations** | Deterministic, rollback-safe self-updater with `stable` / `edge` channels; semver releases; a shared settings manifest that drives the GUI *and* the TUI. | [Updater](https://jarethmt.github.io/asmltr/UPDATER-DESIGN/) |
 
-*Roadmap:* OIDC **client** (log into asmltr via an external IdP), login→vault unlock, a
-[federation](https://jarethmt.github.io/asmltr/FEDERATION/) mesh of cooperating agents, and sleep/dream
-memory consolidation.
+*Roadmap:* headless web-session adapters for the Gemini/Codex engines (mixed-engine browser sessions) +
+self-hosted models, a [federation](https://jarethmt.github.io/asmltr/FEDERATION/) mesh of cooperating
+agents, and sleep/dream memory consolidation.
 
 ---
 
