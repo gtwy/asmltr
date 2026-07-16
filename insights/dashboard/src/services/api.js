@@ -81,7 +81,8 @@ export const vaultApi = {
   status: () => getCore('/v2/vault/status'),
   secrets: () => getCore('/v2/vault/secrets'),
   addSecret: (payload) => postCore('/v2/vault/secrets', payload),
-  removeSecret: (name) => reqCore('DELETE', `/v2/vault/secrets/${encodeURIComponent(name)}`)
+  removeSecret: (name) => reqCore('DELETE', `/v2/vault/secrets/${encodeURIComponent(name)}`),
+  unseal: (password) => postCore('/v2/vault/unseal', { password })
 }
 
 // Data silos — the file-explorer surface. `id` defaults to 'self' (the Self silo). Paths are silo-relative.

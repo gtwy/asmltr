@@ -647,6 +647,85 @@ async function cmdBackup(rest, f) {
   }
 }
 
+// asmltr vault <status|unseal|seal|init> — TRUST vault bootstrap + passphrase-unseal (shared/vault.js).
+async function cmdVault(rest, f) {
+  const fs = require('fs');
+  const path = require('path');
+  try { require('../shared/loadenv'); } catch (_) {} // pick up ASMLTR_VAULT_* from .env (real env still wins)
+  const vault = require('../shared/vault');
+  const identity = require('../shared/identity');
+  const verb = rest[0] || 'status';
+  const ENV = path.join(__dirname, '..', '.env');
+
+  // Upsert KEY=value into .env (replaces an existing active line; leaves comments alone).
+  const upsertEnv = (kv) => {
+    let lines = [];
+    try { lines = fs.readFileSync(ENV, 'utf8').split('\n'); } catch (_) {}
+    for (const [k, v] of Object.entries(kv)) {
+      const i = lines.findIndex((l) => l.replace(/^\s*(export\s+)?/, '').startsWith(k + '='));
+      if (i >= 0) lines[i] = `${k}=${v}`; else lines.push(`${k}=${v}`);
+    }
+    fs.writeFileSync(ENV, lines.join('\n'));
+  };
+
+  if (verb === 'status') {
+    const h = await vault.health(); const s = await vault.sealStatus();
+    console.log(`vault:  ${h.ok ? A.grn('reachable') : A.red('unreachable')}${h.error ? A.dim(' (' + h.error + ')') : ''}`);
+    console.log(`sealed: ${s.sealed ? A.yel('yes — credential ops locked') : A.grn('no')}${s.vault_initialized != null ? A.dim(' · initialized: ' + s.vault_initialized) : ''}`);
+    return;
+  }
+  if (verb === 'unseal') {
+    const pw = f.passphrase || f.password || rest[1] || process.env.ASMLTR_VAULT_PASSWORD || process.env.TRUST_PROTOCOL_VAULT_PASSWORD;
+    if (!pw) throw new Error('unseal needs a passphrase: asmltr vault unseal <passphrase>');
+    const r = await vault.unseal(pw);
+    console.log(A.grn('✓') + ' ' + ((r && r.message) || 'unsealed'));
+    return;
+  }
+  if (verb === 'seal') { await vault.seal(); console.log(A.grn('✓') + ' sealed'); return; }
+  if (verb === 'init') {
+    if (f.url) process.env.ASMLTR_VAULT_URL = f.url;
+    if (f['admin-key']) process.env.ASMLTR_VAULT_ADMIN_KEY = f['admin-key'];
+    const url = process.env.ASMLTR_VAULT_URL || 'http://127.0.0.1:9500/v1';
+    console.log('vault url: ' + A.dim(url));
+    const h = await vault.health();
+    if (!h.ok) {
+      console.log(A.red('✗ vault not reachable at ' + url));
+      console.log('  Deploy the TRUST Protocol first (a separate service on :9500):');
+      console.log('    ' + A.dim('https://github.com/jarethmt/trust-protocol') + '  ·  docs: security/trust-vault');
+      console.log('  Then re-run: ' + A.bold('asmltr vault init --url <url> --admin-key <key> [--unseal <passphrase>]'));
+      process.exit(1);
+    }
+    const s = await vault.sealStatus();
+    if (s.sealed) {
+      const pw = f.unseal || process.env.ASMLTR_VAULT_PASSWORD || process.env.TRUST_PROTOCOL_VAULT_PASSWORD;
+      if (!pw) { console.log(A.yel('vault is SEALED') + ' — re-run with --unseal <passphrase>.'); process.exit(1); }
+      await vault.unseal(pw); console.log(A.grn('✓') + ' unsealed');
+    }
+    if (!process.env.ASMLTR_VAULT_ADMIN_KEY) throw new Error('need an admin key: --admin-key <key> (or ASMLTR_VAULT_ADMIN_KEY)');
+    const name = identity.name();
+    console.log('registering SACRED agent: ' + A.bold(name));
+    const agent = await vault.ensureAgent(name);
+    const env = { ASMLTR_VAULT_URL: url };
+    if (f['admin-key']) env.ASMLTR_VAULT_ADMIN_KEY = f['admin-key'];
+    if (agent.created) { env.ASMLTR_VAULT_AGENT_KEY = agent.api_key; process.env.ASMLTR_VAULT_AGENT_KEY = agent.api_key; console.log(A.grn('✓') + ' agent registered (SACRED)'); }
+    else console.log(A.dim('· agent already exists (agent key unchanged; re-register to rotate)'));
+    upsertEnv(env);
+    console.log(A.grn('✓') + ' wrote ' + Object.keys(env).join(', ') + ' → .env');
+    if (process.env.ASMLTR_VAULT_AGENT_KEY) {
+      const t = 'asmltr_init_selftest';
+      try {
+        await vault.storeSecret(t, { value: 'ok' }, { minTrust: 'SACRED' });
+        const got = await vault.getSecret(t);
+        await vault.deleteSecret(t);
+        console.log(got && got.value === 'ok' ? A.grn('✓ roundtrip verified (store → proxy-fetch → delete)') : A.yel('· roundtrip returned an unexpected value'));
+      } catch (e) { console.log(A.yel('· roundtrip check skipped: ' + e.message)); }
+    } else console.log(A.dim('· skipped roundtrip (no agent key — re-register to rotate one in)'));
+    console.log('\n' + A.bold('Next:') + ' restart services — ' + A.dim('pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector'));
+    return;
+  }
+  console.log('asmltr vault <status|unseal|seal|init> [--url <u>] [--admin-key <k>] [--unseal <passphrase>]');
+}
+
 // --- main --------------------------------------------------------------------
 (async () => {
   const [, , cmd, ...rest] = process.argv;
@@ -699,6 +778,7 @@ async function cmdBackup(rest, f) {
       case 'update': return await cmdUpdate(rest, f);
       case 'silo': return await cmdSilo(rest, f);
       case 'backup': return await cmdBackup(rest, f);
+      case 'vault': return await cmdVault(rest, f);
       case 'version': case '--version': return await cmdVersion();
       case 'help': case '--help': case '-h': return cmdHelp();
       default: console.error(`unknown command: ${cmd}\n`); return cmdHelp();
