@@ -100,6 +100,7 @@ nav:
     - Federation: FEDERATION.md
     - Vault · silos · backups (roadmap): ROADMAP-VAULT-SILOS-BACKUP.md
     - Auth & identity provider (roadmap): AUTH.md
+    - Reasoning engines (roadmap): REASONING-ENGINES.md
   - Security:
     - TRUST vault (credentials & KMS): security/trust-vault.md
     - Trust & permissions: security/trust.md
