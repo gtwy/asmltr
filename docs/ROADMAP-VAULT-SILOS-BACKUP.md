@@ -162,9 +162,14 @@ byte access can read/rewrite it. So the manifest is a **signed claim, never the 
 
 Five layers:
 
-1. **Encrypt at rest** — silo content is sealed with the owner's vault key; raw backend access yields
-   ciphertext. Content keys are wrapped *for the authorized recipient*, so storage nodes/relays never
-   see plaintext.
+1. **Encrypt at rest (KMS envelope)** — each silo has a data key; the runtime uses it to AES-256-GCM
+   the content, so raw backend access yields ciphertext. The data key is **wrapped by the TRUST vault's
+   KMS** (`generate`/`wrap`/`unwrap`) and stored as a blob in the silo's `.silo/dek` — the KMS **master
+   key never leaves the vault**. asmltr holds only the wrapped blob at rest + the plaintext data key
+   *transiently, in the runtime crypto layer* (`EncryptedStorage`), **never in the model's context**,
+   zeroed after use (`dispose()`). This is distinct from the credential proxy (use-but-never-see, for
+   API keys the agent never touches) — the two are complementary vault roles. *(Live: `shared/vault.js`
+   + trust-protocol `core/kms.py`.)*
 2. **Owner-signed manifest (Ed25519, key in the vault)** — tamper-evident. Editing the policy in
    plaintext breaks the signature → the silo is flagged tampered. Only the owner can re-sign → **only
    the owner can modify the manifest.** (OS file perms on `.silo/` are local belt-and-suspenders; the
