@@ -1,0 +1,148 @@
+# Reasoning engines — pluggable agentic backends
+
+> Status: **design agreed, not built.** This is the plan for lifting the Claude dependency into a swappable
+> *reasoning-engine* layer — the same move asmltr made for channels (connectors) and storage (silos).
+
+Today, one thing in asmltr knows it's talking to Claude: **`core/src/runner.js`** (the Agent-SDK `query()`
+call + a little in `shared/runtime.js` and the `IS_SANDBOX`/`permissionMode` setup). Everything else —
+connectors, identity, the Cast, silos, moderation, trust, dashboard, auth — is already engine-agnostic. So
+the whole abstraction is: **turn `runner.js` into the `claude` implementation of an `Engine` interface**,
+and let sessions pick which engine runs them.
+
+## The key idea: an engine is a *harness + a provider*
+
+Two things vary, and it's worth separating them:
+
+- **Harness** — the agentic loop (tools, sub-agents, session handling): Claude Code, Gemini CLI, Codex CLI,
+  or an open harness like OpenCode / Goose / Aider.
+- **Provider / model** — the reasoning itself: Anthropic, Google, OpenAI, or a **self-hosted** model behind
+  an OpenAI-compatible endpoint (Ollama / vLLM / llama.cpp).
+
+Some harnesses are locked to a provider (Claude Code → Anthropic; Gemini CLI → Google); others are
+provider-flexible (Codex and most open harnesses can point at *any* OpenAI-compatible base URL). That gives
+a clean unification:
+
+| Engine | Harness | Provider | Self-hosted? |
+|--------|---------|----------|--------------|
+| `claude` | Claude Code (SDK) | Anthropic (subscription) | no |
+| `gemini` | Gemini CLI | Google | no |
+| `codex` | Codex CLI | OpenAI **or a custom base URL** | **yes** (custom endpoint) |
+| `opencode` / `goose` / `aider` | open harness | any OpenAI-compatible | **yes** |
+
+**Self-hosted models are not a separate engine — they're a provider config on a provider-flexible harness.**
+Point Codex (or an open harness) at your Ollama/vLLM endpoint and it's just another engine instance.
+
+## The Engine interface
+
+Mirrors the connector pattern (`connectors/types/<type>/`) — a thin adapter + a `meta` manifest:
+
+```
+core/src/engines/types/<id>/index.js
+  meta = {
+    id, label,
+    kind: 'sdk' | 'cli',                       // driven in-process, or a subprocess
+    capabilities: { … },                        // see below
+    models,                                     // static list or a discovery fn
+    configSchema,                               // keys (vault-backed), model, base_url, cwd, sandbox…
+  }
+  async run({ prompt, systemPrompt, resume, cwd, images, onEvent, abortController })
+     → { engineSessionId, reply }               // events normalized to shared/events.js
+```
+
+`run()`'s only real job beyond invoking the harness is **normalizing its output into asmltr's existing
+event contract** — the same `system` / `assistant(text·tool_use·thinking)` / `result` / `stream_event`
+shape `runner.js` already emits. The core, collector, dashboard, and CLI don't change.
+
+## The capability manifest (your idea — and it's the right call)
+
+asmltr already thinks this way: connectors carry `capabilities` (`supports_attachments_out`, …) and the
+console-manifest drives "declare a field → GUI + TUI adapt." Engines do the same. Each declares:
+
+```
+capabilities: {
+  tools, subagents, skills, localFs, vision, mcp, thinking, streaming,
+  sessionResume: 'native' | 'replay' | 'none',
+}
+```
+
+The core **capability-gates features** instead of forcing a lowest common denominator:
+
+- Session cards show the engine badge + which capabilities are live.
+- The **SELF SILO / toolbelt** prompt injections (which assume a Bash tool) only fire when `localFs` is true.
+- No `skills` → skills aren't injected. No `subagents` → no Task tool. Graceful degradation, per engine.
+
+## Sessions — where silos pay off
+
+- **`native`** (Claude SDK assigns + resumes ids; Codex has session ids): store `engineSessionId`, pass `resume`.
+- **`replay`** (stateless CLIs): asmltr already owns the transcript (sessions DB + the Self silo's
+  `memory/transcripts`), so it replays history as context. **Because silos abstracted storage, replay-resume
+  is uniform across every engine that lacks native resume.**
+
+## Config, accounts & selection
+
+- **Per-engine config** as its own registry (like `integrations`): model, `base_url`, cwd, sandbox mode,
+  and **keys resolved through the vault** (`*_ref`), never in config. Multiple instances of one harness are
+  allowed (e.g. two `codex` engines on different self-hosted endpoints).
+- **Selection**: a default engine + a **per-session override** (start a session on a chosen engine). Because
+  sessions are already keyed independently, **simultaneous sessions on different engines fall out for free** —
+  the headline demo.
+- **GUI**: Settings → **Engines** (add / configure / enable / set default), and an engine picker when
+  starting a web session; the Live view shows each session's engine.
+
+## Per-engine integration notes
+
+> Exact headless flags / event schemas below are **to confirm during implementation** — the CLIs evolve.
+
+- **`claude`** (SDK, present: `claude` 2.1.211) — the reference impl; native resume, full capabilities
+  (tools, subagents, skills, localFs, mcp, thinking, streaming). Just move `runner.js` behind the interface.
+- **`gemini`** (CLI, **already installed: `gemini` 0.25.0**) — drive its non-interactive/headless mode;
+  parse output → events. Resume likely `replay` (or its checkpoint/save mechanism). Caps: tools + MCP +
+  vision; streaming granularity TBD. Natural **first non-Claude target** since it's on the box.
+- **`codex`** (CLI, not yet installed) — `codex exec` has a structured/JSON mode → clean event mapping;
+  native session resume; MCP; and **custom model providers via config (base URL + key)** → this engine
+  *doubles as the self-hosted path*. Map its sandbox/approval modes to asmltr's autonomous intent.
+- **self-hosted** — start by reusing `codex` with a custom `base_url` (Ollama/vLLM/OpenAI-compatible). If a
+  more general harness is wanted, add an `opencode` / `goose` / `aider` engine (all point at arbitrary
+  endpoints; trade-offs differ — Aider is edit-centric, OpenCode/Goose are general agents).
+
+## Cross-cutting concerns
+
+- **MCP as the unifying tool bridge** — Claude, Codex, and Gemini all speak MCP, so asmltr's existing MCP
+  tools can be exposed to any MCP-capable engine uniformly (rather than re-implementing tools per engine).
+- **Sandbox / permissions** — each harness has its own autonomy model (Claude `bypassPermissions`+`IS_SANDBOX`;
+  Codex sandbox/approval modes; Gemini's yolo/non-interactive). The adapter maps asmltr's "run autonomously" to each.
+- **Skills** — Claude Code skills are Claude-specific. Other engines get none until (later) skills are lifted
+  into an asmltr registry (silo-backed) and injected as prompt + tools. The manifest says who has them.
+- **Streaming granularity + the voice fast-path** — CLIs may stream coarser than the SDK; the `streaming`
+  capability + the low-latency voice path adapt per engine.
+- **Economics** — Claude rides the subscription (no metered path — a *Claude-specific* rule). Other engines
+  may be metered (API keys) or subscription (ChatGPT/Gemini accounts) or free (self-hosted). It's a per-engine
+  config choice, surfaced in the manifest, not a global constraint.
+
+## Phased plan
+
+| Phase | Scope | Risk |
+|-------|-------|------|
+| **0 — Abstraction** | Define the `Engine` interface + capability manifest; move `runner.js` → `engines/types/claude/`; core selects an engine per session (default `claude`); **no behavior change**. | Low — pure refactor, the enabling move |
+| **1 — Registry + selection + GUI** | Engine config registry (vault-backed keys), Settings → Engines, per-session override, engine badge + capabilities on session cards. Still Claude-only, but multi-engine plumbing. | Low |
+| **2 — Codex engine** | Wrap `codex exec --json`; native resume; sandbox mapping; MCP. Highest-value 2nd engine (clean JSON + it's the self-hosted vehicle). | Medium |
+| **3 — Gemini engine** | Wrap the installed Gemini CLI headless; replay resume; caps manifest. | Medium |
+| **4 — Self-hosted** | A Codex (or open-harness) engine instance pointed at a custom OpenAI-compatible `base_url` (Ollama/vLLM). Mostly config on Phase 2/3. | Medium |
+| **5 — (someday) own harness** | asmltr's own Cursor-style tool loop over any model — only if CLI-wrapping proves limiting. Reuses a unified tool schema + silo-backed skills. | Large, optional |
+
+**Phase 0 is the whole unlock** — once the seam exists, each engine is an additive adapter, and mixed-engine
+sessions work immediately.
+
+## Open questions
+
+- Exact headless invocation + streaming-event schema for Gemini CLI and Codex `exec` (verify in Phase 2/3).
+- Do we bridge asmltr's MCP tools into every MCP-capable engine (uniform tools), or accept each harness's
+  native toolset first and add the MCP bridge later?
+- Skills: leave Claude-only for now, or make lifting skills into an asmltr registry a Phase-1.5?
+- Per-engine cost/telemetry — surface metered vs subscription usage distinctly in the Usage view.
+
+## See also
+
+- [Architecture](architecture.md) · [How it works](how-it-works.md) — the pipeline the engine plugs into.
+- [Data silos](silos.md) — why replay-resume is uniform (silos own transcripts).
+- [Connectors](connectors/discord.md) — the adapter+manifest pattern this mirrors.
