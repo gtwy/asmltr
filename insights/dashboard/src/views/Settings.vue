@@ -27,7 +27,8 @@ const sections = computed(() => manifest.value?.settings || [])
 // The manifest drives the shared GUI+TUI tabs; "Notifications" is appended GUI-only because it's a
 // browser capability (Notification API) with no meaning in the terminal.
 const TABS = computed(() => [
-  ...sections.value.map((s) => ({ id: s.id, label: s.label, icon: s.icon })),
+  // 'runtime' (model + permission mode) is folded into the Engines tab, so drop its standalone tab here.
+  ...sections.value.filter((s) => s.id !== 'runtime').map((s) => ({ id: s.id, label: s.label, icon: s.icon })),
   { id: 'engines', label: 'Engines', icon: '🧠' },
   { id: 'security', label: 'Security', icon: '🔒' },
   { id: 'backups', label: 'Backups', icon: '🗄' },
@@ -37,12 +38,24 @@ const TABS = computed(() => [
 // --- reasoning engines ---
 const engines = ref([])
 const enginesDefault = ref('claude')
-const engBusy = ref('')
-async function loadEngines() { try { const r = await enginesApi.list(); engines.value = r.engines || []; enginesDefault.value = r.default } catch (_) {} }
+const engBusy = ref('')          // engine id with an action in flight
+const engCheck = reactive({})    // id -> { latest, updateAvailable }
+const engError = ref('')
+async function loadEngines() { try { const r = await enginesApi.list(); engines.value = r.engines || []; enginesDefault.value = r.default; checkAllEngines() } catch (_) {} }
 async function setDefaultEngine(id) {
   engBusy.value = id
   try { await enginesApi.setDefault(id); await loadEngines() } catch (_) {} finally { engBusy.value = '' }
 }
+async function checkEngine(id) {
+  try { const r = await enginesApi.check(id); engCheck[id] = { latest: r.latest, updateAvailable: r.updateAvailable } } catch (_) {}
+}
+async function installEngine(id) {
+  engBusy.value = id; engError.value = ''
+  try { await enginesApi.install(id); delete engCheck[id]; await loadEngines() }
+  catch (e) { engError.value = `${id}: ${e.message}` } finally { engBusy.value = '' }
+}
+// On opening the Engines tab, check installed engines for available updates (best-effort, background).
+function checkAllEngines() { engines.value.filter((e) => e.installed).forEach((e) => checkEngine(e.id)) }
 
 // --- security / 2FA ---
 const authStatus = ref({ enabled: false, configured: false, user: null, totp: false })
@@ -337,8 +350,37 @@ onMounted(async () => {
         </div>
 
         <!-- Runtime — model choices from the manifest; SDK status widget stays bespoke -->
-        <div v-show="tab === 'runtime'" class="glass p-5">
-          <h3 class="mb-1 text-sm font-semibold text-slate-200">Agent runtime</h3>
+        <div v-show="tab === 'engines'" class="space-y-4">
+          <!-- reasoning-engine registry: install / version / update / default -->
+          <div class="glass p-5">
+            <h3 class="mb-1 text-sm font-semibold text-slate-200">Reasoning engines</h3>
+            <p class="mb-4 text-[12px] text-slate-500">
+              The agentic backends asmltr can run. Pick the <b>default</b> — it's what the <span class="font-mono">{{ agentName }}</span>
+              command and new sessions use. Each also has its own <span class="font-mono">asmltr &lt;engine&gt;</span> command.
+            </p>
+            <ul class="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/5">
+              <li v-for="e in engines" :key="e.id" class="flex items-center gap-3 px-3 py-3 text-sm">
+                <input type="radio" name="default-engine" class="accent-violet-500" :checked="e.isDefault" :disabled="!e.installed || !!engBusy" @change="setDefaultEngine(e.id)" />
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-medium text-slate-100">{{ e.label }}</span>
+                    <span v-if="e.isDefault" class="pill border border-brand-violet/40 bg-brand-violet/10 text-[10px] text-violet-300">default</span>
+                    <span class="pill border text-[10px]" :class="e.installed ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-white/10 bg-white/5 text-slate-500'">{{ e.installed ? '● installed' : '○ not installed' }}</span>
+                    <span v-if="engCheck[e.id] && engCheck[e.id].updateAvailable" class="pill border border-amber-400/30 bg-amber-400/10 text-[10px] text-amber-300">update → {{ engCheck[e.id].latest }}</span>
+                  </div>
+                  <div class="mt-0.5 font-mono text-[10px] text-slate-500">{{ e.version || ('asmltr ' + e.id) }} · asmltr {{ e.id }}</div>
+                </div>
+                <button v-if="!e.installed" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'installing…' : 'Install' }}</button>
+                <button v-else-if="engCheck[e.id] && engCheck[e.id].updateAvailable" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'updating…' : 'Update' }}</button>
+              </li>
+            </ul>
+            <p v-if="engError" class="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">{{ engError }}</p>
+            <p class="mt-3 text-[12px] text-slate-500">Changing the default re-points the <span class="font-mono">{{ agentName }}</span> command. Web-session engine selection lands next.</p>
+          </div>
+
+          <!-- model + runtime for the active engine (was the standalone Runtime tab) -->
+          <div class="glass p-5">
+          <h3 class="mb-1 text-sm font-semibold text-slate-200">Model &amp; runtime <span class="text-[11px] font-normal text-slate-500">· {{ enginesDefault }} engine</span></h3>
           <p class="mb-4 text-[12px] text-slate-500">{{ section('runtime').desc }}</p>
           <template v-if="rt">
             <div class="mb-5 flex flex-wrap items-center gap-3 rounded-lg border border-white/5 bg-black/20 p-3">
@@ -398,6 +440,7 @@ onMounted(async () => {
             </div>
           </template>
           <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
+          </div>
         </div>
 
         <!-- Updates — toggle copy from the manifest; changelog/status stays bespoke -->
@@ -566,30 +609,6 @@ onMounted(async () => {
           <RouterLink to="/notifications" class="mt-4 inline-flex items-center gap-1.5 text-[12px] text-brand-violet hover:underline">
             <AppIcon glyph="✦" /> View notification history
           </RouterLink>
-        </div>
-
-        <div v-show="tab === 'engines'" class="glass p-5">
-          <h3 class="mb-1 text-sm font-semibold text-slate-200">Reasoning engines</h3>
-          <p class="mb-4 text-[12px] text-slate-500">
-            The agentic backends asmltr can run. Pick the <b>default</b> — it's what the <span class="font-mono">{{ agentName }}</span>
-            terminal command and new sessions use. Each also has its own <span class="font-mono">asmltr &lt;engine&gt;</span> command.
-          </p>
-          <ul class="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/5">
-            <li v-for="e in engines" :key="e.id" class="flex items-center gap-3 px-3 py-3 text-sm">
-              <input type="radio" name="default-engine" class="accent-violet-500" :checked="e.isDefault" :disabled="!e.installed || engBusy===e.id" @change="setDefaultEngine(e.id)" />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium text-slate-100">{{ e.label }}</span>
-                  <span v-if="e.isDefault" class="pill border border-brand-violet/40 bg-brand-violet/10 text-[10px] text-violet-300">default</span>
-                  <span class="pill border text-[10px]" :class="e.installed ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-white/10 bg-white/5 text-slate-500'">
-                    {{ e.installed ? '● installed' : '○ not installed' }}
-                  </span>
-                </div>
-                <div class="mt-0.5 font-mono text-[10px] text-slate-500">{{ e.version || (e.installed ? '' : e.install) }} · asmltr {{ e.id }}</div>
-              </div>
-            </li>
-          </ul>
-          <p class="mt-3 text-[12px] text-slate-500">Changing the default re-points the <span class="font-mono">{{ agentName }}</span> command. Web-session engine selection + per-engine config land next.</p>
         </div>
 
         <div v-show="tab === 'security'" class="glass p-5">
@@ -835,5 +854,11 @@ onMounted(async () => {
 .field-input {
   @apply rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors;
   @apply placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06];
+}
+.act {
+  @apply shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50;
+}
+.act-danger {
+  @apply shrink-0 rounded-lg border border-rose-500/20 bg-rose-500/5 px-2.5 py-1 text-xs font-medium text-rose-400/80 transition-colors hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-50;
 }
 </style>

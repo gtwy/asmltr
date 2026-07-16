@@ -141,7 +141,9 @@ export const oidcApi = {
 export const enginesApi = {
   list: () => getCore('/v2/engines'),
   setDefault: (id) => postCore('/v2/engines/default', { id }),
-  setConfig: (id, config) => reqCore('PATCH', `/v2/engines/${encodeURIComponent(id)}`, config)
+  setConfig: (id, config) => reqCore('PATCH', `/v2/engines/${encodeURIComponent(id)}`, config),
+  check: (id) => getCore(`/v2/engines/${encodeURIComponent(id)}/check`),
+  install: (id) => postCore(`/v2/engines/${encodeURIComponent(id)}/install`)
 }
 
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
