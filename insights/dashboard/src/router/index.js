@@ -11,6 +11,7 @@ const routes = [
   { path: '/drafts', name: 'drafts', component: () => import('@/views/Drafts.vue'), meta: { title: 'Drafts', icon: '✎' } },
   { path: '/connectors', name: 'connectors', component: () => import('@/views/Connectors.vue'), meta: { title: 'Connectors', icon: '🔌' } },
   { path: '/integrations', name: 'integrations', component: () => import('@/views/Integrations.vue'), meta: { title: 'Integrations', icon: '🧩' } },
+  { path: '/silos', name: 'silos', component: () => import('@/views/Silos.vue'), meta: { title: 'Silos', icon: '🗄' } },
   { path: '/vault', name: 'vault', component: () => import('@/views/Vault.vue'), meta: { title: 'Vault', icon: '🔒' } },
   { path: '/access', name: 'access', component: () => import('@/views/Access.vue'), meta: { title: 'Access', icon: '🔑' } },
   { path: '/settings', name: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: 'Settings', icon: '⚙' } }

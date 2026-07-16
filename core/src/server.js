@@ -572,6 +572,49 @@ app.delete('/v2/vault/secrets/:name', async (req, res) => {
   try { await vault.deleteSecret(req.params.name); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
+// Data silos — the file-explorer surface over shared/silo.js (`:id` = silo id; `self`/omitted → the Self silo).
+// Read verbs (list/overview/ls/tree/find/file) + safe writes (mkdir/put/mv/rm/new). Paths are silo-relative.
+function openSilo(id) { return (!id || id === 'self') ? silo.ensureSelf(identity.name()) : silo.open(id); }
+app.get('/v2/silos', (req, res) => res.json({
+  silos: silo.list(),
+  templates: Object.entries(silo.TEMPLATES).map(([id, t]) => ({ id, desc: t.desc, folders: t.folders })),
+}));
+app.post('/v2/silos', (req, res) => {
+  const b = req.body || {};
+  try { const s = silo.create({ id: b.id, name: b.name, type: b.type || 'generic' }); res.status(201).json({ ok: true, id: b.id, dir: s.dir }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/v2/silos/:id', (req, res) => { try { res.json({ ok: true, manifest: openSilo(req.params.id).setManifest(req.body || {}) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/silos/:id', (req, res) => {
+  if (req.params.id === 'self') return res.status(400).json({ error: 'the Self silo cannot be deleted' });
+  try { res.json({ ok: silo.remove(req.params.id) }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/v2/silos/:id/overview', async (req, res) => { try { res.json(await openSilo(req.params.id).overview()); } catch (e) { res.status(404).json({ error: e.message }); } });
+app.get('/v2/silos/:id/ls', async (req, res) => { try { res.json({ entries: await openSilo(req.params.id).ls(req.query.path || '') }); } catch (e) { res.status(404).json({ error: e.message }); } });
+app.get('/v2/silos/:id/tree', async (req, res) => { try { res.json({ entries: await openSilo(req.params.id).tree(req.query.path || '', req.query.depth ? +req.query.depth : Infinity) }); } catch (e) { res.status(404).json({ error: e.message }); } });
+app.get('/v2/silos/:id/find', async (req, res) => {
+  try { const q = req.query; res.json({ results: await openSilo(req.params.id).find(q.q || '', { in: q.in, type: q.type, since: q.since, content: q.content === '1' || q.content === 'true' }) }); }
+  catch (e) { res.status(404).json({ error: e.message }); }
+});
+app.get('/v2/silos/:id/file', async (req, res) => {
+  try {
+    const s = openSilo(req.params.id); const p = req.query.path;
+    if (!p) return res.status(400).json({ error: 'path required' });
+    const st = await s.stat(p); const buf = await s.get(p);
+    const isText = !buf.includes(0) && buf.length <= (512 << 10); // no NUL byte + ≤512KB → previewable text
+    res.json({ path: p, size: st ? st.size : buf.length, mtime: st && st.mtime, binary: !isText, content: isText ? buf.toString('utf8') : null });
+  } catch (e) { res.status(404).json({ error: e.message }); }
+});
+app.post('/v2/silos/:id/file', async (req, res) => { // write/upload: { path, content? | data_base64? }
+  try { const b = req.body || {}; if (!b.path) return res.status(400).json({ error: 'path required' });
+    const data = b.data_base64 ? Buffer.from(b.data_base64, 'base64') : Buffer.from(b.content || '', 'utf8');
+    res.json({ ok: true, ...(await openSilo(req.params.id).put(b.path, data)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/v2/silos/:id/mkdir', async (req, res) => { try { await openSilo(req.params.id).mkdir((req.body || {}).path); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/silos/:id/mv', async (req, res) => { try { const b = req.body || {}; await openSilo(req.params.id).mv(b.from, b.to); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/silos/:id/file', async (req, res) => { try { await openSilo(req.params.id).rm(req.query.path); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
 // from config or the reverse proxy's Authelia-resolved user, so the same build works anywhere.

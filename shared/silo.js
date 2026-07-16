@@ -45,6 +45,15 @@ class Silo {
   constructor(dir) { this.dir = dir; this.store = storage.getStorage({ type: 'local', config: { root: dir } }); }
   manifest() { try { return JSON.parse(fs.readFileSync(path.join(this.dir, '.silo', 'manifest.json'), 'utf8')); } catch (_) { return null; } }
 
+  /** Patch editable manifest fields (name/description/…). Identity + provenance keys are protected. */
+  setManifest(patch = {}) {
+    const PROTECTED = new Set(['id', 'type', 'manifest_version', 'created_with', 'min_asmltr', 'created_at', 'storage']);
+    const m = this.manifest() || {};
+    for (const [k, v] of Object.entries(patch)) if (!PROTECTED.has(k)) m[k] = v;
+    fs.writeFileSync(path.join(this.dir, '.silo', 'manifest.json'), JSON.stringify(m, null, 2));
+    return m;
+  }
+
   // ---- file-manager verbs (delegate to the storage driver; paths are silo-relative) ----
   async ls(p = '') { return (await this.store.list(p, { recursive: false })).filter((e) => !isInternal(e.path)); }
   async tree(p = '', depth = Infinity) {
@@ -131,6 +140,15 @@ function list() {
   catch (_) { return []; }
 }
 
+/** Delete a silo by id (never a path — deletion is confined to a plain child of the silos root). */
+function remove(id) {
+  if (!id || /[\\/]|\.\./.test(id)) throw new Error('invalid silo id: ' + id);
+  const dir = path.join(silosRoot(), id);
+  if (!fs.existsSync(path.join(dir, '.silo', 'manifest.json'))) throw new Error('not a silo: ' + id);
+  fs.rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+
 /** The Self silo — created (from the `self` template) if absent. */
 function ensureSelf(name) {
   const existing = list().find((m) => m.type === 'self');
@@ -138,4 +156,4 @@ function ensureSelf(name) {
   return create({ id: 'self', name: `${name || 'Assistant'} — Self`, type: 'self' });
 }
 
-module.exports = { create, open, list, ensureSelf, Silo, silosRoot, TEMPLATES };
+module.exports = { create, open, list, remove, ensureSelf, Silo, silosRoot, TEMPLATES };

@@ -84,6 +84,22 @@ export const vaultApi = {
   removeSecret: (name) => reqCore('DELETE', `/v2/vault/secrets/${encodeURIComponent(name)}`)
 }
 
+// Data silos — the file-explorer surface. `id` defaults to 'self' (the Self silo). Paths are silo-relative.
+const q = (o) => { const s = new URLSearchParams(Object.entries(o || {}).filter(([, v]) => v != null && v !== '')).toString(); return s ? '?' + s : '' }
+export const silosApi = {
+  list: () => getCore('/v2/silos'),
+  create: (payload) => postCore('/v2/silos', payload),
+  update: (id, patch) => reqCore('PATCH', `/v2/silos/${encodeURIComponent(id)}`, patch),
+  remove: (id) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}`),
+  overview: (id = 'self') => getCore(`/v2/silos/${encodeURIComponent(id)}/overview`),
+  ls: (id = 'self', path = '') => getCore(`/v2/silos/${encodeURIComponent(id)}/ls${q({ path })}`),
+  find: (id = 'self', opts = {}) => getCore(`/v2/silos/${encodeURIComponent(id)}/find${q(opts)}`),
+  file: (id = 'self', path) => getCore(`/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`),
+  putFile: (id = 'self', payload) => postCore(`/v2/silos/${encodeURIComponent(id)}/file`, payload),
+  mkdir: (id = 'self', path) => postCore(`/v2/silos/${encodeURIComponent(id)}/mkdir`, { path }),
+  rm: (id = 'self', path) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`)
+}
+
 export const control = {
   // SDK/channel sessions → the core control plane
   abort: (conversation_key) => postCore('/v2/abort', { conversation_key }),
