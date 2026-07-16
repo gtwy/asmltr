@@ -6,9 +6,9 @@
 > Integrations + Silos planes, the **[Self silo](silos.md)** (P3) is live (the `.silo/` construct,
 > templates, layered search, the `asmltr silo` CLI + explorer, and the SELF-SILO awareness injection),
 > and **[backups](backups.md)** (P4) are live — consistent, passphrase-encrypted, vault-independent
-> snapshots with restore/verify + an auto-snapshot before every self-update.
-> **Still ahead:** the auth layer (P1) + passphrase-unseal UX, the guided `asmltr vault init` bootstrap
-> (P2), federation guards (P5), and dreaming/consolidation (P6). Progress is tracked in the GitHub epic
+> snapshots with restore/verify + an auto-snapshot before every self-update. The guided
+> **[`asmltr vault init`](security/trust-vault.md)** bootstrap + passphrase-unseal UX (P2) are also live.
+> **Still ahead:** the auth layer (P1), federation guards (P5), and dreaming/consolidation (P6). Progress is tracked in the GitHub epic
 > (see bottom). This plan turns asmltr into an identity/core platform whose credentials, memory, and
 > artifacts are portable and restorable — with the [TRUST Protocol](https://github.com/jarethmt/trust-protocol)
 > as a hard dependency (its first real-world home).
