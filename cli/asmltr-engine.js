@@ -50,8 +50,9 @@ function profile(id, cwd) {
       tailer: 'claude-tailer.js',
     };
   }
-  if (id === 'gemini') return { surface: 'gemini-cli', envPrefix: '', args: ['--yolo', ...extra], tailer: null };
-  if (id === 'codex') return { surface: 'codex-cli', envPrefix: '', args: [...extra], tailer: null };
+  const model = engines.modelFor(id);
+  if (id === 'gemini') return { surface: 'gemini-cli', envPrefix: '', args: ['--yolo', ...(model ? ['-m', model] : []), ...extra], tailer: null };
+  if (id === 'codex') return { surface: 'codex-cli', envPrefix: '', args: [...(model ? ['-m', model] : []), ...extra], tailer: null };
   return { surface: id + '-cli', envPrefix: '', args: extra, tailer: null };
 }
 

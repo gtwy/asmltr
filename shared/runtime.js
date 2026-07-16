@@ -29,9 +29,11 @@ const modelFile = () => path.join(stateDir(), 'model');
 const sdkAutoFile = () => path.join(stateDir(), 'sdk-auto-update');
 const cliPermFile = () => path.join(stateDir(), 'cli-permission-mode');
 
-// Model selection: GUI-set file wins → ASMLTR_MODEL env → 'opus' (alias tracks the latest Opus).
+// Model selection for the CLAUDE engine (the SDK web runner): the per-engine model from the Engines UI
+// wins → the legacy GUI-set model file → ASMLTR_MODEL env → 'opus' (alias tracks the latest Opus).
 // runner.js calls this every turn, so a GUI change applies on the NEXT turn with no restart.
 function getModel() {
+  try { const m = require('./engines').config('claude').model; if (m) return m; } catch (_) {}
   try { const v = fs.readFileSync(modelFile(), 'utf8').trim(); if (v) return v; } catch (_) {}
   return process.env.ASMLTR_MODEL || 'opus';
 }
