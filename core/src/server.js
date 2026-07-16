@@ -54,6 +54,15 @@ const silo = require('../../shared/silo'); // data silos — the Self silo is me
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 let SELF_SILO_DIR = null;
 try { SELF_SILO_DIR = silo.ensureSelf(identity.name()).dir; } catch (_) { /* non-fatal */ }
+// Cheap cached "is the vault locked?" flag, refreshed in the background, so every turn can warn the agent
+// WITHOUT awaiting a health check. Configured-but-sealed OR unreachable → locked (credential ops will fail).
+let VAULT_LOCKED = false;
+async function refreshVaultLocked() {
+  if (!(process.env.ASMLTR_VAULT_URL && process.env.ASMLTR_VAULT_AGENT_KEY)) { VAULT_LOCKED = false; return; }
+  try { const h = await vault.health(); VAULT_LOCKED = h.ok ? !!h.sealed : true; } catch (_) { VAULT_LOCKED = true; }
+}
+refreshVaultLocked();
+const _vaultTimer = setInterval(refreshVaultLocked, 30000); if (_vaultTimer.unref) _vaultTimer.unref();
 const { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -287,6 +296,12 @@ async function handle(envelope, opts = {}) {
         '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
         '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
         '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).';
+    }
+    if (VAULT_LOCKED) {
+      systemPrompt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
+        '(fetching API keys/secrets, encrypted-storage keys) will FAIL right now. If a task needs a credential, tell the ' +
+        'user the vault is locked and ask them to unlock it (`asmltr vault unseal` or the dashboard Vault page) — do NOT ' +
+        'guess, hardcode, or work around a missing secret.';
     }
     // If THIS channel supports attachments, tell the agent exactly how — so it never claims it can't.
     if (e.capabilities && e.capabilities.supports_attachments_out) {
