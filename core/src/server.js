@@ -555,6 +555,36 @@ app.post('/v2/vault/unseal', async (req, res) => {
   try { const r = await vault.unseal(pw); res.json({ ok: true, ...r }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Auth — the session-gate foundation (roadmap P1 phase A; docs/AUTH.md). ADDITIVE + enforcement OFF:
+// requireAuth is a no-op unless ASMLTR_AUTH=on, so these endpoints exist without gating anything yet.
+const auth = require('../../shared/auth');
+const authSecureCookie = () => process.env.ASMLTR_AUTH_INSECURE_COOKIE !== '1'; // Secure cookie by default (https)
+app.get('/v2/auth/status', (req, res) => {
+  const s = auth.verifySession(auth.tokenFromReq(req));
+  res.json({ enabled: auth.enabled(), configured: auth.hasAccount(), user: s ? s.sub : null });
+});
+app.post('/v2/auth/setup', (req, res) => { // first-run only: create the initial account
+  if (auth.hasAccount()) return res.status(403).json({ error: 'an account already exists' });
+  const b = req.body || {};
+  try { auth.createAccount(b.username, b.password); res.status(201).json({ ok: true, username: b.username }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/v2/auth/login', (req, res) => {
+  const b = req.body || {};
+  const key = (b.username || '') + '|' + (req.ip || (req.socket && req.socket.remoteAddress) || '');
+  if (auth.isLockedOut(key)) return res.status(429).json({ error: 'too many attempts — locked out, try again later' });
+  if (!b.username || !b.password || !auth.verifyPassword(b.username, b.password)) { auth.recordFail(key); return res.status(401).json({ error: 'invalid credentials' }); }
+  auth.recordSuccess(key);
+  res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(b.username), { secure: authSecureCookie() }));
+  res.json({ ok: true, user: b.username });
+});
+app.post('/v2/auth/logout', (req, res) => { res.setHeader('Set-Cookie', auth.clearCookie()); res.json({ ok: true }); });
+app.get('/v2/auth/session', (req, res) => {
+  const s = auth.verifySession(auth.tokenFromReq(req));
+  if (!s) return res.status(401).json({ error: 'no session' });
+  res.json({ user: s.sub });
+});
+
 // Integrations — third-party service links (storage today). Secret fields are *_ref (vault key names),
 // resolved from the vault only at open/test time, never returned here.
 app.get('/v2/integrations', (req, res) => res.json({ integrations: integrations.list() }));
