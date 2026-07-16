@@ -545,6 +545,21 @@ app.patch('/v2/integrations/:id', (req, res) => { const r = integrations.update(
 app.delete('/v2/integrations/:id', (req, res) => res.json({ ok: integrations.remove(req.params.id) }));
 app.post('/v2/integrations/:id/test', async (req, res) => res.json(await integrations.test(req.params.id)));
 
+// Vault key management — metadata only (names/tiers/access counts), NEVER values. Store/delete a
+// credential. Values are write-only from the GUI; retrieval is the SACRED core's job, not the UI's.
+app.get('/v2/vault/secrets', async (req, res) => {
+  try { res.json({ secrets: (await vault.listSecrets()) || [] }); } catch (e) { res.status(502).json({ error: e.message, secrets: [] }); }
+});
+app.post('/v2/vault/secrets', async (req, res) => {
+  const b = req.body || {};
+  if (!b.name || b.value == null) return res.status(400).json({ error: 'name + value required' });
+  try { await vault.storeSecret(String(b.name), { value: String(b.value) }, { minTrust: b.min_trust || 'SACRED' }); res.json({ ok: true, name: b.name }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.delete('/v2/vault/secrets/:name', async (req, res) => {
+  try { await vault.deleteSecret(req.params.name); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
 // from config or the reverse proxy's Authelia-resolved user, so the same build works anywhere.
