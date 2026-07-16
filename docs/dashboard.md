@@ -23,6 +23,7 @@ The SPA is organised into a handful of routed views:
 | `/notifications` | **Notifications** | Feed of outbound notifications. |
 | `/connectors` | **Connectors** | Comms-channel connector instances — add/edit/restart/logs, per-Discord *Servers* (invite/leave). |
 | `/integrations` | **Integrations** | Third-party service links (storage: webdav/s3/local) — add/configure/**test**; credentials stored in the [TRUST vault](integrations/index.md). |
+| `/silos` | **Silos** | File explorer over the [data silos](silos.md) — silo rail (add/select/delete), breadcrumb browser, file preview+editor, layered (name/full-text) search, new-folder + upload, and a Settings modal to edit the manifest. |
 | `/vault` | **Vault** | [TRUST vault](security/trust-vault.md) key management — status banner, keys (name·tier·access-count), add/delete. Values are write-only. |
 | `/access` | **Access** | Access / identity. |
 

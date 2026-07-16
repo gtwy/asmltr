@@ -76,6 +76,22 @@ asmltr silo new <id> [--name "…"] [--template <type>]
   available (fast), and falls back to a **pure-JS scan** of text files when `rg` isn't on `PATH` — so
   content search always works. Each hit is tagged `name`, `content`, or `name+content`.
 
+## The Silos GUI
+
+The dashboard **Silos** view is a file explorer over the same construct:
+
+- a **silo rail** listing every silo — select one, **add** a new silo (pick a template), or open **Settings**;
+- a **breadcrumb browser** with a directory listing (folders first), **new folder** + **upload**, and per-entry delete;
+- a **file preview/editor** — text files open in an editable pane with **Save**; binaries show a size notice;
+- **layered search** — a filename search with a **full-text** toggle (the L1 content search);
+- a **Settings** modal to edit the manifest (name, description) and **delete the silo** (confirmed; the Self
+  silo is protected);
+- a **relationship-graph** teaser — the scaffold for a future node graph of links *within and across* silos
+  (files are nodes; references/provenance become edges).
+
+It's backed by `/v2/silos*` on the core (list/overview/ls/tree/find/file + mkdir/put/mv/rm + create/patch/delete),
+the same operations the CLI exposes.
+
 ## See also
 
 - [Integrations & storage](integrations/index.md) — the storage driver contract + encryption-at-rest.
