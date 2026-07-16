@@ -56,10 +56,14 @@ function profile(id, cwd) {
   return { surface: id + '-cli', envPrefix: '', args: extra, tailer: null };
 }
 
-function main() {
+async function main() {
   const id = process.argv[2];
   const args = process.argv.slice(3);
   if (!engines.known(id)) { console.error(`asmltr: unknown engine "${id}" (known: ${Object.keys(engines.ENGINES).join(', ')})`); process.exit(2); }
+
+  // API-key auth: pull the key from the vault and put it in this process's env so the harness (and the
+  // tmux/screen session it inherits) sees it. Subscription mode needs nothing (the CLI owns its login).
+  try { Object.assign(process.env, await engines.envForLaunch(id)); } catch (_) { /* vault unreachable → fall through to whatever env exists */ }
 
   const bin = engines.resolveBin(id);
   if (!bin) {
@@ -107,4 +111,4 @@ function main() {
   }
 }
 
-main();
+main().catch((e) => { console.error('asmltr:', e.message); process.exit(1); });

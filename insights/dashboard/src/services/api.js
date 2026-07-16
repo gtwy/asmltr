@@ -143,7 +143,10 @@ export const enginesApi = {
   setDefault: (id) => postCore('/v2/engines/default', { id }),
   setConfig: (id, config) => reqCore('PATCH', `/v2/engines/${encodeURIComponent(id)}`, config),
   check: (id) => getCore(`/v2/engines/${encodeURIComponent(id)}/check`),
-  install: (id) => postCore(`/v2/engines/${encodeURIComponent(id)}/install`)
+  install: (id) => postCore(`/v2/engines/${encodeURIComponent(id)}/install`),
+  setAuthMode: (id, mode) => postCore(`/v2/engines/${encodeURIComponent(id)}/auth`, { mode }),
+  setApiKey: (id, value) => reqCore('PUT', `/v2/engines/${encodeURIComponent(id)}/apikey`, { value }),
+  clearApiKey: (id) => reqCore('DELETE', `/v2/engines/${encodeURIComponent(id)}/apikey`)
 }
 
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
