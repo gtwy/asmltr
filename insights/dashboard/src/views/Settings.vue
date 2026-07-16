@@ -5,6 +5,7 @@
 // choices, toggle copy) are sourced from the manifest, so adding a setting updates both GUI and TUI.
 import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
+import Spinner from '@/components/Spinner.vue'
 import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi, enginesApi } from '@/services/api'
 import QRCode from 'qrcode'
 import { startRegistration } from '@simplewebauthn/browser'
@@ -99,6 +100,9 @@ const passkeys = ref([])
 const pkBusy = ref(false)
 const extProviders = ref([]) // configured external login providers
 const extLinked = ref([])     // ones this account has linked
+// Generic per-row action spinner, keyed by `${kind}:${id}` (passkey/ext/oidc/backup-refresh).
+const rowBusy = reactive({})
+const oidcBusy = ref(false)   // "Register app" submit in flight
 async function loadSecurity() {
   try { authStatus.value = await authApi.status() } catch (_) {}
   try { passkeys.value = (await authApi.passkeys()).passkeys || [] } catch (_) { passkeys.value = [] }
@@ -106,8 +110,11 @@ async function loadSecurity() {
 }
 const extProviderIcon = { github: '🐙', google: '🌐' }
 const isLinked = (p) => extLinked.value.some((l) => l.provider === p)
-function connectExternal(p) { window.location.href = authApi.externalStartUrl(p) }
-async function disconnectExternal(p) { try { await authApi.externalUnlink(p); await loadSecurity() } catch (e) { secError.value = e.message } }
+function connectExternal(p) { rowBusy[`ext:${p}`] = true; window.location.href = authApi.externalStartUrl(p) }
+async function disconnectExternal(p) {
+  rowBusy[`ext:${p}`] = true; secError.value = ''
+  try { await authApi.externalUnlink(p); await loadSecurity() } catch (e) { secError.value = e.message } finally { rowBusy[`ext:${p}`] = false }
+}
 async function addPasskey() {
   pkBusy.value = true; secError.value = ''
   try {
@@ -120,7 +127,8 @@ async function addPasskey() {
 }
 async function removePasskey(id) {
   if (!window.confirm('Remove this passkey?')) return
-  try { await authApi.passkeyRemove(id); await loadSecurity() } catch (e) { secError.value = e.message }
+  rowBusy[`passkey:${id}`] = true; secError.value = ''
+  try { await authApi.passkeyRemove(id); await loadSecurity() } catch (e) { secError.value = e.message } finally { rowBusy[`passkey:${id}`] = false }
 }
 
 // OIDC provider — client registry
@@ -134,18 +142,19 @@ async function loadOidc() {
   try { const r = await oidcApi.clients(); oidcClients.value = r.clients || []; oidcStatus.value.issuer = r.issuer || oidcStatus.value.issuer } catch (_) {}
 }
 async function addOidcClient() {
-  secError.value = ''; newClientSecret.value = null
+  secError.value = ''; newClientSecret.value = null; oidcBusy.value = true
   try {
     const uris = newClient.redirect_uris.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
     const c = await oidcApi.addClient({ client_name: newClient.client_name || undefined, redirect_uris: uris })
     newClientSecret.value = { client_id: c.client_id, client_secret: c.client_secret }
     newClient.client_name = ''; newClient.redirect_uris = ''
     await loadOidc()
-  } catch (e) { secError.value = e.message }
+  } catch (e) { secError.value = e.message } finally { oidcBusy.value = false }
 }
 async function removeOidcClient(id) {
   if (!window.confirm('Delete this OIDC client? Apps using it will stop working.')) return
-  try { await oidcApi.removeClient(id); await loadOidc() } catch (e) { secError.value = e.message }
+  rowBusy[`oidc:${id}`] = true; secError.value = ''
+  try { await oidcApi.removeClient(id); await loadOidc() } catch (e) { secError.value = e.message } finally { rowBusy[`oidc:${id}`] = false }
 }
 async function beginEnroll() {
   secBusy.value = true; secError.value = ''; recoveryCodes.value = null
@@ -182,12 +191,13 @@ const storageIntegrations = ref([]) // storage integrations available as remote 
 const schedule = reactive({ enabled: false, every_hours: 24, destination: 'local', max_count: 14, max_age_days: 0, last_run: 0 })
 const scheduleBusy = ref(false)
 async function loadBackups() {
+  rowBusy['backup-refresh'] = true
   try {
     const [r, ints] = await Promise.all([backupApi.list(), integrationsApi.list().catch(() => ({ integrations: [] }))])
     backups.value = r.backups || []; backupDir.value = r.dir || ''
     if (r.schedule) Object.assign(schedule, r.schedule)
     storageIntegrations.value = (ints.integrations || [])
-  } catch (e) { backupError.value = e.message }
+  } catch (e) { backupError.value = e.message } finally { rowBusy['backup-refresh'] = false }
 }
 async function createBackup() {
   backupBusy.value = true; backupError.value = ''
@@ -360,7 +370,7 @@ onMounted(async () => {
                 :disabled="!idnDirty || busy === 'identity'"
                 class="rounded-lg bg-brand-gradient px-4 py-1.5 text-xs font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40"
                 @click="saveIdentity"
-              >{{ busy === 'identity' ? 'saving…' : 'Save' }}</button>
+              ><Spinner v-if="busy === 'identity'" size="xs" class="mr-1" />{{ busy === 'identity' ? 'saving…' : 'Save' }}</button>
               <button type="button" class="text-xs text-slate-400 hover:text-slate-200" @click="showPreamble = !showPreamble">
                 {{ showPreamble ? 'hide' : 'preview' }} the anchor every session sees
               </button>
@@ -392,9 +402,9 @@ onMounted(async () => {
               <span v-if="engCheck[e.id] && engCheck[e.id].updateAvailable" class="pill border border-amber-400/30 bg-amber-400/10 text-[10px] text-amber-300">update → {{ engCheck[e.id].latest }}</span>
               <span class="font-mono text-[10px] text-slate-500">{{ e.version || '—' }} · asmltr {{ e.id }}</span>
               <div class="ml-auto flex items-center gap-2">
-                <button v-if="!e.installed" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'installing…' : 'Install' }}</button>
-                <button v-else-if="engCheck[e.id] && engCheck[e.id].updateAvailable" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'updating…' : 'Update' }}</button>
-                <button v-if="e.installed && !e.isDefault" type="button" class="act" :disabled="!!engBusy" @click="setDefaultEngine(e.id)">Set default</button>
+                <button v-if="!e.installed" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />{{ engBusy===e.id ? 'installing…' : 'Install' }}</button>
+                <button v-else-if="engCheck[e.id] && engCheck[e.id].updateAvailable" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />{{ engBusy===e.id ? 'updating…' : 'Update' }}</button>
+                <button v-if="e.installed && !e.isDefault" type="button" class="act" :disabled="!!engBusy" @click="setDefaultEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />Set default</button>
               </div>
             </div>
 
@@ -403,6 +413,7 @@ onMounted(async () => {
               <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Model
                 <span v-if="e.id==='claude' && rt && rt.model && rt.model.resolved" class="ml-1 font-mono text-slate-400">· running {{ rt.model.resolved }}</span>
                 <span v-else-if="e.model" class="ml-1 font-mono text-slate-400">· {{ e.model }}</span>
+                <Spinner v-if="modelBusy===e.id" size="xs" class="ml-1 text-slate-400" />
               </div>
               <div class="flex flex-wrap gap-2">
                 <button v-for="c in e.models" :key="c.id" type="button" :disabled="modelBusy===e.id"
@@ -416,13 +427,13 @@ onMounted(async () => {
                 <input v-model="customModel[e.id]" type="text" :placeholder="'or a full model id for ' + e.id"
                   class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
                   @keydown.enter.prevent="pickModelFor(e.id, customModel[e.id])" />
-                <button type="button" :disabled="!(customModel[e.id]||'').trim() || modelBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="pickModelFor(e.id, customModel[e.id])">Set</button>
+                <button type="button" :disabled="!(customModel[e.id]||'').trim() || modelBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="pickModelFor(e.id, customModel[e.id])"><Spinner v-if="modelBusy===e.id" size="xs" class="mr-1" />Set</button>
               </div>
             </div>
 
             <!-- connection: subscription (OAuth, owned by the CLI) vs API key (stored in the vault) -->
             <div v-if="e.auth">
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Connection</div>
+              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Connection<Spinner v-if="authBusy===e.id" size="xs" class="ml-1 text-slate-400" /></div>
               <div class="flex flex-wrap gap-2">
                 <button v-for="m in e.auth.modes" :key="m" type="button" :disabled="authBusy===e.id"
                   class="rounded-lg border px-3 py-1.5 text-xs transition-colors"
@@ -437,13 +448,13 @@ onMounted(async () => {
               <div v-else-if="e.auth.mode==='api_key'" class="mt-2 space-y-2">
                 <div v-if="e.auth.hasApiKey" class="flex items-center gap-2">
                   <span class="pill border border-emerald-400/30 bg-emerald-400/10 text-[10px] text-emerald-300">🔒 key stored in vault</span>
-                  <button type="button" class="act-danger" :disabled="authBusy===e.id" @click="removeApiKey(e.id)">Remove</button>
+                  <button type="button" class="act-danger" :disabled="authBusy===e.id" @click="removeApiKey(e.id)"><Spinner v-if="authBusy===e.id" size="xs" class="mr-1" />Remove</button>
                 </div>
                 <div class="flex items-center gap-2">
                   <input v-model="apiKeyInput[e.id]" type="password" autocomplete="off" :placeholder="(e.auth.hasApiKey ? 'replace ' : 'paste ') + (e.auth.apiKeyEnv || 'API key')"
                     class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
                     @keydown.enter.prevent="saveApiKey(e.id)" />
-                  <button type="button" :disabled="!(apiKeyInput[e.id]||'').trim() || authBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="saveApiKey(e.id)">{{ authBusy===e.id ? 'saving…' : 'Save' }}</button>
+                  <button type="button" :disabled="!(apiKeyInput[e.id]||'').trim() || authBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="saveApiKey(e.id)"><Spinner v-if="authBusy===e.id" size="xs" class="mr-1" />{{ authBusy===e.id ? 'saving…' : 'Save' }}</button>
                 </div>
                 <p class="text-[12px] text-slate-500">{{ e.auth.note }}</p>
               </div>
@@ -464,7 +475,7 @@ onMounted(async () => {
                   class="ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
                   :class="rt.sdk.updateAvailable ? 'border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'border-white/10 bg-white/5 text-slate-500'"
                   @click="updateSdk"
-                >{{ busy === 'update' ? 'starting…' : (rt.sdk.updateAvailable ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
+                ><Spinner v-if="busy === 'update'" size="xs" class="mr-1" />{{ busy === 'update' ? 'starting…' : (rt.sdk.updateAvailable ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
               </div>
               <label class="flex cursor-pointer items-center justify-between gap-3">
                 <span>
@@ -520,7 +531,7 @@ onMounted(async () => {
                 class="ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
                 :class="upd.available ? 'border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'border-white/10 bg-white/5 text-slate-500'"
                 @click="runUpdate"
-              >{{ busy === 'upd-run' ? 'starting…' : (upd.available ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
+              ><Spinner v-if="busy === 'upd-run'" size="xs" class="mr-1" />{{ busy === 'upd-run' ? 'starting…' : (upd.available ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
             </div>
             <div v-if="upd.available && upd.changelog?.length" class="mb-4 max-h-40 overflow-y-auto rounded-lg border border-white/5 bg-black/20 p-3">
               <div class="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Incoming ({{ upd.behind }})</div>
@@ -588,7 +599,7 @@ onMounted(async () => {
                 <input v-model="customVoice" type="text" placeholder="or another voice id"
                   class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
                   @keydown.enter.prevent="setCustomVoice" />
-                <button type="button" :disabled="!customVoice.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomVoice">Set</button>
+                <button type="button" :disabled="!customVoice.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomVoice"><Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
               </div>
             </div>
 
@@ -610,7 +621,7 @@ onMounted(async () => {
                 <input v-model="customTtsModel" type="text" placeholder="or another model id (e.g. eleven_turbo_v2_5)"
                   class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
                   @keydown.enter.prevent="setCustomTtsModel" />
-                <button type="button" :disabled="!customTtsModel.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomTtsModel">Set</button>
+                <button type="button" :disabled="!customTtsModel.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomTtsModel"><Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
               </div>
             </div>
 
@@ -687,7 +698,7 @@ onMounted(async () => {
                   <span class="text-[11px] text-slate-500">Password (to disable)</span>
                   <input v-model="disablePass" type="password" autocomplete="off" class="field-input w-56" />
                 </label>
-                <button type="button" :disabled="secBusy" class="act-danger" @click="disable2fa"><AppIcon glyph="🚫" /> Disable 2FA</button>
+                <button type="button" :disabled="secBusy" class="act-danger" @click="disable2fa"><Spinner v-if="secBusy" size="xs" class="mr-1" /><AppIcon v-else glyph="🚫" /> Disable 2FA</button>
               </div>
             </template>
 
@@ -695,7 +706,7 @@ onMounted(async () => {
             <template v-else-if="!authStatus.totp">
               <div v-if="!enroll">
                 <button type="button" :disabled="secBusy" class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="beginEnroll">
-                  {{ secBusy ? 'Generating…' : 'Enable 2FA' }}
+                  <Spinner v-if="secBusy" size="xs" class="mr-1" />{{ secBusy ? 'Generating…' : 'Enable 2FA' }}
                 </button>
               </div>
               <div v-else class="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -706,7 +717,7 @@ onMounted(async () => {
                   <p class="mt-3 text-[12px] text-slate-400">Then enter the current 6-digit code to confirm:</p>
                   <div class="mt-1 flex items-center gap-2">
                     <input v-model="enrollCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" class="field-input w-28 text-center tracking-widest" />
-                    <button type="button" :disabled="secBusy || enrollCode.length < 6" class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="confirmEnroll">Confirm</button>
+                    <button type="button" :disabled="secBusy || enrollCode.length < 6" class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="confirmEnroll"><Spinner v-if="secBusy" size="xs" class="mr-1" />Confirm</button>
                     <button type="button" class="act" @click="enroll = null">Cancel</button>
                   </div>
                 </div>
@@ -724,7 +735,7 @@ onMounted(async () => {
                 <span class="block text-[12px] text-slate-500">Passwordless, phishing-resistant sign-in (Touch ID, Windows Hello, a security key).</span>
               </div>
               <button type="button" :disabled="pkBusy" class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="addPasskey">
-                {{ pkBusy ? 'Waiting…' : '＋ Add a passkey' }}
+                <Spinner v-if="pkBusy" size="xs" class="mr-1" />{{ pkBusy ? 'Waiting…' : '＋ Add a passkey' }}
               </button>
             </div>
             <ul v-if="passkeys.length" class="divide-y divide-white/5">
@@ -732,7 +743,7 @@ onMounted(async () => {
                 <AppIcon glyph="🔑" class="text-slate-500" />
                 <span class="min-w-0 flex-1 truncate text-slate-200">{{ p.name || 'passkey' }}</span>
                 <span class="font-mono text-[10px] text-slate-600">{{ p.last_used ? 'used ' + new Date(p.last_used).toLocaleDateString() : 'never used' }}</span>
-                <button type="button" class="act-danger" @click="removePasskey(p.id)"><AppIcon glyph="🗑" /></button>
+                <button type="button" class="act-danger" :disabled="rowBusy['passkey:'+p.id]" @click="removePasskey(p.id)"><Spinner v-if="rowBusy['passkey:'+p.id]" size="xs" /><AppIcon v-else glyph="🗑" /></button>
               </li>
             </ul>
             <p v-else class="text-[12px] text-slate-500">No passkeys registered yet.</p>
@@ -748,9 +759,9 @@ onMounted(async () => {
                 <span class="min-w-0 flex-1 truncate text-slate-200">{{ p.label }}</span>
                 <template v-if="isLinked(p.id)">
                   <span class="pill border border-emerald-400/30 bg-emerald-400/10 text-[11px] text-emerald-300">connected</span>
-                  <button type="button" class="act-danger" @click="disconnectExternal(p.id)">Disconnect</button>
+                  <button type="button" class="act-danger" :disabled="rowBusy['ext:'+p.id]" @click="disconnectExternal(p.id)"><Spinner v-if="rowBusy['ext:'+p.id]" size="xs" class="mr-1" />Disconnect</button>
                 </template>
-                <button v-else type="button" class="act" @click="connectExternal(p.id)">Connect</button>
+                <button v-else type="button" class="act" :disabled="rowBusy['ext:'+p.id]" @click="connectExternal(p.id)"><Spinner v-if="rowBusy['ext:'+p.id]" size="xs" class="mr-1" />Connect</button>
               </li>
             </ul>
           </div>
@@ -779,7 +790,7 @@ onMounted(async () => {
                   <span class="text-slate-200">{{ c.client_name }}</span>
                   <span class="block truncate font-mono text-[10px] text-slate-500">{{ c.client_id }} · {{ (c.redirect_uris || []).join(', ') }}</span>
                 </span>
-                <button type="button" class="act-danger" @click="removeOidcClient(c.client_id)"><AppIcon glyph="🗑" /></button>
+                <button type="button" class="act-danger" :disabled="rowBusy['oidc:'+c.client_id]" @click="removeOidcClient(c.client_id)"><Spinner v-if="rowBusy['oidc:'+c.client_id]" size="xs" /><AppIcon v-else glyph="🗑" /></button>
               </li>
             </ul>
 
@@ -792,7 +803,7 @@ onMounted(async () => {
                 <span class="text-[11px] text-slate-500">Redirect URIs (space/comma separated)</span>
                 <input v-model="newClient.redirect_uris" type="text" class="field-input w-full" placeholder="https://app.example.com/callback" />
               </label>
-              <button type="submit" :disabled="!newClient.redirect_uris" class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">Register app</button>
+              <button type="submit" :disabled="!newClient.redirect_uris || oidcBusy" class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40"><Spinner v-if="oidcBusy" size="xs" class="mr-1" />{{ oidcBusy ? 'Registering…' : 'Register app' }}</button>
             </form>
             <p class="mt-2 text-[11px] text-slate-600">New clients take effect on the next core restart.</p>
           </div>
@@ -824,10 +835,10 @@ onMounted(async () => {
             </label>
             <button type="submit" :disabled="backupBusy"
               class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">
-              {{ backupBusy ? 'Creating…' : 'Create backup' }}
+              <Spinner v-if="backupBusy" size="xs" class="mr-1" />{{ backupBusy ? 'Creating…' : 'Create backup' }}
             </button>
-            <button type="button" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10" @click="loadBackups">
-              <AppIcon glyph="↻" /> Refresh
+            <button type="button" :disabled="rowBusy['backup-refresh']" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10 disabled:opacity-40" @click="loadBackups">
+              <Spinner v-if="rowBusy['backup-refresh']" size="xs" class="mr-1" /><AppIcon v-else glyph="↻" /> Refresh
             </button>
           </form>
 
@@ -868,7 +879,7 @@ onMounted(async () => {
             </div>
             <div class="mt-3 flex items-center gap-3">
               <button type="button" :disabled="scheduleBusy" class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40" @click="saveSchedule">
-                {{ scheduleBusy ? 'Saving…' : 'Save schedule' }}
+                <Spinner v-if="scheduleBusy" size="xs" class="mr-1" />{{ scheduleBusy ? 'Saving…' : 'Save schedule' }}
               </button>
               <span v-if="schedule.last_run" class="text-[11px] text-slate-500">Last run: {{ new Date(schedule.last_run).toLocaleString() }}</span>
               <span class="text-[11px] text-slate-600">0 = unlimited</span>
