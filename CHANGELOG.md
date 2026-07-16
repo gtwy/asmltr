@@ -14,6 +14,34 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.5.0] - 2026-07-16
+
+### Added
+- **TRUST vault integration (hard dependency).** asmltr now depends on the
+  [TRUST Protocol](https://github.com/jarethmt/trust-protocol) for secrets. `shared/vault.js` is the
+  client; the assistant registers as a SACRED agent under its identity name. `GET /v2/vault/status`
+  reports reachable/sealed for a degraded-but-loud UI. Contributed the **KMS** (envelope encryption —
+  `generate`/`wrap`/`unwrap`) *to* TRUST Protocol for encryption-at-rest.
+- **Storage substrate + drivers.** `shared/storage.js` — a backend-agnostic driver contract
+  (put/get/stat/list/remove/move/mkdir/mint) behind both data silos and backups. Drivers: built-in
+  **local**, **WebDAV** (Nextcloud, verified), and **S3-compatible** (AWS/B2/Spaces/R2/MinIO, presigned
+  `mint`). **EncryptedStorage** wraps any driver with AES-256-GCM — the per-silo data key comes from the
+  vault's KMS (master key never leaves the vault; the key lives only in the runtime crypto layer, never
+  in model context, zeroed after use).
+- **Integrations framework.** A registry (`integrations/registry.js`) of third-party service links whose
+  secret fields are `*_ref` vault key names, resolved from the vault only at open. Core
+  `/v2/integrations` endpoints (list/create/update/delete/test).
+- **GUI: Vault + Integrations planes.** A **Vault** view (key management — status banner, keys with
+  tier + access count, add/delete; values are write-only) and an **Integrations** view (add/configure/
+  test storage integrations; creds stored in the vault).
+
+### Changed
+- **De-BWS — asmltr's runtime no longer depends on Bitwarden.** `shared/secrets.js` resolves from the
+  TRUST vault; all runtime secrets (connector tokens + voice keys) migrated BWS→vault and the BWS
+  command provider disabled. Only the vault's own access keys remain in `.env` (the bootstrap root).
+- **Vocabulary + GUI rename:** *connector* = an I/O channel to a human; *integration* = a link to a
+  third-party service. The old "Integrations" view (connector instances) → **Connectors**.
+
 ## [0.4.0] - 2026-07-16
 
 ### Added
