@@ -24,6 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto'); // Node's crypto (the global `crypto` is Web Crypto — no randomBytes)
 
 // normalize + confine a silo-relative path to a base dir (no traversal escapes)
 function safeJoin(base, rel) {
@@ -78,6 +79,47 @@ class LocalStorage {
   async mint(rel /*, opts */) { return { url: null, path: this._abs(rel) }; }
 }
 
+/**
+ * Composable encryption-at-rest wrapper over ANY driver. `put` seals, `get` opens; the backend (and
+ * anyone browsing it, e.g. Nextcloud's web UI) sees only ciphertext. Per-silo 32-byte key comes from
+ * the vault (shared/vault.js). Layout per object: 'ASE1' | iv(12) | gcmTag(16) | ciphertext.
+ * Chosen per-silo via the manifest `encryption` field; `none` silos just use the raw driver.
+ */
+class EncryptedStorage {
+  constructor(inner, key) {
+    if (!inner) throw new Error('EncryptedStorage: inner driver required');
+    if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('EncryptedStorage: 32-byte key required');
+    this.inner = inner; this.key = key;
+  }
+  _seal(buf) {
+    const iv = crypto.randomBytes(12);
+    const c = crypto.createCipheriv('aes-256-gcm', this.key, iv);
+    const ct = Buffer.concat([c.update(buf), c.final()]);
+    return Buffer.concat([Buffer.from('ASE1'), iv, c.getAuthTag(), ct]);
+  }
+  _open(buf) {
+    if (buf.length < 32 || buf.slice(0, 4).toString('latin1') !== 'ASE1') throw new Error('EncryptedStorage: not an encrypted object (bad magic)');
+    const d = crypto.createDecipheriv('aes-256-gcm', this.key, buf.slice(4, 16));
+    d.setAuthTag(buf.slice(16, 32));
+    return Buffer.concat([d.update(buf.slice(32)), d.final()]);
+  }
+  async put(rel, data) {
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const r = await this.inner.put(rel, this._seal(buf));
+    return { ...r, size: buf.length }; // report PLAINTEXT size
+  }
+  async get(rel) { return this._open(await this.inner.get(rel)); }
+  async stat(rel) { return this.inner.stat(rel); }       // size reflects ciphertext (+~32B) — acceptable
+  async list(prefix, opts) { return this.inner.list(prefix, opts); }
+  async remove(rel) { return this.inner.remove(rel); }
+  async move(a, b) { return this.inner.move(a, b); }
+  async mkdir(rel) { return this.inner.mkdir(rel); }
+  async mint(rel, opts) { return this.inner.mint(rel, opts); }
+}
+
+/** Wrap a driver with encryption-at-rest. */
+function encrypted(inner, key) { return new EncryptedStorage(inner, key); }
+
 // Driver registry. `local` is built in; remote drivers register themselves on require.
 const DRIVERS = { local: (cfg) => new LocalStorage(cfg) };
 
@@ -91,4 +133,4 @@ function getStorage({ type = 'local', config = {} } = {}) {
   return make(config);
 }
 
-module.exports = { getStorage, registerDriver, LocalStorage, safeJoin };
+module.exports = { getStorage, registerDriver, LocalStorage, EncryptedStorage, encrypted, safeJoin };
