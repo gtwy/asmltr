@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useCollectorStore } from '@/stores/collector'
-import { api, update as updateApi, identity, authApi } from '@/services/api'
+import { api, update as updateApi, identity, authApi, vaultApi } from '@/services/api'
 import { NAV_ROUTES } from '@/router'
 import WindowHost from '@/components/WindowHost.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
@@ -68,6 +68,7 @@ const auto = ref(false)
 const updBusy = ref(false)
 const updStarted = ref(false)
 let updTimer = null
+let vaultTimer = null
 async function loadUpd() {
   try { upd.value = await api.updateStatus() } catch (_) {}
   try { auto.value = (await updateApi.getAuto()).auto } catch (_) {}
@@ -90,6 +91,12 @@ const authReady = ref(false)
 const auth = ref({ enabled: false, configured: true, user: null })
 const needsAuth = computed(() => auth.value.enabled && !auth.value.user)
 
+// Vault lock warning — a configured vault that's sealed/unreachable means credential ops fail; warn loudly.
+const vaultLocked = ref(false)
+async function loadVault() {
+  try { const s = await vaultApi.status(); vaultLocked.value = !!(s.configured && (!s.reachable || s.sealed)) } catch (_) { vaultLocked.value = false }
+}
+
 function bootApp() {
   store.connectSocket()
   store.startPolling()
@@ -97,7 +104,9 @@ function bootApp() {
   store.fetchBrief()
   loadUpd()
   loadIdentityVersion()
+  loadVault()
   updTimer = setInterval(loadUpd, 90000)
+  vaultTimer = setInterval(loadVault, 30000)
 }
 
 onMounted(async () => {
@@ -110,6 +119,7 @@ onMounted(async () => {
 onUnmounted(() => {
   store.stopPolling()
   if (updTimer) clearInterval(updTimer)
+  if (vaultTimer) clearInterval(vaultTimer)
 })
 </script>
 
@@ -198,6 +208,16 @@ onUnmounted(() => {
 
     <!-- Main -->
     <main class="min-w-0 flex-1 px-4 py-5 lg:px-8 lg:py-7">
+      <!-- vault-locked warning — credential ops are unavailable until it's unlocked -->
+      <RouterLink
+        v-if="vaultLocked" to="/vault"
+        class="glass mb-4 flex items-center gap-3 border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-200 transition-colors hover:bg-amber-400/15"
+      >
+        <AppIcon glyph="🔒" class="text-lg text-amber-300" />
+        <span class="flex-1"><b>Vault is locked</b> — credential-backed operations are unavailable until you unlock it.</span>
+        <span class="shrink-0 text-[12px] text-amber-300/80">Unlock →</span>
+      </RouterLink>
+
       <!-- LIVE update progress (persistent; survives the mid-update service restart) -->
       <div v-if="updActive" class="glass mb-4 border px-4 py-3"
            :class="{ 'border-brand-violet/40 bg-brand-violet/10': ['violet'].includes(updCopy.tone), 'border-emerald-400/40 bg-emerald-500/10': updCopy.tone==='emerald', 'border-amber-400/40 bg-amber-500/10': updCopy.tone==='amber', 'border-rose-400/40 bg-rose-500/10': updCopy.tone==='rose', 'border-white/10': updCopy.tone==='slate' }">
