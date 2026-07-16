@@ -48,6 +48,7 @@ const tts = require('../../shared/speech/tts'); // TTS config (voice/model), per
 const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
+const vault = require('../../shared/vault'); // TRUST vault (credential broker + KMS) — hard dependency
 const { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -525,6 +526,15 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core'
 const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
 const STARTED_AT = new Date().toISOString();
 app.get('/version', (req, res) => res.json({ service: 'asmltr-core', ...require('../../shared/version').info(), sha: BUILD_SHA, started_at: STARTED_AT, pid: process.pid }));
+
+// TRUST vault status — the hard dependency's health for the degraded-but-loud GUI. `configured`
+// false = no ASMLTR_VAULT_* wired; `reachable`/`sealed` come from the live vault.
+app.get('/v2/vault/status', async (req, res) => {
+  const configured = !!(process.env.ASMLTR_VAULT_URL && process.env.ASMLTR_VAULT_AGENT_KEY);
+  if (!configured) return res.json({ configured: false, reachable: false, sealed: null });
+  const h = await vault.health();
+  res.json({ configured: true, reachable: h.ok, sealed: h.sealed, url: process.env.ASMLTR_VAULT_URL });
+});
 
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side

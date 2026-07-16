@@ -76,6 +76,27 @@ async function listSecrets() {
   return _json(await fetch(c.url + '/credentials', { headers: { 'X-Admin-Key': c.adminKey } }), 'list');
 }
 
+/**
+ * Bootstrap: ensure a SACRED agent named `name` (= the assistant's identity) exists. Registers +
+ * promotes if absent. Returns { created, agent_id, api_key } — the caller must persist api_key to the
+ * bootstrap store (.env ASMLTR_VAULT_AGENT_KEY), since the vault returns it only once. If the agent
+ * already exists, returns { created: false } (its key can't be re-read — re-register to rotate).
+ */
+async function ensureAgent(name) {
+  const c = cfg();
+  const agents = await _json(await fetch(c.url + '/agents', { headers: { 'X-Admin-Key': c.adminKey } }), 'list agents');
+  const existing = (agents || []).find((a) => a.name === name && (a.status || 'active') !== 'suspended');
+  if (existing) return { created: false, agent_id: existing.agent_id };
+  const reg = await _json(await fetch(c.url + '/agents', {
+    method: 'POST', headers: { 'X-Admin-Key': c.adminKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, agent_type: 'assistant', description: `${name} — the assistant identity (asmltr). Owns its silos + credentials.` }),
+  }), 'register agent');
+  await fetch(c.url + '/agents/' + reg.agent_id + '/trust-level', {
+    method: 'PATCH', headers: { 'X-Admin-Key': c.adminKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ trust_tier: 'SACRED' }),
+  });
+  return { created: true, agent_id: reg.agent_id, api_key: reg.api_key };
+}
+
 // ---- KMS: envelope encryption for data keys (EncryptedStorage) ------------------------------------
 // The vault's master key never leaves the server. asmltr stores only the WRAPPED blob (next to the
 // data, e.g. in a silo's .silo/) and unwraps on demand. Plaintext data keys are NOT cached here — the
