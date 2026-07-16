@@ -245,6 +245,55 @@ Sessions are parts; the silo is the shared body — a part that makes a PDF drop
 future part (or the observer/whole) finds it via `asmltr silo find`. Proprioception for artifacts,
 the same shape as the `asmltr who <path>` / body-schema graph already built.
 
+## Integrations & storage backends
+
+**Vocabulary (project-wide from here on):** a **connector** is an I/O channel the agent uses to talk to
+a *human* (Discord, Telegram, email, web, MCP, GitHub, CLI). An **integration** is a link to a
+*third-party service* (storage, backups, or any user-added API). The GUI's current "Integrations" view
+manages connectors → it should be renamed **Connectors**, freeing "Integrations" for this.
+
+### The integrations framework
+
+Parallel to the connector framework but simpler — integrations are **not** long-running supervised
+processes; they're **config + a driver** loaded on demand. So: a **registry** (config + vault-referenced
+credentials), driver modules under `integrations/types/<type>/`, and a config/test API. Every
+integration's credentials live in the **TRUST vault**. Until P2, they resolve through the existing
+`shared/secrets.js` abstraction, so the framework can be built before the vault lands.
+
+### Storage backends (the first integrations) — `shared/storage.js`
+
+The driver contract (`put/get/stat/list/remove/move/mkdir/mint`) is defined in `shared/storage.js`
+(built-in `local` driver done). Two categories:
+
+- **Managed object / cloud storage** — account + keys → ready, no box to run. **S3-compatible** covers
+  **AWS S3, Backblaze B2, DigitalOcean Spaces, Cloudflare R2, MinIO** with one driver + an endpoint
+  setting; **Dropbox** and **Google Drive** have their own APIs (separate drivers). `mint()` returns a
+  **presigned URL** for the direct data plane.
+- **Self-hosted storage node** — a Linux box (existing, or provisioned) running **WebDAV** or **SSH/SFTP**.
+
+### Provisioning — "give me SSH, I'll build you a storage node"
+
+Distinct from *transport* (how you talk to storage) and *silo* (the data on top). Layered:
+
+1. **Provisioner (create infra):**
+   - **`ssh`** — the universal primitive: given SSH access (user + password/key) to an existing Linux
+     box, install + configure a storage service (WebDAV or SFTP) + a scoped account + firewall.
+   - **`digitalocean` / `aws`** — *extend* the ssh provisioner: first **create a box** via the provider
+     API per defined settings (size/region/image), then hand off to `ssh` to configure it. (Pure object
+     storage — S3/Spaces/B2 — skips this: no box to provision, just a bucket + keys.)
+2. **Transport** — the resulting `shared/storage.js` driver (`webdav`/`sftp`/`s3`).
+3. **Silo** — created on that transport; backups can target it.
+
+So `asmltr` can stand up a fresh self-hosted storage node from nothing but provider creds (or bare SSH),
+then register it as a storage integration a silo/backup can use.
+
+### Custom integrations (user-extensible, no code)
+
+A generic integration a human adds through a GUI plane: **base URL + auth (API key in the vault) +
+usage examples / API-docs link**. These are surfaced to the *agent* (injected like the toolbelt, or
+`asmltr integration docs <name>`) so it learns to call the service — key injected use-but-never-see via
+the vault. A no-code way to hand the agent new capabilities.
+
 ## Phased roadmap
 
 - **P0 — Substrate & vault dependency.** `shared/storage.js` (local + Nextcloud/WebDAV); `shared/secrets.js`
