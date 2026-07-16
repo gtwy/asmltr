@@ -72,6 +72,34 @@ The core **capability-gates features** instead of forcing a lowest common denomi
 - The **SELF SILO / toolbelt** prompt injections (which assume a Bash tool) only fire when `localFs` is true.
 - No `skills` → skills aren't injected. No `subagents` → no Task tool. Graceful degradation, per engine.
 
+## Divergent features: normalized model → negotiate → adapter serializes
+
+Harnesses implement the same feature differently (Claude's image handling takes `detail` + more formats
+than Codex; one engine caps images at 8, another at 100). The core **never speaks a harness's dialect** — it
+works in asmltr's own *normalized* feature model, and three pieces bridge the gap:
+
+1. **Rich capability descriptors, not booleans.** A capability declares the feature's *shape* — allowed
+   values + limits — so the runtime knows what each engine will actually accept:
+   ```js
+   // claude
+   vision: { supported: true, formats: ['png','jpeg','webp'], maxImages: 100, detail: ['low','high','auto'], maxBytes: 5e6 }
+   // codex
+   vision: { supported: true, formats: ['png','jpeg'],        maxImages: 8,   detail: false }
+   ```
+2. **A negotiation pass.** Before dispatch, a shared `negotiate(request, capability) → { request, dropped,
+   warnings }` validates the normalized request against the *target* engine's descriptor and applies one
+   uniform degrade policy — clamp counts, drop unsupported fields (e.g. `detail`), downscale/reject oversized
+   images — returning warnings. Same logic for every adapter, so degrade behavior is consistent and the
+   warnings surface (to the session + the dashboard).
+3. **The adapter serializes** the negotiated request into valid harness commands. That's the **only** place
+   harness-specific flags exist (the anti-corruption layer).
+
+The runtime is "aware" because the manifest is **machine-readable**: the GUI hides the image-`detail`
+control on a session whose engine has `detail: false`; the core can warn ("this engine caps images at 8 —
+3 dropped") or route an image-rich task to a vision-strong engine. For genuinely irreducible harness-specific
+nuance, an opt-in per-engine passthrough — `engineOptions: { claude: {…}, codex: {…} }` — is merged by the
+adapter *after* negotiation. **Normalize first; reach for passthrough only for the long tail.**
+
 ## Sessions — where silos pay off
 
 - **`native`** (Claude SDK assigns + resumes ids; Codex has session ids): store `engineSessionId`, pass `resume`.
