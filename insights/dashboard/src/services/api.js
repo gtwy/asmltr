@@ -56,6 +56,34 @@ async function postCore(path, body) {
   return json
 }
 
+async function reqCore(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body || {})
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(json.error || `${method} ${path} -> ${res.status} ${res.statusText}`)
+  return json
+}
+
+// Third-party service integrations (storage, …). Secret fields are *_ref (vault key names).
+export const integrations = {
+  list: () => getCore('/v2/integrations'),
+  create: (payload) => postCore('/v2/integrations', payload),
+  update: (id, patch) => reqCore('PATCH', `/v2/integrations/${id}`, patch),
+  remove: (id) => reqCore('DELETE', `/v2/integrations/${id}`),
+  test: (id) => postCore(`/v2/integrations/${id}/test`)
+}
+
+// TRUST vault — status + key management (metadata only; values are write-only from the GUI).
+export const vaultApi = {
+  status: () => getCore('/v2/vault/status'),
+  secrets: () => getCore('/v2/vault/secrets'),
+  addSecret: (payload) => postCore('/v2/vault/secrets', payload),
+  removeSecret: (name) => reqCore('DELETE', `/v2/vault/secrets/${encodeURIComponent(name)}`)
+}
+
 export const control = {
   // SDK/channel sessions → the core control plane
   abort: (conversation_key) => postCore('/v2/abort', { conversation_key }),

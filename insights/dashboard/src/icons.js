@@ -17,7 +17,7 @@ import {
   faHourglassHalf, faRotate, faRotateLeft, faXmark, faCheck, faCircleInfo, faPlay, faStop,
   faCircleArrowUp, faCircleCheck, faCircleXmark, faCoins, faSitemap,
   faBolt, faLock, faTrashCan, faBan, faFolderOpen, faHeadphones, faScrewdriverWrench,
-  faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments,
+  faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
 } from '@fortawesome/free-solid-svg-icons'
 import { faDiscord, faTelegram, faGithub } from '@fortawesome/free-brands-svg-icons'
 
@@ -29,7 +29,7 @@ library.add(
   faHourglassHalf, faRotate, faRotateLeft, faXmark, faCheck, faCircleInfo, faPlay, faStop,
   faCircleArrowUp, faCircleCheck, faCircleXmark, faCoins, faSitemap,
   faBolt, faLock, faTrashCan, faBan, faFolderOpen, faHeadphones, faScrewdriverWrench,
-  faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments,
+  faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
   faDiscord, faTelegram, faGithub,
 )
 
@@ -45,7 +45,8 @@ const GLYPH_TO_FA = {
   '🎙': ['fas', 'microphone'],       // Voice
   '✦': ['fas', 'bell'],             // Notifications
   '✎': ['fas', 'pen-to-square'],    // Drafts / edit
-  '🔌': ['fas', 'plug'],             // Integrations / mcp
+  '🔌': ['fas', 'plug'],             // Connectors / mcp
+  '🧩': ['fas', 'puzzle-piece'],     // Integrations (third-party services)
   '🔑': ['fas', 'key'],              // Access
   '⚙': ['fas', 'gear'],             // Settings / control
   '🪪': ['fas', 'id-card'],          // Identity tab
