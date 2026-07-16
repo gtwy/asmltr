@@ -13,10 +13,13 @@
  *   ASMLTR_VAULT_ADMIN_KEY  (store/delete credentials + agent management)
  *   ASMLTR_VAULT_AGENT_KEY  (SACRED agent key — proxy-value retrieval)
  *
- * NOTE (candidate TRUST enhancement): proxy-value tokens are single-use/60s — ideal for proxying an
- * API call, heavier for a content key needed on every file op. This client caches fetched keys in
- * memory per name so the token dance runs once per key per process. A future KMS-style wrap/unwrap
- * primitive in TRUST (vault wraps/unwraps a data key; master key never leaves) would be cleaner still.
+ * Two complementary uses:
+ *   • CREDENTIALS (use-but-never-see): API keys the agent never touches — the vault proxies the call.
+ *     store/getSecret below (getSecret is the SACRED raw-fetch, for the trusted core only).
+ *   • KMS (envelope encryption): data keys the runtime MUST use to encrypt its own data at rest
+ *     (silos, backups, local DBs). generate/wrap/unwrap. The KMS MASTER key never leaves the vault;
+ *     asmltr holds only a WRAPPED blob at rest + the plaintext data key transiently, in the runtime
+ *     crypto layer — NEVER surfaced to the model's context, and zeroed after use (EncryptedStorage).
  */
 const crypto = require('crypto');
 
@@ -73,26 +76,28 @@ async function listSecrets() {
   return _json(await fetch(c.url + '/credentials', { headers: { 'X-Admin-Key': c.adminKey } }), 'list');
 }
 
-// ---- content keys for EncryptedStorage ------------------------------------------------------------
-const _keyCache = new Map(); // name -> Buffer (in-memory, per process; see note above)
+// ---- KMS: envelope encryption for data keys (EncryptedStorage) ------------------------------------
+// The vault's master key never leaves the server. asmltr stores only the WRAPPED blob (next to the
+// data, e.g. in a silo's .silo/) and unwraps on demand. Plaintext data keys are NOT cached here — the
+// caller (EncryptedStorage) holds one transiently and zeroes it after use.
 
-/** Mint a fresh 256-bit content key, store it in the vault (SACRED), and return the raw Buffer. */
-async function mintContentKey(name) {
-  const key = crypto.randomBytes(32);
-  await storeSecret(name, { value: key.toString('base64'), kind: 'content-key', alg: 'aes-256-gcm' }, { minTrust: 'SACRED' });
-  _keyCache.set(name, key);
-  return key;
+async function _kms(path, body) {
+  const c = cfg();
+  return _json(await fetch(c.url + '/kms/' + path, {
+    method: 'POST', headers: { 'X-Agent-Key': c.agentKey, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }), `kms ${path}`);
 }
 
-/** Fetch a content key by name -> Buffer (cached per process). Throws if absent. */
-async function getContentKey(name) {
-  if (_keyCache.has(name)) return _keyCache.get(name);
-  const v = await getSecret(name, 'silo content encryption');
-  const b64 = v && (v.value || v); // tolerate {value} or raw
-  if (!b64 || typeof b64 !== 'string') throw new Error(`vault: no content key '${name}'`);
-  const key = Buffer.from(b64, 'base64');
-  _keyCache.set(name, key);
-  return key;
+/** Generate a fresh data key -> { key: Buffer, wrapped: base64 }. Use the key, store the wrapped blob. */
+async function generateDataKey(bytes = 32) {
+  const r = await _kms('generate', { bytes });
+  return { key: Buffer.from(r.plaintext, 'base64'), wrapped: r.wrapped };
 }
 
-module.exports = { health, storeSecret, deleteSecret, getSecret, listSecrets, mintContentKey, getContentKey };
+/** Wrap a raw data key (Buffer) -> wrapped base64 blob. */
+async function wrapKey(key) { return (await _kms('wrap', { plaintext: Buffer.from(key).toString('base64') })).wrapped; }
+
+/** Unwrap a wrapped blob (base64) -> data key Buffer. */
+async function unwrapKey(wrapped) { return Buffer.from((await _kms('unwrap', { wrapped })).plaintext, 'base64'); }
+
+module.exports = { health, storeSecret, deleteSecret, getSecret, listSecrets, generateDataKey, wrapKey, unwrapKey };
