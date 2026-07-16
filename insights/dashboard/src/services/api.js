@@ -101,6 +101,14 @@ export const silosApi = {
   rm: (id = 'self', path) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`)
 }
 
+// Auth — session gate (roadmap P1). status/setup/login/logout are public; the session cookie is httpOnly.
+export const authApi = {
+  status: () => getCore('/v2/auth/status'),
+  setup: (username, password) => postCore('/v2/auth/setup', { username, password }),
+  login: (username, password) => postCore('/v2/auth/login', { username, password }),
+  logout: () => postCore('/v2/auth/logout')
+}
+
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
 export const backupApi = {
   list: (destination) => getCore('/v2/backups' + (destination && destination !== 'local' ? q({ destination }) : '')),

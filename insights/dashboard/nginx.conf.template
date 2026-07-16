@@ -4,63 +4,89 @@
 # admins group; the read dashboard never calls them.
 # ${ASMLTR_MANAGER_TOKEN} is the connector-manager bearer (write/control plane,
 # host :3024) — also injected server-side so it never reaches the browser.
+#
+# Built-in auth (roadmap P1): browser traffic to the proxied backends is gated by an
+# auth_request subrequest to the core's /v2/auth/verify (200 = valid session cookie, or
+# ASMLTR_AUTH=off as break-glass; 401 = the SPA shows its login screen). The identity the
+# session resolves to is forwarded as X-Remote-User (replacing Authelia's edge header).
+# Connectors + the CLI talk to the core DIRECTLY (not via nginx) and are never gated here.
 server {
     listen ${NGINX_LISTEN};
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
 
-    # Control plane (kill/stop/send-keys) needs the STRONGER control bearer, and the
-    # Authelia-resolved user becomes the audit actor. More specific than /api/ so it wins.
-    location /api/control/ {
-        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;
-        proxy_set_header Authorization "Bearer ${ASMLTR_CONTROL_TOKEN}";
-        proxy_set_header X-Remote-User $http_remote_user;
+    # Forward-auth subrequest target (internal — only reachable from auth_request).
+    location = /_asmltr_authz {
+        internal;
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023/v2/auth/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
         proxy_set_header Host $host;
     }
 
-    # REST: inject the read bearer; forward the Authelia-resolved user.
+    # Auth endpoints stay reachable WITHOUT a session (login / setup / status / verify).
+    # More specific than /v2/ so it wins — and no auth_request (can't require a login to log in).
+    location /v2/auth/ {
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
+        proxy_set_header Host $host;
+    }
+
+    # Control plane (kill/stop/send-keys) needs the STRONGER control bearer, and the
+    # session-resolved user becomes the audit actor. More specific than /api/ so it wins.
+    location /api/control/ {
+        auth_request /_asmltr_authz;
+        auth_request_set $asmltr_user $upstream_http_remote_user;
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;
+        proxy_set_header Authorization "Bearer ${ASMLTR_CONTROL_TOKEN}";
+        proxy_set_header X-Remote-User $asmltr_user;
+        proxy_set_header Host $host;
+    }
+
+    # REST: inject the read bearer; forward the session-resolved user.
     location /api/ {
+        auth_request /_asmltr_authz;
+        auth_request_set $asmltr_user $upstream_http_remote_user;
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;
         proxy_set_header Authorization "Bearer ${ASMLTR_INSIGHTS_TOKEN}";
-        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header X-Remote-User $asmltr_user;
         proxy_set_header Host $host;
     }
 
     # Connector manager (control plane). The manager serves at the root, so the
-    # trailing slash on proxy_pass strips the /manager/ prefix. Inject the
-    # manager bearer; forward the Authelia-resolved user for audit/authorization.
+    # trailing slash on proxy_pass strips the /manager/ prefix. Inject the manager bearer.
     location /manager/ {
+        auth_request /_asmltr_authz;
+        auth_request_set $asmltr_user $upstream_http_remote_user;
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3024/;
         proxy_set_header Authorization "Bearer ${ASMLTR_MANAGER_TOKEN}";
-        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header X-Remote-User $asmltr_user;
         proxy_set_header Host $host;
     }
 
-    # Trust framework (the Access control plane) on the CORE. Like /api/, the
-    # core serves its routes at the root under /trust/... (e.g. /trust/principals)
-    # so there is NO trailing slash on proxy_pass — the /trust/ prefix is kept.
-    # Forward the Authelia-resolved user for audit/authorization. The core runs
-    # open on localhost today; when it grows a bearer, set ${ASMLTR_CORE_TOKEN}
-    # and uncomment the Authorization line below (injected server-side).
+    # Trust framework (the Access control plane) on the CORE. Served at root under /trust/…
+    # so NO trailing slash on proxy_pass — the /trust/ prefix is kept.
     location /trust/ {
+        auth_request /_asmltr_authz;
+        auth_request_set $asmltr_user $upstream_http_remote_user;
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
-        # proxy_set_header Authorization "Bearer ${ASMLTR_CORE_TOKEN}";
-        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header X-Remote-User $asmltr_user;
         proxy_set_header Host $host;
     }
 
-    # Core control plane (/v2/inject, /v2/abort) — session takeover from the live
-    # "conversation details" pane. Served at root on the core; keep the prefix.
+    # Core control plane (/v2/inject, /v2/abort, silos, backups, vault, …). Served at root
+    # on the core; keep the prefix. /v2/auth/ above is carved out (unauthenticated).
     location /v2/ {
+        auth_request /_asmltr_authz;
+        auth_request_set $asmltr_user $upstream_http_remote_user;
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
-        # proxy_set_header Authorization "Bearer ${ASMLTR_CORE_TOKEN}";
-        proxy_set_header X-Remote-User $http_remote_user;
+        proxy_set_header X-Remote-User $asmltr_user;
         proxy_set_header Host $host;
     }
 
     # socket.io (websocket upgrade)
     location /socket.io/ {
+        auth_request /_asmltr_authz;
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3017;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -72,7 +98,7 @@ server {
     location = /manifest.webmanifest { default_type application/manifest+json; }
     location = /sw.js { add_header Cache-Control "no-cache"; }
 
-    # SPA history fallback
+    # SPA history fallback (public — the app shell + login screen must always load)
     location / {
         try_files $uri $uri/ /index.html;
     }

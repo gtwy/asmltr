@@ -584,6 +584,15 @@ app.get('/v2/auth/session', (req, res) => {
   if (!s) return res.status(401).json({ error: 'no session' });
   res.json({ user: s.sub });
 });
+// Forward-auth check for the reverse proxy (nginx auth_request). 200 = allow, 401 = redirect to login.
+// When auth is DISABLED this returns 200 (break-glass: flip ASMLTR_AUTH=off + restart to unlock instantly).
+app.get('/v2/auth/verify', (req, res) => {
+  if (!auth.enabled()) return res.status(200).end();
+  const s = auth.verifySession(auth.tokenFromReq(req));
+  if (!s) return res.status(401).json({ error: 'authentication required' });
+  res.setHeader('Remote-User', s.sub); // identity header for the proxied service (forward-auth)
+  res.status(200).end();
+});
 
 // Integrations — third-party service links (storage today). Secret fields are *_ref (vault key names),
 // resolved from the vault only at open/test time, never returned here.
