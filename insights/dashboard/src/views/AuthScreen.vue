@@ -2,10 +2,15 @@
 // The login / first-run screen (roadmap P1 phase B). Shown by App.vue when auth is enabled and there's
 // no valid session. First run (no account yet) → create the initial account; otherwise → sign in. On
 // success we reload so the whole app boots cleanly with the session cookie in place.
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { authApi } from '@/services/api'
 import { startAuthentication } from '@simplewebauthn/browser'
 import BrandLogo from '@/components/BrandLogo.vue'
+
+// External login providers (GitHub/Google) — only shown if configured on this install.
+const extProviders = ref([])
+onMounted(async () => { try { extProviders.value = (await authApi.external()).providers || [] } catch (_) {} })
+const providerIcon = { github: '🐙', google: '🌐' }
 
 const props = defineProps({ configured: { type: Boolean, default: true }, agentName: { type: String, default: 'asmltr' } })
 
@@ -97,13 +102,17 @@ async function passkeyLogin() {
           {{ busy ? 'Please wait…' : totpRequired ? 'Verify & sign in' : (isSetup ? 'Create account & sign in' : 'Sign in') }}
         </button>
 
-        <!-- passkey (passwordless) — only on the sign-in step -->
+        <!-- passkey + external providers — only on the sign-in step -->
         <template v-if="!isSetup && !totpRequired">
           <div class="my-1 flex items-center gap-3 text-[11px] text-slate-600"><span class="h-px flex-1 bg-white/10"></span>or<span class="h-px flex-1 bg-white/10"></span></div>
           <button type="button" :disabled="busy" @click="passkeyLogin"
             class="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition-colors hover:bg-white/10 disabled:opacity-40">
             <AppIcon glyph="🔑" /> Sign in with a passkey
           </button>
+          <a v-for="p in extProviders" :key="p.id" :href="authApi.externalStartUrl(p.id)"
+            class="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition-colors hover:bg-white/10">
+            <AppIcon :glyph="providerIcon[p.id] || '🌐'" /> Continue with {{ p.label }}
+          </a>
         </template>
       </form>
     </div>

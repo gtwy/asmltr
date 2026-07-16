@@ -49,14 +49,20 @@ CLI talk to the core **directly** (not through nginx), so they are never gated.
 - **OIDC provider** — full OAuth2/OIDC issuance (authorization-code + PKCE, JWKS, token + userinfo
   endpoints, a client registry, consent) for apps that speak OIDC natively.
 
-## The vault linkage (no brute-force oracle)
+## The vault and web login are separate (by design)
 
-The vault master passphrase is **never** the web login credential. Instead the vault key is stored
-**envelope-wrapped** under a key derived from the login secret: `E(vault_key, K_login)`, `K_login =
-KDF(password/second-factor)`. A successful, rate-limited, 2FA'd login unwraps it in memory; the web portal
-can't be used to brute-force the vault key (wrong logins are throttled + locked, and never touch the raw
-key). A **paranoid/unlinked mode** keeps vault unseal fully separate from web login for the most sensitive
-installs.
+Web login does **not** unlock the [TRUST vault](security/trust-vault.md) — deliberately. Coupling them
+would make the web portal a potential brute-force surface for the vault key, and the two concerns are
+cleanly independent. The vault is unlocked on its own (`asmltr vault unseal`, or the Vault plane's unseal
+form), and stays that way across restarts if you configure auto-unseal.
+
+Instead, a locked vault is made **loud** so nothing silently fails:
+
+- **Dashboard** — a global amber banner appears on every page when the vault is configured but sealed or
+  unreachable, linking straight to the unlock form.
+- **Sessions** — the core injects a `VAULT LOCKED` note into the system prompt, so the agent knows that
+  credential-backed operations will fail and tells the user to unlock it rather than guessing or
+  hardcoding a secret.
 
 ## Build phases
 
@@ -68,10 +74,10 @@ linkage, OIDC provider) come *after* the session gate is solid.
 | **A — Session gate** | account store + scrypt password + signed-cookie sessions + login/logout/session endpoints + rate-limit; **enforcement flag off by default** | ✅ shipped |
 | **B — Enforcement + login UI** | nginx `auth_request` → `/v2/auth/verify` gates browser traffic; GUI login + first-run screen; then **replace Authelia** on this box | ✅ shipped (Authelia cutover pending first-run) |
 | **C — 2FA** | TOTP enrollment/verify + one-time recovery codes (✅); WebAuthn passkey (pending) | ✅ TOTP shipped |
-| **D — OIDC client** | external-IdP login option | |
+| **D — OIDC client** | external-IdP login (GitHub + Google), link-based, off unless configured | ✅ shipped |
 | **E — Forward-auth provider** | `/v2/auth/verify` + cookie-domain sessions + optional allowlist + identity header (Authelia parity for other services) | ✅ shipped |
 | **F — OIDC provider** | OAuth2/OIDC token issuance (panva `oidc-provider`) + client registry + session-reuse login/consent | ✅ shipped |
-| **G — Vault linkage** | envelope-wrapped vault key unwrapped on login; paranoid/unlinked mode | |
+| **G — Vault: separate unlock + loud warnings** | web login does **not** unlock the vault; unlock stays separate, and a locked vault warns on the dashboard + in every session | ✅ shipped |
 
 ## Two-factor (phase C)
 
@@ -80,6 +86,17 @@ a code) and you get **10 one-time recovery codes**. Login then requires a 6-digi
 code) as a second step. Endpoints: `POST /v2/auth/totp/{setup,enable,disable}` (session-gated); the login
 returns `{ totp_required: true }` until a valid second factor is supplied. WebAuthn passkeys are a planned
 follow-on.
+
+## External login (phase D — OIDC client)
+
+Sign into asmltr with **GitHub** or **Google**, mapped to a local account. It's **off unless configured** —
+set a provider's `ASMLTR_OIDC_<PROVIDER>_ID` + `_SECRET` (register an OAuth app; redirect URI =
+`<ASMLTR_AUTH_ORIGIN>/v2/auth/external/<provider>/callback`) and its button appears on the login screen.
+
+**Link-based + default-deny.** External sign-in only works for an identity a user has **linked** to their
+account first (Settings → Security → *Connected accounts* → Connect, while logged in). An unlinked
+GitHub/Google identity is rejected — you can't create or take over an account by signing in with a random
+external identity. Disconnect any time.
 
 ## Gating other services (phase E — forward-auth)
 
