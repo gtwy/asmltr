@@ -1,11 +1,37 @@
 # Reasoning engines — pluggable agentic backends
 
-> Status: **foundation shipped, being built out.** The engine **registry**, the `asmltr claude|gemini|codex`
-> **terminal commands**, a configurable **default engine**, and the **Settings → Engines** GUI are live (see
-> [Using it today](#using-it-today)). Still ahead: the headless **web-session adapters** (drive Gemini/Codex
-> for browser chat with normalized events) + per-session engine selection in the dashboard. This lifts the
-> Claude dependency into a swappable *reasoning-engine* layer — the same move asmltr made for channels
-> (connectors) and storage (silos).
+> Status: **engine-abstracted end to end.** The engine **registry**, the `asmltr claude|gemini|codex`
+> **terminal commands**, a configurable **default engine**, per-engine **model / connection / auto-update**
+> settings, AND the **channel/web runner** are all engine-pluggable (see [Using it today](#using-it-today)).
+> The core no longer imports the Claude SDK at boot — it is loaded lazily only when a Claude turn runs — so
+> **a Gemini-only or Codex-only install runs with the Claude SDK absent.** Every connector (Discord, Telegram,
+> email, GitHub, web, voice) funnels through one pipeline → the configured default engine, so **any session
+> from any connector runs entirely on whichever single engine is selected**, via subscription or API key.
+> Still ahead: per-session (not just default) engine selection in the new-session UI, and richer
+> Gemini/Codex resume + streaming (see [Adapters](#adapter-status)).
+
+## How the runner is abstracted
+
+`core/src/runner.js` is a thin dispatcher; each engine implements the same contract in `core/src/engines/`:
+
+```
+runTurn(opts) → { text, segments, engineSessionId, tools, usage, isError }
+complete({prompt, model}) → string      // cheap one-shot for the title/status/self-assessment labelers
+```
+
+- **claude.js** — the LOCAL Agent SDK (`query()`), lazily required so it never loads at boot.
+- **codex.js** — headless `codex exec --json`; native resume via the assigned `thread_id`; `OPENAI_API_KEY`
+  injected from the vault (api_key mode).
+- **gemini.js** — headless `gemini -p -o stream-json --skip-trust`; `GEMINI_API_KEY` from the vault.
+
+`core/src/engines/index.js` maps id → impl lazily; `runner` routes each turn to `opts.engine || default`.
+
+### Adapter status
+- **Claude** — production (unchanged behaviour; live-verified).
+- **Codex** — spawn/JSONL-parse/resume-id/abort verified; a live turn needs OpenAI auth (subscription or key).
+- **Gemini** — spawn/parse/env verified; **stateless per turn** for now (the CLI's resume is index-based, not
+  id-addressable — `--session-file` continuity is the planned follow-up). Google deprecated the free OAuth
+  tier, so Gemini's practical path is an **API key** (Settings → Engines → Gemini → API key).
 
 ## Using it today
 
@@ -24,8 +50,10 @@ like the original `asmltr claude`.
 - **Default engine.** Settings → **Engines** lists every known harness (installed? version? default?) and lets
   you pick the **default** — which is what the `<agent-name>` terminal command points at (so `eve` ≡
   `asmltr <default>`). Also `POST /v2/engines/default`.
-- **Install / update from the GUI.** The Engines tab shows each harness's installed version, checks npm for a
-  newer one, and offers a one-click **Install** (if missing) or **Update** button (`npm i -g <pkg>@latest`).
+- **Install / update / auto-update from the GUI.** The Engines tab shows each harness's installed version,
+  checks npm for a newer one, and offers a one-click **Install** (if missing) or **Update** button
+  (`npm i -g <pkg>@latest`). Each engine also has an **Auto-update** toggle — a 6-hourly background sweep
+  (`POST /v2/engines/:id/auto-update`, `engines.autoUpdateAll()`) upgrades it in place so it never goes stale.
 - **Per-engine cards.** The Engines tab renders one card per harness, each with its own **model**, **connection**,
   and (Claude only) **runtime** settings — so every engine is configured at once. The default (★) is what the
   `<agent-name>` command uses, but any configured engine is invokable directly (`asmltr <engine>` / per-session).

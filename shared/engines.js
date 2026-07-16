@@ -84,12 +84,33 @@ function list() {
     enabled: config(e.id).enabled !== false, // enabled unless explicitly disabled
     models: e.models || [], model: config(e.id).model || e.defaultModel || null,
     auth: authInfo(e.id),                    // connection descriptor + selection (never the key value)
+    autoUpdate: isAutoUpdate(e.id),
     config: config(e.id),
   }));
 }
 
 /** The effective model for an engine: configured → engine default → null. */
 function modelFor(id) { const e = ENGINES[id]; if (!e) return null; return config(id).model || e.defaultModel || null; }
+
+// ── auto-update (per engine; a scheduler in the core calls autoUpdateAll on a cadence) ─────────
+function isAutoUpdate(id) { return !!config(id).autoUpdate; }
+function setAutoUpdate(id, on) { if (!known(id)) throw new Error('unknown engine: ' + id); setConfig(id, { autoUpdate: !!on }); return isAutoUpdate(id); }
+/** Install/update an engine's npm package to @latest (blocking). Fixed package per engine — no injection. */
+function installLatest(id) {
+  const e = ENGINES[id]; if (!e || !e.pkg) return { ok: false, error: 'unknown engine' };
+  try { execFileSync('npm', ['install', '-g', `${e.pkg}@latest`], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 180000 }); return { ok: true, version: cleanVersion(id) }; }
+  catch (err) { return { ok: false, error: String((err && (err.stderr || err.message)) || err).slice(-400) }; }
+}
+/** Update every installed engine that has auto-update on AND a newer version available. Returns a summary. */
+function autoUpdateAll() {
+  const done = [];
+  for (const id of Object.keys(ENGINES)) {
+    if (!installed(id) || !isAutoUpdate(id)) continue;
+    const cur = cleanVersion(id); const latest = latestVersion(id);
+    if (updateAvailable(cur, latest)) { const r = installLatest(id); done.push({ id, from: cur, to: r.version || latest, ok: r.ok, error: r.error }); }
+  }
+  return done;
+}
 
 // ── connection / auth (subscription OAuth vs API-key billing; keys live in the TRUST vault) ─────
 const AUTH_SECRET = (id) => `engine_${id}_api_key`;
@@ -135,4 +156,4 @@ async function envForLaunch(id) {
   const v = await apiKeyValue(id); return v ? { [a.apiKeyEnv]: v } : {};
 }
 
-module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, authInfo, setAuthMode, setApiKey, clearApiKey, apiKeyValue, envForLaunch, list };
+module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, authInfo, setAuthMode, setApiKey, clearApiKey, apiKeyValue, envForLaunch, isAutoUpdate, setAutoUpdate, installLatest, autoUpdateAll, list };

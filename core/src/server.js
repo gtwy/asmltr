@@ -765,10 +765,15 @@ app.get('/v2/engines/:id/check', (req, res) => {
 app.post('/v2/engines/:id/install', (req, res) => {
   const id = req.params.id; const e = engines.known(id) && engines.ENGINES[id];
   if (!e || !e.pkg) return res.status(404).json({ error: 'unknown engine' });
-  const r = require('child_process').spawnSync('npm', ['install', '-g', `${e.pkg}@latest`], { encoding: 'utf8', timeout: 180000 });
-  if (r.status === 0) return res.json({ ok: true, id, version: engines.cleanVersion(id) });
-  res.status(500).json({ error: 'install failed', detail: (r.stderr || r.error?.message || `exit ${r.status}`).slice(-800) });
+  const r = engines.installLatest(id);
+  if (r.ok) return res.json({ ok: true, id, version: r.version });
+  res.status(500).json({ error: 'install failed', detail: (r.error || 'unknown').slice(-800) });
 });
+// Per-engine auto-update: check npm on a cadence + upgrade in place (so the harness never goes stale).
+app.post('/v2/engines/:id/auto-update', (req, res) => { try { res.json({ ok: true, autoUpdate: engines.setAutoUpdate(req.params.id, !!(req.body && req.body.enabled)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+// Background sweep: every 6h, update installed engines that have auto-update on + a newer version.
+const _engTimer = setInterval(() => { try { const d = engines.autoUpdateAll(); if (d.length) console.log('[engines] auto-updated:', JSON.stringify(d)); } catch (_) {} }, 6 * 3600 * 1000);
+if (_engTimer.unref) _engTimer.unref();
 // Connection / auth per engine — subscription (OAuth, owned by the CLI) vs API-key billing.
 // The key value is stored ONLY in the TRUST vault (SACRED); engines.json keeps a boolean flag.
 app.post('/v2/engines/:id/auth', (req, res) => { try { res.json({ ok: true, auth: engines.setAuthMode(req.params.id, (req.body || {}).mode) }); } catch (e) { res.status(400).json({ error: e.message }); } });
