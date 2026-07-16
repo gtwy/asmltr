@@ -55,6 +55,12 @@ async function installEngine(id) {
   try { await enginesApi.install(id); delete engCheck[id]; await loadEngines() }
   catch (e) { engError.value = `${id}: ${e.message}` } finally { engBusy.value = '' }
 }
+const autoBusy = ref('')
+async function toggleEngineAuto(id, on) {
+  autoBusy.value = id; engError.value = ''
+  try { await enginesApi.setAutoUpdate(id, on); await loadEngines() }
+  catch (e) { engError.value = `${id}: ${e.message}` } finally { autoBusy.value = '' }
+}
 // On opening the Engines tab, check installed engines for available updates (best-effort, background).
 function checkAllEngines() { engines.value.filter((e) => e.installed).forEach((e) => checkEngine(e.id)) }
 
@@ -407,6 +413,20 @@ onMounted(async () => {
                 <button v-if="e.installed && !e.isDefault" type="button" class="act" :disabled="!!engBusy" @click="setDefaultEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />Set default</button>
               </div>
             </div>
+
+            <!-- auto-update (keep the harness current on a cadence) -->
+            <label v-if="e.installed" class="flex cursor-pointer items-center justify-between gap-3">
+              <span>
+                <span class="text-sm text-slate-200">Auto-update this engine</span>
+                <span class="block text-[12px] text-slate-500">Check npm every 6h and upgrade the <span class="font-mono">{{ e.id }}</span> harness in place, so it never goes stale.</span>
+              </span>
+              <span class="flex items-center gap-2">
+                <Spinner v-if="autoBusy===e.id" size="xs" class="text-slate-400" />
+                <button type="button" :disabled="autoBusy===e.id" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="e.autoUpdate ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleEngineAuto(e.id, !e.autoUpdate)">
+                  <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="e.autoUpdate ? 'left-[22px]' : 'left-0.5'"></span>
+                </button>
+              </span>
+            </label>
 
             <!-- model -->
             <div>
