@@ -49,11 +49,41 @@ Restore decrypts, validates, then places each artifact back — **stashing any f
 pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector
 ```
 
+## Remote destinations
+
+A backup can be pushed **off-box** to any configured [storage integration](integrations/index.md)
+(WebDAV, S3-compatible, or a local path) — the encrypted archive is uploaded under an
+`asmltr-backups/` prefix in the integration's root. Pass a destination by integration id:
+
+```bash
+asmltr backup create --label offsite --destination int_ab12cd34   # or pick it in the dashboard
+```
+
+The archive is already encrypted, so it's safe on third-party storage. `verify`/`restore` still operate
+on a **local** file — pull the archive down first if it only lives remotely. Retention (below) prunes the
+remote destination too.
+
+## Scheduled backups & retention
+
+**Settings → Backups → Scheduled backups** runs automatic snapshots on a timer, with retention:
+
+| Setting | Meaning |
+|---------|---------|
+| **Every (hours)** | how often a snapshot is taken |
+| **Destination** | local, or a storage integration (off-box) |
+| **Max stored** | keep only the newest N (`0` = unlimited) |
+| **Max age (days)** | drop anything older than this (`0` = no age limit) |
+
+The scheduler runs **in-process in the core** (checked every ~10 min; persisted in
+`~/.asmltr/backup-schedule.json`). It needs a passphrase available to the core process
+(`ASMLTR_BACKUP_PASSPHRASE`, or the vault password) — without one, a due backup is logged and skipped
+rather than failing. Retention runs after each scheduled snapshot, on both local and the remote destination.
+
 ## Dashboard
 
-**Settings → Backups** lists existing snapshots and creates new ones (optionally with a one-off
-passphrase). **Restore is intentionally CLI-only** — it's a destructive, footgun-prone operation that
-shouldn't be one mis-click away in a browser.
+**Settings → Backups** lists existing snapshots, creates new ones (with a destination + optional one-off
+passphrase), and configures the schedule. **Restore is intentionally CLI-only** — it's a destructive,
+footgun-prone operation that shouldn't be one mis-click away in a browser.
 
 ## Auto-snapshot before self-update
 
