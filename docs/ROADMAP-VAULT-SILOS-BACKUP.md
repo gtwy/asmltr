@@ -184,6 +184,22 @@ Five layers:
    *offline*; revocation via the TRUST ledger's revocation list + file-based kill switches (short TTLs
    keep the revocation window small).
 
+### Encryption is per-silo — a policy, not a global (opacity vs. direct editability)
+
+Encryption-at-rest is a **composable layer over `shared/storage.js`** (an `EncryptedStorage` wrapper —
+`put` encrypts, `get` decrypts, key per-silo from the vault) so it works over *any* backend. The
+`encryption` field in the signed manifest is a **per-silo choice**, trading two things:
+
+- **`at-rest`** — asmltr seals content before upload; the backend and anyone browsing it (e.g. in
+  Nextcloud's web UI) see only ciphertext. Maximum confidentiality; humans can't edit the files
+  directly (they'd corrupt the ciphertext). Use for anything sensitive.
+- **`none`** — files are stored plaintext. A human can **open, edit, and manage them directly in the
+  storage UI** (Nextcloud, etc.) and the silo reflects those edits live. Trades confidentiality for
+  direct human collaboration. Use for shared/project data where transparency is the point.
+
+Because it's a signed manifest field, the encryption posture is owner-set and tamper-evident like the
+rest of the policy. A backup can still wrap even a `none` silo under the backup root key in transit.
+
 ### The invariant: only the owner mints new peers
 
 **Granting a NEW peer is always an owner-only operation — never delegable to a guard, ever.** A guard
