@@ -649,6 +649,32 @@ app.post('/v2/auth/totp/disable', requireSession, (req, res) => {
   auth.totpDisable(req.authUser); res.json({ ok: true });
 });
 
+// External login (OIDC client, phase D) — GitHub/Google → a LINKED local account. OFF unless a provider's
+// id+secret are configured. Endpoints live under the public /v2/auth/ path (login must be reachable).
+const oidcClient = require('./oidc-client');
+app.get('/v2/auth/external', (req, res) => {
+  const s = auth.verifySession(auth.tokenFromReq(req));
+  res.json({ providers: oidcClient.enabledProviders(), linked: s ? auth.listExternal(s.sub) : [] });
+});
+app.get('/v2/auth/external/:provider/start', (req, res) => {
+  try { res.redirect(oidcClient.authorizeUrl(req.params.provider)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/v2/auth/external/:provider/callback', async (req, res) => {
+  const provider = req.params.provider;
+  if (!oidcClient.checkState(req.query.state)) return res.status(400).send('invalid or expired sign-in state — please try again.');
+  try {
+    const ident = await oidcClient.exchange(provider, req.query.code);
+    if (!ident.subject) return res.status(400).send('could not resolve your ' + provider + ' identity.');
+    const sess = auth.verifySession(auth.tokenFromReq(req));
+    if (sess) { auth.linkExternal(sess.sub, provider, ident.subject, ident.email); return res.redirect('/settings?linked=' + provider); } // linking (already logged in)
+    const username = auth.findByExternal(provider, ident.subject); // login
+    if (!username) return res.status(403).send('No asmltr account is linked to this ' + provider + ' identity. Sign in with your password first, then connect ' + provider + ' under Settings → Security.');
+    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(username), { secure: authSecureCookie() }));
+    res.redirect('/');
+  } catch (e) { res.status(400).send('sign-in failed: ' + e.message); }
+});
+app.delete('/v2/auth/external/:provider', requireSession, (req, res) => res.json({ ok: auth.unlinkExternal(req.authUser, req.params.provider) }));
+
 // WebAuthn passkeys — passwordless login + a strong factor (core/src/passkey.js).
 const passkey = require('./passkey');
 app.get('/v2/auth/passkeys', requireSession, (req, res) => res.json({ passkeys: auth.listPasskeys(req.authUser).map((c) => ({ id: c.id, name: c.name, added_at: c.added_at, last_used: c.last_used })) }));

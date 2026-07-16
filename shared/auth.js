@@ -164,6 +164,28 @@ function removePasskey(username, credId) {
   u.webauthn.credentials = u.webauthn.credentials.filter((c) => c.id !== credId);
   save(d); return u.webauthn.credentials.length < before;
 }
+// ── external identity links (OIDC client: log in via GitHub/Google mapped to a local account) ──
+function linkExternal(username, provider, subject, email) {
+  const d = load(); const u = d.users[username]; if (!u) throw new Error('no such account');
+  u.external = (u.external || []).filter((e) => e.provider !== provider); // one link per provider
+  u.external.push({ provider, subject: String(subject), email: email || null, linked_at: Date.now() });
+  save(d); return true;
+}
+function unlinkExternal(username, provider) {
+  const d = load(); const u = d.users[username]; if (!u || !u.external) return false;
+  const before = u.external.length; u.external = u.external.filter((e) => e.provider !== provider);
+  save(d); return u.external.length < before;
+}
+function listExternal(username) { const u = load().users[username]; return ((u && u.external) || []).map((e) => ({ provider: e.provider, email: e.email })); }
+/** Find the account linked to an external (provider, subject) — for external login → session. */
+function findByExternal(provider, subject) {
+  const d = load();
+  for (const [username, u] of Object.entries(d.users)) {
+    if (u.external && u.external.some((e) => e.provider === provider && e.subject === String(subject))) return username;
+  }
+  return null;
+}
+
 /** Which account owns a credential id — for usernameless (discoverable) passkey login. */
 function findPasskeyOwner(credId) {
   const d = load();
@@ -252,5 +274,6 @@ module.exports = {
   sessionCookie, clearCookie, tokenFromReq, requireAuth,
   totpEnabledFor, verifySecondFactor, totpBeginEnroll, totpConfirmEnroll, totpDisable,
   accountExists, listPasskeys, passkeysEnabled, addPasskey, updatePasskeyCounter, removePasskey, findPasskeyOwner,
+  linkExternal, unlinkExternal, listExternal, findByExternal,
   COOKIE, SESSION_TTL,
 };

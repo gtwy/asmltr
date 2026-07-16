@@ -43,10 +43,17 @@ const secBusy = ref(false)
 const secError = ref('')
 const passkeys = ref([])
 const pkBusy = ref(false)
+const extProviders = ref([]) // configured external login providers
+const extLinked = ref([])     // ones this account has linked
 async function loadSecurity() {
   try { authStatus.value = await authApi.status() } catch (_) {}
   try { passkeys.value = (await authApi.passkeys()).passkeys || [] } catch (_) { passkeys.value = [] }
+  try { const r = await authApi.external(); extProviders.value = r.providers || []; extLinked.value = r.linked || [] } catch (_) {}
 }
+const extProviderIcon = { github: '🐙', google: '🌐' }
+const isLinked = (p) => extLinked.value.some((l) => l.provider === p)
+function connectExternal(p) { window.location.href = authApi.externalStartUrl(p) }
+async function disconnectExternal(p) { try { await authApi.externalUnlink(p); await loadSecurity() } catch (e) { secError.value = e.message } }
 async function addPasskey() {
   pkBusy.value = true; secError.value = ''
   try {
@@ -630,6 +637,23 @@ onMounted(async () => {
               </li>
             </ul>
             <p v-else class="text-[12px] text-slate-500">No passkeys registered yet.</p>
+          </div>
+
+          <!-- connected external accounts (OIDC client) — only if a provider is configured on this install -->
+          <div v-if="extProviders.length" class="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div class="mb-1 text-sm font-medium text-slate-200">Connected accounts</div>
+            <p class="mb-3 text-[12px] text-slate-500">Link an external account to sign in with it (in addition to your password).</p>
+            <ul class="divide-y divide-white/5">
+              <li v-for="p in extProviders" :key="p.id" class="flex items-center gap-2 py-2 text-sm">
+                <AppIcon :glyph="extProviderIcon[p.id] || '🌐'" class="text-slate-500" />
+                <span class="min-w-0 flex-1 truncate text-slate-200">{{ p.label }}</span>
+                <template v-if="isLinked(p.id)">
+                  <span class="pill border border-emerald-400/30 bg-emerald-400/10 text-[11px] text-emerald-300">connected</span>
+                  <button type="button" class="act-danger" @click="disconnectExternal(p.id)">Disconnect</button>
+                </template>
+                <button v-else type="button" class="act" @click="connectExternal(p.id)">Connect</button>
+              </li>
+            </ul>
           </div>
 
           <!-- OIDC provider — register apps that SSO against asmltr -->

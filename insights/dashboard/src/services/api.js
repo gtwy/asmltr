@@ -112,6 +112,10 @@ export const authApi = {
     return { ok: res.ok, ...json }
   },
   logout: () => postCore('/v2/auth/logout'),
+  // External login (OIDC client) — providers enabled only when configured
+  external: () => getCore('/v2/auth/external'),
+  externalStartUrl: (provider) => `/v2/auth/external/${provider}/start`,
+  externalUnlink: (provider) => reqCore('DELETE', `/v2/auth/external/${provider}`),
   // TOTP 2FA enrollment (requires a session)
   totpSetup: () => postCore('/v2/auth/totp/setup'),
   totpEnable: (code) => postCore('/v2/auth/totp/enable', { code }),
