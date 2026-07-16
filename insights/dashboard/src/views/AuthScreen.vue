@@ -48,15 +48,14 @@ async function submit() {
 
 async function passkeyLogin() {
   error.value = ''
-  if (!username.value) { error.value = 'Enter your username first, then use your passkey.'; return }
   busy.value = true
   try {
-    const optionsJSON = await authApi.passkeyLoginOptions(username.value)
+    const optionsJSON = await authApi.passkeyLoginOptions() // usernameless — pick any discoverable passkey
     const response = await startAuthentication({ optionsJSON })
-    await authApi.passkeyLoginVerify(username.value, response)
+    await authApi.passkeyLoginVerify(response)
     afterLogin()
   } catch (e) {
-    error.value = e.message === 'no passkeys registered for this account' ? 'No passkey registered for that user.' : (e.message || 'Passkey sign-in failed.')
+    error.value = e.message === 'unknown passkey' ? 'That passkey isn’t registered here.' : (e.message || 'Passkey sign-in failed.')
     busy.value = false
   }
 }

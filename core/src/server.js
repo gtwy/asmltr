@@ -649,13 +649,13 @@ app.post('/v2/auth/passkey/login/options', async (req, res) => {
 });
 app.post('/v2/auth/passkey/login/verify', async (req, res) => {
   const b = req.body || {};
-  const key = (b.username || '') + '|' + (req.ip || '');
+  const key = 'passkey|' + (req.ip || ''); // usernameless — the account is resolved from the credential
   if (auth.isLockedOut(key)) return res.status(429).json({ error: 'too many attempts — locked out' });
   try {
-    await passkey.loginVerify(b.username, b.response, req.headers.origin);
+    const r = await passkey.loginVerify(b.response, req.headers.origin);
     auth.recordSuccess(key);
-    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(b.username), { secure: authSecureCookie() }));
-    res.json({ ok: true, user: b.username });
+    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(r.username), { secure: authSecureCookie() }));
+    res.json({ ok: true, user: r.username });
   } catch (e) { auth.recordFail(key); res.status(401).json({ error: e.message }); }
 });
 

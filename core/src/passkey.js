@@ -22,12 +22,15 @@ function rp(reqOrigin) {
   return { origin, rpID: rpID || 'localhost' };
 }
 
-// challenge stores: username -> { challenge, exp }
+// challenge stores. Registration is session-gated → key by username. Login is USERNAMELESS (discoverable
+// credentials) → we don't know the user yet, so track challenges by the challenge value itself.
 const CHALLENGE_TTL = 5 * 60 * 1000;
 const regCh = new Map();
-const authCh = new Map();
 const put = (m, k, v) => m.set(k, { challenge: v, exp: Date.now() + CHALLENGE_TTL });
 const take = (m, k) => { const e = m.get(k); m.delete(k); return e && e.exp > Date.now() ? e.challenge : null; };
+const pendingLogin = new Map(); // challenge -> exp
+const addPending = (ch) => pendingLogin.set(ch, Date.now() + CHALLENGE_TTL);
+const consumePending = (ch) => { const exp = pendingLogin.get(ch); pendingLogin.delete(ch); return !!(exp && exp > Date.now()); };
 
 const toB64 = (u8) => Buffer.from(u8).toString('base64url');
 const fromB64 = (s) => Buffer.from(s, 'base64url');
@@ -42,7 +45,8 @@ async function registerOptions(username, reqOrigin) {
     userID: Buffer.from(username, 'utf8'),
     attestationType: 'none',
     excludeCredentials: existing.map((c) => ({ id: c.id, transports: c.transports })),
-    authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+    // residentKey: 'required' → a DISCOVERABLE credential, so login needs no username (just pick the passkey).
+    authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'preferred' },
   });
   put(regCh, username, options.challenge);
   return options;
@@ -59,29 +63,31 @@ async function registerVerify(username, response, reqOrigin, label) {
   return { verified: true, id: c.id };
 }
 
-// ── authentication (passwordless — a passkey is strong MFA on its own) ──────────
+// ── authentication (USERNAMELESS + passwordless — a passkey is strong MFA on its own) ──────────
+// No username: allowCredentials is empty, so the browser offers any discoverable passkey for this RP.
+// (An optional username still works — it scopes the prompt to that account's passkeys.)
 async function loginOptions(username, reqOrigin) {
   const { rpID } = rp(reqOrigin);
-  const creds = auth.listPasskeys(username);
-  if (!creds.length) throw new Error('no passkeys registered for this account');
-  const options = await generateAuthenticationOptions({ rpID, allowCredentials: creds.map((c) => ({ id: c.id, transports: c.transports })), userVerification: 'preferred' });
-  put(authCh, username, options.challenge);
+  const allowCredentials = username ? auth.listPasskeys(username).map((c) => ({ id: c.id, transports: c.transports })) : [];
+  if (username && !allowCredentials.length) throw new Error('no passkeys registered for this account');
+  const options = await generateAuthenticationOptions({ rpID, allowCredentials, userVerification: 'preferred' });
+  addPending(options.challenge);
   return options;
 }
 
-async function loginVerify(username, response, reqOrigin) {
+async function loginVerify(response, reqOrigin) {
   const { origin, rpID } = rp(reqOrigin);
-  const expectedChallenge = take(authCh, username);
-  if (!expectedChallenge) throw new Error('no pending login (challenge expired)');
-  const cred = auth.listPasskeys(username).find((c) => c.id === response.id || c.id === response.rawId);
-  if (!cred) throw new Error('unknown passkey');
+  const credId = response.id || response.rawId;
+  const username = auth.findPasskeyOwner(credId); // resolve the account FROM the credential
+  if (!username) throw new Error('unknown passkey');
+  const cred = auth.listPasskeys(username).find((c) => c.id === credId);
   const { verified, authenticationInfo } = await verifyAuthenticationResponse({
-    response, expectedChallenge, expectedOrigin: origin, expectedRPID: rpID,
+    response, expectedChallenge: (ch) => consumePending(ch), expectedOrigin: origin, expectedRPID: rpID,
     credential: { id: cred.id, publicKey: fromB64(cred.publicKey), counter: cred.counter || 0, transports: cred.transports },
   });
   if (!verified) throw new Error('passkey login did not verify');
   auth.updatePasskeyCounter(username, cred.id, authenticationInfo.newCounter);
-  return { verified: true };
+  return { verified: true, username };
 }
 
 module.exports = { registerOptions, registerVerify, loginOptions, loginVerify };
