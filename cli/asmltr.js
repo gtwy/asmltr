@@ -567,6 +567,65 @@ async function cmdUpdate(rest, f) {
   process.exit(r.status || 0);
 }
 
+// asmltr silo <verb> — browse/search/read/write a data silo (default: the Self silo).
+async function cmdSilo(rest, f) {
+  const fs = require('fs');
+  const silo = require('../shared/silo');
+  const identity = require('../shared/identity');
+  const verb = rest[0] || 'overview';
+  const pos = rest.slice(1).filter((a) => !a.startsWith('--')); // positional args (flags stripped)
+  const has = (name) => rest.includes('--' + name);            // boolean-flag presence
+
+  if (verb === 'list' || verb === 'ls-silos') {
+    const all = silo.list();
+    if (!all.length) return console.log(A.dim('(no silos)'));
+    for (const m of all) console.log(`${A.bold(m.id.padEnd(16))} ${A.dim('[' + m.type + ']')} ${m.name}`);
+    return;
+  }
+  if (verb === 'new' || verb === 'create') {
+    const id = pos[0]; if (!id) throw new Error('usage: asmltr silo new <id> [--name "..."] [--template <type>]');
+    const s = silo.create({ id, name: f.name || id, type: f.template || f.type || 'generic' });
+    return console.log('created silo ' + A.bold(id) + ' at ' + s.dir);
+  }
+
+  const s = f.silo ? silo.open(f.silo) : silo.ensureSelf(identity.name());
+  switch (verb) {
+    case 'overview': return console.log(JSON.stringify(await s.overview(), null, 2));
+    case 'ls': {
+      const es = await s.ls(pos[0] || '');
+      if (!es.length) return console.log(A.dim('(empty)'));
+      for (const e of es) console.log(`${e.type === 'dir' ? A.cyn('d') : ' '} ${e.path}`);
+      return;
+    }
+    case 'tree': {
+      const es = await s.tree(pos[0] || '', f.depth ? +f.depth : Infinity);
+      for (const e of es) console.log(`${'  '.repeat(Math.max(0, e.path.split('/').length - 1))}${e.type === 'dir' ? A.cyn(e.path.split('/').pop() + '/') : e.path.split('/').pop()}`);
+      return;
+    }
+    case 'find': {
+      const r = await s.find(pos[0] || '', { in: f.in, type: f.type, since: f.since, content: has('content') });
+      if (!r.length) return console.log(A.dim('(no matches)'));
+      for (const x of r) console.log(`${A.dim((x.match || 'name').padEnd(12))} ${x.path}`);
+      return;
+    }
+    case 'stat': return console.log(JSON.stringify(await s.stat(pos[0]), null, 2));
+    case 'get': process.stdout.write(await s.get(pos[0])); return;
+    case 'put': {
+      const src = pos[1];
+      const data = src ? fs.readFileSync(src) : fs.readFileSync(0); // 2nd arg = file, else stdin
+      const r = await s.put(pos[0], data);
+      return console.log('put ' + r.path + ' (' + r.size + ' bytes)');
+    }
+    case 'mkdir': await s.mkdir(pos[0]); return console.log('mkdir ' + pos[0]);
+    case 'rm': await s.rm(pos[0]); return console.log('rm ' + pos[0]);
+    case 'mv': await s.mv(pos[0], pos[1]); return console.log('mv ' + pos[0] + ' -> ' + pos[1]);
+    default:
+      console.log('asmltr silo <overview|ls|tree|find|get|put|stat|mkdir|rm|mv|new|list> [path] [args]');
+      console.log(A.dim('  --silo <id>   operate on a named silo (default: the Self silo)'));
+      console.log(A.dim('  find: --content (full-text) --type <ext> --since <date> --in <subpath>'));
+  }
+}
+
 // --- main --------------------------------------------------------------------
 (async () => {
   const [, , cmd, ...rest] = process.argv;
@@ -617,6 +676,7 @@ async function cmdUpdate(rest, f) {
       case 'stop': return await cmdStop(rest[0]);
       case 'diff': return await cmdDiff(rest[0]);
       case 'update': return await cmdUpdate(rest, f);
+      case 'silo': return await cmdSilo(rest, f);
       case 'version': case '--version': return await cmdVersion();
       case 'help': case '--help': case '-h': return cmdHelp();
       default: console.error(`unknown command: ${cmd}\n`); return cmdHelp();
