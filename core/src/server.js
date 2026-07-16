@@ -49,6 +49,7 @@ const stt = require('../../shared/speech/stt'); // STT (transcription) — audio
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
 const vault = require('../../shared/vault'); // TRUST vault (credential broker + KMS) — hard dependency
+const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
@@ -535,6 +536,14 @@ app.get('/v2/vault/status', async (req, res) => {
   const h = await vault.health();
   res.json({ configured: true, reachable: h.ok, sealed: h.sealed, url: process.env.ASMLTR_VAULT_URL });
 });
+
+// Integrations — third-party service links (storage today). Secret fields are *_ref (vault key names),
+// resolved from the vault only at open/test time, never returned here.
+app.get('/v2/integrations', (req, res) => res.json({ integrations: integrations.list() }));
+app.post('/v2/integrations', (req, res) => { try { res.status(201).json(integrations.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.patch('/v2/integrations/:id', (req, res) => { const r = integrations.update(req.params.id, req.body || {}); r ? res.json(r) : res.status(404).json({ error: 'not found' }); });
+app.delete('/v2/integrations/:id', (req, res) => res.json({ ok: integrations.remove(req.params.id) }));
+app.post('/v2/integrations/:id/test', async (req, res) => res.json(await integrations.test(req.params.id)));
 
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
