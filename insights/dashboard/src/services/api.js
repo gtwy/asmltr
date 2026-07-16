@@ -100,6 +100,13 @@ export const silosApi = {
   rm: (id = 'self', path) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`)
 }
 
+// Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
+export const backupApi = {
+  list: () => getCore('/v2/backups'),
+  create: (payload) => postCore('/v2/backups', payload),
+  verify: (payload) => postCore('/v2/backups/verify', payload)
+}
+
 export const control = {
   // SDK/channel sessions → the core control plane
   abort: (conversation_key) => postCore('/v2/abort', { conversation_key }),

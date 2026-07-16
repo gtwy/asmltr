@@ -626,6 +626,27 @@ async function cmdSilo(rest, f) {
   }
 }
 
+// asmltr backup <create|list|verify|restore> — encrypted, restorable snapshots (scripts/backup.js).
+async function cmdBackup(rest, f) {
+  const backup = require('../scripts/backup');
+  const verb = rest[0] || 'list';
+  const pos = rest.slice(1).filter((a) => !a.startsWith('--'));
+  const log = (m) => console.log(A.dim(m));
+  const opts = { passphrase: f.passphrase, label: f.label, out: f.out, log };
+  switch (verb) {
+    case 'create': { const r = await backup.createBackup(opts); console.log(`${A.grn('✓')} ${r.file} ${A.dim('(' + (r.bytes / 1048576).toFixed(2) + ' MB)')}`); return; }
+    case 'list': {
+      const all = backup.listBackups();
+      if (!all.length) return console.log(A.dim('(no backups)'));
+      for (const b of all) console.log(`${A.bold(b.name)}  ${A.dim((b.bytes / 1048576).toFixed(2) + ' MB')}`);
+      return;
+    }
+    case 'verify': { const r = await backup.verifyBackup(pos[0], opts); console.log(`${A.grn('✓')} ${r.manifest.version}/${r.manifest.label} @ ${new Date(r.manifest.created_at).toISOString()}`); return; }
+    case 'restore': { await backup.restoreBackup(pos[0], { ...opts, dryRun: f['dry-run'] || f.n }); return; }
+    default: console.log('asmltr backup <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--out path]');
+  }
+}
+
 // --- main --------------------------------------------------------------------
 (async () => {
   const [, , cmd, ...rest] = process.argv;
@@ -677,6 +698,7 @@ async function cmdSilo(rest, f) {
       case 'diff': return await cmdDiff(rest[0]);
       case 'update': return await cmdUpdate(rest, f);
       case 'silo': return await cmdSilo(rest, f);
+      case 'backup': return await cmdBackup(rest, f);
       case 'version': case '--version': return await cmdVersion();
       case 'help': case '--help': case '-h': return cmdHelp();
       default: console.error(`unknown command: ${cmd}\n`); return cmdHelp();

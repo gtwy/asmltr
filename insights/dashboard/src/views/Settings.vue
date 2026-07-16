@@ -5,7 +5,7 @@
 // choices, toggle copy) are sourced from the manifest, so adding a setting updates both GUI and TUI.
 import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { api, runtime, voice, identity, update } from '@/services/api'
+import { api, runtime, voice, identity, update, backupApi } from '@/services/api'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { applyPalette } from '@/composables/useBrandTheme'
@@ -26,8 +26,29 @@ const sections = computed(() => manifest.value?.settings || [])
 // browser capability (Notification API) with no meaning in the terminal.
 const TABS = computed(() => [
   ...sections.value.map((s) => ({ id: s.id, label: s.label, icon: s.icon })),
+  { id: 'backups', label: 'Backups', icon: '🗄' },
   { id: 'notifications', label: 'Notifications', icon: '✦' },
 ])
+
+// --- backups (encrypted, restorable snapshots) ---
+const backups = ref([])
+const backupDir = ref('')
+const backupPass = ref('')
+const backupLabel = ref('manual')
+const backupBusy = ref(false)
+const backupError = ref('')
+async function loadBackups() {
+  try { const r = await backupApi.list(); backups.value = r.backups || []; backupDir.value = r.dir || '' } catch (e) { backupError.value = e.message }
+}
+async function createBackup() {
+  backupBusy.value = true; backupError.value = ''
+  try {
+    await backupApi.create({ label: backupLabel.value || 'manual', passphrase: backupPass.value || undefined })
+    backupPass.value = ''
+    await loadBackups()
+  } catch (e) { backupError.value = e.message } finally { backupBusy.value = false }
+}
+const fmtMB = (n) => (n / 1048576).toFixed(2) + ' MB'
 function section(id) { return sections.value.find((s) => s.id === id) || { fields: [] } }
 function field(sectionId, fieldId) { return (section(sectionId).fields || []).find((f) => f.id === fieldId) || {} }
 const identityFields = computed(() => section('identity').fields || [])
@@ -148,7 +169,7 @@ async function setCustomTtsModel() { const m = customTtsModel.value.trim(); if (
 
 onMounted(async () => {
   try { manifest.value = await api.manifest() } catch (_) {}
-  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg()])
+  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups()])
   try { ackOn.value = (await voice.getAck()).enabled } catch (_) {}
 })
 </script>
@@ -436,8 +457,57 @@ onMounted(async () => {
           </RouterLink>
         </div>
 
+        <div v-show="tab === 'backups'" class="glass p-5">
+          <h3 class="mb-1 text-sm font-semibold text-slate-200">Backups</h3>
+          <p class="mb-4 text-[12px] text-slate-500">
+            Encrypted, restorable snapshots — the SQLite DBs (consistent), config, identity, and the silos, in one
+            passphrase-encrypted archive that's <em>independent of the vault</em> (so a vault loss is itself recoverable).
+            One is taken automatically before each self-update.
+          </p>
+
+          <form class="mb-4 flex flex-wrap items-end gap-2" @submit.prevent="createBackup">
+            <label class="flex flex-col gap-1">
+              <span class="text-[11px] text-slate-500">Label</span>
+              <input v-model="backupLabel" type="text" class="field-input w-40" placeholder="manual" />
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-[11px] text-slate-500">Passphrase <span class="text-slate-600">(blank → server default)</span></span>
+              <input v-model="backupPass" type="password" class="field-input w-64" placeholder="backup passphrase" autocomplete="off" />
+            </label>
+            <button type="submit" :disabled="backupBusy"
+              class="rounded-xl bg-brand-gradient px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">
+              {{ backupBusy ? 'Creating…' : 'Create backup' }}
+            </button>
+            <button type="button" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10" @click="loadBackups">
+              <AppIcon glyph="↻" /> Refresh
+            </button>
+          </form>
+
+          <p v-if="backupError" class="mb-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{{ backupError }}</p>
+
+          <ul class="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/5">
+            <li v-for="b in backups" :key="b.name" class="flex items-center gap-2 px-3 py-2 text-sm">
+              <AppIcon glyph="🗄" class="text-slate-500" />
+              <span class="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-300" :title="b.name">{{ b.name }}</span>
+              <span class="font-mono text-[11px] text-slate-600">{{ fmtMB(b.bytes) }}</span>
+            </li>
+            <li v-if="!backups.length" class="px-3 py-6 text-center text-sm text-slate-500">No backups yet.</li>
+          </ul>
+          <p class="mt-3 text-[12px] text-slate-500">
+            Stored in <span class="font-mono text-slate-400">{{ backupDir }}</span>. Restore is CLI-only for safety:
+            <span class="font-mono text-slate-400">asmltr backup restore &lt;file&gt; [--dry-run]</span>.
+          </p>
+        </div>
+
         <p v-if="notice" class="mt-4 text-center text-[12px] text-slate-400">{{ notice }}</p>
       </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+.field-input {
+  @apply rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none transition-colors;
+  @apply placeholder:text-slate-600 focus:border-brand-violet/60 focus:bg-white/[0.06];
+}
+</style>
