@@ -121,8 +121,8 @@ export const authApi = {
   passkeyRegisterOptions: () => postCore('/v2/auth/passkey/register/options'),
   passkeyRegisterVerify: (response, label) => postCore('/v2/auth/passkey/register/verify', { response, label }),
   passkeyRemove: (id) => reqCore('DELETE', `/v2/auth/passkey/${encodeURIComponent(id)}`),
-  passkeyLoginOptions: (username) => postCore('/v2/auth/passkey/login/options', { username }),
-  passkeyLoginVerify: (username, response) => postCore('/v2/auth/passkey/login/verify', { username, response })
+  passkeyLoginOptions: (username) => postCore('/v2/auth/passkey/login/options', username ? { username } : {}),
+  passkeyLoginVerify: (response) => postCore('/v2/auth/passkey/login/verify', { response })
 }
 
 // OIDC provider — client registry (asmltr issues tokens to registered apps). Session-gated.

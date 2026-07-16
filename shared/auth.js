@@ -164,6 +164,14 @@ function removePasskey(username, credId) {
   u.webauthn.credentials = u.webauthn.credentials.filter((c) => c.id !== credId);
   save(d); return u.webauthn.credentials.length < before;
 }
+/** Which account owns a credential id — for usernameless (discoverable) passkey login. */
+function findPasskeyOwner(credId) {
+  const d = load();
+  for (const [username, u] of Object.entries(d.users)) {
+    if (u.webauthn && u.webauthn.credentials && u.webauthn.credentials.some((c) => c.id === credId)) return username;
+  }
+  return null;
+}
 
 // ── sessions (stateless, HMAC-signed) ──────────────────────────────────────────
 const b64u = (b) => Buffer.from(b).toString('base64url');
@@ -243,6 +251,6 @@ module.exports = {
   isLockedOut, recordFail, recordSuccess,
   sessionCookie, clearCookie, tokenFromReq, requireAuth,
   totpEnabledFor, verifySecondFactor, totpBeginEnroll, totpConfirmEnroll, totpDisable,
-  accountExists, listPasskeys, passkeysEnabled, addPasskey, updatePasskeyCounter, removePasskey,
+  accountExists, listPasskeys, passkeysEnabled, addPasskey, updatePasskeyCounter, removePasskey, findPasskeyOwner,
   COOKIE, SESSION_TTL,
 };
