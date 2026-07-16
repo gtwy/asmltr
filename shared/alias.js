@@ -39,9 +39,11 @@ function writableBinDir(prefer) {
  * @param {boolean} [o.force] provision even if the name already resolves to a foreign command
  * @param {string} [o.target] what the shim runs (default: `asmltr claude`)
  */
-function provisionAlias({ name, dir, force = false, target = 'asmltr claude' } = {}) {
+function provisionAlias({ name, dir, force = false, target } = {}) {
   const alias = String(name || identity.aliasName() || '').toLowerCase().replace(/[^a-z0-9._-]/g, '');
   if (!alias) return { ok: false, error: 'no valid alias name (set ASSISTANT_NAME)' };
+  // The `<agent-name>` command points at the DEFAULT reasoning engine (asmltr claude|gemini|codex).
+  if (!target) { try { target = 'asmltr ' + require('./engines').getDefault(); } catch (_) { target = 'asmltr claude'; } }
 
   const binDir = writableBinDir(dir);
   if (!binDir) return { ok: false, error: 'no writable bin dir on PATH (tried ~/.local/bin, /usr/local/bin)' };

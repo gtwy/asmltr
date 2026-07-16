@@ -739,8 +739,8 @@ async function cmdVault(rest, f) {
     switch (cmd) {
       case undefined:
       case 'top': return require('./tui').run(BASE, CORE_BASE, TOKEN, A, { base: MANAGER_BASE, token: MANAGER_TOKEN });
-      case 'claude': { // launch an interactive claude session wrapped for monitoring + takeover
-        const r = spawnSync(process.execPath, [require('path').join(__dirname, 'asmltr-claude.js'), ...rest], { stdio: 'inherit' });
+      case 'claude': case 'gemini': case 'codex': { // launch an interactive reasoning-engine session (monitored + takeover-able)
+        const r = spawnSync(process.execPath, [require('path').join(__dirname, 'asmltr-engine.js'), cmd, ...rest], { stdio: 'inherit' });
         return process.exit(r.status || 0);
       }
       case 'provision-alias': { // create a `<agent-name>` → `asmltr claude` command shim (conflict-checked)
