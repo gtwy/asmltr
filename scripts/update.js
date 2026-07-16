@@ -114,7 +114,7 @@ function done(code, summary) {
 }
 
 // ---- main ----
-(function main() {
+(async function main() {
   if (!version.VALID_CHANNELS.includes(CHANNEL)) { log(`invalid channel '${CHANNEL}'`); if (JSON_OUT) console.log(JSON.stringify({ ok: false, error: 'invalid channel' })); process.exit(1); }
 
   // Externally-managed install (package/image/config-management deploy): updating in place is the
@@ -171,6 +171,15 @@ function done(code, summary) {
     if (JSON_OUT) console.log(JSON.stringify(plan, null, 2));
     releaseLock();
     process.exit(0);
+  }
+
+  // pre-update snapshot — a data-level safety net beyond the git rollback point (best-effort, non-fatal).
+  // Skipped when no passphrase is configured (needs ASMLTR_BACKUP_PASSPHRASE or the vault password) or
+  // when ASMLTR_BACKUP_ON_UPDATE=off. The git rollback below always runs regardless.
+  if (process.env.ASMLTR_BACKUP_ON_UPDATE !== 'off' && (process.env.ASMLTR_BACKUP_PASSPHRASE || process.env.TRUST_PROTOCOL_VAULT_PASSWORD)) {
+    phase('pre-update snapshot');
+    try { const b = await require('./backup').createBackup({ label: 'pre-update', log }); log('snapshot: ' + b.file); }
+    catch (e) { log('snapshot failed (non-fatal): ' + e.message); }
   }
 
   // checkout

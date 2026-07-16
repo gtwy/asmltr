@@ -615,6 +615,21 @@ app.post('/v2/silos/:id/mkdir', async (req, res) => { try { await openSilo(req.p
 app.post('/v2/silos/:id/mv', async (req, res) => { try { const b = req.body || {}; await openSilo(req.params.id).mv(b.from, b.to); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.delete('/v2/silos/:id/file', async (req, res) => { try { await openSilo(req.params.id).rm(req.query.path); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
 
+// Backups — encrypted, restorable snapshots (scripts/backup.js). Passphrase comes from the request or the
+// core env (ASMLTR_BACKUP_PASSPHRASE / vault password); restore stays CLI-only (a deliberate footgun guard).
+const backup = require('../../scripts/backup');
+app.get('/v2/backups', (req, res) => { try { res.json({ backups: backup.listBackups(), dir: backup.BACKUP_DIR }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/v2/backups', async (req, res) => {
+  const b = req.body || {};
+  try { const r = await backup.createBackup({ label: b.label || 'manual', passphrase: b.passphrase }); res.status(201).json({ ok: true, file: r.file, bytes: r.bytes, manifest: r.manifest }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/v2/backups/verify', async (req, res) => {
+  const b = req.body || {};
+  try { const r = await backup.verifyBackup(b.file, { passphrase: b.passphrase }); res.json(r); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
 // from config or the reverse proxy's Authelia-resolved user, so the same build works anywhere.
