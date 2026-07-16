@@ -742,6 +742,20 @@ app.delete('/v2/vault/secrets/:name', async (req, res) => {
   try { await vault.deleteSecret(req.params.name); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
+// Reasoning engines — the pluggable agentic backends (claude/gemini/codex). Registry + default + per-engine
+// config (shared/engines.js). Changing the default re-points the `<agent-name>` terminal alias.
+const engines = require('../../shared/engines');
+app.get('/v2/engines', (req, res) => res.json({ engines: engines.list(), default: engines.getDefault() }));
+app.post('/v2/engines/default', (req, res) => {
+  const id = (req.body || {}).id;
+  try {
+    engines.setDefault(id);
+    try { require('../../shared/alias').provisionAlias({}); } catch (_) { /* alias refresh best-effort */ }
+    res.json({ ok: true, default: engines.getDefault() });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/v2/engines/:id', (req, res) => { try { res.json({ ok: true, config: engines.setConfig(req.params.id, req.body || {}) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+
 // Data silos — the file-explorer surface over shared/silo.js (`:id` = silo id; `self`/omitted → the Self silo).
 // Read verbs (list/overview/ls/tree/find/file) + safe writes (mkdir/put/mv/rm/new). Paths are silo-relative.
 function openSilo(id) { return (!id || id === 'self') ? silo.ensureSelf(identity.name()) : silo.open(id); }
