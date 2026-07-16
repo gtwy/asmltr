@@ -641,9 +641,14 @@ async function cmdBackup(rest, f) {
       for (const b of all) console.log(`${A.bold(b.name)}  ${A.dim((b.bytes / 1048576).toFixed(2) + ' MB')}`);
       return;
     }
-    case 'verify': { const r = await backup.verifyBackup(pos[0], opts); console.log(`${A.grn('✓')} ${r.manifest.version}/${r.manifest.label} @ ${new Date(r.manifest.created_at).toISOString()}`); return; }
-    case 'restore': { await backup.restoreBackup(pos[0], { ...opts, dryRun: f['dry-run'] || f.n }); return; }
-    default: console.log('asmltr backup <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--out path]');
+    case 'verify': {
+      const r = await backup.verifyBackup(pos[0], opts);
+      if (r.ok) console.log(`${A.grn('✓')} ${r.manifest.version}/${r.manifest.label} @ ${new Date(r.manifest.created_at).toISOString()} ${A.dim('(' + r.checked + ' artifacts verified)')}`);
+      else console.log(`${A.red('✗ integrity FAILED')} — ${r.mismatches.map((m) => m.file).join(', ')}`);
+      return;
+    }
+    case 'restore': { await backup.restoreBackup(pos[0], { ...opts, dryRun: f['dry-run'] || f.n, activate: f.activate, force: f.force }); return; }
+    default: console.log('asmltr backup <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--activate] [--force] [--out path]');
   }
 }
 

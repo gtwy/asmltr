@@ -50,15 +50,18 @@ const SQLITE_DBS = [
   { key: 'trust', path: process.env.ASMLTR_TRUST_DB || path.join(REPO, 'core', 'data', 'trust.db') },
   { key: 'insights', path: process.env.ASMLTR_INSIGHTS_DB || path.join(REPO, 'insights', 'collector', 'data', 'insights.db') },
 ];
-// Gitignored, secret-bearing repo config — without these a restore can't reconnect.
-const CONFIG_FILES = [
-  '.env', 'CLAUDE.local.md',
-  'connectors/types/mcp/clients.json',
-  'connectors/types/openai/keys.json',
-  'connectors/types/discord/channel-aliases.json',
-  'core/src/trust/seed.json',
-  'insights/docker-compose.eve.yml',
-];
+// Gitignored, secret-bearing repo config — without these a restore can't reconnect. Overridable via
+// ASMLTR_BACKUP_CONFIG_FILES (comma-separated repo-relative paths) for bespoke installs / testing.
+const CONFIG_FILES = (process.env.ASMLTR_BACKUP_CONFIG_FILES != null
+  ? process.env.ASMLTR_BACKUP_CONFIG_FILES.split(',').map((s) => s.trim()).filter(Boolean)
+  : [
+    '.env', 'CLAUDE.local.md',
+    'connectors/types/mcp/clients.json',
+    'connectors/types/openai/keys.json',
+    'connectors/types/discord/channel-aliases.json',
+    'core/src/trust/seed.json',
+    'insights/docker-compose.eve.yml',
+  ]);
 
 // ── crypto ───────────────────────────────────────────────────────────────────
 function deriveKey(passphrase, salt) { return crypto.scryptSync(Buffer.from(passphrase, 'utf8'), salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }); }
@@ -105,6 +108,43 @@ function sha256(file) { const h = crypto.createHash('sha256'); h.update(fs.readF
 function tar(args) { const r = spawnSync('tar', args, { encoding: 'utf8' }); if (r.status !== 0) throw new Error('tar failed: ' + (r.stderr || r.status)); return r.stdout; }
 function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
 function ts() { return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', ''); }
+
+// Integrity — recompute each recorded artifact's SHA-256 against the manifest (accuracy guarantee on
+// top of the GCM tag: GCM proves the archive is authentic; this proves create() captured what it claims).
+function verifyChecksums(root, manifest, log = () => {}) {
+  const sums = manifest.checksums || {};
+  const mismatches = [];
+  let checked = 0;
+  for (const [rel, want] of Object.entries(sums)) {
+    const p = path.join(root, rel);
+    if (!fs.existsSync(p)) { mismatches.push({ file: rel, reason: 'missing' }); log('✗ ' + rel + ': missing'); continue; }
+    checked++;
+    const got = sha256(p);
+    if (got !== want) { mismatches.push({ file: rel, reason: 'checksum', want, got }); log('✗ ' + rel + ': checksum mismatch'); }
+  }
+  return { checked, mismatches };
+}
+
+// Bring a freshly-restored install back ONLINE: idempotent setup steps (relink CLI/skill/alias) → restart.
+function activate(log = () => {}) {
+  try { const { runSetupSteps } = require('./run-setup-steps'); const r = runSetupSteps({ log }); log(`setup: ${r.applied.length} applied, ${r.alreadyDone.length} already done, ${r.failed.length} failed`); }
+  catch (e) { log('setup steps error (non-fatal): ' + e.message); }
+  const svcs = ['asmltr-core', 'asmltr-connector-manager', 'asmltr-insights-collector'];
+  const r = spawnSync('pm2', ['restart', ...svcs], { encoding: 'utf8' });
+  if (r.status === 0) log('restarted: ' + svcs.join(' '));
+  else log('pm2 restart skipped/failed: ' + (r.stderr || (r.error && r.error.message) || r.status));
+  return r.status === 0;
+}
+
+// Poll the core's /version until it answers — confirms the restored install is actually serving.
+async function healthCheck(log = () => {}, base = process.env.ASMLTR_CORE_BASE || 'http://127.0.0.1:3023') {
+  for (let i = 0; i < 12; i++) {
+    try { const r = await fetch(base + '/version'); if (r.ok) { const v = await r.json(); log(`online: ${v.service} ${v.version} (${v.channel})`); return true; } } catch (_) {}
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  log('health check: core did not report /version in time');
+  return false;
+}
 
 function resolvePassphrase(opts = {}) {
   const p = opts.passphrase || process.env.ASMLTR_BACKUP_PASSPHRASE || process.env.TRUST_PROTOCOL_VAULT_PASSWORD;
@@ -181,17 +221,21 @@ async function createBackup(opts = {}) {
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
 }
 
-// ── verify (decrypt + validate manifest + tar integrity, no restore) ──────────
+// ── verify (decrypt + tar integrity + per-file checksums, no restore) ─────────
 async function verifyBackup(file, opts = {}) {
   const passphrase = resolvePassphrase(opts);
+  const log = opts.log || (() => {});
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-vrfy-'));
   const tarPath = path.join(tmp, 'archive.tgz');
+  const extract = path.join(tmp, 'x');
   try {
-    await decryptStream(file, tarPath, passphrase);
-    tar(['-tzf', tarPath]);                                  // gzip + tar structural integrity
-    tar(['-xzf', tarPath, '-C', tmp, './manifest.json']);
-    const manifest = JSON.parse(fs.readFileSync(path.join(tmp, 'manifest.json'), 'utf8'));
-    return { ok: true, file, bytes: fs.statSync(file).size, manifest };
+    await decryptStream(file, tarPath, passphrase);   // GCM auth — archive is authentic + right passphrase
+    tar(['-tzf', tarPath]);                           // gzip + tar structural integrity
+    ensureDir(extract);
+    tar(['-xzf', tarPath, '-C', extract]);
+    const manifest = JSON.parse(fs.readFileSync(path.join(extract, 'manifest.json'), 'utf8'));
+    const { checked, mismatches } = verifyChecksums(extract, manifest, log);
+    return { ok: mismatches.length === 0, file, bytes: fs.statSync(file).size, manifest, checked, mismatches };
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
@@ -208,6 +252,12 @@ async function restoreBackup(file, opts = {}) {
     ensureDir(extract);
     tar(['-xzf', tarPath, '-C', extract]);
     const manifest = JSON.parse(fs.readFileSync(path.join(extract, 'manifest.json'), 'utf8'));
+
+    // Accuracy gate: every recorded artifact must match its manifest checksum before we place anything.
+    const integrity = verifyChecksums(extract, manifest, log);
+    if (integrity.mismatches.length && !opts.force) throw new Error(`integrity check failed — ${integrity.mismatches.length} file(s) mismatched/missing (${integrity.mismatches.map((m) => m.file).join(', ')}); pass force to override`);
+    if (integrity.checked) log(`integrity: ${integrity.checked} artifact(s) verified`);
+
     const plan = [];
 
     for (const d of SQLITE_DBS) {
@@ -237,8 +287,13 @@ async function restoreBackup(file, opts = {}) {
       log(`restored ${p.to}`);
     }
     if (homeDir) { fs.cpSync(homeSrc, ASMLTR, { recursive: true }); log(`merged ~/.asmltr (${manifest.components.home && manifest.components.home.files} files)`); }
-    log(`restore complete — prior files stashed under ${stash}. Restart services: pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector`);
-    return { ok: true, manifest, restored: plan.map((p) => p.to), stash };
+
+    // Bring the install back online (setup.d → restart → health-check), or tell the operator how.
+    let online = null;
+    if (opts.activate) { activate(log); online = await healthCheck(log); }
+    else log('restore complete — activate with `asmltr backup restore <file> --activate`, or: pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector');
+    log(`prior files stashed under ${stash}`);
+    return { ok: true, manifest, restored: plan.map((p) => p.to), stash, online, integrity };
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
@@ -309,7 +364,7 @@ function startScheduler({ log = () => {}, intervalMs = 10 * 60 * 1000 } = {}) {
   return t;
 }
 
-module.exports = { createBackup, verifyBackup, restoreBackup, listBackups, listRemoteBackups, pruneBackups, getSchedule, setSchedule, runScheduled, startScheduler, BACKUP_DIR };
+module.exports = { createBackup, verifyBackup, restoreBackup, verifyChecksums, activate, healthCheck, listBackups, listRemoteBackups, pruneBackups, getSchedule, setSchedule, runScheduled, startScheduler, BACKUP_DIR };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 if (require.main === module) {
@@ -321,8 +376,8 @@ if (require.main === module) {
     try {
       if (cmd === 'create') { const r = await createBackup({ label: flags.label, passphrase: flags.passphrase, out: flags.out, log }); console.log(JSON.stringify({ file: r.file, bytes: r.bytes }, null, 2)); }
       else if (cmd === 'list') { for (const b of listBackups()) console.log(`${b.name}\t${(b.bytes / 1048576).toFixed(2)} MB`); }
-      else if (cmd === 'verify') { const r = await verifyBackup(pos[0], { passphrase: flags.passphrase }); console.log('OK — ' + r.manifest.version + '/' + r.manifest.label + ' @ ' + new Date(r.manifest.created_at).toISOString()); }
-      else if (cmd === 'restore') { await restoreBackup(pos[0], { passphrase: flags.passphrase, dryRun: flags['dry-run'], log }); }
+      else if (cmd === 'verify') { const r = await verifyBackup(pos[0], { passphrase: flags.passphrase, log }); console.log(r.ok ? `OK — ${r.manifest.version}/${r.manifest.label} @ ${new Date(r.manifest.created_at).toISOString()} (${r.checked} artifacts verified)` : `INTEGRITY FAILED — ${r.mismatches.map((m) => m.file).join(', ')}`); if (!r.ok) process.exit(1); }
+      else if (cmd === 'restore') { await restoreBackup(pos[0], { passphrase: flags.passphrase, dryRun: flags['dry-run'], activate: flags.activate, force: flags.force, log }); }
       else { console.log('usage: node scripts/backup.js <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--out path]'); process.exit(cmd ? 1 : 0); }
     } catch (e) { console.error('backup error: ' + e.message); process.exit(1); }
   })();
