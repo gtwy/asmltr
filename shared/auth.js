@@ -82,6 +82,68 @@ function verifyPassword(username, password) {
   return !!u && want.length === got.length && crypto.timingSafeEqual(want, got);
 }
 
+// ── TOTP (RFC 6238) + recovery codes ───────────────────────────────────────────
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function b32encode(buf) {
+  let bits = 0, val = 0, out = '';
+  for (const b of buf) { val = (val << 8) | b; bits += 8; while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits > 0) out += B32[(val << (5 - bits)) & 31];
+  return out;
+}
+function b32decode(str) {
+  let bits = 0, val = 0; const out = [];
+  for (const c of String(str).toUpperCase().replace(/=+$/, '').replace(/\s/g, '')) { const i = B32.indexOf(c); if (i < 0) continue; val = (val << 5) | i; bits += 5; if (bits >= 8) { out.push((val >>> (bits - 8)) & 0xff); bits -= 8; } }
+  return Buffer.from(out);
+}
+function hotp(secretBuf, counter) {
+  const buf = Buffer.alloc(8); for (let i = 7; i >= 0; i--) { buf[i] = counter & 0xff; counter = Math.floor(counter / 256); }
+  const h = crypto.createHmac('sha1', secretBuf).update(buf).digest();
+  const o = h[h.length - 1] & 0xf;
+  const n = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(n % 1e6).padStart(6, '0');
+}
+/** Generate a TOTP secret + the otpauth:// URL for a QR code. */
+function generateTotp(username) {
+  const secret = b32encode(crypto.randomBytes(20));
+  const issuer = encodeURIComponent(process.env.ASSISTANT_NAME || 'asmltr');
+  const label = encodeURIComponent(`${process.env.ASSISTANT_NAME || 'asmltr'}:${username}`);
+  return { secret, otpauth: `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&period=30&digits=6&algorithm=SHA1` };
+}
+/** Verify a 6-digit TOTP code against a base32 secret (±1 step tolerance). */
+function verifyTotpCode(secret, code) {
+  if (!secret || !/^\d{6}$/.test(String(code || '').trim())) return false;
+  const buf = b32decode(secret); const step = Math.floor(Date.now() / 1000 / 30);
+  const want = String(code).trim();
+  for (let d = -1; d <= 1; d++) { const c = hotp(buf, step + d); if (crypto.timingSafeEqual(Buffer.from(c), Buffer.from(want))) return true; }
+  return false;
+}
+const totpEnabled = (username) => { const u = load().users[username]; return !!(u && u.totp && u.totp.enabled); };
+
+/** Begin TOTP enrollment: stash a PENDING secret (not enabled until a code is confirmed). */
+function totpBeginEnroll(username) {
+  const d = load(); const u = d.users[username]; if (!u) throw new Error('no such account');
+  const t = generateTotp(username);
+  u.totp = { ...(u.totp || {}), pending_secret: t.secret, enabled: !!(u.totp && u.totp.enabled) };
+  save(d); return t;
+}
+/** Confirm enrollment with a code → enable TOTP + return fresh recovery codes. */
+function totpConfirmEnroll(username, code) {
+  const d = load(); const u = d.users[username]; if (!u || !u.totp || !u.totp.pending_secret) throw new Error('no pending enrollment');
+  if (!verifyTotpCode(u.totp.pending_secret, code)) throw new Error('code did not verify');
+  u.totp = { secret: u.totp.pending_secret, enabled: true, enrolled_at: Date.now() };
+  const codes = Array.from({ length: 10 }, () => crypto.randomBytes(5).toString('hex'));
+  u.recovery = codes.map((c) => crypto.createHash('sha256').update(c).digest('hex'));
+  save(d); return { codes };
+}
+function totpDisable(username) { const d = load(); const u = d.users[username]; if (u) { delete u.totp; delete u.recovery; save(d); } return true; }
+/** Verify + CONSUME a one-time recovery code. */
+function verifyRecoveryCode(username, code) {
+  const d = load(); const u = d.users[username]; if (!u || !u.recovery) return false;
+  const h = crypto.createHash('sha256').update(String(code || '').trim()).digest('hex');
+  const i = u.recovery.indexOf(h); if (i < 0) return false;
+  u.recovery.splice(i, 1); save(d); return true;
+}
+
 // ── sessions (stateless, HMAC-signed) ──────────────────────────────────────────
 const b64u = (b) => Buffer.from(b).toString('base64url');
 function sign(payloadB64) { return crypto.createHmac('sha256', secret()).update(payloadB64).digest('base64url'); }
@@ -118,12 +180,15 @@ function recordFail(key) { const a = attempts.get(key) || { fails: 0, until: 0 }
 function recordSuccess(key) { attempts.delete(key); }
 
 // ── cookie helpers ──────────────────────────────────────────────────────────
+// ASMLTR_AUTH_COOKIE_DOMAIN (e.g. `.example.com`) scopes the session cookie to a PARENT domain so a
+// single login covers every subdomain — the basis for forward-auth gating other services (phase E).
+const cookieDomain = () => (process.env.ASMLTR_AUTH_COOKIE_DOMAIN ? `; Domain=${process.env.ASMLTR_AUTH_COOKIE_DOMAIN}` : '');
 function sessionCookie(token, { secure = true } = {}) {
   const attrs = [`${COOKIE}=${token}`, 'HttpOnly', 'Path=/', `Max-Age=${SESSION_TTL}`, 'SameSite=Lax'];
   if (secure) attrs.push('Secure');
-  return attrs.join('; ');
+  return attrs.join('; ') + cookieDomain();
 }
-function clearCookie() { return `${COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`; }
+function clearCookie() { return `${COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax` + cookieDomain(); }
 function tokenFromReq(req) {
   const auth = req.headers['authorization'];
   if (auth && /^Bearer /i.test(auth)) return auth.replace(/^Bearer /i, '').trim();
@@ -141,10 +206,21 @@ function requireAuth(req, res, next) {
   next();
 }
 
+/** Does this account require a second factor at login? */
+function totpEnabledFor(username) { return totpEnabled(username); }
+/** Check a login's second factor: a valid TOTP OR a one-time recovery code. */
+function verifySecondFactor(username, code) {
+  const u = load().users[username];
+  if (!u || !u.totp || !u.totp.enabled) return true; // no 2FA on this account
+  if (verifyTotpCode(u.totp.secret, code)) return true;
+  return verifyRecoveryCode(username, code);
+}
+
 module.exports = {
   enabled, hasAccount, listUsers, createAccount, setPassword, verifyPassword,
   issueSession, verifySession, revokeAllSessions,
   isLockedOut, recordFail, recordSuccess,
   sessionCookie, clearCookie, tokenFromReq, requireAuth,
+  totpEnabledFor, verifySecondFactor, totpBeginEnroll, totpConfirmEnroll, totpDisable,
   COOKIE, SESSION_TTL,
 };

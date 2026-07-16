@@ -561,7 +561,7 @@ const auth = require('../../shared/auth');
 const authSecureCookie = () => process.env.ASMLTR_AUTH_INSECURE_COOKIE !== '1'; // Secure cookie by default (https)
 app.get('/v2/auth/status', (req, res) => {
   const s = auth.verifySession(auth.tokenFromReq(req));
-  res.json({ enabled: auth.enabled(), configured: auth.hasAccount(), user: s ? s.sub : null });
+  res.json({ enabled: auth.enabled(), configured: auth.hasAccount(), user: s ? s.sub : null, totp: s ? auth.totpEnabledFor(s.sub) : false });
 });
 app.post('/v2/auth/setup', (req, res) => { // first-run only: create the initial account
   if (auth.hasAccount()) return res.status(403).json({ error: 'an account already exists' });
@@ -574,6 +574,11 @@ app.post('/v2/auth/login', (req, res) => {
   const key = (b.username || '') + '|' + (req.ip || (req.socket && req.socket.remoteAddress) || '');
   if (auth.isLockedOut(key)) return res.status(429).json({ error: 'too many attempts — locked out, try again later' });
   if (!b.username || !b.password || !auth.verifyPassword(b.username, b.password)) { auth.recordFail(key); return res.status(401).json({ error: 'invalid credentials' }); }
+  // password OK — second factor if the account has TOTP enabled (accepts a TOTP code or a recovery code)
+  if (auth.totpEnabledFor(b.username)) {
+    if (!b.totp) return res.status(401).json({ error: 'second factor required', totp_required: true });
+    if (!auth.verifySecondFactor(b.username, b.totp)) { auth.recordFail(key); return res.status(401).json({ error: 'invalid code', totp_required: true }); }
+  }
   auth.recordSuccess(key);
   res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(b.username), { secure: authSecureCookie() }));
   res.json({ ok: true, user: b.username });
@@ -582,7 +587,16 @@ app.post('/v2/auth/logout', (req, res) => { res.setHeader('Set-Cookie', auth.cle
 app.get('/v2/auth/session', (req, res) => {
   const s = auth.verifySession(auth.tokenFromReq(req));
   if (!s) return res.status(401).json({ error: 'no session' });
-  res.json({ user: s.sub });
+  res.json({ user: s.sub, totp: auth.totpEnabledFor(s.sub) });
+});
+// TOTP 2FA enrollment (requires a live session). setup → scan QR → enable with a code → recovery codes.
+function requireSession(req, res, next) { const s = auth.verifySession(auth.tokenFromReq(req)); if (!s) return res.status(401).json({ error: 'authentication required' }); req.authUser = s.sub; next(); }
+app.post('/v2/auth/totp/setup', requireSession, (req, res) => { try { res.json(auth.totpBeginEnroll(req.authUser)); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/auth/totp/enable', requireSession, (req, res) => { try { res.json(auth.totpConfirmEnroll(req.authUser, (req.body || {}).code)); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/auth/totp/disable', requireSession, (req, res) => {
+  const b = req.body || {};
+  if (!auth.verifyPassword(req.authUser, b.password)) return res.status(401).json({ error: 'password required to disable 2FA' });
+  auth.totpDisable(req.authUser); res.json({ ok: true });
 });
 // Forward-auth check for the reverse proxy (nginx auth_request). 200 = allow, 401 = redirect to login.
 // When auth is DISABLED this returns 200 (break-glass: flip ASMLTR_AUTH=off + restart to unlock instantly).
@@ -590,6 +604,10 @@ app.get('/v2/auth/verify', (req, res) => {
   if (!auth.enabled()) return res.status(200).end();
   const s = auth.verifySession(auth.tokenFromReq(req));
   if (!s) return res.status(401).json({ error: 'authentication required' });
+  // Optional per-resource allowlist for forward-auth (phase E): ASMLTR_AUTH_ALLOW = comma-sep usernames.
+  // Empty = any authenticated session passes. Set per protected service via its own middleware if needed.
+  const allow = (process.env.ASMLTR_AUTH_ALLOW || '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (allow.length && !allow.includes(s.sub)) return res.status(403).json({ error: 'not authorized for this resource' });
   res.setHeader('Remote-User', s.sub); // identity header for the proxied service (forward-auth)
   res.status(200).end();
 });
