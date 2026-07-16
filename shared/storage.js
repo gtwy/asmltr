@@ -115,6 +115,9 @@ class EncryptedStorage {
   async move(a, b) { return this.inner.move(a, b); }
   async mkdir(rel) { return this.inner.mkdir(rel); }
   async mint(rel, opts) { return this.inner.mint(rel, opts); }
+  /** Zero the data key when the silo handle is done. The key lived only in this runtime crypto layer —
+   *  never logged, never returned by a method, never surfaced to the model's context. */
+  dispose() { if (this.key) { this.key.fill(0); this.key = null; } }
 }
 
 /** Wrap a driver with encryption-at-rest. */
