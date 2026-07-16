@@ -22,7 +22,13 @@ useTurnNotifications(store)
 // Live update progress (persistent panel, survives the mid-update restart).
 const { status: updProgress, active: updActive, begin: updBegin, dismiss: updDismiss } = useUpdateProgress()
 
-const navItems = NAV_ROUTES
+// Notifications lives as a bell icon in the header (not a nav row), so filter it out of the menu.
+const navItems = computed(() => NAV_ROUTES.filter((r) => r.name !== 'notifications'))
+
+async function logout() {
+  try { await authApi.logout() } catch (_) {}
+  window.location.reload() // cookie cleared → the auth gate shows the login screen
+}
 
 const statusText = computed(() => (store.connected ? 'live' : 'offline'))
 
@@ -127,10 +133,22 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- right side: (mobile) connection pill. The turn-complete notification toggle lives in
-             Settings → Notifications; the ✦ Notifications nav item shows the history. -->
-        <div class="flex items-center gap-2">
-          <div class="flex items-center gap-2 lg:hidden">
+        <!-- right side: quick actions (notifications bell + sign out) and, on mobile, the connection pill. -->
+        <div class="flex items-center gap-1">
+          <RouterLink
+            to="/notifications" title="Notifications"
+            class="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200"
+            :class="route.name === 'notifications' ? 'text-brand-violet' : ''"
+          >
+            <AppIcon glyph="✦" class="text-base" />
+          </RouterLink>
+          <button
+            v-if="auth.enabled" type="button" title="Sign out" @click="logout"
+            class="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+          >
+            <AppIcon glyph="⎋" class="text-base" />
+          </button>
+          <div class="ml-1 flex items-center gap-2 lg:hidden">
             <span
               class="h-2 w-2 rounded-full"
               :class="store.connected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-rose-500'"
