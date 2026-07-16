@@ -31,6 +31,16 @@ keeps working unchanged. Once you enable it, it becomes the primary store and yo
 
 ## Enabling it
 
+!!! tip "Guided path — `asmltr vault init`"
+    Once the vault is **running** (step 1 below) and you have its admin key, one command does steps 2–3:
+    ```bash
+    asmltr vault init --url http://127.0.0.1:9500/v1 --admin-key <admin key> [--unseal <passphrase>]
+    ```
+    It health-checks the vault, unseals it if needed, registers the assistant as a **SACRED** agent,
+    writes `ASMLTR_VAULT_*` to `.env`, and verifies a `store → proxy-fetch → delete` roundtrip. It points
+    at an existing vault — it won't silently stand up a security service. `asmltr vault status` shows
+    reachability + seal state at any time. The manual steps below are the same thing, spelled out.
+
 ### 1. Run the vault
 
 The vault is a small Python service (Docker) on `127.0.0.1:9500`:
@@ -50,8 +60,10 @@ docker compose up -d --build
 curl -s http://127.0.0.1:9500/v1/health   # {"status":"ok","sealed":false}
 ```
 
-> **Sealed vs. unsealed.** The vault seals at rest. In production a human runs `trust-protocol unseal`
-> with the master password (never written to disk); in dev, `TRUST_PROTOCOL_VAULT_PASSWORD` auto-unseals
+> **Sealed vs. unsealed.** The vault seals at rest. Unseal it with the master passphrase from asmltr —
+> `asmltr vault unseal <passphrase>`, or the **Vault** plane's inline unseal form when the banner shows
+> "sealed" (the passphrase is held only in the vault's memory, never persisted). In dev,
+> `TRUST_PROTOCOL_VAULT_PASSWORD` auto-unseals
 > on start. **Back up the admin key + vault password** — they're the root of trust and can't live in the
 > vault itself.
 
