@@ -598,6 +598,31 @@ app.post('/v2/auth/totp/disable', requireSession, (req, res) => {
   if (!auth.verifyPassword(req.authUser, b.password)) return res.status(401).json({ error: 'password required to disable 2FA' });
   auth.totpDisable(req.authUser); res.json({ ok: true });
 });
+
+// WebAuthn passkeys — passwordless login + a strong factor (core/src/passkey.js).
+const passkey = require('./passkey');
+app.get('/v2/auth/passkeys', requireSession, (req, res) => res.json({ passkeys: auth.listPasskeys(req.authUser).map((c) => ({ id: c.id, name: c.name, added_at: c.added_at, last_used: c.last_used })) }));
+app.post('/v2/auth/passkey/register/options', requireSession, async (req, res) => { try { res.json(await passkey.registerOptions(req.authUser, req.headers.origin)); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/auth/passkey/register/verify', requireSession, async (req, res) => { const b = req.body || {}; try { res.json(await passkey.registerVerify(req.authUser, b.response, req.headers.origin, b.label)); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/auth/passkey/:id', requireSession, (req, res) => res.json({ ok: auth.removePasskey(req.authUser, req.params.id) }));
+// Passwordless login: options (by username) → the browser signs → verify → session.
+app.post('/v2/auth/passkey/login/options', async (req, res) => {
+  const b = req.body || {};
+  const key = (b.username || '') + '|' + (req.ip || '');
+  if (auth.isLockedOut(key)) return res.status(429).json({ error: 'too many attempts — locked out' });
+  try { res.json(await passkey.loginOptions(b.username, req.headers.origin)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/v2/auth/passkey/login/verify', async (req, res) => {
+  const b = req.body || {};
+  const key = (b.username || '') + '|' + (req.ip || '');
+  if (auth.isLockedOut(key)) return res.status(429).json({ error: 'too many attempts — locked out' });
+  try {
+    await passkey.loginVerify(b.username, b.response, req.headers.origin);
+    auth.recordSuccess(key);
+    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(b.username), { secure: authSecureCookie() }));
+    res.json({ ok: true, user: b.username });
+  } catch (e) { auth.recordFail(key); res.status(401).json({ error: e.message }); }
+});
 // Forward-auth check for the reverse proxy (nginx auth_request). 200 = allow, 401 = redirect to login.
 // When auth is DISABLED this returns 200 (break-glass: flip ASMLTR_AUTH=off + restart to unlock instantly).
 app.get('/v2/auth/verify', (req, res) => {

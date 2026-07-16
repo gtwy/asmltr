@@ -4,6 +4,7 @@
 // success we reload so the whole app boots cleanly with the session cookie in place.
 import { ref, computed } from 'vue'
 import { authApi } from '@/services/api'
+import { startAuthentication } from '@simplewebauthn/browser'
 import BrandLogo from '@/components/BrandLogo.vue'
 
 const props = defineProps({ configured: { type: Boolean, default: true }, agentName: { type: String, default: 'asmltr' } })
@@ -34,6 +35,21 @@ async function submit() {
     busy.value = false
   } catch (e) {
     error.value = e.message || 'Authentication failed.'
+    busy.value = false
+  }
+}
+
+async function passkeyLogin() {
+  error.value = ''
+  if (!username.value) { error.value = 'Enter your username first, then use your passkey.'; return }
+  busy.value = true
+  try {
+    const optionsJSON = await authApi.passkeyLoginOptions(username.value)
+    const response = await startAuthentication({ optionsJSON })
+    await authApi.passkeyLoginVerify(username.value, response)
+    window.location.reload()
+  } catch (e) {
+    error.value = e.message === 'no passkeys registered for this account' ? 'No passkey registered for that user.' : (e.message || 'Passkey sign-in failed.')
     busy.value = false
   }
 }
@@ -74,6 +90,15 @@ async function submit() {
           class="mt-1 rounded-xl bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 transition-opacity hover:opacity-90 disabled:opacity-40">
           {{ busy ? 'Please wait…' : totpRequired ? 'Verify & sign in' : (isSetup ? 'Create account & sign in' : 'Sign in') }}
         </button>
+
+        <!-- passkey (passwordless) — only on the sign-in step -->
+        <template v-if="!isSetup && !totpRequired">
+          <div class="my-1 flex items-center gap-3 text-[11px] text-slate-600"><span class="h-px flex-1 bg-white/10"></span>or<span class="h-px flex-1 bg-white/10"></span></div>
+          <button type="button" :disabled="busy" @click="passkeyLogin"
+            class="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition-colors hover:bg-white/10 disabled:opacity-40">
+            <AppIcon glyph="🔑" /> Sign in with a passkey
+          </button>
+        </template>
       </form>
     </div>
   </div>

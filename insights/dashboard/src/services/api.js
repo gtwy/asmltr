@@ -115,7 +115,14 @@ export const authApi = {
   // TOTP 2FA enrollment (requires a session)
   totpSetup: () => postCore('/v2/auth/totp/setup'),
   totpEnable: (code) => postCore('/v2/auth/totp/enable', { code }),
-  totpDisable: (password) => postCore('/v2/auth/totp/disable', { password })
+  totpDisable: (password) => postCore('/v2/auth/totp/disable', { password }),
+  // WebAuthn passkeys
+  passkeys: () => getCore('/v2/auth/passkeys'),
+  passkeyRegisterOptions: () => postCore('/v2/auth/passkey/register/options'),
+  passkeyRegisterVerify: (response, label) => postCore('/v2/auth/passkey/register/verify', { response, label }),
+  passkeyRemove: (id) => reqCore('DELETE', `/v2/auth/passkey/${encodeURIComponent(id)}`),
+  passkeyLoginOptions: (username) => postCore('/v2/auth/passkey/login/options', { username }),
+  passkeyLoginVerify: (username, response) => postCore('/v2/auth/passkey/login/verify', { username, response })
 }
 
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
