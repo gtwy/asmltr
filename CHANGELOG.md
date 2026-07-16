@@ -14,6 +14,26 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.4.0] - 2026-07-15
+
+### Added
+- **Aesthetic identity facets** — a free-text *aesthetic* sensibility + an ordered *signature palette*
+  (primary/secondary/tertiary; names and/or hex), injected into the anchor every session sees, so an
+  agent leans on its own colors/style when building assets and no other cue is given. Editable in
+  Settings → Identity (GUI + TUI via the manifest).
+- **Live UI theming from the palette** — the dashboard's brand accent, gradients, background glow,
+  pills, **nav logo** (now inline SVG), and **browser tab favicon** (regenerated data-URI) all retint
+  in real time when the signature palette is saved. Falls back to the built-in violet/pink.
+- **Discord server invite + membership management** — a *Servers* button on the Discord instance card
+  opens a modal with the copyable OAuth invite URL (to add the bot to a new server) and the list of
+  servers it's in, each with a *Leave* button. New connector `/servers` control endpoint + manager
+  proxy generalization; documented in `docs/connectors/discord.md`.
+
+### Fixed
+- **Self-goal extractor no longer gives up** (issue #16) — the reflector now climbs to the loosest
+  honest through-line (shared subject/domain/mode/direction; a single part's aim *is* the goal)
+  instead of defaulting to "no single goal — the parts are unrelated," which is now a rare last resort.
+
 ## [0.3.1] - 2026-07-15
 
 ### Added
