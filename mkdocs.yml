@@ -82,6 +82,7 @@ nav:
     - CLI sessions: connectors/cli.md
   - Integrations:
     - Integrations & storage: integrations/index.md
+    - Data silos & the Self silo: silos.md
   - Operating:
     - The asmltr CLI: cli.md
     - The dashboard: dashboard.md
