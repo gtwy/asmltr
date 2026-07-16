@@ -47,6 +47,17 @@ async function get(key) {
   // 2) secrets file
   if (val == null) { const f = loadFileSecrets(); if (f && f[key] != null) val = String(f[key]); }
 
+  // 2.5) TRUST vault — the primary secret store. Before the command provider so migrated keys resolve
+  //      from the vault while any not-yet-migrated key falls through (safe migration). Once everything
+  //      is in the vault the command provider is removed and this becomes the store.
+  if (val == null && process.env.ASMLTR_VAULT_URL && process.env.ASMLTR_VAULT_AGENT_KEY && /^[A-Za-z0-9_.:-]+$/.test(key)) {
+    try {
+      const v = await require('./vault').getSecret(key, 'secret resolution');
+      const s = v && (typeof v === 'string' ? v : v.value);
+      if (s) val = String(s);
+    } catch (_) { /* not in the vault → fall through */ }
+  }
+
   // 3) command provider (e.g. Bitwarden) — only for well-formed keys
   if (val == null && process.env.ASMLTR_SECRET_CMD && /^[A-Za-z0-9_.-]+$/.test(key)) {
     try {
