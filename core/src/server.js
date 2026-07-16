@@ -769,6 +769,11 @@ app.post('/v2/engines/:id/install', (req, res) => {
   if (r.status === 0) return res.json({ ok: true, id, version: engines.cleanVersion(id) });
   res.status(500).json({ error: 'install failed', detail: (r.stderr || r.error?.message || `exit ${r.status}`).slice(-800) });
 });
+// Connection / auth per engine — subscription (OAuth, owned by the CLI) vs API-key billing.
+// The key value is stored ONLY in the TRUST vault (SACRED); engines.json keeps a boolean flag.
+app.post('/v2/engines/:id/auth', (req, res) => { try { res.json({ ok: true, auth: engines.setAuthMode(req.params.id, (req.body || {}).mode) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.put('/v2/engines/:id/apikey', async (req, res) => { try { res.json({ ok: true, auth: await engines.setApiKey(req.params.id, (req.body || {}).value) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/engines/:id/apikey', async (req, res) => { try { res.json({ ok: true, auth: await engines.clearApiKey(req.params.id) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 
 // Data silos — the file-explorer surface over shared/silo.js (`:id` = silo id; `self`/omitted → the Self silo).
 // Read verbs (list/overview/ls/tree/find/file) + safe writes (mkdir/put/mv/rm/new). Paths are silo-relative.

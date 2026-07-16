@@ -23,13 +23,16 @@ const expand = (p) => (p && p.startsWith('~') ? path.join(HOME, p.slice(1)) : p)
 const ENGINES = {
   claude: { id: 'claude', label: 'Claude', bin: 'claude', binEnv: 'ASMLTR_CLAUDE_BIN', pkg: '@anthropic-ai/claude-code',
     binPaths: ['/usr/local/bin/claude', '/usr/bin/claude', '~/.claude/local/claude', '~/.local/bin/claude'],
-    defaultModel: 'opus', models: [{ id: 'opus', label: 'Opus (latest)' }, { id: 'sonnet', label: 'Sonnet (latest)' }, { id: 'haiku', label: 'Haiku (latest)' }] },
+    defaultModel: 'opus', models: [{ id: 'opus', label: 'Opus (latest)' }, { id: 'sonnet', label: 'Sonnet (latest)' }, { id: 'haiku', label: 'Haiku (latest)' }],
+    auth: { modes: ['subscription'], apiKeyEnv: null, loginCmd: 'claude', note: 'Uses your Claude subscription via the local CLI login. API-key billing is intentionally unsupported here — it would bypass your subscription and switch to metered, sandboxed billing.' } },
   gemini: { id: 'gemini', label: 'Gemini', bin: 'gemini', binEnv: 'ASMLTR_GEMINI_BIN', pkg: '@google/gemini-cli',
     binPaths: ['/usr/local/bin/gemini', '/usr/bin/gemini', '~/.local/bin/gemini'],
-    defaultModel: 'gemini-2.5-pro', models: [{ id: 'gemini-2.5-pro', label: '2.5 Pro' }, { id: 'gemini-2.5-flash', label: '2.5 Flash' }, { id: 'gemini-2.0-flash', label: '2.0 Flash' }] },
+    defaultModel: 'gemini-2.5-pro', models: [{ id: 'gemini-2.5-pro', label: '2.5 Pro' }, { id: 'gemini-2.5-flash', label: '2.5 Flash' }, { id: 'gemini-2.0-flash', label: '2.0 Flash' }],
+    auth: { modes: ['subscription', 'api_key'], apiKeyEnv: 'GEMINI_API_KEY', loginCmd: 'gemini', note: 'Subscription = Google login handled by the gemini CLI. API key = a Google AI Studio key (billed by Google).' } },
   codex: { id: 'codex', label: 'Codex', bin: 'codex', binEnv: 'ASMLTR_CODEX_BIN', pkg: '@openai/codex',
     binPaths: ['/usr/local/bin/codex', '/usr/bin/codex', '~/.local/bin/codex'],
-    defaultModel: 'gpt-5-codex', models: [{ id: 'gpt-5-codex', label: 'gpt-5-codex' }, { id: 'o3', label: 'o3' }, { id: 'o4-mini', label: 'o4-mini' }, { id: 'gpt-4.1', label: 'gpt-4.1' }] },
+    defaultModel: 'gpt-5-codex', models: [{ id: 'gpt-5-codex', label: 'gpt-5-codex' }, { id: 'o3', label: 'o3' }, { id: 'o4-mini', label: 'o4-mini' }, { id: 'gpt-4.1', label: 'gpt-4.1' }],
+    auth: { modes: ['subscription', 'api_key'], apiKeyEnv: 'OPENAI_API_KEY', loginCmd: 'codex login', note: 'Subscription = ChatGPT login via `codex login`. API key = an OpenAI API key (metered billing).' } },
 };
 
 const isExecFile = (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } };
@@ -80,6 +83,7 @@ function list() {
     isDefault: e.id === def,
     enabled: config(e.id).enabled !== false, // enabled unless explicitly disabled
     models: e.models || [], model: config(e.id).model || e.defaultModel || null,
+    auth: authInfo(e.id),                    // connection descriptor + selection (never the key value)
     config: config(e.id),
   }));
 }
@@ -87,4 +91,48 @@ function list() {
 /** The effective model for an engine: configured → engine default → null. */
 function modelFor(id) { const e = ENGINES[id]; if (!e) return null; return config(id).model || e.defaultModel || null; }
 
-module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, list };
+// ── connection / auth (subscription OAuth vs API-key billing; keys live in the TRUST vault) ─────
+const AUTH_SECRET = (id) => `engine_${id}_api_key`;
+/** Auth descriptor + current selection for an engine. Never includes the key value. */
+function authInfo(id) {
+  const e = ENGINES[id]; if (!e) return null;
+  const a = e.auth || { modes: ['subscription'], apiKeyEnv: null };
+  const c = config(id);
+  const mode = a.modes.includes(c.authMode) ? c.authMode : a.modes[0];
+  return { modes: a.modes, apiKeyEnv: a.apiKeyEnv || null, loginCmd: a.loginCmd || null, note: a.note || '', mode, hasApiKey: !!c.apiKeyStored };
+}
+function setAuthMode(id, mode) {
+  const a = authInfo(id); if (!a) throw new Error('unknown engine: ' + id);
+  if (!a.modes.includes(mode)) throw new Error(`engine ${id} does not support auth mode "${mode}"`);
+  setConfig(id, { authMode: mode });
+  return authInfo(id);
+}
+/** Store an engine's API key in the vault (SACRED) + switch it to api_key mode. Never written to disk. */
+async function setApiKey(id, value) {
+  const a = authInfo(id); if (!a) throw new Error('unknown engine: ' + id);
+  if (!a.apiKeyEnv) throw new Error(`engine ${id} does not support API-key auth`);
+  const v = String(value || '').trim(); if (!v) throw new Error('empty API key');
+  await require('./vault').storeSecret(AUTH_SECRET(id), { value: v }, { minTrust: 'SACRED' });
+  setConfig(id, { apiKeyStored: true, authMode: 'api_key' });
+  return authInfo(id);
+}
+async function clearApiKey(id) {
+  const a = authInfo(id); if (!a) throw new Error('unknown engine: ' + id);
+  try { await require('./vault').deleteSecret(AUTH_SECRET(id)); } catch (_) {}
+  const patch = { apiKeyStored: false };
+  if (config(id).authMode === 'api_key') patch.authMode = 'subscription';
+  setConfig(id, patch);
+  return authInfo(id);
+}
+/** Resolve the stored API key value from the vault (null if none / unreadable). */
+async function apiKeyValue(id) {
+  if (!config(id).apiKeyStored) return null;
+  try { const s = await require('./vault').getSecret(AUTH_SECRET(id), 'engine launch'); return (s && s.value) || null; } catch (_) { return null; }
+}
+/** Env vars to inject when launching an engine in api_key mode ({} for subscription or if unset). */
+async function envForLaunch(id) {
+  const a = authInfo(id); if (!a || a.mode !== 'api_key' || !a.apiKeyEnv) return {};
+  const v = await apiKeyValue(id); return v ? { [a.apiKeyEnv]: v } : {};
+}
+
+module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, authInfo, setAuthMode, setApiKey, clearApiKey, apiKeyValue, envForLaunch, list };

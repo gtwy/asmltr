@@ -26,10 +26,20 @@ like the original `asmltr claude`.
   `asmltr <default>`). Also `POST /v2/engines/default`.
 - **Install / update from the GUI.** The Engines tab shows each harness's installed version, checks npm for a
   newer one, and offers a one-click **Install** (if missing) or **Update** button (`npm i -g <pkg>@latest`).
-- **Model & runtime** (the former Runtime tab — model choice, permission mode) now lives under Engines too,
-  as the settings for the active engine.
-- **Config** lives in `~/.asmltr/engines.json` (default + per-engine settings); override a harness binary with
-  `ASMLTR_<ENGINE>_BIN`.
+- **Per-engine cards.** The Engines tab renders one card per harness, each with its own **model**, **connection**,
+  and (Claude only) **runtime** settings — so every engine is configured at once. The default (★) is what the
+  `<agent-name>` command uses, but any configured engine is invokable directly (`asmltr <engine>` / per-session).
+  Model choice is per-engine (`PATCH /v2/engines/:id { model }`); each harness exposes its own model list.
+- **Connection.** Each engine picks **Subscription (OAuth)** — the harness's own login, nothing stored — or
+  **API key** for metered billing. API keys are written **only to the TRUST vault** (`engine_<id>_api_key`,
+  SACRED); `engines.json` keeps just an `apiKeyStored` flag. At launch, api-key mode injects the key as the
+  harness's env var (`GEMINI_API_KEY`, `OPENAI_API_KEY`). Endpoints: `POST /v2/engines/:id/auth`,
+  `PUT|DELETE /v2/engines/:id/apikey`. **Claude is subscription-only** — api-key billing is refused, since it
+  bypasses the subscription (the project's core non-negotiable).
+- **Install / update + runtime** (the former Runtime tab — Agent SDK version/update, permission mode) live under
+  Engines too; runtime settings show on the Claude card (they govern the SDK web runner).
+- **Config** lives in `~/.asmltr/engines.json` (default + per-engine settings; never secrets); override a harness
+  binary with `ASMLTR_<ENGINE>_BIN`.
 
 The design below is the full plan the foundation is being built out toward.
 

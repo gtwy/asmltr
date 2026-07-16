@@ -57,6 +57,36 @@ async function installEngine(id) {
 // On opening the Engines tab, check installed engines for available updates (best-effort, background).
 function checkAllEngines() { engines.value.filter((e) => e.installed).forEach((e) => checkEngine(e.id)) }
 
+// per-engine model selection — set any engine's model without touching the default.
+const modelBusy = ref('')            // engine id while its model is saving
+const customModel = reactive({})     // id -> custom model id being typed
+async function pickModelFor(id, modelId) {
+  const m = String(modelId || '').trim(); if (!m) return
+  modelBusy.value = id; engError.value = ''
+  try { await enginesApi.setConfig(id, { model: m }); customModel[id] = ''; await loadEngines(); if (id === 'claude') await loadRuntime(true) }
+  catch (e) { engError.value = `${id}: ${e.message}` } finally { modelBusy.value = '' }
+}
+
+// per-engine connection / auth — subscription (OAuth) vs API key (stored in the vault).
+const authBusy = ref('')             // engine id while an auth action is in flight
+const apiKeyInput = reactive({})     // id -> new API key being entered
+async function setEngineAuthMode(id, mode) {
+  authBusy.value = id; engError.value = ''
+  try { await enginesApi.setAuthMode(id, mode); await loadEngines() }
+  catch (e) { engError.value = `${id}: ${e.message}` } finally { authBusy.value = '' }
+}
+async function saveApiKey(id) {
+  const v = (apiKeyInput[id] || '').trim(); if (!v) return
+  authBusy.value = id; engError.value = ''
+  try { await enginesApi.setApiKey(id, v); apiKeyInput[id] = ''; await loadEngines() }
+  catch (e) { engError.value = `${id}: ${e.message}` } finally { authBusy.value = '' }
+}
+async function removeApiKey(id) {
+  authBusy.value = id; engError.value = ''
+  try { await enginesApi.clearApiKey(id); await loadEngines() }
+  catch (e) { engError.value = `${id}: ${e.message}` } finally { authBusy.value = '' }
+}
+
 // --- security / 2FA ---
 const authStatus = ref({ enabled: false, configured: false, user: null, totp: false })
 const enroll = ref(null)      // { otpauth, secret, qr } during enrollment
@@ -176,10 +206,6 @@ const fmtMB = (n) => (n / 1048576).toFixed(2) + ' MB'
 function section(id) { return sections.value.find((s) => s.id === id) || { fields: [] } }
 function field(sectionId, fieldId) { return (section(sectionId).fields || []).find((f) => f.id === fieldId) || {} }
 const identityFields = computed(() => section('identity').fields || [])
-// Model choices come from the SELECTED (default) engine's own model list — not hardcoded Claude models.
-const activeEngine = computed(() => engines.value.find((e) => e.isDefault) || null)
-const modelChoices = computed(() => (activeEngine.value && activeEngine.value.models) || [])
-const activeModel = computed(() => activeEngine.value && activeEngine.value.model)
 
 // --- Identity (the Self / Likeness plane) ---
 const idn = ref(null)
@@ -239,18 +265,9 @@ async function runUpdate() {
   catch (e) { notice.value = 'Failed to start: ' + e.message } finally { busy.value = '' }
 }
 
-// --- Runtime (SDK + model) ---
+// --- Runtime (Claude Agent SDK: version + auto-update + permission mode) ---
 const rt = ref(null)
-const customModel = ref('')
-const isChoice = (id) => activeModel.value === id
 async function loadRuntime(fetch = true) { try { rt.value = await runtime.get(fetch) } catch (e) { notice.value = 'Could not load runtime: ' + e.message } }
-async function pickModel(id) {
-  busy.value = 'model'; notice.value = ''
-  const eng = enginesDefault.value
-  try { await enginesApi.setConfig(eng, { model: id }); await loadEngines(); if (eng === 'claude') await loadRuntime(true); notice.value = `${eng} model set to “${id}” — applies on the next turn.` }
-  catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
-}
-async function setCustom() { const m = customModel.value.trim(); if (m) { await pickModel(m); customModel.value = '' } }
 async function toggleAuto() {
   busy.value = 'auto'
   try { const r = await runtime.setAutoUpdate(!rt.value.autoUpdate); rt.value.autoUpdate = r.autoUpdate }
@@ -353,101 +370,121 @@ onMounted(async () => {
           <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
         </div>
 
-        <!-- Runtime — model choices from the manifest; SDK status widget stays bespoke -->
+        <!-- Reasoning engines — one card per engine: header · model · connection · runtime. Configure them
+             all at once; the default (★) is what the agent command uses, but any is invokable directly. -->
         <div v-show="tab === 'engines'" class="space-y-4">
-          <!-- reasoning-engine registry: install / version / update / default -->
           <div class="glass p-5">
             <h3 class="mb-1 text-sm font-semibold text-slate-200">Reasoning engines</h3>
-            <p class="mb-4 text-[12px] text-slate-500">
-              The agentic backends asmltr can run. Pick the <b>default</b> — it's what the <span class="font-mono">{{ agentName }}</span>
-              command and new sessions use. Each also has its own <span class="font-mono">asmltr &lt;engine&gt;</span> command.
+            <p class="text-[12px] text-slate-500">
+              Configure each agentic backend once — model, connection, runtime. The <b class="text-violet-300">★ default</b> is
+              what the <span class="font-mono">{{ agentName }}</span> command and new sessions use, but any configured engine can be
+              invoked directly via <span class="font-mono">asmltr &lt;engine&gt;</span>. API keys are stored in the TRUST vault, never on disk.
             </p>
-            <ul class="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/5">
-              <li v-for="e in engines" :key="e.id" class="flex items-center gap-3 px-3 py-3 text-sm">
-                <input type="radio" name="default-engine" class="accent-violet-500" :checked="e.isDefault" :disabled="!e.installed || !!engBusy" @change="setDefaultEngine(e.id)" />
-                <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="font-medium text-slate-100">{{ e.label }}</span>
-                    <span v-if="e.isDefault" class="pill border border-brand-violet/40 bg-brand-violet/10 text-[10px] text-violet-300">default</span>
-                    <span class="pill border text-[10px]" :class="e.installed ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-white/10 bg-white/5 text-slate-500'">{{ e.installed ? '● installed' : '○ not installed' }}</span>
-                    <span v-if="engCheck[e.id] && engCheck[e.id].updateAvailable" class="pill border border-amber-400/30 bg-amber-400/10 text-[10px] text-amber-300">update → {{ engCheck[e.id].latest }}</span>
-                  </div>
-                  <div class="mt-0.5 font-mono text-[10px] text-slate-500">{{ e.version || ('asmltr ' + e.id) }} · asmltr {{ e.id }}</div>
-                </div>
-                <button v-if="!e.installed" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'installing…' : 'Install' }}</button>
-                <button v-else-if="engCheck[e.id] && engCheck[e.id].updateAvailable" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'updating…' : 'Update' }}</button>
-              </li>
-            </ul>
             <p v-if="engError" class="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">{{ engError }}</p>
-            <p class="mt-3 text-[12px] text-slate-500">Changing the default re-points the <span class="font-mono">{{ agentName }}</span> command. Web-session engine selection lands next.</p>
           </div>
 
-          <!-- model + runtime for the active engine (was the standalone Runtime tab) -->
-          <div class="glass p-5">
-          <h3 class="mb-1 text-sm font-semibold text-slate-200">Model &amp; runtime <span class="text-[11px] font-normal text-slate-500">· {{ enginesDefault }} engine</span></h3>
-          <p class="mb-4 text-[12px] text-slate-500">{{ section('runtime').desc }}</p>
-          <template v-if="rt">
-            <!-- Agent SDK version + auto-update + CLI permission mode are Claude-engine-only (the SDK web runner). -->
-            <template v-if="enginesDefault === 'claude'">
-            <div class="mb-5 flex flex-wrap items-center gap-3 rounded-lg border border-white/5 bg-black/20 p-3">
-              <div class="min-w-0">
-                <div class="text-[11px] uppercase tracking-wide text-slate-500">Agent SDK</div>
-                <div class="font-mono text-sm text-slate-200">{{ rt.sdk.installed || '—' }}
-                  <span v-if="rt.sdk.latest && !rt.sdk.updateAvailable" class="ml-1 text-[11px] text-emerald-400"><AppIcon glyph="✓" /> up to date</span>
-                  <span v-else-if="rt.sdk.updateAvailable" class="ml-1 text-[11px] text-amber-400">→ {{ rt.sdk.latest }} available</span>
-                </div>
+          <div v-for="e in engines" :key="e.id" class="glass space-y-4 p-5" :class="e.isDefault ? 'ring-1 ring-brand-violet/40' : ''">
+            <!-- header -->
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-semibold text-slate-100">{{ e.label }}</span>
+              <span v-if="e.isDefault" class="pill border border-brand-violet/40 bg-brand-violet/10 text-[10px] text-violet-300">★ default</span>
+              <span class="pill border text-[10px]" :class="e.installed ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-white/10 bg-white/5 text-slate-500'">{{ e.installed ? '● installed' : '○ not installed' }}</span>
+              <span v-if="engCheck[e.id] && engCheck[e.id].updateAvailable" class="pill border border-amber-400/30 bg-amber-400/10 text-[10px] text-amber-300">update → {{ engCheck[e.id].latest }}</span>
+              <span class="font-mono text-[10px] text-slate-500">{{ e.version || '—' }} · asmltr {{ e.id }}</span>
+              <div class="ml-auto flex items-center gap-2">
+                <button v-if="!e.installed" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'installing…' : 'Install' }}</button>
+                <button v-else-if="engCheck[e.id] && engCheck[e.id].updateAvailable" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)">{{ engBusy===e.id ? 'updating…' : 'Update' }}</button>
+                <button v-if="e.installed && !e.isDefault" type="button" class="act" :disabled="!!engBusy" @click="setDefaultEngine(e.id)">Set default</button>
               </div>
-              <button
-                type="button"
-                :disabled="busy === 'update' || !rt.sdk.updateAvailable"
-                class="ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
-                :class="rt.sdk.updateAvailable ? 'border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'border-white/10 bg-white/5 text-slate-500'"
-                @click="updateSdk"
-              >{{ busy === 'update' ? 'starting…' : (rt.sdk.updateAvailable ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
             </div>
-            <label class="mb-5 flex cursor-pointer items-center justify-between gap-3">
-              <span>
-                <span class="text-sm text-slate-200">{{ field('runtime','autoUpdate').label }}</span>
-                <span class="block text-[12px] text-slate-500">{{ field('runtime','autoUpdate').desc }}</span>
-              </span>
-              <button type="button" :disabled="busy === 'auto'" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="rt.autoUpdate ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleAuto">
-                <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.autoUpdate ? 'left-[22px]' : 'left-0.5'"></span>
-              </button>
-            </label>
-            <label class="mb-5 flex cursor-pointer items-center justify-between gap-3">
-              <span>
-                <span class="text-sm text-slate-200">{{ field('runtime','cliBypass').label }}</span>
-                <span class="block text-[12px] text-slate-500">{{ field('runtime','cliBypass').desc }}</span>
-              </span>
-              <button type="button" :disabled="busy === 'cli-bypass'" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="rt.cliBypass ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleCliBypass">
-                <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.cliBypass ? 'left-[22px]' : 'left-0.5'"></span>
-              </button>
-            </label>
-            </template>
+
+            <!-- model -->
             <div>
               <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Model
-                <span v-if="enginesDefault === 'claude' && rt.model.resolved" class="ml-1 font-mono text-slate-400">· running {{ rt.model.resolved }}</span>
-                <span v-else-if="activeModel" class="ml-1 font-mono text-slate-400">· {{ activeModel }}</span>
+                <span v-if="e.id==='claude' && rt && rt.model && rt.model.resolved" class="ml-1 font-mono text-slate-400">· running {{ rt.model.resolved }}</span>
+                <span v-else-if="e.model" class="ml-1 font-mono text-slate-400">· {{ e.model }}</span>
               </div>
               <div class="flex flex-wrap gap-2">
-                <button v-for="c in modelChoices" :key="c.id"
-                  type="button" :disabled="busy === 'model'"
+                <button v-for="c in e.models" :key="c.id" type="button" :disabled="modelBusy===e.id"
                   class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-                  :class="isChoice(c.id) ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
-                  @click="pickModel(c.id)">
+                  :class="e.model===c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                  @click="pickModelFor(e.id, c.id)">
                   <div class="font-semibold">{{ c.label }}</div>
-                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
                 </button>
               </div>
               <div class="mt-2 flex items-center gap-2">
-                <input v-model="customModel" type="text" :placeholder="enginesDefault === 'claude' ? 'or a full model id (e.g. claude-opus-4-8)' : 'or a full model id for ' + enginesDefault"
+                <input v-model="customModel[e.id]" type="text" :placeholder="'or a full model id for ' + e.id"
                   class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
-                  @keydown.enter.prevent="setCustom" />
-                <button type="button" :disabled="!customModel.trim() || busy === 'model'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustom">Set</button>
+                  @keydown.enter.prevent="pickModelFor(e.id, customModel[e.id])" />
+                <button type="button" :disabled="!(customModel[e.id]||'').trim() || modelBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="pickModelFor(e.id, customModel[e.id])">Set</button>
               </div>
             </div>
-          </template>
-          <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
+
+            <!-- connection: subscription (OAuth, owned by the CLI) vs API key (stored in the vault) -->
+            <div v-if="e.auth">
+              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Connection</div>
+              <div class="flex flex-wrap gap-2">
+                <button v-for="m in e.auth.modes" :key="m" type="button" :disabled="authBusy===e.id"
+                  class="rounded-lg border px-3 py-1.5 text-xs transition-colors"
+                  :class="e.auth.mode===m ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                  @click="setEngineAuthMode(e.id, m)">{{ m==='subscription' ? 'Subscription (OAuth)' : 'API key' }}</button>
+                <span v-if="e.auth.modes.length===1" class="self-center text-[11px] text-slate-500">subscription only</span>
+              </div>
+              <p v-if="e.auth.mode==='subscription'" class="mt-2 text-[12px] text-slate-500">
+                Signed in through the harness's own login. If a session reports it isn't authenticated, run
+                <span class="font-mono text-slate-400">{{ e.auth.loginCmd }}</span> once in a terminal.
+              </p>
+              <div v-else-if="e.auth.mode==='api_key'" class="mt-2 space-y-2">
+                <div v-if="e.auth.hasApiKey" class="flex items-center gap-2">
+                  <span class="pill border border-emerald-400/30 bg-emerald-400/10 text-[10px] text-emerald-300">🔒 key stored in vault</span>
+                  <button type="button" class="act-danger" :disabled="authBusy===e.id" @click="removeApiKey(e.id)">Remove</button>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input v-model="apiKeyInput[e.id]" type="password" autocomplete="off" :placeholder="(e.auth.hasApiKey ? 'replace ' : 'paste ') + (e.auth.apiKeyEnv || 'API key')"
+                    class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
+                    @keydown.enter.prevent="saveApiKey(e.id)" />
+                  <button type="button" :disabled="!(apiKeyInput[e.id]||'').trim() || authBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="saveApiKey(e.id)">{{ authBusy===e.id ? 'saving…' : 'Save' }}</button>
+                </div>
+                <p class="text-[12px] text-slate-500">{{ e.auth.note }}</p>
+              </div>
+            </div>
+
+            <!-- runtime: Claude Agent SDK web runner only (SDK version + auto-update + permission mode) -->
+            <div v-if="e.id==='claude' && rt" class="space-y-4 border-t border-white/5 pt-4">
+              <div class="text-[11px] uppercase tracking-wide text-slate-500">Runtime · Agent SDK <span class="font-normal normal-case text-slate-600">(the web-session runner)</span></div>
+              <div class="flex flex-wrap items-center gap-3 rounded-lg border border-white/5 bg-black/20 p-3">
+                <div class="min-w-0">
+                  <div class="text-[11px] uppercase tracking-wide text-slate-500">Agent SDK</div>
+                  <div class="font-mono text-sm text-slate-200">{{ rt.sdk.installed || '—' }}
+                    <span v-if="rt.sdk.latest && !rt.sdk.updateAvailable" class="ml-1 text-[11px] text-emerald-400"><AppIcon glyph="✓" /> up to date</span>
+                    <span v-else-if="rt.sdk.updateAvailable" class="ml-1 text-[11px] text-amber-400">→ {{ rt.sdk.latest }} available</span>
+                  </div>
+                </div>
+                <button type="button" :disabled="busy === 'update' || !rt.sdk.updateAvailable"
+                  class="ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
+                  :class="rt.sdk.updateAvailable ? 'border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'border-white/10 bg-white/5 text-slate-500'"
+                  @click="updateSdk"
+                >{{ busy === 'update' ? 'starting…' : (rt.sdk.updateAvailable ? 'Update now' : 'Latest') }}<AppIcon v-if="busy !== 'upd-run' && busy !== 'update'" glyph="↑" class="ml-1" /></button>
+              </div>
+              <label class="flex cursor-pointer items-center justify-between gap-3">
+                <span>
+                  <span class="text-sm text-slate-200">{{ field('runtime','autoUpdate').label }}</span>
+                  <span class="block text-[12px] text-slate-500">{{ field('runtime','autoUpdate').desc }}</span>
+                </span>
+                <button type="button" :disabled="busy === 'auto'" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="rt.autoUpdate ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleAuto">
+                  <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.autoUpdate ? 'left-[22px]' : 'left-0.5'"></span>
+                </button>
+              </label>
+              <label class="flex cursor-pointer items-center justify-between gap-3">
+                <span>
+                  <span class="text-sm text-slate-200">{{ field('runtime','cliBypass').label }}</span>
+                  <span class="block text-[12px] text-slate-500">{{ field('runtime','cliBypass').desc }}</span>
+                </span>
+                <button type="button" :disabled="busy === 'cli-bypass'" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="rt.cliBypass ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleCliBypass">
+                  <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.cliBypass ? 'left-[22px]' : 'left-0.5'"></span>
+                </button>
+              </label>
+            </div>
           </div>
         </div>
 
