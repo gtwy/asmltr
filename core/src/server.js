@@ -531,6 +531,41 @@ function dispatch(envelope, opts) {
 
 // --- HTTP --------------------------------------------------------------------
 const app = express();
+
+// OIDC provider (roadmap P1 phase F) — MOUNTED BEFORE express.json so oidc-provider owns its own body
+// parsing (the token endpoint needs the raw stream). OFF unless ASMLTR_OIDC=on. Login/consent reuse the
+// asmltr session via the interaction handler below; everything else is the standard provider.
+const oidc = require('./oidc');
+if (oidc.enabled()) {
+  try {
+    const authLib = require('../../shared/auth');
+    const provider = oidc.getProvider();
+    // Interaction: auto-login from the asmltr session, auto-consent (clients are admin-registered → trusted).
+    app.get('/oidc/interaction/:uid', async (req, res, next) => {
+      try {
+        const details = await provider.interactionDetails(req, res);
+        const { prompt, params } = details;
+        const s = authLib.verifySession(authLib.tokenFromReq(req));
+        if (!s) return res.redirect('/?next=' + encodeURIComponent(req.originalUrl)); // → SPA login, returns here
+        if (prompt.name === 'login') {
+          return await provider.interactionFinished(req, res, { login: { accountId: s.sub } }, { mergeWithLastSubmission: false });
+        }
+        if (prompt.name === 'consent') {
+          let grant = details.grantId ? await provider.Grant.find(details.grantId) : new provider.Grant({ accountId: s.sub, clientId: params.client_id });
+          if (prompt.details.missingOIDCScope) grant.addOIDCScope(prompt.details.missingOIDCScope.join(' '));
+          if (prompt.details.missingOIDCClaims) grant.addOIDCClaims(prompt.details.missingOIDCClaims);
+          if (prompt.details.missingResourceScopes) for (const [r, scopes] of Object.entries(prompt.details.missingResourceScopes)) grant.addResourceScope(r, scopes.join(' '));
+          const grantId = await grant.save();
+          return await provider.interactionFinished(req, res, { consent: { grantId } }, { mergeWithLastSubmission: true });
+        }
+        return next();
+      } catch (e) { next(e); }
+    });
+    app.use('/oidc', provider.callback());
+    console.log('OIDC provider mounted at ' + oidc.issuer());
+  } catch (e) { console.log('[oidc] failed to mount: ' + e.message); }
+}
+
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core', active }));
@@ -623,6 +658,12 @@ app.post('/v2/auth/passkey/login/verify', async (req, res) => {
     res.json({ ok: true, user: b.username });
   } catch (e) { auth.recordFail(key); res.status(401).json({ error: e.message }); }
 });
+
+// OIDC provider status + client registry (session-gated). New clients apply on the next core restart.
+app.get('/v2/oidc/status', (req, res) => res.json({ enabled: oidc.enabled(), issuer: oidc.enabled() ? oidc.issuer() : null }));
+app.get('/v2/oidc/clients', requireSession, (req, res) => res.json({ clients: oidc.listClients(), issuer: oidc.issuer() }));
+app.post('/v2/oidc/clients', requireSession, (req, res) => { try { res.status(201).json(oidc.addClient(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/oidc/clients/:id', requireSession, (req, res) => res.json({ ok: oidc.removeClient(req.params.id) }));
 // Forward-auth check for the reverse proxy (nginx auth_request). 200 = allow, 401 = redirect to login.
 // When auth is DISABLED this returns 200 (break-glass: flip ASMLTR_AUTH=off + restart to unlock instantly).
 app.get('/v2/auth/verify', (req, res) => {
