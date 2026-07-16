@@ -2,10 +2,11 @@
 import { onMounted, onUnmounted, computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useCollectorStore } from '@/stores/collector'
-import { api, update as updateApi, identity } from '@/services/api'
+import { api, update as updateApi, identity, authApi } from '@/services/api'
 import { NAV_ROUTES } from '@/router'
 import WindowHost from '@/components/WindowHost.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
+import AuthScreen from '@/views/AuthScreen.vue'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
 import { useWindows } from '@/stores/windows'
@@ -77,15 +78,27 @@ async function loadIdentityVersion() {
   try { const s = await updateApi.status(false); if (s && s.version) appVersion.value = s.version } catch (_) {}
 }
 
-onMounted(() => {
+// Auth gate (roadmap P1 phase B). Check status first; only boot the app when we're allowed in. When
+// auth is enabled and there's no session, render the login/setup screen instead of the control plane.
+const authReady = ref(false)
+const auth = ref({ enabled: false, configured: true, user: null })
+const needsAuth = computed(() => auth.value.enabled && !auth.value.user)
+
+function bootApp() {
   store.connectSocket()
   store.startPolling()
-  // prime shared data so any landing route has something to show
   store.fetchSessions()
   store.fetchBrief()
   loadUpd()
   loadIdentityVersion()
   updTimer = setInterval(loadUpd, 90000)
+}
+
+onMounted(async () => {
+  try { auth.value = await authApi.status() } catch (_) { /* status is public; on error assume open */ }
+  authReady.value = true
+  loadIdentityVersion() // agent name for the login screen brand (public identity endpoint)
+  if (!needsAuth.value) bootApp()
 })
 
 onUnmounted(() => {
@@ -95,7 +108,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-screen flex-col lg:flex-row">
+  <div v-if="!authReady" class="min-h-screen"></div>
+  <AuthScreen v-else-if="needsAuth" :configured="auth.configured" :agent-name="agentName" />
+  <div v-else class="flex min-h-screen flex-col lg:flex-row">
     <!-- Sidebar (desktop) / top brand (mobile) -->
     <aside
       class="lg:sticky lg:top-0 lg:h-screen lg:w-60 lg:shrink-0 lg:border-r lg:border-white/10 lg:bg-black/20 lg:backdrop-blur-xl"

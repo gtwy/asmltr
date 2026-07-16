@@ -31,6 +31,14 @@ all secret comparisons are constant-time; state-changing requests are CSRF-prote
 install that fronts asmltr with its own reverse-proxy auth. Enforcement is rolled out deliberately, never
 flipped on under a live system by surprise.
 
+**How enforcement works (phase B).** The dashboard's nginx runs an `auth_request` subrequest to the core's
+`GET /v2/auth/verify` on every proxied backend call (`/api`, `/v2`, `/manager`, `/trust`, `/socket.io`).
+`/v2/auth/*` (login/setup/status) and the SPA shell stay public so you can reach the login screen.
+Verify returns **200** for a valid session cookie (and sets `Remote-User`), **401** otherwise → the SPA
+shows its login/first-run screen. **Break-glass:** when `ASMLTR_AUTH` is off, verify returns 200
+unconditionally — so `ASMLTR_AUTH=off` + a core restart instantly unlocks a lockout. Connectors and the
+CLI talk to the core **directly** (not through nginx), so they are never gated.
+
 ## Provider modes (gating other services)
 
 - **Forward-auth** (Authelia parity) — the reverse proxy calls asmltr's `/v2/auth/verify` on each request;
@@ -57,8 +65,8 @@ linkage, OIDC provider) come *after* the session gate is solid.
 
 | Phase | Scope | State |
 |-------|-------|-------|
-| **A — Session gate** | account store + scrypt password + signed-cookie sessions + login/logout/session endpoints + rate-limit; **enforcement flag off by default** | foundation |
-| **B — Enforcement + login UI** | `requireAuth` on the core/collector, a GUI login portal + first-run setup, then **replace Authelia** on this box | |
+| **A — Session gate** | account store + scrypt password + signed-cookie sessions + login/logout/session endpoints + rate-limit; **enforcement flag off by default** | ✅ shipped |
+| **B — Enforcement + login UI** | nginx `auth_request` → `/v2/auth/verify` gates browser traffic; GUI login + first-run screen; then **replace Authelia** on this box | ✅ shipped (Authelia cutover pending first-run) |
 | **C — 2FA** | TOTP enrollment/verify, WebAuthn passkey register/login, recovery codes | |
 | **D — OIDC client** | external-IdP login option | |
 | **E — Forward-auth provider** | `/v2/auth/verify` + per-resource rules + identity headers (Authelia parity for other services) | |
