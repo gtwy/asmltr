@@ -24,6 +24,10 @@ like the original `asmltr claude`.
 - **Default engine.** Settings → **Engines** lists every known harness (installed? version? default?) and lets
   you pick the **default** — which is what the `<agent-name>` terminal command points at (so `eve` ≡
   `asmltr <default>`). Also `POST /v2/engines/default`.
+- **Install / update from the GUI.** The Engines tab shows each harness's installed version, checks npm for a
+  newer one, and offers a one-click **Install** (if missing) or **Update** button (`npm i -g <pkg>@latest`).
+- **Model & runtime** (the former Runtime tab — model choice, permission mode) now lives under Engines too,
+  as the settings for the active engine.
 - **Config** lives in `~/.asmltr/engines.json` (default + per-engine settings); override a harness binary with
   `ASMLTR_<ENGINE>_BIN`.
 

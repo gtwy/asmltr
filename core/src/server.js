@@ -755,6 +755,20 @@ app.post('/v2/engines/default', (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.patch('/v2/engines/:id', (req, res) => { try { res.json({ ok: true, config: engines.setConfig(req.params.id, req.body || {}) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+// Check for a harness update (npm view) — network call, on demand.
+app.get('/v2/engines/:id/check', (req, res) => {
+  const id = req.params.id; if (!engines.known(id)) return res.status(404).json({ error: 'unknown engine' });
+  const installed = engines.cleanVersion(id); const latest = engines.latestVersion(id);
+  res.json({ id, installed, latest, updateAvailable: engines.updateAvailable(installed, latest) });
+});
+// Install / update a harness from the GUI (npm i -g <pkg>@latest). Fixed package per engine (no injection).
+app.post('/v2/engines/:id/install', (req, res) => {
+  const id = req.params.id; const e = engines.known(id) && engines.ENGINES[id];
+  if (!e || !e.pkg) return res.status(404).json({ error: 'unknown engine' });
+  const r = require('child_process').spawnSync('npm', ['install', '-g', `${e.pkg}@latest`], { encoding: 'utf8', timeout: 180000 });
+  if (r.status === 0) return res.json({ ok: true, id, version: engines.cleanVersion(id) });
+  res.status(500).json({ error: 'install failed', detail: (r.stderr || r.error?.message || `exit ${r.status}`).slice(-800) });
+});
 
 // Data silos — the file-explorer surface over shared/silo.js (`:id` = silo id; `self`/omitted → the Self silo).
 // Read verbs (list/overview/ls/tree/find/file) + safe writes (mkdir/put/mv/rm/new). Paths are silo-relative.

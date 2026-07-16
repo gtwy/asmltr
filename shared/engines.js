@@ -19,12 +19,13 @@ const HOME = os.homedir();
 const expand = (p) => (p && p.startsWith('~') ? path.join(HOME, p.slice(1)) : p);
 
 // Static registry — the harnesses asmltr knows how to launch. `binPaths` are fallbacks beyond $PATH.
+// `pkg` is the npm package used to install/update the harness from the GUI.
 const ENGINES = {
-  claude: { id: 'claude', label: 'Claude', bin: 'claude', binEnv: 'ASMLTR_CLAUDE_BIN', install: 'npm i -g @anthropic-ai/claude-code',
+  claude: { id: 'claude', label: 'Claude', bin: 'claude', binEnv: 'ASMLTR_CLAUDE_BIN', pkg: '@anthropic-ai/claude-code',
     binPaths: ['/usr/local/bin/claude', '/usr/bin/claude', '~/.claude/local/claude', '~/.local/bin/claude'] },
-  gemini: { id: 'gemini', label: 'Gemini', bin: 'gemini', binEnv: 'ASMLTR_GEMINI_BIN', install: 'npm i -g @google/gemini-cli',
+  gemini: { id: 'gemini', label: 'Gemini', bin: 'gemini', binEnv: 'ASMLTR_GEMINI_BIN', pkg: '@google/gemini-cli',
     binPaths: ['/usr/local/bin/gemini', '/usr/bin/gemini', '~/.local/bin/gemini'] },
-  codex: { id: 'codex', label: 'Codex', bin: 'codex', binEnv: 'ASMLTR_CODEX_BIN', install: 'npm i -g @openai/codex',
+  codex: { id: 'codex', label: 'Codex', bin: 'codex', binEnv: 'ASMLTR_CODEX_BIN', pkg: '@openai/codex',
     binPaths: ['/usr/local/bin/codex', '/usr/bin/codex', '~/.local/bin/codex'] },
 };
 
@@ -44,6 +45,17 @@ function resolveBin(id) {
 }
 function installed(id) { return !!resolveBin(id); }
 function version(id) { const bin = resolveBin(id); if (!bin) return null; try { return execFileSync(bin, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n')[0]; } catch { return null; } }
+const semver = (s) => { const m = String(s || '').match(/(\d+)\.(\d+)\.(\d+)/); return m ? [+m[1], +m[2], +m[3]] : null; };
+function cleanVersion(id) { const v = semver(version(id)); return v ? v.join('.') : null; } // installed semver
+/** Latest published version of an engine's npm package (network call). null on failure. */
+function latestVersion(id) {
+  const e = ENGINES[id]; if (!e || !e.pkg) return null;
+  try { const v = execFileSync('npm', ['view', e.pkg, 'version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20000 }).trim(); return semver(v) ? v : null; } catch { return null; }
+}
+function updateAvailable(installedV, latestV) {
+  const a = semver(installedV), b = semver(latestV); if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) { if (b[i] > a[i]) return true; if (b[i] < a[i]) return false; } return false;
+}
 
 // ── persisted config (default engine + per-engine settings) ────────────────────
 function file() { return process.env.ASMLTR_ENGINES_FILE || path.join(HOME, '.asmltr', 'engines.json'); }
@@ -68,4 +80,4 @@ function list() {
   }));
 }
 
-module.exports = { ENGINES, resolveBin, installed, version, known, getDefault, setDefault, config, setConfig, list };
+module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, list };
