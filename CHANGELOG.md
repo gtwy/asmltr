@@ -9,6 +9,24 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Self silo (P3).** A directory becomes a silo via a `.silo/manifest.json` marker (git-style); the
+  filesystem is the schema, structure comes from a template at creation (no enforced zones). The **Self
+  silo** is the assistant's memory + the default home for artifacts — the core ensures it at boot and
+  injects a SELF-SILO awareness block into every session. Layered search (filename + full-text, ripgrep
+  with a pure-JS fallback). New `asmltr silo <overview|ls|tree|find|get|put|…>` CLI. `shared/silo.js`.
+- **Silos GUI.** A file-explorer plane — silo rail (add / select / delete-with-confirm), breadcrumb
+  browser, file preview + editor, layered search, new-folder + upload, and a Settings modal to edit the
+  manifest. `/v2/silos*` endpoints. A relationship-graph teaser scaffolds the future node graph.
+- **Backups (P4).** `scripts/backup.js` — consistent SQLite online-backup snapshots + config + identity
+  + silos → gzipped tar, **AES-256-GCM under a scrypt(passphrase) key, vault-independent** (a vault loss
+  is itself recoverable). Streamed encrypt/decrypt; `asmltr backup <create|list|verify|restore>` (restore
+  stashes overwritten files); auto-snapshot before every self-update. **Remote destinations** push the
+  encrypted archive to a storage integration (webdav/s3/local). **Scheduled backups** with retention
+  (frequency / max stored / max age) run in-process in the core. Settings → Backups GUI.
+- **`asmltr vault init` (P2).** Guided one-command bootstrap — health-check → optional unseal → register
+  the identity as a SACRED agent → write `ASMLTR_VAULT_*` to `.env` → verify a store→proxy-fetch→delete
+  roundtrip. Plus `asmltr vault <status|unseal|seal>` and a passphrase-unseal form in the Vault GUI when
+  the vault is sealed (`POST /v2/vault/unseal`).
 
 ### Changed
 
