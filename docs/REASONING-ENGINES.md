@@ -220,6 +220,35 @@ stays a fallback for engines without MCP but with a shell.)
   may be metered (API keys) or subscription (ChatGPT/Gemini accounts) or free (self-hosted). It's a per-engine
   config choice, surfaced in the manifest, not a global constraint.
 
+## How it ages (durability as harnesses update)
+
+The CLIs churn fast. The design holds up because it's weighted toward **deriving over declaring**, with a
+small, contained maintenance surface:
+
+| Layer | On a harness update | Maintenance |
+|-------|---------------------|-------------|
+| **Derived at runtime** — tool inventory, model id, MCP list (from the harness handshake) | **auto-updates** (a new/renamed tool just appears) | **none** |
+| **Substrate** — cwd/sandbox=silo, vault brokering, boundary moderation | **immune** (OS + vault, not the harness API) | **none** |
+| **Adapter parse/serialize** — event schema + flags, in `engines/types/<id>/` | may break **that one adapter** | the real surface — contained to one file, core never moves |
+| **Normalized model + GUI** for a brand-new modality | ignored until taught | additive, rare (true of any abstraction) |
+
+**The highest-velocity thing (toolsets) is derived, not maintained** — that's the crux of why it scales.
+
+Guardrails that keep the adapter surface from becoming a treadmill:
+
+- **Stable machine contracts, never TUI scraping** — versioned SDK (Claude), `exec --json` (Codex). Don't parse human output.
+- **Version-pin + `tested_versions` in the manifest + adapter self-check on startup** (`--version` / list-tools):
+  a harness outside the tested range makes that engine **degrade loudly** in the dashboard ("⚠ codex 0.x untested")
+  instead of silently corrupting sessions. Breakage becomes a visible, contained signal.
+- **Contract / golden-transcript tests per adapter** so schema drift fails CI, not production.
+- **Defensive parsing** (the current runner already does "field names defensive across SDK versions").
+- **asmltr's own tools ride MCP with asmltr-controlled names** → they never drift; only *native* tools drift, and those are merely *displayed* (derived), not depended on.
+
+**Precedent + pressure valve.** This ages like the [connector layer](connectors/discord.md) already has — churning
+third-party APIs absorbed one adapter at a time, core unmoved. And if any single CLI's churn becomes untenable,
+that provider can move to the **own-the-loop** path (Phase 5) where there's no harness to track — so no one
+backend can hold the system hostage.
+
 ## Phased plan
 
 | Phase | Scope | Risk |
