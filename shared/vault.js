@@ -42,6 +42,26 @@ async function health() {
   catch (e) { return { ok: false, sealed: null, error: e.message }; }
 }
 
+/** Seal status -> { sealed, vault_initialized } (never throws). */
+async function sealStatus() {
+  try { const r = await fetch(cfg().url + '/seal-status'); return await r.json(); }
+  catch (e) { return { error: e.message }; }
+}
+
+/** Unseal the vault with the master passphrase (admin). Held only in the vault's memory. */
+async function unseal(password) {
+  const c = cfg();
+  return _json(await fetch(c.url + '/unseal', {
+    method: 'POST', headers: { 'X-Admin-Key': c.adminKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
+  }), 'unseal');
+}
+
+/** Re-seal the vault (admin) — clears the passphrase from the vault's memory. */
+async function seal() {
+  const c = cfg();
+  return _json(await fetch(c.url + '/seal', { method: 'POST', headers: { 'X-Admin-Key': c.adminKey } }), 'seal');
+}
+
 /** Store a credential (admin). `data` is an object; `minTrust` gates who may retrieve it. */
 async function storeSecret(name, data, { minTrust = 'SACRED', allowedDomains = [] } = {}) {
   const c = cfg();
@@ -121,4 +141,4 @@ async function wrapKey(key) { return (await _kms('wrap', { plaintext: Buffer.fro
 /** Unwrap a wrapped blob (base64) -> data key Buffer. */
 async function unwrapKey(wrapped) { return Buffer.from((await _kms('unwrap', { wrapped })).plaintext, 'base64'); }
 
-module.exports = { health, storeSecret, deleteSecret, getSecret, listSecrets, generateDataKey, wrapKey, unwrapKey };
+module.exports = { health, sealStatus, unseal, seal, storeSecret, deleteSecret, getSecret, listSecrets, ensureAgent, generateDataKey, wrapKey, unwrapKey };

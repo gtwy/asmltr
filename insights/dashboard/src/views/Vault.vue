@@ -22,6 +22,17 @@ async function loadStatus() {
   }
 }
 
+// unseal (passphrase held only in the vault's memory; never persisted)
+const unsealPass = ref('')
+const unsealBusy = ref(false)
+const unsealError = ref('')
+async function unseal() {
+  if (!unsealPass.value) return
+  unsealBusy.value = true; unsealError.value = ''
+  try { await vaultApi.unseal(unsealPass.value); unsealPass.value = ''; await loadStatus() }
+  catch (e) { unsealError.value = e.message } finally { unsealBusy.value = false }
+}
+
 // ── keys ─────────────────────────────────────────────────────────────────────
 const secrets = ref([])
 const loading = ref(false)
@@ -150,10 +161,24 @@ onMounted(refresh)
       <!-- reachable + sealed -->
       <div
         v-else-if="status.sealed"
-        class="mb-6 flex items-center gap-3 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-300"
+        class="mb-6 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-300"
       >
-        <AppIcon glyph="🔒" />
-        <span><b>Vault is sealed</b> — unlock to enable credential operations.</span>
+        <div class="flex items-center gap-3">
+          <AppIcon glyph="🔒" />
+          <span><b>Vault is sealed</b> — unlock with the master passphrase to enable credential operations.</span>
+        </div>
+        <form class="mt-3 flex flex-wrap items-center gap-2" @submit.prevent="unseal">
+          <input
+            v-model="unsealPass" type="password" autocomplete="off" placeholder="master passphrase"
+            class="w-64 rounded-lg border border-amber-400/30 bg-black/20 px-3 py-1.5 text-sm text-amber-100 outline-none placeholder:text-amber-300/40 focus:border-amber-400/60"
+          />
+          <button type="submit" :disabled="!unsealPass || unsealBusy"
+            class="rounded-lg border border-amber-400/40 bg-amber-400/20 px-3 py-1.5 text-sm font-semibold text-amber-100 hover:bg-amber-400/30 disabled:opacity-40">
+            {{ unsealBusy ? 'Unlocking…' : 'Unseal' }}
+          </button>
+          <span v-if="unsealError" class="text-xs text-rose-300">{{ unsealError }}</span>
+          <span class="text-[11px] text-amber-300/60">Held only in the vault's memory — never persisted.</span>
+        </form>
       </div>
 
       <!-- reachable + unsealed => online -->

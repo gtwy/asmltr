@@ -548,6 +548,12 @@ app.get('/v2/vault/status', async (req, res) => {
   const h = await vault.health();
   res.json({ configured: true, reachable: h.ok, sealed: h.sealed, url: process.env.ASMLTR_VAULT_URL });
 });
+// Unseal the vault with the master passphrase (never persisted — held only in the vault's memory).
+app.post('/v2/vault/unseal', async (req, res) => {
+  const pw = (req.body || {}).password;
+  if (!pw) return res.status(400).json({ error: 'password required' });
+  try { const r = await vault.unseal(pw); res.json({ ok: true, ...r }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 // Integrations — third-party service links (storage today). Secret fields are *_ref (vault key names),
 // resolved from the vault only at open/test time, never returned here.
