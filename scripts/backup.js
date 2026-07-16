@@ -27,6 +27,9 @@ const REPO = path.resolve(__dirname, '..');
 const HOME = os.homedir();
 const ASMLTR = path.join(HOME, '.asmltr');
 const BACKUP_DIR = process.env.ASMLTR_BACKUP_DIR || path.join(ASMLTR, 'backups');
+const SCHEDULE_FILE = process.env.ASMLTR_BACKUP_SCHEDULE_FILE || path.join(ASMLTR, 'backup-schedule.json');
+const REMOTE_PREFIX = 'asmltr-backups'; // subfolder within a destination integration's root
+function registry() { return require('../integrations/registry'); } // lazy — pulls in storage drivers only when a remote is used
 const MAGIC = Buffer.from('ASMLTRBK1'); // 9 bytes
 const HEADER_LEN = MAGIC.length + 16 + 12; // magic + salt + iv = 37
 const TAG_LEN = 16;
@@ -164,7 +167,17 @@ async function createBackup(opts = {}) {
     fs.rmSync(tarPath, { force: true });
     const bytes = fs.statSync(outPath).size;
     log(`wrote ${outPath} (${bytes} bytes)`);
-    return { file: outPath, manifest, bytes };
+
+    // Optional off-box copy: push the (already-encrypted) archive to a configured storage integration.
+    let remote = null;
+    if (opts.destination && opts.destination !== 'local') {
+      const store = await registry().openStorage(opts.destination);
+      const remotePath = `${REMOTE_PREFIX}/${path.basename(outPath)}`;
+      await store.put(remotePath, fs.readFileSync(outPath));
+      remote = { integration: opts.destination, path: remotePath };
+      log(`pushed to integration ${opts.destination}:${remotePath}`);
+    }
+    return { file: outPath, manifest, bytes, remote };
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
 }
 
@@ -238,7 +251,65 @@ function listBackups() {
   }).sort((a, b) => b.mtime - a.mtime);
 }
 
-module.exports = { createBackup, verifyBackup, restoreBackup, listBackups, BACKUP_DIR };
+// ── remote listing + retention ────────────────────────────────────────────────
+async function listRemoteBackups(destination) {
+  const store = await registry().openStorage(destination);
+  const entries = await store.list(REMOTE_PREFIX, { recursive: false }).catch(() => []);
+  return entries.filter((e) => e.type === 'file' && e.path.endsWith('.asmltrbk'))
+    .map((e) => ({ name: path.basename(e.path), path: e.path, bytes: e.size, mtime: e.mtime }))
+    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+}
+
+/** Enforce retention (keep newest `maxCount`, drop older than `maxAgeDays`) on local or a remote destination. */
+async function pruneBackups({ maxCount = 0, maxAgeDays = 0, destination = 'local', log = () => {} } = {}) {
+  const ageCut = maxAgeDays ? Date.now() - maxAgeDays * 86400000 : 0;
+  const remote = destination && destination !== 'local';
+  const items = remote
+    ? await listRemoteBackups(destination)
+    : listBackups().map((b) => ({ name: b.name, path: b.file, mtime: b.mtime }));
+  const del = remote
+    ? async (p) => { const s = await registry().openStorage(destination); await s.remove(p); }
+    : async (p) => fs.rmSync(p, { force: true });
+  const doomed = items.filter((b, i) => (maxCount && i >= maxCount) || (ageCut && (b.mtime || 0) < ageCut));
+  for (const b of doomed) { await del(b.path); log('pruned ' + b.name); }
+  return { pruned: doomed.map((b) => b.name), kept: items.length - doomed.length };
+}
+
+// ── schedule config + scheduler ────────────────────────────────────────────────
+const SCHEDULE_DEFAULT = { enabled: false, every_hours: 24, destination: 'local', max_count: 14, max_age_days: 0, last_run: 0 };
+function getSchedule() { try { return { ...SCHEDULE_DEFAULT, ...JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf8')) }; } catch (_) { return { ...SCHEDULE_DEFAULT }; } }
+function setSchedule(patch) { const s = { ...getSchedule(), ...patch }; ensureDir(path.dirname(SCHEDULE_FILE)); fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(s, null, 2)); return s; }
+
+/** Run one scheduled backup + retention pass per the persisted schedule config. */
+async function runScheduled(opts = {}) {
+  const s = getSchedule();
+  const r = await createBackup({ label: 'scheduled', destination: s.destination, log: opts.log });
+  const local = await pruneBackups({ maxCount: s.max_count, maxAgeDays: s.max_age_days, destination: 'local', log: opts.log });
+  let remotePrune = null;
+  if (s.destination && s.destination !== 'local') remotePrune = await pruneBackups({ maxCount: s.max_count, maxAgeDays: s.max_age_days, destination: s.destination, log: opts.log }).catch((e) => ({ error: e.message }));
+  setSchedule({ last_run: Date.now() });
+  return { backup: r.file, remote: r.remote, pruned: local.pruned, remotePruned: remotePrune && remotePrune.pruned };
+}
+
+/** Start an in-process timer that fires runScheduled() when the interval elapses. Returns the timer. */
+function startScheduler({ log = () => {}, intervalMs = 10 * 60 * 1000 } = {}) {
+  const tick = async () => {
+    try {
+      const s = getSchedule();
+      if (!s.enabled) return;
+      if (Date.now() - (s.last_run || 0) < (s.every_hours || 24) * 3600000) return;
+      if (!(process.env.ASMLTR_BACKUP_PASSPHRASE || process.env.TRUST_PROTOCOL_VAULT_PASSWORD)) return void log('scheduled backup due but skipped — no passphrase (set ASMLTR_BACKUP_PASSPHRASE)');
+      log('running scheduled backup…');
+      const r = await runScheduled({ log });
+      log(`scheduled backup done: ${r.backup}${r.pruned.length ? ` (pruned ${r.pruned.length})` : ''}`);
+    } catch (e) { log('scheduled backup error: ' + e.message); }
+  };
+  const t = setInterval(tick, intervalMs); if (t.unref) t.unref();
+  const boot = setTimeout(tick, 15000); if (boot.unref) boot.unref(); // first check shortly after boot
+  return t;
+}
+
+module.exports = { createBackup, verifyBackup, restoreBackup, listBackups, listRemoteBackups, pruneBackups, getSchedule, setSchedule, runScheduled, startScheduler, BACKUP_DIR };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 if (require.main === module) {
