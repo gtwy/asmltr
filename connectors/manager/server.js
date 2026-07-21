@@ -223,7 +223,7 @@ app.post('/read', requireToken, async (req, res) => { const r = await readSource
 // connector reconnects. Lets an agent that just triggered its OWN update (over a channel)
 // confirm completion in-channel, even though the restart killed the turn that issued it.
 // POST /announce { channel|instance_id, target, text }
-const ANNOUNCE_FILE = path.join(__dirname, 'data', 'announcements.json');
+const ANNOUNCE_FILE = process.env.ASMLTR_ANNOUNCE_FILE || path.join(__dirname, 'data', 'announcements.json');
 app.post('/announce', requireToken, (req, res) => {
   const { channel, instance_id, target, text } = req.body || {};
   if (!text || (!channel && !instance_id)) return res.status(400).json({ error: 'need text + channel or instance_id' });
