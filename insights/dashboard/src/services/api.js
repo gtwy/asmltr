@@ -156,7 +156,15 @@ export const backupApi = {
   create: (payload) => postCore('/v2/backups', payload),
   verify: (payload) => postCore('/v2/backups/verify', payload),
   getSchedule: () => getCore('/v2/backups/schedule'),
-  setSchedule: (payload) => reqCore('PUT', '/v2/backups/schedule', payload)
+  setSchedule: (payload) => reqCore('PUT', '/v2/backups/schedule', payload),
+  restorePreview: (payload) => postCore('/v2/backups/restore/preview', payload),
+  restore: (payload) => postCore('/v2/backups/restore', payload),
+  restoreLog: () => getCore('/v2/backups/restore/log'),
+  async import(file) {
+    const res = await fetch('/v2/backups/import', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Backup-Filename': file.name, Accept: 'application/json' }, body: file })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `import failed (${res.status})`)
+    return res.json()
+  }
 }
 
 export const control = {
