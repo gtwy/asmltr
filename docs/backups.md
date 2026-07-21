@@ -1,8 +1,8 @@
 # Backups
 
-A backup is a **portable, encrypted, restorable snapshot** of an asmltr install (roadmap P4). One is
-taken automatically before every self-update; you can also take them on demand
-from the CLI or the dashboard.
+A backup is a **portable, encrypted, restorable snapshot** of an asmltr install. One is taken
+automatically before every self-update; you can also take, restore, and import them on demand — from
+the CLI **or** the dashboard.
 
 ## What's captured
 
@@ -106,11 +106,33 @@ The scheduler runs **in-process in the core** (checked every ~10 min; persisted 
 (`ASMLTR_BACKUP_PASSPHRASE`, or the vault password) — without one, a due backup is logged and skipped
 rather than failing. Retention runs after each scheduled snapshot, on both local and the remote destination.
 
-## Dashboard
+## Dashboard — create, import & restore
 
 **Settings → Backups** lists existing snapshots, creates new ones (with a destination + optional one-off
-passphrase), and configures the schedule. **Restore is intentionally CLI-only** — it's a destructive,
-footgun-prone operation that shouldn't be one mis-click away in a browser.
+passphrase), configures the schedule, and now handles **import** and a **guarded restore**.
+
+### Import a backup file
+
+**Import…** uploads a `.asmltrbk` archive from your browser straight into the backup directory (a raw
+stream, so it isn't capped by the JSON body limit). Once imported it appears in the list and can be
+previewed and restored like any local snapshot — handy for moving a backup onto a fresh box through the
+dashboard instead of `scp`.
+
+### Guarded restore
+
+Restore is destructive — it overwrites live config, secrets, and databases and restarts the core — so
+instead of hiding it behind the CLI, the dashboard makes it **hard to do by accident**:
+
+1. Click **Restore…** on a snapshot and (optionally) enter its passphrase.
+2. **Preview** runs a dry-run: it decrypts, verifies every checksum against the manifest, and lists the
+   exact paths that *would* be restored. Nothing is written.
+3. To proceed you must **type the backup's name** to confirm.
+4. **Restore & restart** hands off to a **detached runner** (so it survives the core restart that
+   `--activate` triggers) and streams a live progress log back into the panel.
+
+Under the hood this is the same checksum-gated, pre-restore-stashed [CLI restore](#the-passphrase)
+described above — just driven from the browser with a preview + type-to-confirm gate. The passphrase is
+passed to the runner through the environment, never on a command line.
 
 ## Auto-snapshot before self-update
 
