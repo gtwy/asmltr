@@ -6,6 +6,7 @@
 
 const path = require('path');
 const { spawn } = require('child_process');
+const { HEARTBEAT_TOKEN, staleThresholdMs, heartbeatHealth } = require('./health');
 
 const RUNTIME = path.join(__dirname, '..', 'runtime', 'run-instance.js');
 const MAX_RESTARTS = 5;          // within the window before we give up
@@ -13,7 +14,8 @@ const RESTART_WINDOW_MS = 60000;
 const LOG_RING = 200;
 
 function makeSupervisor(env) {
-  const procs = new Map(); // id -> { child, status, restarts, restartTimes[], startedAt, lastExit, logs[] }
+  const procs = new Map(); // id -> { child, status, restarts, restartTimes[], startedAt, lastExit, logs[], lastHeartbeat }
+  const STALE_MS = staleThresholdMs();
 
   function logLine(rec, line) {
     rec.logs.push(`${new Date().toISOString()} ${line}`);
@@ -25,6 +27,7 @@ function makeSupervisor(env) {
     const rec = procs.get(instance.id) || { restarts: 0, restartTimes: [], logs: [] };
     rec.instance = instance;
     rec.status = 'starting';
+    rec.lastHeartbeat = null; // a fresh process hasn't proven its I/O path yet; start from 'unknown'
     procs.set(instance.id, rec);
 
     const child = spawn('node', [RUNTIME], {
@@ -42,7 +45,12 @@ function makeSupervisor(env) {
     rec.startedAt = Date.now();
     rec.pid = child.pid;
 
-    child.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => logLine(rec, l)));
+    // A heartbeat sentinel is a control line, not a log line: record the time & drop it so the log
+    // ring stays readable. Everything else is scraped into the ring as before.
+    child.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => {
+      if (l === HEARTBEAT_TOKEN) { rec.lastHeartbeat = Date.now(); return; }
+      logLine(rec, l);
+    }));
     child.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => logLine(rec, '[err] ' + l)));
 
     child.on('exit', (code, sig) => {
@@ -103,7 +111,11 @@ function makeSupervisor(env) {
   function status(id) {
     const rec = procs.get(id);
     if (!rec) return { status: 'stopped', restarts: 0 };
-    return { status: rec.status, pid: rec.child ? rec.pid : null, restarts: rec.restarts, startedAt: rec.startedAt, lastExit: rec.lastExit };
+    // Merge the heartbeat health so GET /instances surfaces a deaf-but-alive connector: process
+    // liveness (status) says the pid is up; heartbeat/healthy says the I/O loop still moves. A stale
+    // instance is reported, not killed — see health.js for why flag-only over auto-restart.
+    const hb = heartbeatHealth(rec.lastHeartbeat, Date.now(), STALE_MS);
+    return { status: rec.status, pid: rec.child ? rec.pid : null, restarts: rec.restarts, startedAt: rec.startedAt, lastExit: rec.lastExit, ...hb };
   }
   function logs(id) { const rec = procs.get(id); return rec ? rec.logs.slice() : []; }
   // Stop every child; invoke `cb` once they've ALL exited. On shutdown the manager waits on this

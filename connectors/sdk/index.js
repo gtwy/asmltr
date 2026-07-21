@@ -173,6 +173,7 @@ function makeEmitter(collectorUrl, token, defaults) {
 /** Build the ctx handed to a plugin's start(). */
 function buildContext({ instanceId, instanceName, type, config, coreUrl, collectorUrl, token, signal }) {
   const emit = makeEmitter(collectorUrl, token, { surface: type, source: `connector:${instanceId}` });
+  const { HEARTBEAT_TOKEN } = require('../manager/health');
   return {
     instanceId,
     instanceName,
@@ -182,6 +183,11 @@ function buildContext({ instanceId, instanceName, type, config, coreUrl, collect
     uploads: makeUploads(),
     emit,
     log: (...a) => console.log(`[${type}:${instanceName || instanceId}]`, ...a),
+    // Liveness signal: a connector calls this from its ACTIVE I/O path (a successful poll cycle, a
+    // gateway that's still Ready). It writes one sentinel line to stdout, which the manager already
+    // scrapes, and the supervisor records the time. A dead I/O loop stops calling it, so the manager
+    // marks the instance stale WITHOUT the process having to crash. Never throws.
+    heartbeat: () => { try { process.stdout.write(HEARTBEAT_TOKEN + '\n'); } catch (_) {} },
     signal,
   };
 }

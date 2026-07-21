@@ -17,7 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder, Status } = require('discord.js');
 // THE shared asmltr speech layer — same TTS/STT used by the dashboard + core /v2/speak (DRY).
 const sharedTts = require('../../../shared/speech/tts');
 const sharedStt = require('../../../shared/speech/stt');
@@ -556,8 +556,18 @@ RESPONSE RULES:
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildVoiceStates],
     partials: [Partials.Channel, Partials.Message],
   });
-  client.once('ready', () => { ctx.log(`online as ${client.user.tag}`); if (cfg.presence_text) client.user.setPresence({ activities: [{ name: cfg.presence_text }], status: 'online' }); });
+  client.once('ready', () => { ctx.heartbeat(); ctx.log(`online as ${client.user.tag}`); if (cfg.presence_text) client.user.setPresence({ activities: [{ name: cfg.presence_text }], status: 'online' }); });
   client.on('error', (e) => ctx.log('client error: ' + e.message));
+
+  // Gateway-status heartbeat: discord.js keeps the shard WebSocket alive with its own heartbeat/ack;
+  // when acks stop, it drops out of Status.Ready and reconnects. We heartbeat only while the shard is
+  // Ready, so a live gateway keeps the instance healthy even with no messages, & a gateway that's
+  // wedged (not Ready) stops heartbeating and goes stale. Message arrivals heartbeat too (below).
+  const { HEARTBEAT_INTERVAL_MS } = require('../../manager/health');
+  const hbTimer = setInterval(() => {
+    if (client.ws && client.ws.status === Status.Ready) ctx.heartbeat();
+  }, HEARTBEAT_INTERVAL_MS);
+  hbTimer.unref();
   // --- voice transcription helper: per-utterance WAV → OpenAI STT → text --------
   const voiceText = new Map(); // guildId -> text channel to post the live transcript
   async function sttTranscribe(wav) {
@@ -796,6 +806,7 @@ RESPONSE RULES:
   }
 
   client.on('messageCreate', async (message) => {
+    ctx.heartbeat(); // a gateway message is live inbound I/O
     if (message.author.id === client.user.id) return;
     // Ignore voice transcript / spoken-reply mirror lines (🗣️ / 🔊) that ANY agent posts for
     // its own voice session — they're artifacts, never conversation for another agent to answer.
@@ -926,7 +937,7 @@ RESPONSE RULES:
   await client.login(token);
 
   return {
-    async stop() { try { await client.destroy(); } catch (_) {} try { httpServer.close(); } catch (_) {} persistMemory(); },
+    async stop() { clearInterval(hbTimer); try { await client.destroy(); } catch (_) {} try { httpServer.close(); } catch (_) {} persistMemory(); },
     health() { return { online: !!client.user, silenced }; },
   };
 }
