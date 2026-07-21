@@ -146,6 +146,7 @@ export const enginesApi = {
   install: (id) => postCore(`/v2/engines/${encodeURIComponent(id)}/install`),
   setAutoUpdate: (id, enabled) => postCore(`/v2/engines/${encodeURIComponent(id)}/auto-update`, { enabled }),
   setAuthMode: (id, mode) => postCore(`/v2/engines/${encodeURIComponent(id)}/auth`, { mode }),
+  setBaseUrl: (id, url) => postCore(`/v2/engines/${encodeURIComponent(id)}/base-url`, { url }),
   setApiKey: (id, value) => reqCore('PUT', `/v2/engines/${encodeURIComponent(id)}/apikey`, { value }),
   clearApiKey: (id) => reqCore('DELETE', `/v2/engines/${encodeURIComponent(id)}/apikey`)
 }

@@ -23,6 +23,10 @@ complete({prompt, model}) → string      // cheap one-shot for the title/status
 - **codex.js** — headless `codex exec --json`; native resume via the assigned `thread_id`; `OPENAI_API_KEY`
   injected from the vault (api_key mode).
 - **gemini.js** — headless `gemini -p -o stream-json --skip-trust`; `GEMINI_API_KEY` from the vault.
+- **self-hosted** — Codex is the OpenAI-compatible vehicle: set a **custom endpoint** (Settings → Engines →
+  Codex → Custom endpoint, or `POST /v2/engines/codex/base-url`) and its turns route to that base URL via a
+  codex custom provider (`-c model_providers.asmltr_custom.base_url=… wire_api=responses`). The endpoint must
+  speak the OpenAI **Responses** API (vLLM, LiteLLM, a gateway); use api_key mode with the server's key.
 
 `core/src/engines/index.js` maps id → impl lazily; `runner` routes each turn to `opts.engine || default`.
 

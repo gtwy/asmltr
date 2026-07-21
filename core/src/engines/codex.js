@@ -36,6 +36,18 @@ async function launchEnv() {
 }
 const itemType = (it) => (it && (it.item_type || it.type)) || '';
 
+// If a custom OpenAI-compatible endpoint is configured, add codex -c flags that define a provider
+// pointing at it (wire_api=chat for a generic OpenAI server) + select it. Returns [] when unset.
+function baseUrlArgs() {
+  const url = engines.baseUrlFor('codex'); if (!url) return [];
+  const P = 'asmltr_custom';
+  // Modern codex only supports the Responses wire protocol for custom providers (chat was dropped),
+  // so the endpoint must speak the OpenAI /responses API (vLLM, LiteLLM, and most gateways do).
+  return ['-c', `model_provider=${P}`, '-c', `model_providers.${P}.name=${P}`,
+    '-c', `model_providers.${P}.base_url=${url}`, '-c', `model_providers.${P}.wire_api=responses`,
+    '-c', `model_providers.${P}.env_key=OPENAI_API_KEY`];
+}
+
 async function runTurn({ prompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
   const mdl = model || engines.modelFor('codex');
   const lastMsgFile = path.join(os.tmpdir(), `asmltr-codex-${process.pid}-${Date.now().toString(36)}.txt`);
@@ -44,6 +56,7 @@ async function runTurn({ prompt, resume = null, cwd, model, abortController, onD
   args.push('--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check',
     '--output-last-message', lastMsgFile);
   if (mdl) args.push('-m', mdl);
+  args.push(...baseUrlArgs());
   if (cwd) args.push('-C', cwd);
   args.push(prompt || '');
 

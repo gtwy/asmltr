@@ -93,6 +93,13 @@ async function removeApiKey(id) {
   try { await enginesApi.clearApiKey(id); await loadEngines() }
   catch (e) { engError.value = `${id}: ${e.message}` } finally { authBusy.value = '' }
 }
+// custom (self-hosted / alternate-provider) OpenAI-compatible endpoint
+const baseUrlInput = reactive({})   // id -> edited base URL
+async function saveBaseUrl(id) {
+  authBusy.value = id; engError.value = ''
+  try { await enginesApi.setBaseUrl(id, (baseUrlInput[id] ?? '').trim()); await loadEngines() }
+  catch (e) { engError.value = `${id}: ${e.message}` } finally { authBusy.value = '' }
+}
 
 // --- security / 2FA ---
 const authStatus = ref({ enabled: false, configured: false, user: null, totp: false })
@@ -510,6 +517,22 @@ onMounted(async () => {
                   <button type="button" :disabled="!(apiKeyInput[e.id]||'').trim() || authBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="saveApiKey(e.id)"><Spinner v-if="authBusy===e.id" size="xs" class="mr-1" />{{ authBusy===e.id ? 'saving…' : 'Save' }}</button>
                 </div>
                 <p class="text-[12px] text-slate-500">{{ e.auth.note }}</p>
+              </div>
+
+              <!-- self-hosted / custom OpenAI-compatible endpoint (base_url-capable engines only) -->
+              <div v-if="e.supportsBaseUrl" class="mt-3 border-t border-white/5 pt-3">
+                <div class="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500">
+                  Custom endpoint <span class="font-normal normal-case text-slate-600">— self-hosted / alternate provider</span>
+                  <span v-if="e.baseUrl" class="pill border border-emerald-400/30 bg-emerald-400/10 text-[10px] text-emerald-300">● {{ e.baseUrl }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input :value="baseUrlInput[e.id] ?? e.baseUrl" @input="baseUrlInput[e.id] = $event.target.value" type="text" :placeholder="e.baseUrlHint"
+                    class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
+                    @keydown.enter.prevent="saveBaseUrl(e.id)" />
+                  <button type="button" :disabled="authBusy===e.id" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="saveBaseUrl(e.id)"><Spinner v-if="authBusy===e.id" size="xs" class="mr-1" />Save</button>
+                  <button v-if="e.baseUrl" type="button" class="act-danger" :disabled="authBusy===e.id" @click="baseUrlInput[e.id]=''; saveBaseUrl(e.id)">Clear</button>
+                </div>
+                <p class="mt-1 text-[12px] text-slate-500">When set, this engine's turns route to your endpoint (use <b>API key</b> mode above with the server's key, or any placeholder if it needs none). The model becomes whatever your server serves.</p>
               </div>
             </div>
 
