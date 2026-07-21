@@ -9,6 +9,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.7.0] - 2026-07-21
+
+asmltr 0.7.0 — Reasoning engines (Claude/Gemini/Codex/self-hosted), MCP tools registry, guarded backup restore + import, and connector-resilience fixes (#30/#33/#35).
+
+### Added
 - **Reasoning engines — pluggable agentic backends.** The channel/web runner is now engine-abstracted
   (`core/src/engines/`): a turn routes to the configured default engine — **Claude Code, Gemini CLI, or
   Codex CLI**. The Claude SDK is loaded lazily, so a Gemini-only or Codex-only install runs without it,
