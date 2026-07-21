@@ -853,6 +853,57 @@ app.put('/v2/backups/schedule', (req, res) => {
 // In-process scheduler — fires runScheduled() when the interval elapses (needs a configured passphrase).
 try { backup.startScheduler({ log: (m) => console.log('[backup] ' + m) }); } catch (e) { console.log('[backup] scheduler not started: ' + e.message); }
 
+// ── Guarded GUI restore (destructive → preview first, then a DETACHED runner that survives the core
+//    restart the restore triggers). The footgun guard is procedural: a mandatory dry-run preview + an
+//    explicit confirm flag (the GUI additionally makes the operator type the backup name).
+const _bkpath = require('path');
+const RESTORE_LOG = () => _bkpath.join(backup.BACKUP_DIR, 'restore.log');
+// Preview: decrypt + verify checksums + list what WOULD be restored. No writes (dryRun). Safe.
+app.post('/v2/backups/restore/preview', async (req, res) => {
+  const b = req.body || {};
+  if (!b.file) return res.status(400).json({ error: 'file required' });
+  const logs = [];
+  try { const r = await backup.restoreBackup(b.file, { dryRun: true, passphrase: b.passphrase, log: (m) => logs.push(m) });
+    res.json({ ok: true, manifest: r.manifest, plan: r.plan, logs }); }
+  catch (e) { res.status(400).json({ error: e.message, logs }); }
+});
+// Restore: spawn a DETACHED node process (survives `pm2 restart asmltr-core` in --activate). Passphrase
+// goes via env (never argv/ps). Requires confirm:true. Progress streams to BACKUP_DIR/restore.log.
+app.post('/v2/backups/restore', (req, res) => {
+  const b = req.body || {};
+  if (!b.file) return res.status(400).json({ error: 'file required' });
+  if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required (restore overwrites config + databases)' });
+  try { require('fs').accessSync(b.file); } catch (_) { return res.status(404).json({ error: 'backup file not found: ' + b.file }); }
+  const { spawn } = require('child_process');
+  const log = RESTORE_LOG();
+  const args = [_bkpath.join(__dirname, '..', '..', 'scripts', 'backup.js'), 'restore', b.file, '--activate'];
+  if (b.force) args.push('--force');
+  const env = { ...process.env };
+  if (b.passphrase) env.ASMLTR_BACKUP_PASSPHRASE = String(b.passphrase);
+  try { require('fs').writeFileSync(log, `[${new Date().toISOString()}] restore starting: ${b.file}\n`); } catch (_) {}
+  const child = spawn('setsid', ['bash', '-c', `sleep 1; { "${process.execPath}" ${args.map((a) => `"${a}"`).join(' ')}; echo "[$(date)] restore-runner exited $?"; } >> "${log}" 2>&1`], { detached: true, stdio: 'ignore', env });
+  child.unref();
+  res.json({ started: true, pid: child.pid || null, log });
+});
+// Poll the restore log (GUI progress). Returns the tail of BACKUP_DIR/restore.log.
+app.get('/v2/backups/restore/log', (req, res) => {
+  try { const txt = require('fs').readFileSync(RESTORE_LOG(), 'utf8'); res.json({ log: txt.slice(-8000) }); }
+  catch (_) { res.json({ log: '' }); }
+});
+// Import a backup file uploaded from the browser (raw octet-stream → bypasses the 10mb JSON cap). The
+// filename comes via a header; we sanitize it and drop it into BACKUP_DIR so it shows up in the list.
+app.post('/v2/backups/import', express.raw({ type: 'application/octet-stream', limit: '1024mb' }), (req, res) => {
+  try {
+    if (!req.body || !req.body.length) return res.status(400).json({ error: 'empty body' });
+    let name = (req.get('X-Backup-Filename') || 'imported.asmltrbk').replace(/[^A-Za-z0-9._-]/g, '_');
+    if (!name.endsWith('.asmltrbk')) name += '.asmltrbk';
+    require('fs').mkdirSync(backup.BACKUP_DIR, { recursive: true });
+    const dest = _bkpath.join(backup.BACKUP_DIR, name);
+    require('fs').writeFileSync(dest, req.body);
+    res.json({ ok: true, file: dest, name, bytes: req.body.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
 // from config or the reverse proxy's Authelia-resolved user, so the same build works anywhere.

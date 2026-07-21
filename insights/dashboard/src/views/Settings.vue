@@ -218,6 +218,39 @@ async function saveSchedule() {
   try { const s = await backupApi.setSchedule({ enabled: schedule.enabled, every_hours: Number(schedule.every_hours), destination: schedule.destination, max_count: Number(schedule.max_count), max_age_days: Number(schedule.max_age_days) }); Object.assign(schedule, s) }
   catch (e) { backupError.value = e.message } finally { scheduleBusy.value = false }
 }
+// --- restore / import (guarded: preview → type-to-confirm → detached runner) ---
+const restoreTarget = ref(null)     // { name, file } being restored, or null
+const restorePass = ref('')
+const restorePreview = ref(null)    // { manifest, plan, logs }
+const restoreConfirm = ref('')      // operator must type the backup name
+const restoreBusy = ref('')         // '' | 'preview' | 'running'
+const restoreLog = ref('')
+const importBusy = ref(false)
+let _restorePoll = null
+function openRestore(b) { restoreTarget.value = { name: b.name, file: b.file }; restorePreview.value = null; restoreConfirm.value = ''; restorePass.value = ''; restoreLog.value = ''; backupError.value = '' }
+function closeRestore() { restoreTarget.value = null; if (_restorePoll) { clearInterval(_restorePoll); _restorePoll = null } }
+async function doPreview() {
+  restoreBusy.value = 'preview'; backupError.value = ''; restorePreview.value = null
+  try { restorePreview.value = await backupApi.restorePreview({ file: restoreTarget.value.file, passphrase: restorePass.value || undefined }) }
+  catch (e) { backupError.value = e.message } finally { restoreBusy.value = '' }
+}
+async function doRestore() {
+  if (restoreConfirm.value.trim() !== restoreTarget.value.name) { backupError.value = 'Type the exact backup name to confirm.'; return }
+  restoreBusy.value = 'running'; backupError.value = ''; restoreLog.value = 'starting…\n'
+  try {
+    await backupApi.restore({ file: restoreTarget.value.file, passphrase: restorePass.value || undefined, confirm: true })
+    // Poll the log — the core restarts mid-restore (activate), so errors while it's down are expected.
+    _restorePoll = setInterval(async () => {
+      try { const r = await backupApi.restoreLog(); if (r.log) restoreLog.value = r.log; if (/restore-runner exited/.test(r.log)) { clearInterval(_restorePoll); _restorePoll = null; restoreBusy.value = ''; await loadBackups() } } catch (_) { restoreLog.value += '.' }
+    }, 2000)
+  } catch (e) { backupError.value = e.message; restoreBusy.value = '' }
+}
+async function importBackup(evt) {
+  const file = evt.target.files && evt.target.files[0]; if (!file) return
+  importBusy.value = true; backupError.value = ''
+  try { await backupApi.import(file); await loadBackups() }
+  catch (e) { backupError.value = e.message } finally { importBusy.value = false; evt.target.value = '' }
+}
 const fmtMB = (n) => (n / 1048576).toFixed(2) + ' MB'
 function section(id) { return sections.value.find((s) => s.id === id) || { fields: [] } }
 function field(sectionId, fieldId) { return (section(sectionId).fields || []).find((f) => f.id === fieldId) || {} }
@@ -906,18 +939,68 @@ onMounted(async () => {
             </div>
           </div>
 
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-slate-500">Snapshots</span>
+            <label class="act cursor-pointer">
+              <Spinner v-if="importBusy" size="xs" class="mr-1" /><span v-else>＋</span> Import…
+              <input type="file" accept=".asmltrbk" class="hidden" :disabled="importBusy" @change="importBackup" />
+            </label>
+          </div>
           <ul class="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/5">
             <li v-for="b in backups" :key="b.name" class="flex items-center gap-2 px-3 py-2 text-sm">
               <AppIcon glyph="🗄" class="text-slate-500" />
               <span class="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-300" :title="b.name">{{ b.name }}</span>
               <span class="font-mono text-[11px] text-slate-600">{{ fmtMB(b.bytes) }}</span>
+              <button type="button" class="act" @click="openRestore(b)">Restore…</button>
             </li>
             <li v-if="!backups.length" class="px-3 py-6 text-center text-sm text-slate-500">No backups yet.</li>
           </ul>
           <p class="mt-3 text-[12px] text-slate-500">
-            Stored in <span class="font-mono text-slate-400">{{ backupDir }}</span>. Restore is CLI-only for safety:
-            <span class="font-mono text-slate-400">asmltr backup restore &lt;file&gt; [--dry-run]</span>.
+            Stored in <span class="font-mono text-slate-400">{{ backupDir }}</span>. Restore overwrites config +
+            databases and restarts the core — it always previews first and asks you to confirm.
           </p>
+
+          <!-- guarded restore panel: preview → type-to-confirm → detached runner + live log -->
+          <div v-if="restoreTarget" class="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/[0.06] p-4">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <span class="text-sm font-semibold text-amber-200">Restore <span class="font-mono text-[12px]">{{ restoreTarget.name }}</span></span>
+              <button type="button" class="act" :disabled="restoreBusy==='running'" @click="closeRestore">Cancel</button>
+            </div>
+            <p class="mb-3 text-[12px] text-amber-200/80">This overwrites the live config, secrets and databases with the snapshot's contents (prior files are stashed under <span class="font-mono">pre-restore-*</span>), then restarts the core. Preview first, then type the name to confirm.</p>
+
+            <div class="mb-3 flex flex-wrap items-end gap-2">
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-slate-400">Passphrase <span class="text-slate-600">(blank → server default)</span></span>
+                <input v-model="restorePass" type="password" autocomplete="off" class="field-input w-56" placeholder="backup passphrase" />
+              </label>
+              <button type="button" class="act" :disabled="restoreBusy==='preview'" @click="doPreview"><Spinner v-if="restoreBusy==='preview'" size="xs" class="mr-1" />Preview</button>
+            </div>
+
+            <div v-if="restorePreview" class="mb-3 rounded-lg border border-white/10 bg-black/20 p-3 text-[12px]">
+              <div class="mb-1 text-slate-300">
+                <span class="font-semibold">{{ restorePreview.manifest.version }}</span> / {{ restorePreview.manifest.label }}
+                · {{ new Date(restorePreview.manifest.created_at).toLocaleString() }}
+                · host <span class="font-mono">{{ restorePreview.manifest.host }}</span>
+              </div>
+              <div class="text-slate-400">Would restore {{ (restorePreview.plan || []).length }} path(s):</div>
+              <ul class="mt-1 max-h-40 space-y-0.5 overflow-auto font-mono text-[11px] text-slate-500">
+                <li v-for="p in restorePreview.plan" :key="p" class="truncate">{{ p }}</li>
+              </ul>
+            </div>
+
+            <div v-if="restorePreview && restoreBusy!=='running'" class="flex flex-wrap items-end gap-2">
+              <label class="flex flex-1 flex-col gap-1">
+                <span class="text-[11px] text-slate-400">Type <span class="font-mono text-slate-300">{{ restoreTarget.name }}</span> to confirm</span>
+                <input v-model="restoreConfirm" type="text" class="field-input w-full" :placeholder="restoreTarget.name" />
+              </label>
+              <button type="button" class="act-danger" :disabled="restoreConfirm.trim() !== restoreTarget.name" @click="doRestore"><AppIcon glyph="⚠" class="mr-1" />Restore &amp; restart</button>
+            </div>
+
+            <div v-if="restoreLog" class="mt-3">
+              <div class="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500">Progress <Spinner v-if="restoreBusy==='running'" size="xs" class="text-slate-400" /></div>
+              <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/40 p-2 font-mono text-[11px] text-slate-400">{{ restoreLog }}</pre>
+            </div>
+          </div>
         </div>
 
         <p v-if="notice" class="mt-4 text-center text-[12px] text-slate-400">{{ notice }}</p>
