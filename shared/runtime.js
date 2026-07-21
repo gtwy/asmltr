@@ -19,6 +19,11 @@ const execFileP = promisify(execFile);
 const REPO = path.join(__dirname, '..');
 const CORE_DIR = path.join(REPO, 'core');
 const SDK_PKG = '@anthropic-ai/claude-agent-sdk';
+// Every PM2-managed asmltr service that runs on the SDK. An SDK bump changes on-disk code all three
+// import, so all three must restart together; restarting only asmltr-core advances core onto the new
+// sha while the manager & collector keep running the old one. scripts/restart-with-rollback.sh cycles
+// this same set.
+const ASMLTR_SERVICES = ['asmltr-core', 'asmltr-insights-collector', 'asmltr-connector-manager'];
 
 function stateDir() {
   const d = process.env.ASMLTR_STATE_DIR || path.join(os.homedir(), '.asmltr');
@@ -76,10 +81,10 @@ async function latestSdkVersion({ fetch = true } = {}) {
   } catch (_) { return _latest.v; }
 }
 
-/** Update the SDK to latest + restart the core, detached so it survives the restart. */
+/** Update the SDK to latest + restart every asmltr service, detached so it survives the restart. */
 function updateSdk() {
   const log = path.join(stateDir(), 'sdk-update.log');
-  const script = `echo "[$(date)] updating ${SDK_PKG}"; cd ${CORE_DIR} && npm install ${SDK_PKG}@latest --legacy-peer-deps && pm2 restart asmltr-core; echo "[$(date)] done"`;
+  const script = `echo "[$(date)] updating ${SDK_PKG}"; cd ${CORE_DIR} && npm install ${SDK_PKG}@latest --legacy-peer-deps && pm2 restart ${ASMLTR_SERVICES.join(' ')}; echo "[$(date)] done"`;
   const child = spawn('setsid', ['bash', '-c', `sleep 1; { ${script}; } >> ${log} 2>&1`], { detached: true, stdio: 'ignore' });
   child.unref();
   return { started: true, pid: child.pid || null, log };
@@ -97,4 +102,4 @@ async function status({ fetch = true } = {}) {
   };
 }
 
-module.exports = { getModel, setModel, isSdkAutoUpdate, setSdkAutoUpdate, getCliPermissionMode, setCliPermissionMode, sdkVersion, latestSdkVersion, updateSdk, status };
+module.exports = { getModel, setModel, isSdkAutoUpdate, setSdkAutoUpdate, getCliPermissionMode, setCliPermissionMode, sdkVersion, latestSdkVersion, updateSdk, status, ASMLTR_SERVICES };

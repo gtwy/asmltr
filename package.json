@@ -21,6 +21,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
+    "test": "node --test test/*.test.js",
     "update": "node scripts/update.js",
     "release": "node scripts/release.js",
     "setup": "node scripts/run-setup-steps.js",
