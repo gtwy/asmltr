@@ -72,6 +72,10 @@ nav:
     - Installation: getting-started/install.md
     - Quick Start: getting-started/quickstart.md
   - Architecture: architecture.md
+  - Reasoning engines:
+    - Overview & setup: engines.md
+    - MCP tools registry: engines-mcp.md
+    - The design (deep-dive): REASONING-ENGINES.md
   - Connectors:
     - Overview: connectors/index.md
     - Discord: connectors/discord.md
@@ -94,13 +98,13 @@ nav:
     - Cross-channel send: coordination/cross-channel.md
     - Announcements: coordination/announcements.md
     - Session awareness: coordination/awareness.md
-  - Vision & design:
+  - Identity, auth & trust:
     - The cast — identity & trust: CAST.md
+    - Auth & identity provider: AUTH.md
     - Access evolution (roadmap): ACCESS-EVOLUTION.md
-    - Federation: FEDERATION.md
+  - Vision & roadmap:
+    - Federation (roadmap): FEDERATION.md
     - Vault · silos · backups (roadmap): ROADMAP-VAULT-SILOS-BACKUP.md
-    - Auth & identity provider (roadmap): AUTH.md
-    - Reasoning engines (roadmap): REASONING-ENGINES.md
   - Security:
     - TRUST vault (credentials & KMS): security/trust-vault.md
     - Trust & permissions: security/trust.md

@@ -1,4 +1,10 @@
-# Reasoning engines — pluggable agentic backends
+# Reasoning engines — the design
+
+!!! tip "Looking for setup instructions?"
+    This page is the **design deep-dive** — the engine interface, the headless adapters, event
+    normalization, and how capabilities are derived at runtime. For *how to pick and configure* an
+    engine (models, connection, self-hosted, auto-update), see the **[Reasoning engines guide](engines.md)**;
+    for the shared tools layer, see the **[MCP tools registry](engines-mcp.md)**.
 
 > Status: **engine-abstracted end to end.** The engine **registry**, the `asmltr claude|gemini|codex`
 > **terminal commands**, a configurable **default engine**, per-engine **model / connection / auto-update**

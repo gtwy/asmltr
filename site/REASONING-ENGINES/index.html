@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://jarethmt.github.io/asmltr/REASONING-ENGINES/">
       
       
-        <link rel="prev" href="../AUTH/">
+        <link rel="prev" href="../engines-mcp/">
       
       
-        <link rel="next" href="../security/trust-vault/">
+        <link rel="next" href="../connectors/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Reasoning engines (roadmap) - asmltr</title>
+        <title>The design (deep-dive) - asmltr</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#reasoning-engines-pluggable-agentic-backends" class="md-skip">
+        <a href="#reasoning-engines-the-design" class="md-skip">
           Skip to content
         </a>
       
@@ -115,7 +115,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Reasoning engines (roadmap)
+              The design (deep-dive)
             
           </span>
         </div>
@@ -491,6 +491,421 @@
       
   
   
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning engines
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reasoning engines
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview & setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engines-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The design (deep-dive)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The design (deep-dive)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-runner-is-abstracted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the runner is abstracted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-tools-declared-once-provisioned-into-every-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP tools — declared once, provisioned into every engine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MCP tools — declared once, provisioned into every engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adapter-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-it-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using it today
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-key-idea-an-engine-is-a-harness-a-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The key idea: an engine is a harness + a provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-engine-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Engine interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-capability-manifest-your-idea-and-its-the-right-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The capability manifest (your idea — and it's the right call)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#divergent-features-normalized-model-negotiate-adapter-serializes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Divergent features: normalized model → negotiate → adapter serializes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tools-across-engines-normalize-events-not-names-derive-the-inventory-from-the-harness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tools across engines — normalize events, not names; derive the inventory from the harness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sessions-where-silos-pay-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sessions — where silos pay off
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-accounts-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config, accounts &amp; selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-engine-integration-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-engine integration notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#levels-of-control-substrate-first-not-tool-interception" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Levels of control (substrate first — not tool interception)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-one-registry-every-harness-the-additive-tool-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP — one registry, every harness (the additive tool layer)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-cutting-concerns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-cutting concerns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-ages-durability-as-harnesses-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it ages (durability as harnesses update)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phased-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phased plan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
   
   
     
@@ -525,7 +940,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
           <div class="md-nav__link md-nav__container">
@@ -547,14 +962,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -771,7 +1186,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
         
           
           <div class="md-nav__link md-nav__container">
@@ -793,14 +1208,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -905,10 +1320,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
         
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
             
   
   
@@ -926,8 +1341,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1086,10 +1501,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -1107,8 +1522,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1241,18 +1656,10 @@
       
   
   
-    
   
   
-  
     
     
-      
-        
-      
-        
-      
-        
       
         
       
@@ -1269,21 +1676,21 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
         
           
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
             
   
   
   <span class="md-ellipsis">
     
   
-    Vision & design
+    Identity, auth & trust
   
 
     
@@ -1294,12 +1701,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_9">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Vision & design
+    Identity, auth & trust
   
 
           </label>
@@ -1320,6 +1727,34 @@
     
   
     The cast — identity & trust
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../AUTH/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth & identity provider
   
 
     
@@ -1361,6 +1796,71 @@
 
               
             
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vision & roadmap
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Vision & roadmap
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
               
                 
   
@@ -1375,7 +1875,7 @@
   <span class="md-ellipsis">
     
   
-    Federation
+    Federation (roadmap)
   
 
     
@@ -1412,285 +1912,6 @@
   
 
       </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../AUTH/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Auth & identity provider (roadmap)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reasoning engines (roadmap)
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reasoning engines (roadmap)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#using-it-today" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Using it today
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-key-idea-an-engine-is-a-harness-a-provider" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The key idea: an engine is a harness + a provider
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-engine-interface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Engine interface
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-capability-manifest-your-idea-and-its-the-right-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The capability manifest (your idea — and it's the right call)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#divergent-features-normalized-model-negotiate-adapter-serializes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Divergent features: normalized model → negotiate → adapter serializes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tools-across-engines-normalize-events-not-names-derive-the-inventory-from-the-harness" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tools across engines — normalize events, not names; derive the inventory from the harness
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sessions-where-silos-pay-off" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sessions — where silos pay off
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#config-accounts-selection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Config, accounts &amp; selection
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#per-engine-integration-notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Per-engine integration notes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#levels-of-control-substrate-first-not-tool-interception" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Levels of control (substrate first — not tool interception)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mcp-one-registry-every-harness-the-additive-tool-layer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MCP — one registry, every harness (the additive tool layer)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cross-cutting-concerns" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cross-cutting concerns
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-ages-durability-as-harnesses-update" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How it ages (durability as harnesses update)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#phased-plan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Phased plan
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#open-questions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Open questions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1733,10 +1954,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
         
           
-          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="">
             
   
   
@@ -1754,8 +1975,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_10">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1910,10 +2131,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_13" >
         
           
-          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="">
             
   
   
@@ -1931,8 +2152,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_11">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2029,10 +2250,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_14" >
         
           
-          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="">
+          <label class="md-nav__link" for="__nav_14" id="__nav_14_label" tabindex="">
             
   
   
@@ -2050,8 +2271,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_12">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_14">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2121,6 +2342,45 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-runner-is-abstracted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the runner is abstracted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-tools-declared-once-provisioned-into-every-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP tools — declared once, provisioned into every engine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MCP tools — declared once, provisioned into every engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adapter-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#using-it-today" class="md-nav__link">
@@ -2318,21 +2578,66 @@
   
 
 
-<h1 id="reasoning-engines-pluggable-agentic-backends">Reasoning engines — pluggable agentic backends<a class="headerlink" href="#reasoning-engines-pluggable-agentic-backends" title="Permanent link">&para;</a></h1>
+<h1 id="reasoning-engines-the-design">Reasoning engines — the design<a class="headerlink" href="#reasoning-engines-the-design" title="Permanent link">&para;</a></h1>
+<div class="admonition tip">
+<p class="admonition-title">Looking for setup instructions?</p>
+<p>This page is the <strong>design deep-dive</strong> — the engine interface, the headless adapters, event
+normalization, and how capabilities are derived at runtime. For <em>how to pick and configure</em> an
+engine (models, connection, self-hosted, auto-update), see the <strong><a href="../engines/">Reasoning engines guide</a></strong>;
+for the shared tools layer, see the <strong><a href="../engines-mcp/">MCP tools registry</a></strong>.</p>
+</div>
 <blockquote>
-<p>Status: <strong>foundation shipped, being built out.</strong> The engine <strong>registry</strong>, the <code>asmltr claude|gemini|codex</code>
-<strong>terminal commands</strong>, a configurable <strong>default engine</strong>, and the <strong>Settings → Engines</strong> GUI are live (see
-<a href="#using-it-today">Using it today</a>). Still ahead: the headless <strong>web-session adapters</strong> (drive Gemini/Codex
-for browser chat with normalized events) + per-session engine selection in the dashboard. This lifts the
-Claude dependency into a swappable <em>reasoning-engine</em> layer — the same move asmltr made for channels
-(connectors) and storage (silos).</p>
+<p>Status: <strong>engine-abstracted end to end.</strong> The engine <strong>registry</strong>, the <code>asmltr claude|gemini|codex</code>
+<strong>terminal commands</strong>, a configurable <strong>default engine</strong>, per-engine <strong>model / connection / auto-update</strong>
+settings, AND the <strong>channel/web runner</strong> are all engine-pluggable (see <a href="#using-it-today">Using it today</a>).
+The core no longer imports the Claude SDK at boot — it is loaded lazily only when a Claude turn runs — so
+<strong>a Gemini-only or Codex-only install runs with the Claude SDK absent.</strong> Every connector (Discord, Telegram,
+email, GitHub, web, voice) funnels through one pipeline → the configured default engine, so <strong>any session
+from any connector runs entirely on whichever single engine is selected</strong>, via subscription or API key.
+Still ahead: per-session (not just default) engine selection in the new-session UI, and richer
+Gemini/Codex resume + streaming (see <a href="#adapter-status">Adapters</a>).</p>
 </blockquote>
+<h2 id="how-the-runner-is-abstracted">How the runner is abstracted<a class="headerlink" href="#how-the-runner-is-abstracted" title="Permanent link">&para;</a></h2>
+<p><code>core/src/runner.js</code> is a thin dispatcher; each engine implements the same contract in <code>core/src/engines/</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>runTurn(opts) → { text, segments, engineSessionId, tools, usage, isError }
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>complete({prompt, model}) → string      // cheap one-shot for the title/status/self-assessment labelers
+</code></pre></div>
+<ul>
+<li><strong>claude.js</strong> — the LOCAL Agent SDK (<code>query()</code>), lazily required so it never loads at boot.</li>
+<li><strong>codex.js</strong> — headless <code>codex exec --json</code>; native resume via the assigned <code>thread_id</code>; <code>OPENAI_API_KEY</code>
+  injected from the vault (api_key mode).</li>
+<li><strong>gemini.js</strong> — headless <code>gemini -p -o stream-json --skip-trust</code>; <code>GEMINI_API_KEY</code> from the vault.</li>
+<li><strong>self-hosted</strong> — Codex is the OpenAI-compatible vehicle: set a <strong>custom endpoint</strong> (Settings → Engines →
+  Codex → Custom endpoint, or <code>POST /v2/engines/codex/base-url</code>) and its turns route to that base URL via a
+  codex custom provider (<code>-c model_providers.asmltr_custom.base_url=… wire_api=responses</code>). The endpoint must
+  speak the OpenAI <strong>Responses</strong> API (vLLM, LiteLLM, a gateway); use api_key mode with the server's key.</li>
+</ul>
+<h2 id="mcp-tools-declared-once-provisioned-into-every-engine">MCP tools — declared once, provisioned into every engine<a class="headerlink" href="#mcp-tools-declared-once-provisioned-into-every-engine" title="Permanent link">&para;</a></h2>
+<p><code>shared/mcp-registry.js</code> is the single place to declare MCP servers (<code>~/.asmltr/mcp.json</code>, gitignored).
+Each engine gets them at launch in its own shape:
+- <strong>Claude</strong> — the SDK <code>mcpServers</code> option.
+- <strong>Codex</strong> — per-launch <code>-c mcp_servers.&lt;name&gt;.{command,args,env|url}</code> flags.
+- <strong>Gemini</strong> — reconciled into gemini's own config via <code>gemini mcp add</code> (once per process; re-synced on change).</p>
+<p>A built-in <strong><code>asmltr-toolbelt</code></strong> stdio server (<code>mcp/toolbelt-server.js</code>, zero-dep newline-JSON-RPC) is always
+included unless disabled — it exposes asmltr's own cross-session tools (<code>asmltr_sessions</code>, <code>asmltr_send</code>,
+<code>asmltr_announce</code>, <code>asmltr_uploads</code>) to <strong>every</strong> harness, so the toolbelt that used to be a Claude-only
+system-prompt cheatsheet is now real, structured tools any engine can call. Manage from Settings → Engines →
+MCP tools, or <code>GET/POST /v2/mcp</code>, <code>DELETE /v2/mcp/:name</code>, <code>POST /v2/mcp/:name/toggle</code>.</p>
+<p><code>core/src/engines/index.js</code> maps id → impl lazily; <code>runner</code> routes each turn to <code>opts.engine || default</code>.</p>
+<h3 id="adapter-status">Adapter status<a class="headerlink" href="#adapter-status" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Claude</strong> — production (unchanged behaviour; live-verified).</li>
+<li><strong>Codex</strong> — spawn/JSONL-parse/resume-id/abort verified; a live turn needs OpenAI auth (subscription or key).</li>
+<li><strong>Gemini</strong> — spawn/parse/env verified; <strong>stateless per turn</strong> for now (the CLI's resume is index-based, not
+  id-addressable — <code>--session-file</code> continuity is the planned follow-up). Google deprecated the free OAuth
+  tier, so Gemini's practical path is an <strong>API key</strong> (Settings → Engines → Gemini → API key).</li>
+</ul>
 <h2 id="using-it-today">Using it today<a class="headerlink" href="#using-it-today" title="Permanent link">&para;</a></h2>
 <p>asmltr ships a <strong>registry</strong> of known agentic-CLI harnesses — <strong>Claude Code, Gemini CLI, Codex CLI</strong> — and
 detects which are installed (with versions). From the terminal:</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>asmltr<span class="w"> </span>claude<span class="w"> </span><span class="o">[</span>args…<span class="o">]</span><span class="w">     </span><span class="c1"># launch a wrapped, monitored, takeover-able session on any engine</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>asmltr<span class="w"> </span>gemini<span class="w"> </span><span class="o">[</span>args…<span class="o">]</span><span class="w">     </span><span class="c1"># (Gemini CLI)</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>asmltr<span class="w"> </span>codex<span class="w">  </span><span class="o">[</span>args…<span class="o">]</span><span class="w">     </span><span class="c1"># (Codex CLI)</span>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>asmltr<span class="w"> </span>claude<span class="w"> </span><span class="o">[</span>args…<span class="o">]</span><span class="w">     </span><span class="c1"># launch a wrapped, monitored, takeover-able session on any engine</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>asmltr<span class="w"> </span>gemini<span class="w"> </span><span class="o">[</span>args…<span class="o">]</span><span class="w">     </span><span class="c1"># (Gemini CLI)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>asmltr<span class="w"> </span>codex<span class="w">  </span><span class="o">[</span>args…<span class="o">]</span><span class="w">     </span><span class="c1"># (Codex CLI)</span>
 </code></pre></div>
 <p>Each launches that harness inside a multiplexer, tracked in the dashboard (Live) and attachable — exactly
 like the original <code>asmltr claude</code>.</p>
@@ -2340,12 +2645,24 @@ like the original <code>asmltr claude</code>.</p>
 <li><strong>Default engine.</strong> Settings → <strong>Engines</strong> lists every known harness (installed? version? default?) and lets
   you pick the <strong>default</strong> — which is what the <code>&lt;agent-name&gt;</code> terminal command points at (so <code>eve</code> ≡
   <code>asmltr &lt;default&gt;</code>). Also <code>POST /v2/engines/default</code>.</li>
-<li><strong>Install / update from the GUI.</strong> The Engines tab shows each harness's installed version, checks npm for a
-  newer one, and offers a one-click <strong>Install</strong> (if missing) or <strong>Update</strong> button (<code>npm i -g &lt;pkg&gt;@latest</code>).</li>
-<li><strong>Model &amp; runtime</strong> (the former Runtime tab — model choice, permission mode) now lives under Engines too,
-  as the settings for the active engine.</li>
-<li><strong>Config</strong> lives in <code>~/.asmltr/engines.json</code> (default + per-engine settings); override a harness binary with
-  <code>ASMLTR_&lt;ENGINE&gt;_BIN</code>.</li>
+<li><strong>Install / update / auto-update from the GUI.</strong> The Engines tab shows each harness's installed version,
+  checks npm for a newer one, and offers a one-click <strong>Install</strong> (if missing) or <strong>Update</strong> button
+  (<code>npm i -g &lt;pkg&gt;@latest</code>). Each engine also has an <strong>Auto-update</strong> toggle — a 6-hourly background sweep
+  (<code>POST /v2/engines/:id/auto-update</code>, <code>engines.autoUpdateAll()</code>) upgrades it in place so it never goes stale.</li>
+<li><strong>Per-engine cards.</strong> The Engines tab renders one card per harness, each with its own <strong>model</strong>, <strong>connection</strong>,
+  and (Claude only) <strong>runtime</strong> settings — so every engine is configured at once. The default (★) is what the
+  <code>&lt;agent-name&gt;</code> command uses, but any configured engine is invokable directly (<code>asmltr &lt;engine&gt;</code> / per-session).
+  Model choice is per-engine (<code>PATCH /v2/engines/:id { model }</code>); each harness exposes its own model list.</li>
+<li><strong>Connection.</strong> Each engine picks <strong>Subscription (OAuth)</strong> — the harness's own login, nothing stored — or
+  <strong>API key</strong> for metered billing. API keys are written <strong>only to the TRUST vault</strong> (<code>engine_&lt;id&gt;_api_key</code>,
+  SACRED); <code>engines.json</code> keeps just an <code>apiKeyStored</code> flag. At launch, api-key mode injects the key as the
+  harness's env var (<code>GEMINI_API_KEY</code>, <code>OPENAI_API_KEY</code>). Endpoints: <code>POST /v2/engines/:id/auth</code>,
+  <code>PUT|DELETE /v2/engines/:id/apikey</code>. <strong>Claude is subscription-only</strong> — api-key billing is refused, since it
+  bypasses the subscription (the project's core non-negotiable).</li>
+<li><strong>Install / update + runtime</strong> (the former Runtime tab — Agent SDK version/update, permission mode) live under
+  Engines too; runtime settings show on the Claude card (they govern the SDK web runner).</li>
+<li><strong>Config</strong> lives in <code>~/.asmltr/engines.json</code> (default + per-engine settings; never secrets); override a harness
+  binary with <code>ASMLTR_&lt;ENGINE&gt;_BIN</code>.</li>
 </ul>
 <p>The design below is the full plan the foundation is being built out toward.</p>
 <p>Today, one thing in asmltr knows it's talking to Claude: <strong><code>core/src/runner.js</code></strong> (the Agent-SDK <code>query()</code>
@@ -2404,17 +2721,17 @@ a clean unification:</p>
 Point Codex (or an open harness) at your Ollama/vLLM endpoint and it's just another engine instance.</p>
 <h2 id="the-engine-interface">The Engine interface<a class="headerlink" href="#the-engine-interface" title="Permanent link">&para;</a></h2>
 <p>Mirrors the connector pattern (<code>connectors/types/&lt;type&gt;/</code>) — a thin adapter + a <code>meta</code> manifest:</p>
-<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>core/src/engines/types/&lt;id&gt;/index.js
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  meta = {
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    id, label,
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    kind: &#39;sdk&#39; | &#39;cli&#39;,                       // driven in-process, or a subprocess
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    capabilities: { … },                        // see below
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    models,                                     // static list or a discovery fn
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    configSchema,                               // keys (vault-backed), model, base_url, cwd, sandbox…
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  }
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  async provisionMcp(servers, ctx)              // materialize asmltr&#39;s MCP registry into this harness
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  async run({ prompt, systemPrompt, resume, cwd, images, mcp, onEvent, abortController })
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>     → { engineSessionId, reply }               // events normalized to shared/events.js
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>core/src/engines/types/&lt;id&gt;/index.js
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  meta = {
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    id, label,
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    kind: &#39;sdk&#39; | &#39;cli&#39;,                       // driven in-process, or a subprocess
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    capabilities: { … },                        // see below
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    models,                                     // static list or a discovery fn
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    configSchema,                               // keys (vault-backed), model, base_url, cwd, sandbox…
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  }
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  async provisionMcp(servers, ctx)              // materialize asmltr&#39;s MCP registry into this harness
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  async run({ prompt, systemPrompt, resume, cwd, images, mcp, onEvent, abortController })
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>     → { engineSessionId, reply }               // events normalized to shared/events.js
 </code></pre></div>
 <p><code>run()</code>'s only real job beyond invoking the harness is <strong>normalizing its output into asmltr's existing
 event contract</strong> — the same <code>system</code> / <code>assistant(text·tool_use·thinking)</code> / <code>result</code> / <code>stream_event</code>
@@ -2422,10 +2739,10 @@ shape <code>runner.js</code> already emits. The core, collector, dashboard, and 
 <h2 id="the-capability-manifest-your-idea-and-its-the-right-call">The capability manifest (your idea — and it's the right call)<a class="headerlink" href="#the-capability-manifest-your-idea-and-its-the-right-call" title="Permanent link">&para;</a></h2>
 <p>asmltr already thinks this way: connectors carry <code>capabilities</code> (<code>supports_attachments_out</code>, …) and the
 console-manifest drives "declare a field → GUI + TUI adapt." Engines do the same. Each declares:</p>
-<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>capabilities: {
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  tools, subagents, skills, localFs, vision, mcp, thinking, streaming,
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  sessionResume: &#39;native&#39; | &#39;replay&#39; | &#39;none&#39;,
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>}
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>capabilities: {
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  tools, subagents, skills, localFs, vision, mcp, thinking, streaming,
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  sessionResume: &#39;native&#39; | &#39;replay&#39; | &#39;none&#39;,
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>}
 </code></pre></div>
 <p>The core <strong>capability-gates features</strong> instead of forcing a lowest common denominator:</p>
 <ul>
@@ -2440,10 +2757,10 @@ works in asmltr's own <em>normalized</em> feature model, and three pieces bridge
 <ol>
 <li><strong>Rich capability descriptors, not booleans.</strong> A capability declares the feature's <em>shape</em> — allowed
    values + limits — so the runtime knows what each engine will actually accept:
-   <div class="language-js highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1">// claude</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nx">vision</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">supported</span><span class="o">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nx">formats</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;png&#39;</span><span class="p">,</span><span class="s1">&#39;jpeg&#39;</span><span class="p">,</span><span class="s1">&#39;webp&#39;</span><span class="p">],</span><span class="w"> </span><span class="nx">maxImages</span><span class="o">:</span><span class="w"> </span><span class="mf">100</span><span class="p">,</span><span class="w"> </span><span class="nx">detail</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;low&#39;</span><span class="p">,</span><span class="s1">&#39;high&#39;</span><span class="p">,</span><span class="s1">&#39;auto&#39;</span><span class="p">],</span><span class="w"> </span><span class="nx">maxBytes</span><span class="o">:</span><span class="w"> </span><span class="mf">5e6</span><span class="w"> </span><span class="p">}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1">// codex</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nx">vision</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">supported</span><span class="o">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nx">formats</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;png&#39;</span><span class="p">,</span><span class="s1">&#39;jpeg&#39;</span><span class="p">],</span><span class="w">        </span><span class="nx">maxImages</span><span class="o">:</span><span class="w"> </span><span class="mf">8</span><span class="p">,</span><span class="w">   </span><span class="nx">detail</span><span class="o">:</span><span class="w"> </span><span class="kc">false</span><span class="w"> </span><span class="p">}</span>
+   <div class="language-js highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">// claude</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nx">vision</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">supported</span><span class="o">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nx">formats</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;png&#39;</span><span class="p">,</span><span class="s1">&#39;jpeg&#39;</span><span class="p">,</span><span class="s1">&#39;webp&#39;</span><span class="p">],</span><span class="w"> </span><span class="nx">maxImages</span><span class="o">:</span><span class="w"> </span><span class="mf">100</span><span class="p">,</span><span class="w"> </span><span class="nx">detail</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;low&#39;</span><span class="p">,</span><span class="s1">&#39;high&#39;</span><span class="p">,</span><span class="s1">&#39;auto&#39;</span><span class="p">],</span><span class="w"> </span><span class="nx">maxBytes</span><span class="o">:</span><span class="w"> </span><span class="mf">5e6</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1">// codex</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nx">vision</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">supported</span><span class="o">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nx">formats</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;png&#39;</span><span class="p">,</span><span class="s1">&#39;jpeg&#39;</span><span class="p">],</span><span class="w">        </span><span class="nx">maxImages</span><span class="o">:</span><span class="w"> </span><span class="mf">8</span><span class="p">,</span><span class="w">   </span><span class="nx">detail</span><span class="o">:</span><span class="w"> </span><span class="kc">false</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div></li>
 <li><strong>A negotiation pass.</strong> Before dispatch, a shared <code>negotiate(request, capability) → { request, dropped,
    warnings }</code> validates the normalized request against the <em>target</em> engine's descriptor and applies one

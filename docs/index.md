@@ -2,15 +2,18 @@
 
 <p class="asmltr-gradient" style="font-size:1.35rem;font-weight:800;margin-top:-0.4rem">One channel-agnostic AI-assistant backend behind every chat surface — with a live insights dashboard.</p>
 
-Run **one** assistant (backed by your Claude subscription via the local Agent SDK) and let people
-reach it from **Discord, Telegram, an MCP client, GitHub issues, or any OpenAI-compatible client** —
-all through the same brain, with shared memory, a unified trust/permission model, moderation, and
-per-secret output redaction. A collector + dashboard give you one pane of glass over everything the
-assistant is doing, and a CLI lets any session watch, steer, and coordinate with the others.
+Run **one** assistant and let people reach it from **Discord, Telegram, an MCP client, GitHub issues,
+or any OpenAI-compatible client** — all through the same brain, with shared memory, a unified
+trust/permission model, moderation, and per-secret output redaction. Its thinking runs on a
+**[swappable engine](engines.md)** — Claude Code (on your subscription, the default), Gemini, Codex, or
+a self-hosted model — and whichever you pick drives every channel. A collector + dashboard give you one
+pane of glass over everything the assistant is doing, and a CLI lets any session watch, steer, and
+coordinate with the others.
 
-!!! note "No metered API key"
-    All agent execution runs through the **local Agent SDK on your Claude subscription** — there is
-    **no `ANTHROPIC_API_KEY` execution path**. See [Architecture](architecture.md).
+!!! note "The default engine uses your Claude subscription — no metered API key"
+    The Claude engine executes through the **local Agent SDK on your Claude subscription** — there is
+    **no `ANTHROPIC_API_KEY` execution path**. Other engines (Gemini/Codex/self-hosted) use their own
+    login or a vault-stored API key. See [Reasoning engines](engines.md) · [Architecture](architecture.md).
 
 <div class="grid cards" markdown>
 
@@ -21,6 +24,10 @@ assistant is doing, and a CLI lets any session watch, steer, and coordinate with
 - :material-sitemap: **[Architecture](architecture.md)**
 
     Adapter → envelope → core (SDK) → redact → outbound, plus the collector & dashboard.
+
+- :material-brain: **[Reasoning engines](engines.md)**
+
+    Run on Claude, Gemini, Codex, or a self-hosted model — one choice drives every channel.
 
 - :material-hub: **[Connectors](https://github.com/jarethmt/asmltr/blob/main/connectors/index.md)**
 
