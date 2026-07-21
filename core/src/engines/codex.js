@@ -57,6 +57,7 @@ async function runTurn({ prompt, resume = null, cwd, model, abortController, onD
     '--output-last-message', lastMsgFile);
   if (mdl) args.push('-m', mdl);
   args.push(...baseUrlArgs());
+  try { args.push(...require('../../../shared/mcp-registry').codexArgs()); } catch (_) {} // shared MCP registry
   if (cwd) args.push('-C', cwd);
   args.push(prompt || '');
 

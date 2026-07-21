@@ -46,8 +46,11 @@ function extractText(obj) {
   return '';
 }
 
+let _mcpSynced = false;
 async function runTurn({ prompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
   const mdl = model || engines.modelFor('gemini');
+  // MCP: gemini persists servers in its own config → reconcile the shared registry once per process.
+  if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGemini(bin()); } catch (_) {} }
   const sessionId = resume || crypto.randomUUID();
   const args = ['-p', prompt || '', '-o', 'stream-json', '-y', '--skip-trust', '--session-id', sessionId];
   if (mdl) args.push('-m', mdl);

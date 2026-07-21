@@ -28,6 +28,20 @@ complete({prompt, model}) → string      // cheap one-shot for the title/status
   codex custom provider (`-c model_providers.asmltr_custom.base_url=… wire_api=responses`). The endpoint must
   speak the OpenAI **Responses** API (vLLM, LiteLLM, a gateway); use api_key mode with the server's key.
 
+## MCP tools — declared once, provisioned into every engine
+
+`shared/mcp-registry.js` is the single place to declare MCP servers (`~/.asmltr/mcp.json`, gitignored).
+Each engine gets them at launch in its own shape:
+- **Claude** — the SDK `mcpServers` option.
+- **Codex** — per-launch `-c mcp_servers.<name>.{command,args,env|url}` flags.
+- **Gemini** — reconciled into gemini's own config via `gemini mcp add` (once per process; re-synced on change).
+
+A built-in **`asmltr-toolbelt`** stdio server (`mcp/toolbelt-server.js`, zero-dep newline-JSON-RPC) is always
+included unless disabled — it exposes asmltr's own cross-session tools (`asmltr_sessions`, `asmltr_send`,
+`asmltr_announce`, `asmltr_uploads`) to **every** harness, so the toolbelt that used to be a Claude-only
+system-prompt cheatsheet is now real, structured tools any engine can call. Manage from Settings → Engines →
+MCP tools, or `GET/POST /v2/mcp`, `DELETE /v2/mcp/:name`, `POST /v2/mcp/:name/toggle`.
+
 `core/src/engines/index.js` maps id → impl lazily; `runner` routes each turn to `opts.engine || default`.
 
 ### Adapter status
