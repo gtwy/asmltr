@@ -57,6 +57,7 @@ async function start(ctx) {
   }
 
   bot.on('message', async (msg) => {
+    ctx.heartbeat(); // an inbound update proves the poll loop delivered I/O
     if (msg.from && msg.from.is_bot) return;
     const chatId = msg.chat.id;
     const userId = (msg.from && (msg.from.username || msg.from.id)) || String(chatId);
@@ -150,6 +151,18 @@ async function start(ctx) {
     }
   });
 
+  // Poll-cycle heartbeat: node-telegram-bot-api stamps bot._polling._lastUpdate on every successful
+  // getUpdates, message or not. We heartbeat only when that timestamp ADVANCES, so a healthy-but-quiet
+  // bot stays alive & an EFATAL-dead loop (the 2026-07-16 case: _lastUpdate froze while the pid lived)
+  // stops heartbeating and goes stale. This is the liveness signal, not a timer that fires regardless.
+  const { HEARTBEAT_INTERVAL_MS } = require('../../manager/health');
+  let lastSeenUpdate = 0;
+  const hbTimer = setInterval(() => {
+    const at = bot._polling && bot._polling._lastUpdate;
+    if (at && at !== lastSeenUpdate) { lastSeenUpdate = at; ctx.heartbeat(); }
+  }, HEARTBEAT_INTERVAL_MS);
+  hbTimer.unref();
+
   // --- outbound HTTP endpoints (transport other tools depend on) -------------
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -185,7 +198,7 @@ async function start(ctx) {
 
   ctx.log('telegram connector started (polling)');
   return {
-    async stop() { try { await bot.stopPolling(); } catch (_) {} try { httpServer.close(); } catch (_) {} },
+    async stop() { clearInterval(hbTimer); try { await bot.stopPolling(); } catch (_) {} try { httpServer.close(); } catch (_) {} },
     health() { return { polling: true, http_port: cfg.http_port || 3008 }; },
   };
 }
