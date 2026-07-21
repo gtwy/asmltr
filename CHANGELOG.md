@@ -9,10 +9,38 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Reasoning engines — pluggable agentic backends.** The channel/web runner is now engine-abstracted
+  (`core/src/engines/`): a turn routes to the configured default engine — **Claude Code, Gemini CLI, or
+  Codex CLI**. The Claude SDK is loaded lazily, so a Gemini-only or Codex-only install runs without it,
+  and every connector (Discord/Telegram/email/GitHub/web/voice) runs on whichever single engine is
+  selected. Per-engine model, **connection** (subscription OAuth or a vault-stored API key), one-click
+  **install/update + auto-update**, and `asmltr claude|gemini|codex` terminal commands. Settings → Engines.
+- **Self-hosted models.** Point the Codex engine at any OpenAI **Responses-API** endpoint (self-hosted
+  vLLM/LiteLLM, a gateway, another provider) via a custom base URL; the key is vault-stored.
+- **MCP tools registry.** Declare MCP servers once (`~/.asmltr/mcp.json`) and asmltr provisions them into
+  every harness (Claude SDK `mcpServers` / Codex `-c` / Gemini `mcp add`). Includes a built-in
+  **asmltr-toolbelt** stdio MCP server exposing asmltr's own tools (sessions/send/announce/uploads) to
+  every engine. Settings → Engines → MCP tools.
+- **Guarded backup restore + import in the dashboard.** Restore is no longer CLI-only: preview (dry-run)
+  → type-to-confirm → a detached runner that survives the core restart, with a live progress log. Import
+  a `.asmltrbk` archive straight from the browser.
+- **Connector liveness heartbeat** (#29, #35). A connector emits a heartbeat from its active I/O path;
+  the manager surfaces a deaf-but-alive instance as `healthy:false / heartbeat:stale` on `GET /instances`
+  without killing it — closing the "reports running while its I/O loop is dead" gap. `ASMLTR_HEARTBEAT_STALE_MS`.
+- **`ASMLTR_ANNOUNCE_FILE`** override for the manager announcements path (#29, #30).
+- Loading spinners on every async action button across Settings.
 
 ### Changed
+- **Docs.** README rewritten plain-language-first with a developer gateway into the deeper docs; new
+  Reasoning-engines guide + MCP-registry pages; nav restructured (engines promoted to their own section,
+  shipped systems separated from roadmap).
+- Model & runtime settings are now **per-engine** (each harness exposes its own model list).
 
 ### Fixed
+- **SDK auto-update split-brain** (#31, #33). `updateSdk()` now restarts all three PM2 services in
+  lockstep, so a bump can't advance `asmltr-core` onto a new sha while the manager & collector run old code.
+- **Telegram EFATAL silent death** (#32, #33). A fatal polling error now exits the connector so the
+  supervisor respawns a fresh poller, instead of the process staying up and deaf.
 
 ## [0.6.0] - 2026-07-16
 
