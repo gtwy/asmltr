@@ -139,7 +139,16 @@ async function start(ctx) {
     }
   });
 
-  bot.on('polling_error', (e) => ctx.log(`polling_error: ${e.code || e.message}`));
+  bot.on('polling_error', (e) => {
+    ctx.log(`polling_error: ${e.code || e.message}`);
+    if (isFatalPollingError(e)) {
+      // node-telegram-bot-api marks unrecoverable failures with code EFATAL; when it fires the
+      // internal poll loop has stopped and never resumes, so the process stays alive but deaf. Exit
+      // so the manager's supervisor respawns a fresh poller (backoff, gives up after its max).
+      ctx.log('fatal polling error, exiting so the manager respawns the connector');
+      setTimeout(() => process.exit(1), 500); // let the log line flush first
+    }
+  });
 
   // --- outbound HTTP endpoints (transport other tools depend on) -------------
   const app = express();
@@ -188,4 +197,8 @@ async function sendChunked(bot, chatId, textRaw) {
   for (let i = 0; i < text.length; i += MAX) await bot.sendMessage(chatId, text.slice(i, i + MAX)).catch(() => {});
 }
 
-module.exports = { meta, start };
+// node-telegram-bot-api sets e.code === 'EFATAL' on an unrecoverable polling failure (the loop has
+// stopped and won't resume). Recoverable errors (ETELEGRAM, ETIMEDOUT, network blips) keep polling.
+function isFatalPollingError(e) { return !!e && e.code === 'EFATAL'; }
+
+module.exports = { meta, start, isFatalPollingError };
