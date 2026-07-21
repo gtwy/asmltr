@@ -151,6 +151,13 @@ export const enginesApi = {
   clearApiKey: (id) => reqCore('DELETE', `/v2/engines/${encodeURIComponent(id)}/apikey`)
 }
 
+export const mcpApi = {
+  list: () => getCore('/v2/mcp'),
+  add: (def) => postCore('/v2/mcp', def),
+  remove: (name) => reqCore('DELETE', `/v2/mcp/${encodeURIComponent(name)}`),
+  toggle: (name, disabled) => postCore(`/v2/mcp/${encodeURIComponent(name)}/toggle`, { disabled })
+}
+
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
 export const backupApi = {
   list: (destination) => getCore('/v2/backups' + (destination && destination !== 'local' ? q({ destination }) : '')),

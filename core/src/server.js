@@ -782,6 +782,14 @@ app.delete('/v2/engines/:id/apikey', async (req, res) => { try { res.json({ ok: 
 // Custom (self-hosted / alternate-provider) OpenAI-compatible endpoint for a base_url-capable engine.
 app.post('/v2/engines/:id/base-url', (req, res) => { try { res.json({ ok: true, baseUrl: engines.setBaseUrl(req.params.id, (req.body || {}).url) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 
+// MCP registry — declare once, provisioned into every engine (Claude SDK / Codex -c / Gemini config).
+const mcpReg = require('../../shared/mcp-registry');
+function resyncGeminiMcp() { try { const b = engines.resolveBin('gemini'); if (b) mcpReg.syncGemini(b); } catch (_) {} }
+app.get('/v2/mcp', (req, res) => res.json({ servers: mcpReg.list() }));
+app.post('/v2/mcp', (req, res) => { try { const l = mcpReg.add((req.body || {}).name, req.body || {}); resyncGeminiMcp(); res.status(201).json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/mcp/:name', (req, res) => { try { res.json({ ok: true, servers: mcpReg.remove(req.params.name) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/mcp/:name/toggle', (req, res) => { try { const l = mcpReg.setDisabled(req.params.name, !!(req.body && req.body.disabled)); resyncGeminiMcp(); res.json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
+
 // Data silos — the file-explorer surface over shared/silo.js (`:id` = silo id; `self`/omitted → the Self silo).
 // Read verbs (list/overview/ls/tree/find/file) + safe writes (mkdir/put/mv/rm/new). Paths are silo-relative.
 function openSilo(id) { return (!id || id === 'self') ? silo.ensureSelf(identity.name()) : silo.open(id); }

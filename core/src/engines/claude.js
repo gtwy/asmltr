@@ -36,6 +36,8 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
   if (systemPrompt) options.appendSystemPrompt = systemPrompt;
   if (abortController) options.abortController = abortController;
   if (resume) options.resume = resume;
+  // MCP: provision the shared asmltr registry (incl. the built-in toolbelt) as SDK mcpServers.
+  try { const m = require('../../../shared/mcp-registry').forClaude(); if (Object.keys(m).length) options.mcpServers = m; } catch (_) {}
 
   let queryPrompt = prompt;
   if (images && images.length) {

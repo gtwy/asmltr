@@ -29,3 +29,6 @@ connectors/types/discord/channel-aliases.json
 CLAUDE.local.md
 insights/docker-compose.eve.yml
 connectors/types/openai/keys.json
+
+# asmltr per-install MCP registry (secret-bearing env)
+.asmltr/mcp.json

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "asmltr-toolbelt": {
+      "command": "/usr/bin/node",
+      "args": [
+        "~/asmltr/mcp/toolbelt-server.js"
+      ]
+    }
+  }
+}

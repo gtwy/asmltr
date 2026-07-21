@@ -6,7 +6,7 @@
 import { ref, onMounted, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
-import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi, enginesApi } from '@/services/api'
+import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi, enginesApi, mcpApi } from '@/services/api'
 import QRCode from 'qrcode'
 import { startRegistration } from '@simplewebauthn/browser'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
@@ -73,6 +73,24 @@ async function pickModelFor(id, modelId) {
   try { await enginesApi.setConfig(id, { model: m }); customModel[id] = ''; await loadEngines(); if (id === 'claude') await loadRuntime(true) }
   catch (e) { engError.value = `${id}: ${e.message}` } finally { modelBusy.value = '' }
 }
+
+// MCP registry — shared across all engines (declare once, provisioned into each harness).
+const mcpServers = ref([])
+const mcpBusy = ref('')
+const newMcp = reactive({ name: '', command: '', args: '', url: '' })
+const mcpError = ref('')
+async function loadMcp() { try { mcpServers.value = (await mcpApi.list()).servers || [] } catch (_) {} }
+async function addMcp() {
+  mcpBusy.value = 'add'; mcpError.value = ''
+  try {
+    const def = { name: newMcp.name.trim() }
+    if (newMcp.url.trim()) def.url = newMcp.url.trim()
+    else { def.command = newMcp.command.trim(); def.args = newMcp.args.trim() ? newMcp.args.trim().split(/\s+/) : [] }
+    await mcpApi.add(def); Object.assign(newMcp, { name: '', command: '', args: '', url: '' }); await loadMcp()
+  } catch (e) { mcpError.value = e.message } finally { mcpBusy.value = '' }
+}
+async function toggleMcp(s) { mcpBusy.value = s.name; try { await mcpApi.toggle(s.name, !s.disabled); await loadMcp() } catch (e) { mcpError.value = e.message } finally { mcpBusy.value = '' } }
+async function removeMcp(name) { if (!window.confirm(`Remove MCP server "${name}"?`)) return; mcpBusy.value = name; try { await mcpApi.remove(name); await loadMcp() } catch (e) { mcpError.value = e.message } finally { mcpBusy.value = '' } }
 
 // per-engine connection / auth — subscription (OAuth) vs API key (stored in the vault).
 const authBusy = ref('')             // engine id while an auth action is in flight
@@ -370,7 +388,7 @@ async function setCustomTtsModel() { const m = customTtsModel.value.trim(); if (
 
 onMounted(async () => {
   try { manifest.value = await api.manifest() } catch (_) {}
-  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups(), loadSecurity(), loadOidc(), loadEngines()])
+  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups(), loadSecurity(), loadOidc(), loadEngines(), loadMcp()])
   try { ackOn.value = (await voice.getAck()).enabled } catch (_) {}
 })
 </script>
@@ -571,6 +589,39 @@ onMounted(async () => {
                   <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="rt.cliBypass ? 'left-[22px]' : 'left-0.5'"></span>
                 </button>
               </label>
+            </div>
+          </div>
+
+          <!-- MCP tools — declared once, provisioned into EVERY engine (Claude SDK / Codex / Gemini) -->
+          <div class="glass p-5">
+            <h3 class="mb-1 text-sm font-semibold text-slate-200">MCP tools <span class="text-[11px] font-normal text-slate-500">· shared across all engines</span></h3>
+            <p class="mb-3 text-[12px] text-slate-500">Declare an MCP server once; it's provisioned into whichever engine runs a turn. The built-in <span class="font-mono">asmltr-toolbelt</span> exposes {{ agentName }}'s own tools (sessions · send · announce · uploads) to every harness.</p>
+            <p v-if="mcpError" class="mb-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-300">{{ mcpError }}</p>
+            <ul class="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/5">
+              <li v-for="s in mcpServers" :key="s.name" class="flex items-center gap-2 px-3 py-2 text-sm">
+                <AppIcon glyph="🧩" class="text-slate-500" />
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-slate-100">{{ s.name }}</span>
+                    <span v-if="s.builtin" class="pill border border-brand-violet/40 bg-brand-violet/10 text-[10px] text-violet-300">built-in</span>
+                    <span class="pill border border-white/10 bg-white/5 text-[10px] text-slate-500">{{ s.type }}</span>
+                    <span v-if="s.disabled" class="pill border border-white/10 bg-white/5 text-[10px] text-slate-500">off</span>
+                  </div>
+                  <div class="truncate font-mono text-[10px] text-slate-500">{{ s.url || (s.command + ' ' + (s.args||[]).join(' ')) }}</div>
+                </div>
+                <button type="button" class="act" :disabled="mcpBusy===s.name" @click="toggleMcp(s)"><Spinner v-if="mcpBusy===s.name" size="xs" class="mr-1" />{{ s.disabled ? 'Enable' : 'Disable' }}</button>
+                <button v-if="!s.builtin" type="button" class="act-danger" :disabled="mcpBusy===s.name" @click="removeMcp(s.name)"><AppIcon glyph="🗑" /></button>
+              </li>
+            </ul>
+            <div class="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <div class="mb-2 text-[11px] uppercase tracking-wide text-slate-500">Add a server</div>
+              <div class="flex flex-wrap items-end gap-2">
+                <input v-model="newMcp.name" type="text" placeholder="name" class="field-input w-32" />
+                <input v-model="newMcp.command" type="text" placeholder="command (e.g. npx)" class="field-input w-40" :disabled="!!newMcp.url" />
+                <input v-model="newMcp.args" type="text" placeholder="args (space-separated)" class="field-input min-w-0 flex-1" :disabled="!!newMcp.url" />
+                <input v-model="newMcp.url" type="text" placeholder="…or http URL" class="field-input w-44" />
+                <button type="button" :disabled="!newMcp.name.trim() || (!newMcp.command.trim() && !newMcp.url.trim()) || mcpBusy==='add'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="addMcp"><Spinner v-if="mcpBusy==='add'" size="xs" class="mr-1" />Add</button>
+              </div>
             </div>
           </div>
         </div>
