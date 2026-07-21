@@ -32,7 +32,10 @@ const ENGINES = {
   codex: { id: 'codex', label: 'Codex', bin: 'codex', binEnv: 'ASMLTR_CODEX_BIN', pkg: '@openai/codex',
     binPaths: ['/usr/local/bin/codex', '/usr/bin/codex', '~/.local/bin/codex'],
     defaultModel: 'gpt-5-codex', models: [{ id: 'gpt-5-codex', label: 'gpt-5-codex' }, { id: 'o3', label: 'o3' }, { id: 'o4-mini', label: 'o4-mini' }, { id: 'gpt-4.1', label: 'gpt-4.1' }],
-    auth: { modes: ['subscription', 'api_key'], apiKeyEnv: 'OPENAI_API_KEY', loginCmd: 'codex login', note: 'Subscription = ChatGPT login via `codex login`. API key = an OpenAI API key (metered billing).' } },
+    auth: { modes: ['subscription', 'api_key'], apiKeyEnv: 'OPENAI_API_KEY', loginCmd: 'codex login', note: 'Subscription = ChatGPT login via `codex login`. API key = an OpenAI API key (metered billing).' },
+    // Codex is the OpenAI-compatible vehicle: point it at any custom endpoint (self-hosted vLLM/Ollama/
+    // LM Studio, a gateway, or another provider) via a base URL. The model list is then the server's.
+    supportsBaseUrl: true, baseUrlHint: 'e.g. http://localhost:8000/v1 (OpenAI Responses-API compatible: vLLM, LiteLLM, a gateway)' },
 };
 
 const isExecFile = (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } };
@@ -85,12 +88,24 @@ function list() {
     models: e.models || [], model: config(e.id).model || e.defaultModel || null,
     auth: authInfo(e.id),                    // connection descriptor + selection (never the key value)
     autoUpdate: isAutoUpdate(e.id),
+    supportsBaseUrl: !!e.supportsBaseUrl, baseUrl: config(e.id).base_url || '', baseUrlHint: e.baseUrlHint || '',
     config: config(e.id),
   }));
 }
 
 /** The effective model for an engine: configured → engine default → null. */
 function modelFor(id) { const e = ENGINES[id]; if (!e) return null; return config(id).model || e.defaultModel || null; }
+
+// Custom (self-hosted / alternate-provider) OpenAI-compatible endpoint for a base_url-capable engine.
+function baseUrlFor(id) { const e = ENGINES[id]; return (e && e.supportsBaseUrl) ? (config(id).base_url || '') : ''; }
+function setBaseUrl(id, url) {
+  const e = ENGINES[id]; if (!e) throw new Error('unknown engine: ' + id);
+  if (!e.supportsBaseUrl) throw new Error(`engine ${id} does not support a custom endpoint`);
+  const v = String(url || '').trim();
+  if (v && !/^https?:\/\//i.test(v)) throw new Error('base URL must start with http:// or https://');
+  setConfig(id, { base_url: v });
+  return baseUrlFor(id);
+}
 
 // ── auto-update (per engine; a scheduler in the core calls autoUpdateAll on a cadence) ─────────
 function isAutoUpdate(id) { return !!config(id).autoUpdate; }
@@ -156,4 +171,4 @@ async function envForLaunch(id) {
   const v = await apiKeyValue(id); return v ? { [a.apiKeyEnv]: v } : {};
 }
 
-module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, authInfo, setAuthMode, setApiKey, clearApiKey, apiKeyValue, envForLaunch, isAutoUpdate, setAutoUpdate, installLatest, autoUpdateAll, list };
+module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, baseUrlFor, setBaseUrl, authInfo, setAuthMode, setApiKey, clearApiKey, apiKeyValue, envForLaunch, isAutoUpdate, setAutoUpdate, installLatest, autoUpdateAll, list };
