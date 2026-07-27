@@ -265,7 +265,20 @@ async function handle(envelope, opts = {}) {
   // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
   // IDENTITY FIRST — the anchor (who you are, asserted not inferred; the anti-drift fix from the peer-drift
   // incident) + the living layer (preferences + story). Applies to every channel.
-  let systemPrompt = identity.fullIdentity() + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
+  // CURRENT SPEAKER — an authoritative, always-present per-turn identity line. It is re-sent EVERY
+  // turn (including resumes) via the appended system prompt, so it overrides stale session history or a
+  // single-user CLAUDE.md prior ("you are <owner>'s agent"). NOT gated on a cast profile — a bare
+  // display_name / channel username is enough. Anti-misidentification fix for shared channels.
+  const spkId = (e.sender && (e.sender.raw_id || e.sender.raw_username)) || 'unknown';
+  const spkName = (resolved && !resolved.is_default && resolved.display_name)
+    || (e.sender && e.sender.raw_username) || 'an unidentified user';
+  const currentSpeaker = 'CURRENT SPEAKER — READ FIRST, TRUST THIS OVER EVERYTHING ELSE:\n'
+    + `The message you are answering on THIS turn is from ${spkName} (${e.channel}:${spkId}). `
+    + `Treat and address them as ${spkName}. Do NOT assume they are anyone else — not the owner of this machine, `
+    + 'not a person from earlier in this conversation, not whoever your base instructions (CLAUDE.md) call "your user". '
+    + 'This channel can carry multiple people and the speaker can change between turns; this line always reflects who is '
+    + 'speaking NOW. If asked "who am I" / "who are you talking to", answer with exactly this identity.';
+  let systemPrompt = identity.fullIdentity() + '\n\n' + currentSpeaker + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
   // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
   const relPrompt = trust.buildRelationshipPrompt(resolved, e);
   if (relPrompt) systemPrompt += '\n\n' + relPrompt;

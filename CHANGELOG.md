@@ -10,9 +10,19 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- Always-on **CURRENT SPEAKER** line in every turn's system prompt — authoritatively names the
+  current sender (even without a cast profile) so an assistant on a shared, multi-person channel
+  doesn't confuse who it's talking to or default to the box owner.
+
 ### Changed
 
 ### Fixed
+
+- **Core system prompt was silently dropped on the Claude engine.** `options.appendSystemPrompt` is
+  a no-op in `@anthropic-ai/claude-agent-sdk`'s `query()`; the engine now passes
+  `options.systemPrompt = { type: 'preset', preset: 'claude_code', append }`. Identity, trust/authz,
+  channel-awareness, cast, and toolbelt instructions reach the model again (regression since the
+  agent-SDK migration — the assistant had been running on `CLAUDE.md` alone).
 
 ## [0.7.0] - 2026-07-21
 

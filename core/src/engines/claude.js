@@ -33,7 +33,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
   const thinkTokens = Number(process.env.ASMLTR_MAX_THINKING_TOKENS ?? 4000);
   if (thinkTokens > 0) options.maxThinkingTokens = thinkTokens;
   if (cwd) options.cwd = cwd;
-  if (systemPrompt) options.appendSystemPrompt = systemPrompt;
+  if (systemPrompt) options.systemPrompt = { type: 'preset', preset: 'claude_code', append: systemPrompt };
   if (abortController) options.abortController = abortController;
   if (resume) options.resume = resume;
   // MCP: provision the shared asmltr registry (incl. the built-in toolbelt) as SDK mcpServers.
@@ -118,7 +118,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
 async function complete({ prompt, model, appendSystemPrompt = null, maxTurns = 1 }) {
   const query = q();
   const options = { stream: true, permissionMode: 'bypassPermissions', model, maxTurns };
-  if (appendSystemPrompt) options.appendSystemPrompt = appendSystemPrompt;
+  if (appendSystemPrompt) options.systemPrompt = { type: 'preset', preset: 'claude_code', append: appendSystemPrompt };
   let out = '';
   const response = await query({ prompt, options });
   for await (const ev of response) {
