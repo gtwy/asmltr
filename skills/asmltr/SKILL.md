@@ -88,6 +88,22 @@ asmltr release <key>               # end takeover; channel resumes
 asmltr kill <id> | stop <id> | diff <id>
 ```
 
+## Keeping asmltr current
+
+```bash
+asmltr version                     # installed version + sha + channel, each service's version, and whether an update is available
+asmltr update                      # fetch + install the latest, restart the three services, verify, auto-roll-back on failure
+asmltr update --dry-run            # print the plan + resolved target and change nothing (also: -n)
+asmltr update --channel stable     # target the newest release tag; --channel edge tracks origin/main
+```
+`asmltr version` prints the running sha against its channel and, when you're behind, the number of
+commits and the exact `asmltr update` line to run. `asmltr update` runs the deterministic updater in
+the foreground, so every step streams to your terminal: it snapshots a rollback point, checks out the
+target, reinstalls, rebuilds the dashboard, then restarts and checks `/health` and the `/version` sha
+before it declares success. A failed verify rolls the whole update back on its own. `--dry-run` stops
+right after it resolves the target. `--agent` is the fallback: it hands the update to an LLM session
+run detached through core, which you watch in the dashboard.
+
 ## Don't
 
 - Don't hit connector HTTP endpoints or SMTP/IMAP directly — go through `asmltr` so everything stays
