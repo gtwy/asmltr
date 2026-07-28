@@ -255,6 +255,38 @@ This is a **different layer** from the coarse capability manifest:
   more general harness is wanted, add an `opencode` / `goose` / `aider` engine (all point at arbitrary
   endpoints; trade-offs differ — Aider is edit-centric, OpenCode/Goose are general agents).
 
+## System-prompt delivery & the inject-once decision (#53 / #54)
+
+The core rebuilds the system prompt **per message** — it carries the current speaker and that sender's
+`trust.buildAuthzPrompt` scope (`server.js`). How it reaches the model differs by engine:
+
+- **claude** — lands on a real system channel via the SDK (`systemPrompt: { preset, append }`); re-sent
+  every turn but absorbed by prompt-caching, not accumulated into user history.
+- **codex / gemini** — folded into the **user turn** as a delimited `<system-instructions>` preamble
+  (`shared/prompt-compose.js`), because the installed CLIs expose no verified system-instruction flag.
+
+On **codex**, `exec resume` replays the thread server-side, so a prompt folded into an earlier user turn
+persists — re-sending the whole block every turn is pure token bloat on long sessions. **inject-once**
+(#58) fixes that by splitting the prompt into a **STABLE** block (identity, channel, toolbelt, uploads
+instruction — keyed by a sha256) and a **VOLATILE** tail (current speaker, authz, relationship,
+per-turn context). The stable block is sent once (and re-sent only when its hash moves — identity edit,
+trust change, vault lock/unlock, silo-path change); the volatile tail is sent **every turn**.
+
+> ⚠️ **The trust-scope trap (why we did NOT naively "send once").** A codex thread can carry messages
+> from different senders/tiers over its life. If turn-1's authz block governed the whole thread, a later
+> turn from a *lower-trust* sender would inherit turn-1's scope — a privilege bug. So the current
+> sender + their authz are in the VOLATILE tail and re-asserted every turn; only the sender-independent
+> stable block is cached. Never move authz/current-speaker into the stable block.
+
+- **gemini** stays **always-full** (`historyReplaysSystemPrompt` off): its adapter is stateless per turn,
+  so nothing accumulates and nothing can be skipped. Cross-turn continuity is a separate follow-up (#59);
+  once it retains history it inherits inject-once for free.
+- Kill-switch: `ASMLTR_INJECT_ONCE=off` reverts to full-every-turn without a redeploy.
+- **Still open (#53):** route the block through a *native system channel* on codex/gemini (codex
+  `-c`/instructions, gemini `GEMINI_SYSTEM_MD`) instead of the user-channel preamble, for stronger
+  injection resistance under full autonomy. `composePrompt` stays the documented fallback where no native
+  channel exists on the installed version.
+
 ## Levels of control (substrate first — not tool interception)
 
 A wrapped harness runs its *own* agentic loop with its *own* native tools, and a model **will prefer its
