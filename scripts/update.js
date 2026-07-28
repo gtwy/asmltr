@@ -222,7 +222,7 @@ function done(code, summary) {
     if (compose && hasDocker) {
       phase('rebuild dashboard (docker compose)');
       const d = run('docker', ['compose', '-f', compose, 'up', '-d', '--build'], { timeout: 15 * 60 * 1000 });
-      if (d.code !== 0) log('dashboard rebuild failed (non-fatal — core update continues)');
+      if (d.code !== 0) log('dashboard rebuild failed (non-fatal — core update continues). For a local-only deploy, save your compose as insights/docker-compose.<name>.yml so the updater uses it instead of the base Traefik compose.');
     } else { log('dashboard: no compose file or docker not present — skip'); }
   }
 

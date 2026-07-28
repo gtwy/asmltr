@@ -251,6 +251,21 @@ ASMLTR_NGINX_LISTEN=127.0.0.1:8091 ASMLTR_UPSTREAM_HOST=127.0.0.1 \
 ```
 Tell the user to reach it via: `ssh -L 8091:127.0.0.1:8091 <server>` then open `http://localhost:8091`.
 
+**⛏ Make the updater keep this rebuilt.** The base `insights/docker-compose.yml` joins the external `traefik-network`; run it on a local-only box & it fails with `network traefik-network declared as external, but could not be found`. `scripts/update.js` rebuilds the dashboard on every `asmltr update`, & with only the base file present that rebuild fails each time, so the GUI silently lags a version. Save your local-only compose as `insights/docker-compose.<name>.yml` (e.g. `insights/docker-compose.local.yml`). `.gitignore` line 30 (`insights/docker-compose.*.yml`) keeps it out of git, so `git reset --hard` on an update never touches it, & `scripts/update.js` prefers any `insights/docker-compose.*.yml` over the base Traefik compose. Then `asmltr update` rebuilds the GUI with your local-only config on its own. A minimal host-networked file:
+
+```yaml
+services:
+  asmltr-insights-dashboard:
+    build: ./dashboard
+    container_name: asmltr-insights-dashboard
+    network_mode: host
+    environment:
+      - NGINX_LISTEN=127.0.0.1:8091
+      - ASMLTR_UPSTREAM_HOST=127.0.0.1
+```
+
+If you already ran the dashboard from a compose in another directory, run `docker rm -f asmltr-insights-dashboard` once so the new compose project can own the container name.
+
 ### Option B — public, authenticated (walk the user through it)
 
 **1. Detect what's already on the box — don't assume.**
