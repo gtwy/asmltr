@@ -29,6 +29,8 @@ asmltr diff <id>       git diff of a session's worktree
 asmltr claude [args]   launch a monitored session on the Claude engine
 asmltr gemini [args]   … on the Gemini engine
 asmltr codex  [args]   … on the Codex engine
+asmltr version         installed + per-service versions; whether an update is available
+asmltr update          pull + install the latest & restart (verifies; auto-rolls-back)
 ```
 
 !!! tip "Reasoning engines"
@@ -296,6 +298,52 @@ The session runs as a real interactive `claude` TUI (in tmux), while its events 
 to the collector like any other session — so it shows up in `ls`, `map`, `who`, the
 TUI, and the dashboard, and can be steered/taken over. See the
 [CLI-sessions connector](https://github.com/jarethmt/asmltr/blob/main/connectors/cli.md) for how these sessions are wired in.
+
+---
+
+## Update
+
+Report the installed version and pull the latest, from the terminal.
+
+### `asmltr version`
+
+```bash
+asmltr version
+```
+
+Prints the installed version, sha, and channel, then each host service's own version
+(core, collector, manager), then whether an update is available. When the install is
+behind, it reports how many commits and the `asmltr update` command to run; when it's
+current it says so for the active channel.
+
+### `asmltr update`
+
+Fetch and install the latest, restart the services, and verify — the deterministic
+updater, no LLM in the loop.
+
+```bash
+asmltr update                      # update on the current channel
+asmltr update --dry-run            # print the plan + resolved target, change nothing (also -n)
+asmltr update --channel stable     # newest release tag vX.Y.Z
+asmltr update --channel edge       # origin/main
+asmltr update --agent              # hand the update to a detached LLM session (fallback)
+```
+
+It runs in the foreground with `stdio: 'inherit'`, so the whole pipeline streams to your
+terminal: preflight, lock, snapshot a rollback point, fetch, resolve the channel target,
+git checkout, run the setup steps, reconcile `.env`, `npm install` on the root workspace,
+rebuild the Docker dashboard, then restart all three services and check `/health` and the
+`/version` sha. A failed verify rolls the update back on its own.
+
+| Flag | Meaning |
+|---|---|
+| `--dry-run`, `-n` | resolve the target and print the step plan; stop before changing anything |
+| `--channel stable\|edge` | `stable` = newest release tag `vX.Y.Z`; `edge` = `origin/main` (also `--stable` / `--edge`) |
+| `--force` | reinstall the target even when already up to date (skip the short-circuit) |
+| `--agent` | run the LLM escape-hatch updater, detached via core; watch it in the dashboard |
+
+Exit codes: `0` ok, `1` preflight or usage, `2` rolled back, `3` manual intervention
+needed, `4` already up to date, `5` another update is running, `6` externally managed.
 
 ---
 
