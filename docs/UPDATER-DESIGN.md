@@ -99,6 +99,26 @@ The agent update session ([`scripts/run-update-session.js`](../scripts/run-updat
 `asmltr update --agent`. Use it only when the deterministic path fails on a genuinely novel install —
 you keep the "wild install" adaptability without depending on an LLM for routine updates.
 
+## Node major upgrades (native-addon ABI)
+
+The services load native addons (`better-sqlite3` for the session/draft/trust stores; `@discordjs/opus`
+for voice). Native addons are compiled against a specific `NODE_MODULE_VERSION` (Node 20 = 115,
+Node 24 = 137), so after the host Node major changes they must be rebuilt or they fail to load with
+`NODE_MODULE_VERSION` / "Could not locate the bindings file" and PM2 crash-loops the service.
+
+- A normal deploy is safe: the updater runs `npm ci` (see above), which rebuilds addons for the current Node.
+- A **manual** Node upgrade is not: bump Node, then rebuild before restarting.
+
+  ```sh
+  npm rebuild            # or: npm ci   (from the repo root; recompiles addons for the running Node)
+  npm run check:native   # preflight: verifies addons load under this Node, exits non-zero with the fix if not
+  pm2 restart asmltr-core asmltr-connector-manager asmltr-insights-collector
+  ```
+
+  `npm run check:native` ([`scripts/preflight-native.js`](../scripts/preflight-native.js)) turns the
+  cryptic bindings crash into a clear "rebuild for Node X" message; run it in a deploy step after any
+  Node change.
+
 ## What is never touched on update
 
 Gitignored config + all runtime state: `.env`, `core/src/trust/seed.json`,

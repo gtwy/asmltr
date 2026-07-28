@@ -25,7 +25,8 @@
     "update": "node scripts/update.js",
     "release": "node scripts/release.js",
     "setup": "node scripts/run-setup-steps.js",
-    "version:print": "node -e \"console.log(require('./shared/version').readVersion())\""
+    "version:print": "node -e \"console.log(require('./shared/version').readVersion())\"",
+    "check:native": "node scripts/preflight-native.js"
   },
   "dependencies": {
     "aws4fetch": "^1.0.20"
