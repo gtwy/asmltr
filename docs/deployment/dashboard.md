@@ -94,3 +94,22 @@ docker compose -f insights/docker-compose.yml up -d --build   # + any -f overrid
 ```
 
 If it's public, confirm afterward that an unauthenticated request still redirects to the login portal — that auth didn't regress.
+
+### Let the updater rebuild the local-only dashboard
+
+`scripts/update.js` rebuilds the dashboard on every `asmltr update`, but it only knows about the base `insights/docker-compose.yml` unless you tell it otherwise. That base file joins the external `traefik-network`; on a local-only box it fails with `network traefik-network declared as external, but could not be found`, so the rebuild fails each update & the GUI silently lags a version.
+
+Save your local-only compose as `insights/docker-compose.<name>.yml` (e.g. `insights/docker-compose.local.yml`). `.gitignore` matches `insights/docker-compose.*.yml`, so `git reset --hard` during an update never touches it, & `scripts/update.js` scans `insights/` for a `docker-compose.*.yml` override & prefers it over the base Traefik compose. A minimal host-networked file:
+
+```yaml
+services:
+  asmltr-insights-dashboard:
+    build: ./dashboard
+    container_name: asmltr-insights-dashboard
+    network_mode: host
+    environment:
+      - NGINX_LISTEN=127.0.0.1:8091
+      - ASMLTR_UPSTREAM_HOST=127.0.0.1
+```
+
+If you first ran the dashboard from a compose in another directory, run `docker rm -f asmltr-insights-dashboard` once so the new compose project can own the container name.
