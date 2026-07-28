@@ -528,6 +528,10 @@ function cmdHelp() {
   asmltr claude [args]   launch a monitored, identity-anchored claude session (tmux; takeover-able)
   asmltr provision-alias create a \`<agent-name>\` → \`asmltr claude\` command (from ASSISTANT_NAME;
        [name] [--force]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
+  ${A.bold('version & updates:')}
+  asmltr version         installed + per-service versions; whether an update is available
+  asmltr update          pull + install the latest & restart (deterministic; verifies, auto-rolls-back)
+       [--dry-run] [--channel stable|edge] [--force] [--agent]
   asmltr help
 
   collector: ${BASE}   core: ${CORE_BASE}   ${TOKEN ? '(token set)' : A.dim('(no token — dev mode)')}`);
