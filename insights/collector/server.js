@@ -213,6 +213,9 @@ app.get('/api/events', requireToken, (req, res) => {
 });
 // where each session is ACTIVELY working — derived from recent tool events' file paths
 // (resolved to the git repo root), NOT the static spawn dir. This is the honest map.
+// Absolute paths under a real filesystem root — used to mine "where" out of shell commands. Anchored
+// on known roots so it doesn't match flags/URLs/relative tokens. Catches `cd /x`, `git -C /x`, file args.
+const _ABS_PATH_RE = /\/(?:root|home|opt|srv|var|tmp|mnt|data|workspace)\/[A-Za-z0-9._\-\/]+/g;
 function _pathsFromTool(payload) {
   let p; try { p = JSON.parse(payload); } catch { return []; }
   let inp = p && p.input;
@@ -220,6 +223,12 @@ function _pathsFromTool(payload) {
   const out = [];
   if (inp && typeof inp === 'object') {
     for (const k of ['file_path', 'notebook_path', 'path']) if (typeof inp[k] === 'string' && inp[k].startsWith('/')) out.push(inp[k]);
+    // Bash/shell is the bulk of real work (git/npm/build/scripts) and carries no path arg — mine the
+    // command string so a shell-heavy session isn't invisible to the map. cwd targets + file args.
+    const cmd = typeof inp.command === 'string' ? inp.command : '';
+    if (cmd) for (const m of cmd.matchAll(_ABS_PATH_RE)) out.push(m[0]);
+  } else if (typeof inp === 'string' && inp) {
+    for (const m of inp.matchAll(_ABS_PATH_RE)) out.push(m[0]);
   }
   return out;
 }
@@ -259,27 +268,51 @@ app.get('/api/self/assessment', requireToken, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Session map — WHAT each currently-active agent is doing and WHERE. "What" is the live activity
+// rollup (built from inbound + ALL tool events, incl. Bash) with title/task fallbacks. "Where" is the
+// filesystem location mined from recent tool activity (file args + shell paths), falling back to the
+// session's working_dir (terminal sessions) or channel location. Every session active within the
+// window is listed — not just ones that happened to run a file-path tool — so a shell-heavy or
+// channel session is no longer invisible. Grouped by repo → same repo, 2+ sessions = collision.
 app.get('/api/map', requireToken, (req, res) => {
   const since = Number(req.query.since) || (Date.now() - 30 * 60000);
   const meta = {};
   for (const s of dbmod.q.activeSessions.all()) meta[s.session_id] = s;
-  const dirs = {}; // session_id -> { dir: hits }
+  const acc = {}; // session_id -> { repos: {repo: hits}, dirs: {dir: hits} } from recent tool activity
   for (const r of dbmod.q.toolEventsSince.all({ since })) {
     if (!meta[r.session_id]) continue;
     for (const fp of _pathsFromTool(r.payload)) {
+      // Group by the INNERMOST git repo of the full path (walk up to .git) — not the path's parent
+      // dir, which would mis-group a `cd <repo>` under its container. Track containing dirs for display.
+      const repo = _repoRoot(fp);
       const dir = fp.replace(/\/[^/]*$/, '') || '/';
-      (dirs[r.session_id] = dirs[r.session_id] || {});
-      dirs[r.session_id][dir] = (dirs[r.session_id][dir] || 0) + 1;
+      const a = (acc[r.session_id] = acc[r.session_id] || { repos: {}, dirs: {} });
+      a.repos[repo] = (a.repos[repo] || 0) + 1;
+      a.dirs[dir] = (a.dirs[dir] || 0) + 1;
     }
   }
   const sessions = [];
-  for (const sid of Object.keys(dirs)) {
-    const ranked = Object.entries(dirs[sid]).sort((a, b) => b[1] - a[1]);
+  for (const s of Object.values(meta)) {
+    if (!(s.last_activity_unix > since)) continue;              // only agents active in the window
+    const what = s.activity || s.title || s.task || null;       // what it's doing (live rollup first)
+    const a = acc[s.session_id];
+    let repo, dirList;
+    if (a && Object.keys(a.repos).length) {                     // where: innermost repo by hit count
+      repo = Object.entries(a.repos).sort((x, y) => y[1] - x[1])[0][0];
+      dirList = Object.entries(a.dirs).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([dir, hits]) => ({ dir, hits }));
+    } else if (s.working_dir) {                                 // fallback: terminal spawn cwd
+      repo = _repoRoot(s.working_dir);
+      dirList = [{ dir: s.working_dir, hits: 0 }];
+    } else {                                                    // channel session, no fs activity yet
+      repo = s.location || '(no filesystem activity)';
+      dirList = [];
+    }
     sessions.push({
-      session_id: sid, surface: meta[sid].surface, title: meta[sid].title, last_activity_unix: meta[sid].last_activity_unix,
-      repo: _repoRoot(ranked[0][0]), dirs: ranked.slice(0, 3).map(([dir, hits]) => ({ dir, hits })),
+      session_id: s.session_id, surface: s.surface, what, title: s.title || null, activity: s.activity || null,
+      identity: s.identity || null, last_activity_unix: s.last_activity_unix, repo, dirs: dirList,
     });
   }
+  sessions.sort((a, b) => b.last_activity_unix - a.last_activity_unix);
   res.json({ since, sessions });
 });
 
@@ -349,7 +382,7 @@ app.get('/api/brief', requireToken, (req, res) => {
   res.json({
     ts: Date.now(),
     active_sessions: active.length,
-    sessions: active.map((s) => ({ id: s.session_id, surface: s.surface, kind: s.kind, task: s.task, context: s.context })),
+    sessions: active.map((s) => ({ id: s.session_id, surface: s.surface, kind: s.kind, task: s.task, activity: s.activity, title: s.title, context: s.context })),
     tokens_24h: tokens,
     tokens_by_surface_24h: bySurface,
   });
