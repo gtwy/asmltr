@@ -153,6 +153,17 @@ async function start(ctx) {
     try { ctx.heartbeat(); } catch (_) {}
   });
 
+  // Stop the in-flight turn for this device (the overlay Stop button) → core aborts by conversation_key.
+  const CORE_ABORT = (process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle$/, '/v2/abort');
+  app.post('/gw/abort', async (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    const device = String(b.device || '').trim();
+    if (!device) return res.status(400).json({ ok: false, error: 'device id required' });
+    try { await fetch(CORE_ABORT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_key: convKey(device) }) }); res.json({ ok: true }); }
+    catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
   // --- manager→device push: `asmltr send android <device>` / announcements / steer ------------------
   app.post('/out', (req, res) => {
     const { target, text } = req.body || {};
