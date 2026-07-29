@@ -105,22 +105,37 @@ public class DeviceTools {
   private String launchApp(String query) {
     if (query == null || query.isEmpty()) return err("app query required");
     PackageManager pm = ctx.getPackageManager();
-    String q = query.toLowerCase();
-    // try exact package first, then fuzzy match on launchable app labels
+    String q = query.toLowerCase().trim();
+    String qtight = q.replaceAll("[^a-z0-9]", ""); // "google maps" ~ "googlemaps"
+    // try exact package first
     Intent direct = pm.getLaunchIntentForPackage(query);
-    if (direct != null) { direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(direct); return ok(); }
-    Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-    for (ResolveInfo ri : pm.queryIntentActivities(probe, 0)) {
+    if (direct != null) { direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(direct); return launched(query); }
+    // fuzzy match on launchable app labels (best UX — matches "spotify" → Spotify)
+    int seen = 0;
+    for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)) {
+      seen++;
       String label = String.valueOf(ri.loadLabel(pm)).toLowerCase();
       String pkg = ri.activityInfo.packageName;
-      if (label.contains(q) || pkg.toLowerCase().contains(q)) {
+      if (label.contains(q) || pkg.toLowerCase().contains(q) || label.replaceAll("[^a-z0-9]", "").contains(qtight)) {
         Intent li = pm.getLaunchIntentForPackage(pkg);
-        if (li != null) { li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(li);
-          try { JSONObject o = new JSONObject(); o.put("launched", pkg); return ok(o); } catch (Exception e) { return ok(); } }
+        if (li != null) { li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(li); return launched(pkg); }
       }
     }
-    return err("no app matching \"" + query + "\"");
+    // fallback: scan ALL installed packages (needs QUERY_ALL_PACKAGES) for a package-name match, then
+    // its launch intent — catches apps whose launcher label didn't match the query.
+    try {
+      for (android.content.pm.ApplicationInfo ai : pm.getInstalledApplications(0)) {
+        String pkg = ai.packageName;
+        String lbl = String.valueOf(pm.getApplicationLabel(ai)).toLowerCase();
+        if (pkg.toLowerCase().contains(q) || lbl.contains(q) || lbl.replaceAll("[^a-z0-9]", "").contains(qtight)) {
+          Intent li = pm.getLaunchIntentForPackage(pkg);
+          if (li != null) { li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(li); return launched(pkg); }
+        }
+      }
+    } catch (Exception e) {}
+    try { JSONObject o = new JSONObject(); o.put("ok", false); o.put("error", "no app matching \"" + query + "\""); o.put("visible_launcher_apps", seen); return o.toString(); } catch (Exception e) { return err("no match"); }
   }
+  private String launched(String pkg) { try { JSONObject o = new JSONObject(); o.put("launched", pkg); return ok(o); } catch (Exception e) { return ok(); } }
 
   private String openUrl(String url) {
     if (url == null || url.isEmpty()) return err("url required");
