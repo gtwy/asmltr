@@ -41,6 +41,7 @@ public class OverlayService extends Service {
   private FrameLayout root;
   private WebView web;
   private boolean added = false, minimized = false;
+  private int winX = -1, winY = -1; // expanded-panel position (absolute, top-left gravity); -1 = uninit
 
   private int dp(int v) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()); }
 
@@ -111,10 +112,19 @@ public class OverlayService extends Service {
       lp.gravity = Gravity.BOTTOM | Gravity.END;
       lp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
     } else {
-      // expanded: focusable full-screen so the keyboard works; resizes for the soft keyboard
-      lp.width = WindowManager.LayoutParams.MATCH_PARENT; lp.height = WindowManager.LayoutParams.MATCH_PARENT;
-      lp.gravity = Gravity.TOP | Gravity.START;
-      lp.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+      // Expanded = a fixed floating PANEL (NOT full-screen). FLAG_NOT_TOUCH_MODAL means everything
+      // outside the panel bounds passes through to the app behind — so you can still tap other apps.
+      // Focusable (no NOT_FOCUSABLE) so the keyboard works; ADJUST_RESIZE keeps the input visible.
+      android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+      int panelW = Math.min(Math.round(m.widthPixels * 0.94f), dp(460));
+      int panelH = Math.round(m.heightPixels * 0.80f);
+      if (winX < 0) winX = (m.widthPixels - panelW) / 2;
+      if (winY < 0) winY = m.heightPixels - panelH - dp(12);
+      winX = Math.max(0, Math.min(winX, m.widthPixels - panelW));
+      winY = Math.max(0, Math.min(winY, m.heightPixels - panelH));
+      lp.width = panelW; lp.height = panelH;
+      lp.gravity = Gravity.TOP | Gravity.START; lp.x = winX; lp.y = winY;
+      lp.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
       lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
     }
     return lp;
@@ -135,6 +145,15 @@ public class OverlayService extends Service {
   private class OverlayBridge {
     @android.webkit.JavascriptInterface public void setMinimized(final boolean min) {
       if (root != null) root.post(new Runnable() { public void run() { setMinimizedInternal(min); } });
+    }
+    // Move the floating panel (grip drag in the web). Deltas are in device px.
+    @android.webkit.JavascriptInterface public void dragBy(final int dx, final int dy) {
+      if (root == null) return;
+      root.post(new Runnable() { public void run() {
+        if (minimized || !added) return;
+        winX += dx; winY += dy;
+        try { wm.updateViewLayout(root, params(false)); } catch (Exception e) {}
+      } });
     }
     @android.webkit.JavascriptInterface public void close() {
       if (root != null) root.post(new Runnable() { public void run() { stopSelf(); } });

@@ -96,3 +96,12 @@ body.overlay.minimized .minbubble {
 }
 body.overlay.minimized .minbubble svg { width: 26px; height: 26px; }
 @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+/* ===== native overlay (OverlayService) = a fixed floating PANEL window ===== */
+/* The card fills the panel; touch pass-through outside it is handled natively (FLAG_NOT_TOUCH_MODAL),
+   so we drop the full-screen centering + transparent margins that used to eat touches. */
+body.overlay.native .card {
+  position: static; left: auto; bottom: auto; transform: none !important;
+  width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 26px;
+}
+body.overlay.native .log { max-height: none; }
