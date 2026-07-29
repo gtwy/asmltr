@@ -19,7 +19,12 @@ function rp(reqOrigin) {
   const origin = process.env.ASMLTR_AUTH_ORIGIN || reqOrigin || '';
   let rpID = process.env.ASMLTR_AUTH_RP_ID;
   if (!rpID && origin) { try { rpID = new URL(origin).hostname; } catch (_) { /* leave undefined */ } }
-  return { origin, rpID: rpID || 'localhost' };
+  // A native app WebView presents an `android:apk-key-hash:<hash>` (or `ios:bundle-id:<id>`) origin, NOT
+  // the web origin. Allow extra origins via ASMLTR_WEBAUTHN_EXTRA_ORIGINS (comma-separated) so passkeys
+  // verify in-app too. verify*Response accepts a string[] for expectedOrigin.
+  const extra = (process.env.ASMLTR_WEBAUTHN_EXTRA_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const origins = [origin, ...extra].filter(Boolean);
+  return { origin, origins, rpID: rpID || 'localhost' };
 }
 
 // challenge stores. Registration is session-gated → key by username. Login is USERNAMELESS (discoverable
@@ -53,10 +58,10 @@ async function registerOptions(username, reqOrigin) {
 }
 
 async function registerVerify(username, response, reqOrigin, label) {
-  const { origin, rpID } = rp(reqOrigin);
+  const { origins, rpID } = rp(reqOrigin);
   const expectedChallenge = take(regCh, username);
   if (!expectedChallenge) throw new Error('no pending registration (challenge expired)');
-  const { verified, registrationInfo } = await verifyRegistrationResponse({ response, expectedChallenge, expectedOrigin: origin, expectedRPID: rpID });
+  const { verified, registrationInfo } = await verifyRegistrationResponse({ response, expectedChallenge, expectedOrigin: origins, expectedRPID: rpID });
   if (!verified || !registrationInfo) throw new Error('passkey registration did not verify');
   const c = registrationInfo.credential; // { id, publicKey (Uint8Array), counter, transports }
   auth.addPasskey(username, { id: c.id, publicKey: toB64(c.publicKey), counter: c.counter || 0, transports: c.transports || [], name: label || 'passkey', added_at: Date.now() });
@@ -76,13 +81,13 @@ async function loginOptions(username, reqOrigin) {
 }
 
 async function loginVerify(response, reqOrigin) {
-  const { origin, rpID } = rp(reqOrigin);
+  const { origins, rpID } = rp(reqOrigin);
   const credId = response.id || response.rawId;
   const username = auth.findPasskeyOwner(credId); // resolve the account FROM the credential
   if (!username) throw new Error('unknown passkey');
   const cred = auth.listPasskeys(username).find((c) => c.id === credId);
   const { verified, authenticationInfo } = await verifyAuthenticationResponse({
-    response, expectedChallenge: (ch) => consumePending(ch), expectedOrigin: origin, expectedRPID: rpID,
+    response, expectedChallenge: (ch) => consumePending(ch), expectedOrigin: origins, expectedRPID: rpID,
     credential: { id: cred.id, publicKey: fromB64(cred.publicKey), counter: cred.counter || 0, transports: cred.transports },
   });
   if (!verified) throw new Error('passkey login did not verify');
