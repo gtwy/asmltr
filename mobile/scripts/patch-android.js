@@ -21,7 +21,9 @@ for (const f of fs.readdirSync(path.join(ROOT, 'native', 'res', 'xml'))) {
 
 const mf = path.join(APP, 'AndroidManifest.xml');
 let x = fs.readFileSync(mf, 'utf8');
-const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.REQUEST_INSTALL_PACKAGES'];
+const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.REQUEST_INSTALL_PACKAGES',
+  // persistent floating overlay (survives swipe-home) + its foreground service
+  'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
@@ -53,6 +55,15 @@ if (!x.includes('updateprovider')) x = x.replace(/<\/application>/, provider + '
 // PackageInstaller session status receiver (launches the system install-confirm dialog).
 const receiver = '\n        <receiver android:name=".InstallReceiver" android:exported="false" />\n';
 if (!x.includes('InstallReceiver')) x = x.replace(/<\/application>/, receiver + '    </application>');
+
+// The persistent-overlay foreground service (draws the assistant over other apps, survives swipe-home).
+const overlaySvc = `
+        <service android:name=".OverlayService"
+            android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="assistant_overlay" />
+        </service>
+`;
+if (!x.includes('.OverlayService')) x = x.replace(/<\/application>/, overlaySvc + '    </application>');
 fs.writeFileSync(mf, x);
 
 // --- versioning (drives auto-update): versionName from package.json, versionCode = M*10000+m*100+p ---

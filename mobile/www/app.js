@@ -7,6 +7,10 @@
 const CFG_KEY = 'asmltr.mobile.cfg';
 const $ = (id) => document.getElementById(id);
 const OVERLAY = /(?:^|[?&#])overlay(?:=1)?(?:$|[&#])/.test(location.search + location.hash);
+// native=1 → we're inside the persistent OverlayService window; min/expand drive the native window
+// (so it survives swipe-home) and device tools are available via the AsmltrDevice bridge.
+const NATIVE = /(?:^|[?&#])native(?:=1)?(?:$|[&#])/.test(location.search + location.hash);
+function nativeOverlay() { return NATIVE && window.AsmltrOverlay ? window.AsmltrOverlay : null; }
 
 const ICON = {
   mic: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>',
@@ -104,11 +108,13 @@ function connect() {
     else if (m.type === 'delta') { stopDrone(); if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text; feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; }
     else if (m.type === 'done') { stopDrone(); curBubble = null; stepsEl = null; flushTTS(); }
     else if (m.type === 'inject') { stepsEl = null; bubble('assistant', m.text); if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } }
+    else if (m.type === 'device_rpc') runDeviceRPC(m);   // #77: the assistant wants to act on this phone
     else if (m.type === 'error') { stopDrone(); bubble('sys', '⚠ ' + m.error); resetTTS(); setState('idle'); }
   };
   es.onerror = () => { setStatus('reconnecting…', 'pill-warn'); if (es) { es.close(); es = null; } clearTimeout(reconnectT); reconnectT = setTimeout(connect, 2500); };
 }
-function afterReply() { if (continuous && !suppressRestart && state === 'idle') setTimeout(() => { if (continuous && !suppressRestart && state === 'idle') startRec(); }, 350); }
+function minimized() { return document.body.classList.contains('minimized'); }
+function afterReply() { if (continuous && !suppressRestart && !minimized() && state === 'idle') setTimeout(() => { if (continuous && !suppressRestart && !minimized() && state === 'idle') startRec(); }, 350); }
 
 // ---------- streaming TTS ----------
 function feedTTS(text) {
@@ -176,7 +182,12 @@ function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 async function startRec() {
   if (state !== 'idle') return;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    // IMPORTANT: echoCancellation/noiseSuppression route Chromium through its WebRTC *communication*
+    // audio path, which flips Android into MODE_IN_COMMUNICATION and forces Bluetooth headsets onto the
+    // HFP "call" profile — hijacking the earbud button to call-mute. Plain (unprocessed) capture keeps the
+    // headset on A2DP/media so its gesture still triggers the assistant. We only record when TTS isn't
+    // playing, so AEC isn't needed anyway.
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
     recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
     chunks = []; heardSpeech = false;
@@ -220,9 +231,30 @@ function startVAD(mediaStream) {
 function stopVAD() { if (vadRAF) cancelAnimationFrame(vadRAF); vadRAF = 0; try { if (vadCtx) { vadCtx.close(); vadCtx = null; } } catch (_) {} }
 function blobB64(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); }); }
 
-// ---------- assist launch ----------
+// ---------- #77 device control ----------
+// The assistant emits a device_rpc frame; we run it against this phone via the native AsmltrDevice
+// bridge and post the outcome back so the connector can resolve the tool with a real result.
+async function runDeviceRPC(m) {
+  const id = m.id, tool = m.tool, args = m.args || {};
+  let result;
+  try {
+    if (window.AsmltrDevice && window.AsmltrDevice.dispatch) {
+      const raw = window.AsmltrDevice.dispatch(tool, JSON.stringify(args));
+      result = JSON.parse(raw || '{"ok":false,"error":"no result"}');
+    } else {
+      result = { ok: false, error: 'device tools only available in the native app' };
+    }
+  } catch (e) { result = { ok: false, error: String(e && e.message || e) }; }
+  addTool('device:' + tool, args); addToolResult(JSON.stringify(result), !result.ok);
+  try { await api('/gw/rpc-result', { id, result }); } catch (_) {}
+}
+
+// ---------- assist launch + native overlay controls ----------
 function maybeAssistLaunch() { const a = OVERLAY || location.hash.indexOf('assist') >= 0 || window.__ASMLTR_ASSIST === true; if (a && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); } }
 window.asmltrStartListening = () => { if (state === 'idle') startRec(); };
+// Called by OverlayService when the card should collapse/expand; also usable from the min button.
+window.asmltrMinimize = () => { document.body.classList.add('minimized'); if (state === 'rec') stopRec(); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(true); } catch (_) {} };
+window.asmltrExpand = () => { document.body.classList.remove('minimized'); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(false); } catch (_) {} };
 
 // ---------- overlay chrome ----------
 function initOverlayChrome() {
@@ -234,8 +266,8 @@ function initOverlayChrome() {
   handle.addEventListener('mousedown', down); handle.addEventListener('touchstart', down, { passive: true });
   window.addEventListener('mousemove', move); window.addEventListener('touchmove', move, { passive: false });
   window.addEventListener('mouseup', up); window.addEventListener('touchend', up);
-  $('min').addEventListener('click', () => { document.body.classList.add('minimized'); if (state === 'rec') stopRec(); });
-  $('minbubble').addEventListener('click', () => { document.body.classList.remove('minimized'); if (continuous && state === 'idle') startRec(); });
+  $('min').addEventListener('click', () => { window.asmltrMinimize(); });
+  $('minbubble').addEventListener('click', () => { window.asmltrExpand(); if (continuous && state === 'idle') startRec(); });
   $('close').addEventListener('click', () => { stopEverything(); try { if (window.AsmltrOverlay && window.AsmltrOverlay.close) window.AsmltrOverlay.close(); } catch (_) {} });
 }
 
