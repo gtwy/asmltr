@@ -14,6 +14,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.9.1] - 2026-07-29
+
+asmltr 0.9.1 — complete package-lock.json (resolved+integrity) so deterministic updates npm ci in seconds instead of a ~40-minute npm install fallback. (#48)
+
+### Added
+
+### Changed
+
+### Fixed
+
 - **`package-lock.json` completed with `resolved` + `integrity` so `npm ci` works.** 614 external
   entries carried only a pinned `version`, so every deterministic update's `npm ci` failed on lock
   drift and fell back to a full `npm install` — ~40 minutes on a cold-cache box. Backfilled from each
