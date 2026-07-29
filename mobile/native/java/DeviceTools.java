@@ -45,6 +45,15 @@ public class DeviceTools {
         case "open_setting":  return openSetting(a.optString("screen", ""));
         case "battery":       return battery();
         case "list_apps":     return listApps();
+        // ── phase 2: on-screen control (needs the accessibility service enabled) ──
+        case "tap":           return gesture(g -> g.tap((float) a.optDouble("x", -1), (float) a.optDouble("y", -1)));
+        case "long_press":    return gesture(g -> g.longPress((float) a.optDouble("x", -1), (float) a.optDouble("y", -1)));
+        case "swipe":         return gesture(g -> g.swipe((float) a.optDouble("x1", -1), (float) a.optDouble("y1", -1), (float) a.optDouble("x2", -1), (float) a.optDouble("y2", -1), a.optInt("ms", 300)));
+        case "tap_text":      return gesture(g -> g.tapText(a.optString("query", "")));
+        case "type_text":     return gesture(g -> g.typeText(a.optString("text", "")));
+        case "global":        return gesture(g -> g.global(a.optString("action", "")));
+        case "read_screen":   return readScreen(a.optInt("max", 120));
+        case "screenshot":    return screenshot(a.optInt("max_dim", 1024), a.optInt("quality", 55));
         default:              return err("unknown device tool: " + tool);
       }
     } catch (Exception e) { return err(e.getMessage() == null ? e.toString() : e.getMessage()); }
@@ -175,5 +184,27 @@ public class DeviceTools {
       try { JSONObject o = new JSONObject(); o.put("label", String.valueOf(ri.loadLabel(pm))); o.put("package", ri.activityInfo.packageName); arr.put(o); } catch (Exception e) {}
     }
     try { JSONObject o = new JSONObject(); o.put("apps", arr); return ok(o); } catch (Exception e) { return err(e.getMessage()); }
+  }
+
+  // ── phase 2 helpers: route to the accessibility service (the actuator + eyes) ──
+  private interface GestureOp { boolean run(AsmltrAccessibilityService g); }
+  private static final String A11Y_OFF = "screen control is off — enable the asmltr accessibility service in Settings → Accessibility";
+  private String gesture(GestureOp op) {
+    AsmltrAccessibilityService svc = AsmltrAccessibilityService.getInstance();
+    if (svc == null) return err(A11Y_OFF);
+    try { return op.run(svc) ? ok() : err("gesture failed (target not found or off-screen)"); }
+    catch (Exception e) { return err(e.getMessage()); }
+  }
+  private String readScreen(int max) {
+    AsmltrAccessibilityService svc = AsmltrAccessibilityService.getInstance();
+    if (svc == null) return err(A11Y_OFF);
+    try { JSONObject o = new JSONObject(); o.put("nodes", svc.readScreen(Math.min(Math.max(max, 1), 300))); return ok(o); }
+    catch (Exception e) { return err(e.getMessage()); }
+  }
+  private String screenshot(int maxDim, int quality) {
+    AsmltrAccessibilityService svc = AsmltrAccessibilityService.getInstance();
+    if (svc == null) return err(A11Y_OFF);
+    try { return svc.screenshot(Math.min(Math.max(maxDim, 240), 2048), Math.min(Math.max(quality, 20), 90)).toString(); }
+    catch (Exception e) { return err(e.getMessage()); }
   }
 }

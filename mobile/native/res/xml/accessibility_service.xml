@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Config for AsmltrAccessibilityService: it drives the UI (gestures + global actions), reads the
+     on-screen view tree, and can retrieve window content. canPerformGestures + canTakeScreenshot enable
+     the actuator + eyes. The user must explicitly turn it on in Settings → Accessibility. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:notificationTimeout="100"
+    android:description="@string/asmltr_a11y_desc" />
