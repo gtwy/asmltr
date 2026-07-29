@@ -57,6 +57,15 @@ async function start(ctx) {
 
   // deviceId → { res, name, identity, since }. One live SSE per device (a reconnect replaces it).
   const devices = new Map();
+  // Separate PERSISTENT control link, held by the phone's native foreground service (not the WebView).
+  // This is what lets any agent session actuate the phone even when the overlay/app is closed — the chat
+  // stream (devices) is ephemeral UI; this one stays connected in the background.
+  const controlDevices = new Map(); // deviceId → { res, name, since }
+  function pushControl(device, obj) {
+    const d = controlDevices.get(device);
+    if (!d) return false;
+    try { d.res.write(`data: ${JSON.stringify(obj)}\n\n`); return true; } catch (_) { return false; }
+  }
 
   function keyEntry(token) { return loadKeys(keysFile).find((k) => k.key === token) || null; }
   // Resolve a device's caller identity from its token. Returns null when a token is required but invalid.
@@ -109,6 +118,28 @@ async function start(ctx) {
       clearInterval(ka);
       if (devices.get(device) && devices.get(device).res === res) devices.delete(device);
       ctx.emit({ event_type: 'control', session_id: convKey(device), identity: who.identity, payload: { action: 'device-disconnected', device } });
+    });
+  });
+
+  // --- persistent control link: the native foreground service holds this open 24/7 -------------------
+  // Same auth as the chat stream, but a SEPARATE registry so it doesn't get replaced when the overlay's
+  // chat stream (re)connects. Device_rpc frames are pushed here so phone control works with no UI open.
+  app.get('/gw/control', (req, res) => {
+    const who = auth(req.query.token);
+    if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    const device = String(req.query.device || '').trim();
+    if (!device) return res.status(400).json({ ok: false, error: 'device id required' });
+    const name = String(req.query.name || who.username || 'android');
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    const prev = controlDevices.get(device); if (prev && prev.res !== res) { try { prev.res.end(); } catch (_) {} }
+    controlDevices.set(device, { res, name, since: Date.now() });
+    res.write(`data: ${JSON.stringify({ type: 'ready', device, control: true })}\n\n`);
+    ctx.emit({ event_type: 'control', session_id: convKey(device), identity: who.identity, payload: { action: 'control-connected', device } });
+    const ka = setInterval(() => { try { res.write(': ka\n\n'); } catch (_) {} }, 25000); ka.unref && ka.unref();
+    req.on('close', () => {
+      clearInterval(ka);
+      if (controlDevices.get(device) && controlDevices.get(device).res === res) controlDevices.delete(device);
+      ctx.emit({ event_type: 'control', session_id: convKey(device), identity: who.identity, payload: { action: 'control-disconnected', device } });
     });
   });
 
@@ -171,18 +202,22 @@ async function start(ctx) {
   // with the device's result. Lets the assistant actually actuate the phone (volume, launch apps, …).
   const pendingRpc = new Map(); // id → { resolve, timer }
   let rpcSeq = 0;
-  function pickDevice(requested) {
-    if (requested && devices.has(requested)) return requested;
-    if (requested) return null;
-    // no device specified → the most-recently-connected one (single-phone installs "just work")
-    let best = null, bestSince = -1;
-    for (const [id, d] of devices) if (d.since > bestSince) { best = id; bestSince = d.since; }
-    return best;
+  // Prefer the persistent control link (works with no UI open); fall back to the chat stream (PWA/web).
+  function pickTarget(requested) {
+    const pick = (map) => {
+      if (requested) return map.has(requested) ? requested : null;
+      let best = null, bestSince = -1;
+      for (const [id, d] of map) if (d.since > bestSince) { best = id; bestSince = d.since; }
+      return best;
+    };
+    const c = pick(controlDevices); if (c) return { device: c, push: pushControl };
+    const d = pick(devices); if (d) return { device: d, push: pushSSE };
+    return null;
   }
   app.post('/gw/rpc', (req, res) => {
     const b = req.body || {};
-    const device = pickDevice(b.device ? String(b.device).trim() : '');
-    if (!device) return res.status(404).json({ ok: false, error: 'no connected device' });
+    const tgt = pickTarget(b.device ? String(b.device).trim() : '');
+    if (!tgt) return res.status(404).json({ ok: false, error: 'no connected device' });
     const tool = String(b.tool || '').trim();
     if (!tool) return res.status(400).json({ ok: false, error: 'tool required' });
     const id = `rpc${++rpcSeq}-${Date.now()}`;
@@ -191,8 +226,8 @@ async function start(ctx) {
       if (pendingRpc.has(id)) { pendingRpc.delete(id); res.status(504).json({ ok: false, error: 'device did not respond in time' }); }
     }, timeoutMs);
     if (timer.unref) timer.unref();
-    pendingRpc.set(id, { resolve: (result) => { clearTimeout(timer); res.json({ ok: true, device, result }); }, timer });
-    const delivered = pushSSE(device, { type: 'device_rpc', id, tool, args: b.args || {} });
+    pendingRpc.set(id, { resolve: (result) => { clearTimeout(timer); res.json({ ok: true, device: tgt.device, result }); }, timer });
+    const delivered = tgt.push(tgt.device, { type: 'device_rpc', id, tool, args: b.args || {} });
     if (!delivered) { clearTimeout(timer); pendingRpc.delete(id); return res.status(502).json({ ok: false, error: 'device push failed' }); }
   });
   app.post('/gw/rpc-result', (req, res) => {
@@ -207,7 +242,9 @@ async function start(ctx) {
   });
   // Let the core discover which devices can be actuated (for the MCP tool's device targeting).
   app.get('/gw/devices', (req, res) => {
-    res.json({ ok: true, devices: [...devices.entries()].map(([id, d]) => ({ id, name: d.name, since: d.since })) });
+    res.json({ ok: true,
+      devices: [...devices.entries()].map(([id, d]) => ({ id, name: d.name, since: d.since })),
+      control: [...controlDevices.entries()].map(([id, d]) => ({ id, name: d.name, since: d.since })) });
   });
 
   // --- manager→device push: `asmltr send android <device>` / announcements / steer ------------------
@@ -270,10 +307,11 @@ async function start(ctx) {
   return {
     async stop() {
       for (const d of devices.values()) { try { d.res.end(); } catch (_) {} }
-      devices.clear();
+      for (const d of controlDevices.values()) { try { d.res.end(); } catch (_) {} }
+      devices.clear(); controlDevices.clear();
       await new Promise((r) => httpServer.close(() => r()));
     },
-    health() { return { http_port: PORT, devices: devices.size }; },
+    health() { return { http_port: PORT, devices: devices.size, control: controlDevices.size }; },
   };
 }
 
