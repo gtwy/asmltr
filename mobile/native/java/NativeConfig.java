@@ -12,6 +12,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.UUID;
 
 /** Bridge for the app + overlay WebViews: connector config (SharedPreferences, merge semantics),
  *  the installed version, and a robust in-app updater via the PackageInstaller session API (no
@@ -27,6 +28,42 @@ public class NativeConfig {
     if (token != null && !token.isEmpty()) e.putString("token", token);
     if (name != null && !name.isEmpty()) e.putString("name", name);
     e.apply();
+    // Config just landed → (re)start the persistent control link so the phone connects on its own.
+    startControlLink();
+  }
+
+  /** A stable per-install device id, shared by the web chat stream and the native control link so both
+   *  map to the same conversation. Generated once, persisted in SharedPreferences. */
+  static String deviceId(Context ctx) {
+    SharedPreferences p = ctx.getSharedPreferences("asmltr", Context.MODE_PRIVATE);
+    String id = p.getString("deviceId", "");
+    if (id == null || id.isEmpty()) { id = "dev-" + UUID.randomUUID().toString().substring(0, 12); p.edit().putString("deviceId", id).apply(); }
+    return id;
+  }
+  @JavascriptInterface
+  public String getDeviceId() { return deviceId(ctx); }
+
+  /** Start the always-on device link (idempotent). */
+  @JavascriptInterface
+  public void startControlLink() {
+    try {
+      Intent svc = new Intent(ctx, DeviceControlService.class).setAction(DeviceControlService.ACTION_START);
+      if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(svc); else ctx.startService(svc);
+    } catch (Exception e) {}
+  }
+
+  /** Ask the OS to exempt us from battery optimization so the link isn't suspended in Doze. */
+  @JavascriptInterface
+  public void requestBatteryExemption() {
+    try {
+      if (Build.VERSION.SDK_INT >= 23) {
+        android.os.PowerManager pm = (android.os.PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+        if (pm != null && !pm.isIgnoringBatteryOptimizations(ctx.getPackageName())) {
+          Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + ctx.getPackageName()));
+          i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(i);
+        }
+      }
+    } catch (Exception e) {}
   }
 
   @JavascriptInterface

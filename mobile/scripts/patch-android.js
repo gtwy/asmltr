@@ -26,7 +26,9 @@ const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET',
   'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
   // full app visibility so the assistant can find/launch ANY installed app by name (this IS a device
   // controller; the <queries> below covers launcher apps, this guarantees the rest).
-  'android.permission.QUERY_ALL_PACKAGES'];
+  'android.permission.QUERY_ALL_PACKAGES',
+  // persistent device-control link: restart on boot, post its ongoing notification, stay alive in Doze
+  'android.permission.RECEIVE_BOOT_COMPLETED', 'android.permission.POST_NOTIFICATIONS', 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
@@ -84,6 +86,18 @@ const overlaySvc = `
         </service>
 `;
 if (!x.includes('.OverlayService')) x = x.replace(/<\/application>/, overlaySvc + '    </application>');
+
+// The always-on device-control link (persistent foreground service) + a boot receiver to restart it.
+const controlSvc = `
+        <service android:name=".DeviceControlService"
+            android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="device_control_link" />
+        </service>
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+`;
+if (!x.includes('.DeviceControlService')) x = x.replace(/<\/application>/, controlSvc + '    </application>');
 fs.writeFileSync(mf, x);
 
 // --- versioning (drives auto-update): versionName from package.json, versionCode = M*10000+m*100+p ---

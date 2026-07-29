@@ -148,6 +148,7 @@ public class OverlayService extends Service {
       o.put("baseUrl", p.getString("baseUrl", ""));
       o.put("token", p.getString("token", ""));
       o.put("name", p.getString("name", "assistant"));
+      o.put("deviceId", NativeConfig.deviceId(this));
     } catch (Exception e) {}
     return "window.__ASMLTR_NATIVE_CFG=" + o.toString() + ";";
   }

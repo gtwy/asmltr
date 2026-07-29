@@ -28,6 +28,9 @@ function loadCfg() {
   c.token = c.token || nc.token || d.token || '';
   c.name = c.name || nc.name || d.agentName || 'My device';
   c.agentName = c.agentName || nc.agentName || d.agentName || 'assistant';
+  // In the native app, adopt the native device id so the web chat stream + the persistent control link
+  // share one identity (same conversation_key).
+  if (nc.deviceId) c.deviceId = nc.deviceId;
   if (!c.deviceId) c.deviceId = 'dev-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
   return c;
 }
