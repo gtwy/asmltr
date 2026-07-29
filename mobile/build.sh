@@ -19,3 +19,11 @@ nice -n 19 ionice -c3 ./gradlew --no-daemon --max-workers=1 assembleDebug
 APK="app/build/outputs/apk/debug/app-debug.apk"
 echo "==> APK: $(pwd)/$APK"
 ls -lh "$APK"
+# Assert the built APK's version matches package.json — so a stale/cached APK can never masquerade as new.
+WANT="$(node -e "console.log(require('../package.json').version)")"
+AAPT="$(ls "$ANDROID_SDK_ROOT"/build-tools/*/aapt 2>/dev/null | tail -1)"
+if [ -n "$AAPT" ]; then
+  GOT="$("$AAPT" dump badging "$APK" 2>/dev/null | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)"
+  echo "==> APK versionName=$GOT (want $WANT)"
+  [ "$GOT" = "$WANT" ] || { echo "FATAL: built APK is $GOT, expected $WANT — build did not produce the new binary"; exit 3; }
+fi
