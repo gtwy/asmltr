@@ -25,11 +25,17 @@ function persisted() { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8'
 
 function config() {
   const p = persisted();
+  const num = (v, d, lo, hi) => { let n = Number(v); if (!Number.isFinite(n)) n = d; return Math.max(lo, Math.min(hi, n)); };
   return {
     provider: p.provider || process.env.ASMLTR_STT_PROVIDER || 'openai',
     model: p.model || process.env.ASMLTR_STT_MODEL || 'gpt-4o-transcribe',
     // language: '' means auto-detect; default 'en' (empty string is a valid, persistable choice).
     language: p.language !== undefined ? p.language : (process.env.ASMLTR_STT_LANGUAGE || 'en'),
+    // client-side VAD (end-of-utterance) tuning for push-to-talk surfaces (the mobile overlay). These are
+    // hints the client applies; kept here so they're one global, GUI/TUI-editable setting.
+    vad_endpoint_ms: num(p.vad_endpoint_ms, 1600, 400, 6000),   // silence AFTER speech that ends a turn — raise if it cuts you off between sentences
+    vad_start_ms: num(p.vad_start_ms, 8000, 2000, 30000),       // give up if no speech starts within this
+    vad_sensitivity: num(p.vad_sensitivity, 50, 0, 100),        // 0 = only loud speech triggers, 100 = very sensitive
     keyName: process.env.ASMLTR_STT_KEY_NAME || 'openai_api_key',
   };
 }
@@ -40,6 +46,11 @@ function setConfig(partial) {
     if (!partial || partial[k] === undefined) continue;
     if (partial[k] === null) delete next[k];
     else next[k] = String(partial[k]);
+  }
+  for (const k of ['vad_endpoint_ms', 'vad_start_ms', 'vad_sensitivity']) {
+    if (!partial || partial[k] === undefined) continue;
+    if (partial[k] === null) delete next[k];
+    else next[k] = Number(partial[k]);
   }
   try { fs.writeFileSync(cfgFile(), JSON.stringify(next)); } catch (_) {}
   return config();
