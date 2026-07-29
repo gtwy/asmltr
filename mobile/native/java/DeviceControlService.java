@@ -42,6 +42,7 @@ public class DeviceControlService extends Service {
   @Override public int onStartCommand(Intent intent, int flags, int startId) {
     if (intent != null && ACTION_STOP.equals(intent.getAction())) { running = false; stopSelf(); return START_NOT_STICKY; }
     if (!running) { running = true; worker = new Thread(this::loop, "asmltr-control"); worker.start(); }
+    try { WakeWord.refresh(this); } catch (Throwable t) {} // (re)configure always-on wake word if enabled
     return START_STICKY; // Android restarts us if killed → the link is meant to be always-on
   }
 
@@ -63,6 +64,7 @@ public class DeviceControlService extends Service {
         c.connect();
         if (c.getResponseCode() != 200) { updateNote("Auth/failed (" + c.getResponseCode() + ")"); sleep(backoff); backoff = Math.min(backoff * 2, 60000); continue; }
         updateNote("Connected"); backoff = 2000;
+        try { WakeWord.refresh(this); } catch (Throwable t) {} // pick up wake-word config changes on (re)connect
         BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
         String line;
         while (running && (line = r.readLine()) != null) {
@@ -129,5 +131,5 @@ public class DeviceControlService extends Service {
     try { ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(43, buildNotification(text)); } catch (Exception e) {}
   }
 
-  @Override public void onDestroy() { running = false; if (worker != null) worker.interrupt(); super.onDestroy(); }
+  @Override public void onDestroy() { running = false; try { WakeWord.stop(); } catch (Throwable t) {} if (worker != null) worker.interrupt(); super.onDestroy(); }
 }

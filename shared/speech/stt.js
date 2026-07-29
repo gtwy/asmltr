@@ -36,6 +36,10 @@ function config() {
     vad_endpoint_ms: num(p.vad_endpoint_ms, 1600, 400, 6000),   // silence AFTER speech that ends a turn — raise if it cuts you off between sentences
     vad_start_ms: num(p.vad_start_ms, 8000, 2000, 30000),       // give up if no speech starts within this
     vad_sensitivity: num(p.vad_sensitivity, 50, 0, 100),        // 0 = only loud speech triggers, 100 = very sensitive
+    // Wake word (hands-free trigger). Default phrase derives from the assistant name ("hey <name>").
+    wake_enabled: p.wake_enabled === undefined ? false : !!p.wake_enabled,
+    wake_phrase: (p.wake_phrase !== undefined && p.wake_phrase !== null) ? String(p.wake_phrase) : `hey ${process.env.ASSISTANT_NAME || 'assistant'}`,
+    wake_sensitivity: num(p.wake_sensitivity, 50, 0, 100),      // detection strictness (higher = more triggers, more false-accepts)
     keyName: process.env.ASMLTR_STT_KEY_NAME || 'openai_api_key',
   };
 }
@@ -47,11 +51,13 @@ function setConfig(partial) {
     if (partial[k] === null) delete next[k];
     else next[k] = String(partial[k]);
   }
-  for (const k of ['vad_endpoint_ms', 'vad_start_ms', 'vad_sensitivity']) {
+  for (const k of ['vad_endpoint_ms', 'vad_start_ms', 'vad_sensitivity', 'wake_sensitivity']) {
     if (!partial || partial[k] === undefined) continue;
     if (partial[k] === null) delete next[k];
     else next[k] = Number(partial[k]);
   }
+  if (partial && partial.wake_enabled !== undefined) next.wake_enabled = !!partial.wake_enabled;
+  if (partial && partial.wake_phrase !== undefined) { if (partial.wake_phrase === null) delete next.wake_phrase; else next.wake_phrase = String(partial.wake_phrase); }
   try { fs.writeFileSync(cfgFile(), JSON.stringify(next)); } catch (_) {}
   return config();
 }

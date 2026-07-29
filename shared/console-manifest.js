@@ -172,6 +172,26 @@ const manifest = {
             { id: '75', label: 'High', hint: 'quiet room' },
           ],
         },
+        {
+          id: 'wake_enabled', label: 'Wake word', type: 'toggle', get: 'stt.wake_enabled',
+          desc: 'Hands-free trigger on the mobile app — say the wake phrase to open the assistant. Always-on listening (uses a little battery). Requires a keyword model for the phrase (see Wake phrase).',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { wake_enabled: '{value}' } } },
+        },
+        {
+          id: 'wake_phrase', label: 'Wake phrase', type: 'text', get: 'stt.wake_phrase',
+          desc: 'What to say to trigger the assistant (default "hey <name>"). Each phrase needs a Porcupine .ppn keyword model — generate one free at console.picovoice.ai and drop it in the connector\'s keywords/ dir named after the phrase; the app loads it automatically.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { wake_phrase: '{value}' } } },
+        },
+        {
+          id: 'wake_sensitivity', label: 'Wake sensitivity', type: 'choice', get: 'stt.wake_sensitivity',
+          desc: 'How eagerly the wake word fires. Higher catches more but false-triggers more.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { wake_sensitivity: '{value}' } } },
+          choices: [
+            { id: '35', label: 'Low', hint: 'fewer false triggers' },
+            { id: '50', label: 'Medium', hint: 'default' },
+            { id: '70', label: 'High', hint: 'catches more' },
+          ],
+        },
       ],
     },
   ],
