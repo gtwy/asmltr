@@ -23,7 +23,10 @@ const mf = path.join(APP, 'AndroidManifest.xml');
 let x = fs.readFileSync(mf, 'utf8');
 const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.REQUEST_INSTALL_PACKAGES',
   // persistent floating overlay (survives swipe-home) + its foreground service
-  'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE'];
+  'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
+  // full app visibility so the assistant can find/launch ANY installed app by name (this IS a device
+  // controller; the <queries> below covers launcher apps, this guarantees the rest).
+  'android.permission.QUERY_ALL_PACKAGES'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
