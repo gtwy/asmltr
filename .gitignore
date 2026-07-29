@@ -37,5 +37,3 @@ connectors/types/android/keys.json
 # generated docs build output (deployed via mkdocs gh-deploy, not from here)
 /site/
 
-# wake-word keyword models (licensed Porcupine binaries)
-connectors/types/android/keywords/*.ppn
