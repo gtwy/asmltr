@@ -368,7 +368,34 @@ async function start(ctx) {
     let stt = null;
     try { const r = await fetch(CORE_VOICE); if (r.ok) { const j = await r.json(); stt = j.stt || null; } } catch (_) {}
     const vad = stt ? { endpoint_ms: stt.vad_endpoint_ms, start_ms: stt.vad_start_ms, sensitivity: stt.vad_sensitivity } : null;
-    res.json({ palette, agentName: name, vad });
+    const wake = stt ? { enabled: !!stt.wake_enabled, phrase: stt.wake_phrase || '', sensitivity: stt.wake_sensitivity } : null;
+    res.json({ palette, agentName: name, vad, wake });
+  });
+
+  // Wake word (Porcupine): the app fetches its config + the runtime access key here, and downloads the
+  // keyword model (.ppn) for the configured phrase. Models live in a gitignored keywords/ dir (licensed
+  // binaries generated at console.picovoice.ai, named <phrase-slug>.ppn). No model → wake stays inert.
+  const KW_DIR = process.env.ASMLTR_ANDROID_KEYWORDS || path.join(__dirname, 'keywords');
+  const phraseSlug = (p) => String(p || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  app.get('/gw/wake', async (req, res) => {
+    if (requireToken && !auth(req.query.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    let stt = null;
+    try { const r = await fetch(CORE_VOICE); if (r.ok) { const j = await r.json(); stt = j.stt || null; } } catch (_) {}
+    const phrase = (stt && stt.wake_phrase) || `hey ${process.env.ASSISTANT_NAME || 'assistant'}`;
+    const slug = phraseSlug(phrase);
+    let accessKey = ''; try { accessKey = (await ctx.secrets.get('porcupine_access_key')) || ''; } catch (_) {}
+    const hasModel = (() => { try { return fs.existsSync(path.join(KW_DIR, slug + '.ppn')); } catch (_) { return false; } })();
+    res.json({ ok: true, enabled: !!(stt && stt.wake_enabled), phrase, slug,
+      sensitivity: (stt && stt.wake_sensitivity != null) ? stt.wake_sensitivity : 50,
+      access_key: accessKey, has_model: hasModel });
+  });
+  app.get('/gw/wake-model', (req, res) => {
+    if (requireToken && !auth(req.query.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    const slug = phraseSlug(req.query.phrase || req.query.slug);
+    const f = path.join(KW_DIR, slug + '.ppn');
+    if (!slug || !fs.existsSync(f)) return res.status(404).json({ ok: false, error: 'no keyword model for that phrase — generate one at console.picovoice.ai' });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    fs.createReadStream(f).pipe(res);
   });
   app.get('/gw/download', (req, res) => {
     if (!fs.existsSync(APK)) return res.status(404).json({ ok: false, error: 'APK not built yet' });
