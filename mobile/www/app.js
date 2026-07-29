@@ -45,6 +45,7 @@ let curBubble = null, stepsEl = null, lastTool = null, convKey = '';
 let drone = null, curAudio = null, vadRAF = 0, vadCtx = null;
 // VAD tuning — global STT settings from the web GUI/TUI (fetched via /gw/theme); forgiving defaults.
 let vadCfg = { endpoint_ms: 1600, start_ms: 8000, sensitivity: 50 };
+let wakeCfg = { enabled: false, phrase: '' }; // wake word (mirrors core voice config; editable in-app)
 let continuous = OVERLAY, suppressRestart = false;
 // streaming TTS pipeline (synthesize each sentence as it arrives, play in order)
 let ttsBuf = '', ttsSeq = 0, ttsNextPlay = 0, ttsPlaying = false, replyTextDone = false; const ttsClips = {};
@@ -59,6 +60,7 @@ async function applyTheme() {
     const a = hexes[0] && toRGB(hexes[0]), b = (hexes[1] && toRGB(hexes[1])) || a;
     if (a) { document.documentElement.style.setProperty('--accent', a); document.documentElement.style.setProperty('--accent2', b); }
     if (j.vad) vadCfg = { endpoint_ms: +j.vad.endpoint_ms || vadCfg.endpoint_ms, start_ms: +j.vad.start_ms || vadCfg.start_ms, sensitivity: (j.vad.sensitivity != null ? +j.vad.sensitivity : vadCfg.sensitivity) };
+    if (j.wake) wakeCfg = { enabled: !!j.wake.enabled, phrase: j.wake.phrase || wakeCfg.phrase };
   } catch (_) {}
 }
 
@@ -322,7 +324,17 @@ function initOverlayChrome() {
 }
 
 // ---------- settings ----------
-function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; $('sheet').classList.remove('hidden'); reportPanelHeight(); }
+function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; $('sheet').classList.remove('hidden'); reportPanelHeight(); }
+async function saveVoice() {
+  const m = $('voiceMsg'); if (m) m.textContent = 'saving…';
+  const enabled = $('cfgWake').checked, phrase = $('cfgWakePhrase').value.trim();
+  try {
+    const r = await api('/gw/voice-config', { stt: { wake_enabled: enabled, ...(phrase ? { wake_phrase: phrase } : {}) } });
+    wakeCfg = { enabled, phrase: (r.stt && r.stt.wake_phrase) || phrase || wakeCfg.phrase };
+    try { if (window.AsmltrNative && window.AsmltrNative.refreshWake) window.AsmltrNative.refreshWake(); } catch (_) {}
+    if (m) m.textContent = enabled ? '✓ wake word on — say "' + wakeCfg.phrase + '"' : '✓ saved (wake word off)';
+  } catch (e) { if (m) m.textContent = '✗ ' + e.message; }
+}
 function closeSheet() { $('sheet').classList.add('hidden'); reportPanelHeight(); }
 // Start a fresh conversation: stop anything running, ask the connector to forget the core session, wipe the log.
 async function newSession() {
@@ -404,6 +416,7 @@ function init() {
   if ($('sessRefresh')) $('sessRefresh').addEventListener('click', openSessions);
   if ($('targetLeave')) $('targetLeave').addEventListener('click', leaveTarget);
   if ($('sessions')) $('sessions').addEventListener('click', (e) => { if (e.target === $('sessions')) { $('sessions').classList.add('hidden'); reportPanelHeight(); } });
+  if ($('cfgVoiceSave')) $('cfgVoiceSave').addEventListener('click', saveVoice);
   if ($('cfgNewSession')) $('cfgNewSession').addEventListener('click', newSession);
   $('cfgTest').addEventListener('click', testConn);
   $('cfgSave').addEventListener('click', () => {

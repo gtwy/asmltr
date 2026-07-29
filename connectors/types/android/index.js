@@ -387,6 +387,16 @@ async function start(ctx) {
       sensitivity: (stt && stt.wake_sensitivity != null) ? stt.wake_sensitivity : 50,
       model_url: VOSK_MODEL_URL, model_id: VOSK_MODEL_ID });
   });
+  // Let the phone app write voice/wake settings back (so it's configurable IN the app, not just the web GUI).
+  app.post('/gw/voice-config', async (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    try {
+      const r = await fetch(CORE_VOICE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stt: b.stt || {} }) });
+      const j = await r.json().catch(() => ({}));
+      res.json({ ok: true, stt: j.stt || null });
+    } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  });
   app.get('/gw/download', (req, res) => {
     if (!fs.existsSync(APK)) return res.status(404).json({ ok: false, error: 'APK not built yet' });
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
