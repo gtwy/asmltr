@@ -81,18 +81,19 @@ public class DeviceControlService extends Service {
     }
   }
 
-  private void handleRpc(String base, String token, String device, JSONObject o) {
+  private void handleRpc(final String base, final String token, final String device, JSONObject o) {
     final String id = o.optString("id");
     final String tool = o.optString("tool");
     final JSONObject args = o.optJSONObject("args");
-    // DeviceTools returns a JSON string {ok,...}. Run on the main thread — many actuators (launch app,
-    // torch, volume UI) expect to be called from the UI thread.
-    final String[] out = new String[1];
-    final Object lock = new Object();
-    android.os.Handler h = new android.os.Handler(getMainLooper());
-    h.post(() -> { String r; try { r = tools.dispatch(tool, args != null ? args.toString() : "{}"); } catch (Exception e) { r = "{\"ok\":false,\"error\":\"" + e.getMessage() + "\"}"; } synchronized (lock) { out[0] = r; lock.notifyAll(); } });
-    synchronized (lock) { long end = System.currentTimeMillis() + 15000; while (out[0] == null && System.currentTimeMillis() < end) { try { lock.wait(200); } catch (InterruptedException e) { break; } } }
-    postResult(base, token, device, id, out[0] != null ? out[0] : "{\"ok\":false,\"error\":\"timeout\"}");
+    // Run each command on its own thread so the SSE read loop keeps flowing AND blocking gesture/
+    // screenshot ops (whose callbacks land on the main/other threads) don't deadlock. DeviceTools' own
+    // actuators are thread-safe (startActivity uses NEW_TASK; accessibility APIs are callable off-main).
+    new Thread(() -> {
+      String r;
+      try { r = tools.dispatch(tool, args != null ? args.toString() : "{}"); }
+      catch (Exception e) { r = "{\"ok\":false,\"error\":\"" + (e.getMessage() == null ? "error" : e.getMessage()) + "\"}"; }
+      postResult(base, token, device, id, r);
+    }, "asmltr-rpc").start();
   }
 
   private void postResult(String base, String token, String device, String id, String resultJson) {

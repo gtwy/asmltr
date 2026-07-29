@@ -18,6 +18,13 @@ fs.mkdirSync(xmlDst, { recursive: true });
 for (const f of fs.readdirSync(path.join(ROOT, 'native', 'res', 'xml'))) {
   fs.copyFileSync(path.join(ROOT, 'native', 'res', 'xml', f), path.join(xmlDst, f));
 }
+// res/values (our own non-colliding files, e.g. the accessibility-service description string)
+const valuesSrc = path.join(ROOT, 'native', 'res', 'values');
+if (fs.existsSync(valuesSrc)) {
+  const valuesDst = path.join(APP, 'res', 'values');
+  fs.mkdirSync(valuesDst, { recursive: true });
+  for (const f of fs.readdirSync(valuesSrc)) fs.copyFileSync(path.join(valuesSrc, f), path.join(valuesDst, f));
+}
 
 const mf = path.join(APP, 'AndroidManifest.xml');
 let x = fs.readFileSync(mf, 'utf8');
@@ -98,6 +105,17 @@ const controlSvc = `
         </receiver>
 `;
 if (!x.includes('.DeviceControlService')) x = x.replace(/<\/application>/, controlSvc + '    </application>');
+
+// Phase 2: the accessibility service (on-screen control: gestures, read screen, screenshots). The user
+// must enable it in Settings → Accessibility; it's inert until then.
+const a11ySvc = `
+        <service android:name=".AsmltrAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="@string/app_name">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service" />
+        </service>
+`;
+if (!x.includes('.AsmltrAccessibilityService')) x = x.replace(/<\/application>/, a11ySvc + '    </application>');
 fs.writeFileSync(mf, x);
 
 // --- versioning (drives auto-update): versionName from package.json, versionCode = M*10000+m*100+p ---
