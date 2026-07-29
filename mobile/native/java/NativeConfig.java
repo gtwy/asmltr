@@ -35,6 +35,30 @@ public class NativeConfig {
     catch (Exception e) { return 0; }
   }
 
+  /** True once the user has granted "draw over other apps" — required for the persistent overlay. */
+  @JavascriptInterface
+  public boolean canDrawOverlay() {
+    return Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(ctx);
+  }
+
+  /** Route the user to grant the overlay permission (so the assistant can float over other apps). */
+  @JavascriptInterface
+  public void requestOverlayPermission() {
+    if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(ctx)) {
+      Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.getPackageName()));
+      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      ctx.startActivity(i);
+    }
+  }
+
+  /** Manually surface the floating overlay (e.g. a "test overlay" button in the app). */
+  @JavascriptInterface
+  public void openOverlay() {
+    if (!canDrawOverlay()) { requestOverlayPermission(); return; }
+    Intent i = new Intent(ctx, OverlayService.class).setAction("com.asmltr.assistant.SHOW");
+    if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i); else ctx.startService(i);
+  }
+
   /** Download `url` and install it via a PackageInstaller session. If the app can't yet install
    *  unknown apps, route the user to grant that first (they re-tap Update after). */
   @JavascriptInterface

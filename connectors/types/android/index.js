@@ -165,6 +165,51 @@ async function start(ctx) {
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
 
+  // --- #77 device control: core→device RPC round-trip -----------------------------------------------
+  // The core's `asmltr-device` MCP tool POSTs /gw/rpc; we push a `device_rpc` frame to the phone, the
+  // app runs it via the AsmltrDevice bridge and POSTs /gw/rpc-result, and we resolve the original POST
+  // with the device's result. Lets the assistant actually actuate the phone (volume, launch apps, …).
+  const pendingRpc = new Map(); // id → { resolve, timer }
+  let rpcSeq = 0;
+  function pickDevice(requested) {
+    if (requested && devices.has(requested)) return requested;
+    if (requested) return null;
+    // no device specified → the most-recently-connected one (single-phone installs "just work")
+    let best = null, bestSince = -1;
+    for (const [id, d] of devices) if (d.since > bestSince) { best = id; bestSince = d.since; }
+    return best;
+  }
+  app.post('/gw/rpc', (req, res) => {
+    const b = req.body || {};
+    const device = pickDevice(b.device ? String(b.device).trim() : '');
+    if (!device) return res.status(404).json({ ok: false, error: 'no connected device' });
+    const tool = String(b.tool || '').trim();
+    if (!tool) return res.status(400).json({ ok: false, error: 'tool required' });
+    const id = `rpc${++rpcSeq}-${Date.now()}`;
+    const timeoutMs = Math.min(Math.max(parseInt(b.timeout_ms, 10) || 20000, 1000), 60000);
+    const timer = setTimeout(() => {
+      if (pendingRpc.has(id)) { pendingRpc.delete(id); res.status(504).json({ ok: false, error: 'device did not respond in time' }); }
+    }, timeoutMs);
+    if (timer.unref) timer.unref();
+    pendingRpc.set(id, { resolve: (result) => { clearTimeout(timer); res.json({ ok: true, device, result }); }, timer });
+    const delivered = pushSSE(device, { type: 'device_rpc', id, tool, args: b.args || {} });
+    if (!delivered) { clearTimeout(timer); pendingRpc.delete(id); return res.status(502).json({ ok: false, error: 'device push failed' }); }
+  });
+  app.post('/gw/rpc-result', (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    const id = String(b.id || '');
+    const p = pendingRpc.get(id);
+    if (!p) return res.json({ ok: false, error: 'unknown or expired rpc id' });
+    pendingRpc.delete(id);
+    p.resolve(b.result != null ? b.result : { ok: false, error: 'no result' });
+    res.json({ ok: true });
+  });
+  // Let the core discover which devices can be actuated (for the MCP tool's device targeting).
+  app.get('/gw/devices', (req, res) => {
+    res.json({ ok: true, devices: [...devices.entries()].map(([id, d]) => ({ id, name: d.name, since: d.since })) });
+  });
+
   // --- manager→device push: `asmltr send android <device>` / announcements / steer ------------------
   app.post('/out', (req, res) => {
     const { target, text } = req.body || {};
