@@ -48,11 +48,12 @@ for (const [d, [L, F]] of Object.entries(DENS)) {
   sh(`rsvg-convert -w ${fg} -h ${fg} "${tmp}" -o /tmp/_fg.png`);
   sh(`convert /tmp/_fg.png -background none -gravity center -extent ${F}x${F} "${dir}/ic_launcher_foreground.png"`);
 }
-// keep the adaptive background color in sync (dark for gradient contrast)
-const valFile = path.join(RES, 'values', 'asmltr_strings.xml');
+// keep the adaptive background color in sync (dark for gradient contrast). ONE definition only, in its
+// own file (it overwrites Capacitor's ic_launcher_background.xml) — duplicating it fails mergeResources.
+const valFile = path.join(RES, 'values', 'ic_launcher_background.xml');
 try {
   let v = fs.readFileSync(valFile, 'utf8');
-  if (/ic_launcher_background/.test(v)) v = v.replace(/<color name="ic_launcher_background">[^<]*<\/color>/, `<color name="ic_launcher_background">${BG}</color>`);
+  v = v.replace(/<color name="ic_launcher_background">[^<]*<\/color>/, `<color name="ic_launcher_background">${BG}</color>`);
   fs.writeFileSync(valFile, v);
 } catch (_) {}
 console.log(`gen-icon: launcher icons themed ${c1} → ${c2}`);
