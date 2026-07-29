@@ -121,6 +121,22 @@ async function start(ctx) {
     });
   });
 
+  // Start a fresh conversation for this device (clear context): forget the core session so the next turn
+  // re-injects a clean system prompt (identity/trust/history reset). Surfaced by the overlay's "New session".
+  const CORE_FORGET = (process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle$/, '/v2/session/forget');
+  app.post('/gw/forget', async (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    const device = String(b.device || '').trim();
+    if (!device) return res.status(400).json({ ok: false, error: 'device id required' });
+    const key = convKey(device);
+    try {
+      const r = await fetch(CORE_FORGET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_key: key, by: 'android-device' }) });
+      const j = await r.json().catch(() => ({}));
+      res.json({ ok: true, conversation_key: key, existed: !!j.existed });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
   // --- persistent control link: the native foreground service holds this open 24/7 -------------------
   // Same auth as the chat stream, but a SEPARATE registry so it doesn't get replaced when the overlay's
   // chat stream (re)connects. Device_rpc frames are pushed here so phone control works with no UI open.

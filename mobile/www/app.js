@@ -41,7 +41,7 @@ let muted = false; try { muted = localStorage.getItem('asmltr.muted') === '1'; }
 let es = null, reconnectT = null;
 let state = 'idle';              // 'idle' | 'rec' | 'busy'   (busy covers thinking + reading aloud)
 let recorder = null, chunks = [], stream = null, heardSpeech = false;
-let curBubble = null, stepsEl = null, lastTool = null;
+let curBubble = null, stepsEl = null, lastTool = null, convKey = '';
 let drone = null, curAudio = null, vadRAF = 0, vadCtx = null;
 let continuous = OVERLAY, suppressRestart = false;
 // streaming TTS pipeline (synthesize each sentence as it arrives, play in order)
@@ -104,7 +104,7 @@ function connect() {
   es = new EventSource(url);
   es.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
-    if (m.type === 'ready') { setStatus('connected', 'pill-on'); maybeAssistLaunch(); }
+    if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) convKey = m.conversation_key; maybeAssistLaunch(); }
     else if (m.type === 'thinking') addThinking(m.text);
     else if (m.type === 'tool') addTool(m.name, m.input);
     else if (m.type === 'tool_result') addToolResult(m.output, m.is_error);
@@ -275,8 +275,17 @@ function initOverlayChrome() {
 }
 
 // ---------- settings ----------
-function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; $('sheet').classList.remove('hidden'); }
+function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; $('sheet').classList.remove('hidden'); }
 function closeSheet() { $('sheet').classList.add('hidden'); }
+// Start a fresh conversation: stop anything running, ask the connector to forget the core session, wipe the log.
+async function newSession() {
+  const m = $('sessMsg'); if (m) m.textContent = 'clearing…';
+  stopEverything();
+  try { const r = await api('/gw/forget', {}); if (m) m.textContent = r && r.existed ? '✓ context cleared — fresh session' : '✓ fresh session'; }
+  catch (e) { if (m) m.textContent = '✗ ' + e.message; return; }
+  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; resetTTS();
+  bubble('sys', 'New session started.');
+}
 async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/, ''); $('cfgMsg').textContent = 'testing…'; try { const r = await fetch(base + '/health'); const j = await r.json(); $('cfgMsg').textContent = j.status === 'ok' ? '✓ reachable' : 'unexpected'; } catch (e) { $('cfgMsg').textContent = '✗ ' + e.message; } }
 
 // ---------- wire up ----------
@@ -288,6 +297,7 @@ function init() {
   $('mute').addEventListener('click', () => setMuted(!muted));
   $('talk').addEventListener('click', () => { if (state === 'rec') stopRec(); else if (state === 'busy') stopEverything(); else startRec(); });
   $('settingsBtn').addEventListener('click', () => openSheet());
+  if ($('cfgNewSession')) $('cfgNewSession').addEventListener('click', newSession);
   $('cfgTest').addEventListener('click', testConn);
   $('cfgSave').addEventListener('click', () => {
     cfg.baseUrl = $('cfgUrl').value.trim().replace(/\/+$/, ''); cfg.token = $('cfgToken').value.trim(); cfg.name = $('cfgName').value.trim() || 'My device'; saveCfg(cfg);
