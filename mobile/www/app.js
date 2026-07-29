@@ -43,6 +43,8 @@ let state = 'idle';              // 'idle' | 'rec' | 'busy'   (busy covers think
 let recorder = null, chunks = [], stream = null, heardSpeech = false;
 let curBubble = null, stepsEl = null, lastTool = null, convKey = '';
 let drone = null, curAudio = null, vadRAF = 0, vadCtx = null;
+// VAD tuning — global STT settings from the web GUI/TUI (fetched via /gw/theme); forgiving defaults.
+let vadCfg = { endpoint_ms: 1600, start_ms: 8000, sensitivity: 50 };
 let continuous = OVERLAY, suppressRestart = false;
 // streaming TTS pipeline (synthesize each sentence as it arrives, play in order)
 let ttsBuf = '', ttsSeq = 0, ttsNextPlay = 0, ttsPlaying = false, replyTextDone = false; const ttsClips = {};
@@ -56,6 +58,7 @@ async function applyTheme() {
     const hexes = String(j.palette || '').match(/#[0-9a-fA-F]{6}/g) || [];
     const a = hexes[0] && toRGB(hexes[0]), b = (hexes[1] && toRGB(hexes[1])) || a;
     if (a) { document.documentElement.style.setProperty('--accent', a); document.documentElement.style.setProperty('--accent2', b); }
+    if (j.vad) vadCfg = { endpoint_ms: +j.vad.endpoint_ms || vadCfg.endpoint_ms, start_ms: +j.vad.start_ms || vadCfg.start_ms, sensitivity: (j.vad.sensitivity != null ? +j.vad.sensitivity : vadCfg.sensitivity) };
   } catch (_) {}
 }
 
@@ -233,14 +236,17 @@ function startVAD(mediaStream) {
     const an = vadCtx.createAnalyser(); an.fftSize = 1024; src.connect(an);
     const buf = new Uint8Array(an.fftSize);
     const t0 = Date.now(); let floor = 0.01, floorN = 0, quietSince = 0;
+    // sensitivity 0..100 → threshold scale 1.5 (needs louder) .. 0.5 (more sensitive); 50 = neutral.
+    const f = 1.5 - (Math.max(0, Math.min(100, vadCfg.sensitivity)) / 100);
+    const endpointMs = vadCfg.endpoint_ms || 1600, startMs = vadCfg.start_ms || 8000;
     const rms = () => { an.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; } return Math.sqrt(s / buf.length); };
     const tick = () => {
       const level = rms(); const now = Date.now(); const dt = now - t0;
       if (dt < 350) { floor = (floor * floorN + level) / (floorN + 1); floorN++; vadRAF = requestAnimationFrame(tick); return; }
-      const speaking = level > Math.max(0.03, floor * 2.2 + 0.012);
+      const speaking = level > f * Math.max(0.03, floor * 2.2 + 0.012);
       if (speaking) { heardSpeech = true; quietSince = 0; }
-      else if (heardSpeech) { if (!quietSince) quietSince = now; else if (now - quietSince > 900) { stopRec(); return; } }
-      else if (dt > 7000) { stopRec(); return; }
+      else if (heardSpeech) { if (!quietSince) quietSince = now; else if (now - quietSince > endpointMs) { stopRec(); return; } }
+      else if (dt > startMs) { stopRec(); return; }
       vadRAF = requestAnimationFrame(tick);
     };
     vadRAF = requestAnimationFrame(tick);

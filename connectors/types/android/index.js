@@ -358,12 +358,17 @@ async function start(ctx) {
     let v = {}; try { v = JSON.parse(fs.readFileSync(APK_VER, 'utf8')); } catch (_) {}
     res.json({ available: fs.existsSync(APK), download: '/app/gw/download', filename: 'asmltr.apk', versionCode: v.versionCode || 0, versionName: v.versionName || '' });
   });
-  // Branding: the assistant's signature palette + name, so the app themes itself like the web GUI.
-  app.get('/gw/theme', (req, res) => {
+  // Branding + the global voice/VAD tuning (from core /v2/voice/config), so the app themes itself AND
+  // applies the shared end-of-speech / mic-sensitivity settings edited in the web GUI / TUI.
+  const CORE_VOICE = (process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle$/, '/v2/voice/config');
+  app.get('/gw/theme', async (req, res) => {
     let palette = '', name = '';
     try { palette = identity.getFacet('palette') || ''; } catch (_) {}
     try { name = identity.name() || ''; } catch (_) {}
-    res.json({ palette, agentName: name });
+    let stt = null;
+    try { const r = await fetch(CORE_VOICE); if (r.ok) { const j = await r.json(); stt = j.stt || null; } } catch (_) {}
+    const vad = stt ? { endpoint_ms: stt.vad_endpoint_ms, start_ms: stt.vad_start_ms, sensitivity: stt.vad_sensitivity } : null;
+    res.json({ palette, agentName: name, vad });
   });
   app.get('/gw/download', (req, res) => {
     if (!fs.existsSync(APK)) return res.status(404).json({ ok: false, error: 'APK not built yet' });
