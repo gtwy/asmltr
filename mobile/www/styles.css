@@ -107,3 +107,21 @@ body.overlay.native .card {
 /* card hugs its content; the log gets an explicit px cap (set in JS from screen height, not the window,
    to avoid a circular size dependency) and scrolls. The native window height tracks the card. */
 body.overlay.native .log { flex: 0 1 auto; }
+
+/* ===== session switcher ===== */
+.targetbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(139,92,246,0.14);
+  border-bottom: 1px solid #ffffff10; font-size: 12px; }
+.targetbar.hidden { display: none; }
+.targetlabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.targetleave { background: #ffffff14; color: var(--text); border: none; border-radius: 999px; padding: 4px 10px; font-size: 11px; }
+.sessrefresh { flex: none; padding: 5px 12px; font-size: 12px; font-weight: 600; float: right; }
+.sesslist { display: flex; flex-direction: column; gap: 6px; }
+.sessrow { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--panel2);
+  border: 1px solid #ffffff12; cursor: pointer; }
+.sessrow:active { background: #ffffff14; }
+.sessrow .st { display: flex; align-items: center; gap: 7px; }
+.sess-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; padding: 2px 7px; border-radius: 999px;
+  background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent2))); color: #fff; white-space: nowrap; }
+.sess-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.sess-sub { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sessrow.active { border-color: rgb(var(--accent2)); }

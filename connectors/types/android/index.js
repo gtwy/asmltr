@@ -121,6 +121,51 @@ async function start(ctx) {
     });
   });
 
+  // --- session switcher: list/attach ANY asmltr session from the overlay (like the web GUI) ----------
+  // The connector reads the collector (localhost, open) for the reconciled session list + per-session
+  // history, so the phone can browse every channel's sessions, load one, and direct its next turn at it.
+  const INSIGHTS_BASE = (process.env.ASMLTR_INSIGHTS_BASE || 'http://127.0.0.1:3017').replace(/\/+$/, '');
+  const INSIGHTS_TOKEN = process.env.ASMLTR_INSIGHTS_TOKEN || '';
+  async function collector(p) {
+    const r = await fetch(INSIGHTS_BASE + p, { headers: INSIGHTS_TOKEN ? { Authorization: `Bearer ${INSIGHTS_TOKEN}` } : {} });
+    if (!r.ok) throw new Error(`collector ${r.status}`);
+    return r.json();
+  }
+  app.get('/gw/sessions', async (req, res) => {
+    if (requireToken && !auth(req.query.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    try {
+      const j = await collector('/api/sessions?active=1');
+      const rows = (j.sessions || []).map((s) => ({
+        key: s.session_id, surface: s.surface || 'core',
+        title: (s.title || s.task || '').trim(), task: (s.task || '').trim(),
+        status: s.status || '', identity: s.identity || '', tools: s.tool_count || 0,
+        updated: (s.last_activity_unix || s.updated_unix || s.started_unix || 0),
+      })).filter((r) => r.key).sort((a, b) => b.updated - a.updated);
+      res.json({ ok: true, sessions: rows });
+    } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  });
+  app.get('/gw/history', async (req, res) => {
+    if (requireToken && !auth(req.query.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    const key = String(req.query.key || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'key required' });
+    try {
+      const j = await collector(`/api/events?session=${encodeURIComponent(key)}&limit=${Math.min(parseInt(req.query.limit, 10) || 300, 1000)}`);
+      const items = [];
+      for (const e of (j.events || [])) {
+        let p = {}; try { p = typeof e.payload === 'string' ? JSON.parse(e.payload) : (e.payload || {}); } catch (_) {}
+        switch (e.event_type) {
+          case 'inbound': items.push({ kind: 'user', text: p.text || '', ts: e.ts }); break;
+          case 'outbound': items.push({ kind: 'assistant', text: p.text || '', ts: e.ts }); break;
+          case 'thinking': items.push({ kind: 'thinking', text: p.text || '', ts: e.ts }); break;
+          case 'tool': items.push({ kind: 'tool', name: p.tool || p.name || 'tool', input: p.input, ts: e.ts }); break;
+          case 'tool_result': items.push({ kind: 'tool_result', output: p.output || '', is_error: !!p.is_error, ts: e.ts }); break;
+          default: break; // session-start/end/control → skip
+        }
+      }
+      res.json({ ok: true, key, items });
+    } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  });
+
   // Start a fresh conversation for this device (clear context): forget the core session so the next turn
   // re-injects a clean system prompt (identity/trust/history reset). Surfaced by the overlay's "New session".
   const CORE_FORGET = (process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle$/, '/v2/session/forget');
@@ -169,23 +214,29 @@ async function start(ctx) {
     if (!device) return res.status(400).json({ ok: false, error: 'device id required' });
     if (!text.trim()) return res.status(400).json({ ok: false, error: 'text required' });
     const name = String(b.name || who.username || 'android');
+    // Optionally DIRECT this turn at another session (the overlay session switcher): run on its
+    // conversation_key + channel so it continues THAT conversation; the reply still streams to this phone.
+    const targetKey = String(b.target_key || '').trim();
+    const targetSurface = String(b.target_surface || '').trim();
+    const convo = targetKey || convKey(device);
+    const channel = targetKey ? (targetSurface || (convo.includes(':') ? convo.split(':')[0] : 'core')) : 'android';
 
-    ctx.emit({ event_type: 'inbound', session_id: convKey(device), identity: who.identity, payload: { text: text.slice(0, 200) } });
+    ctx.emit({ event_type: 'inbound', session_id: convo, identity: who.identity, payload: { text: text.slice(0, 200) } });
     const envelope = {
-      channel: 'android',
-      conversation_key: convKey(device),
+      channel,
+      conversation_key: convo,
       message_id: String(Date.now()),
       sender: { raw_id: who.identity, raw_username: name },
       content: { text },
       delivery: 'sync',
       public: false, // 1:1 authed device; redaction still applies unless the identity is full-trust
       channel_context: { device },
-      context: { scope_name: 'Android assistant' },
+      context: { scope_name: targetKey ? `Session ${convo}` : 'Android assistant' },
       capabilities: { max_message_chars: 100000, supports_markdown: false, streaming: true, supports_attachments_out: false },
     };
 
     // Ack immediately (the reply streams over the SSE, not this POST response).
-    res.json({ ok: true, conversation_key: convKey(device), streaming: devices.has(device) });
+    res.json({ ok: true, conversation_key: convo, streaming: devices.has(device) });
     try {
       await ctx.core.handleStream(envelope, {
         onDelta: (t) => pushSSE(device, { type: 'delta', text: t }),                                 // streamed reply text
@@ -193,7 +244,7 @@ async function start(ctx) {
         onToolCall: (t) => pushSSE(device, { type: 'tool', name: t.name, input: t.input }),          // tool call + args
         onToolResult: (r) => pushSSE(device, { type: 'tool_result', output: r.output, is_error: r.is_error }), // its output
       });
-      pushSSE(device, { type: 'done', conversation_key: convKey(device) });
+      pushSSE(device, { type: 'done', conversation_key: convo });
     } catch (e) {
       ctx.log(`android turn error (${device}): ${e.message}`);
       pushSSE(device, { type: 'error', error: e.message });
