@@ -36,6 +36,12 @@ public class MainActivity extends BridgeActivity {
     if (!p.getString("baseUrl", "").isEmpty() && !p.getString("token", "").isEmpty()) {
       nc.startControlLink();
       if (!p.getBoolean("batteryAsked", false)) { p.edit().putBoolean("batteryAsked", true).apply(); nc.requestBatteryExemption(); }
+      // One-time offer to enable screen control (accessibility) — only if it's off and the user hasn't
+      // already been asked (so a decline isn't nagged). They can still enable it later from settings.
+      if (!nc.isScreenControlEnabled() && !p.getBoolean("a11yAsked", false)) {
+        p.edit().putBoolean("a11yAsked", true).apply();
+        nc.openAccessibilitySettings();
+      }
     }
     WebView wv = getBridge().getWebView();
     wv.addJavascriptInterface(nc, "AsmltrNative");

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="asmltr_a11y_desc">Lets your assistant operate the phone on your behalf — tap, swipe, type, read the screen, and take screenshots — when you ask it to. You control when it\'s on.</string>
+    <color name="ic_launcher_background">#14141F</color>
 </resources>
