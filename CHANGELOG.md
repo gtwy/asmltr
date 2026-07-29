@@ -12,6 +12,18 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Changed
 
+- **`asmltr map` now reports what each active agent is doing and where** — not just repos with
+  file-edit activity. "What" is the session's live activity rollup (built from inbound + **all** tool
+  events, incl. shell); "where" is the git repo it's working in, now mined from absolute paths in
+  **Bash/shell** commands (`cd`, `git -C`, file args) as well as file-tool args, with a `working_dir`
+  fallback. Every currently-active agent is listed (shell-heavy and channel sessions included), so an
+  empty map no longer means "someone might still be working via the shell." Fixes a repo-grouping bug
+  where a `cd <repo>` was mis-attributed to the parent directory's repo. Use it to answer "what's
+  happening in the other sessions?" (#79 follow-up)
+- **`asmltr ls` / `asmltr_sessions` show what+where** — each session's live activity (or title) and
+  working-dir basename, instead of the static `claude — <spawn-dir>` task label that collapsed every
+  same-directory session to one indistinguishable row. `asmltr brief` likewise.
+
 ### Fixed
 
 ## [0.8.0] - 2026-07-29

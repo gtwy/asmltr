@@ -17,10 +17,10 @@ const NAME = process.env.ASSISTANT_NAME || 'asmltr';
 
 // Tool definitions → (args) => argv for `node cli/asmltr.js …`. Keep names stable + engine-agnostic.
 const TOOLS = [
-  { name: 'asmltr_sessions', description: `List ${NAME}'s currently active sessions across all channels (id, surface, task, status). To answer "is another session already working in this repo/dir?", use asmltr_map or asmltr_who — those group by working directory; this flat list does not.`,
+  { name: 'asmltr_sessions', description: `List ${NAME}'s currently active sessions across all channels — each with what it's doing (live activity) + where. To group by repo and spot collisions use asmltr_map; to check one specific path use asmltr_who.`,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     argv: () => ['ls'] },
-  { name: 'asmltr_map', description: `Collision radar: active sessions grouped by git repo / working dir, derived from real recent file tool-activity (not spawn dir), flagging any repo with more than one session. Check this BEFORE starting substantial work in a repo so you don't duplicate or clobber what another session is already doing.`,
+  { name: 'asmltr_map', description: `What every currently-active agent is doing and where: each active session's live activity ("what") grouped by the repo/dir it's working in ("where" — mined from ALL recent tool activity incl. shell commands, with a working-dir fallback), flagging any repo with 2+ agents as a possible collision. Use this to report cross-session status ("what's happening in the other sessions") or before starting work in a repo.`,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     argv: () => ['map'] },
   { name: 'asmltr_who', description: 'Which sessions recently touched a specific file or directory — a targeted collision check for one path before you edit it.',

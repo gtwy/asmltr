@@ -92,11 +92,15 @@ function flags(argv) {
 async function cmdLs() {
   const { sessions } = await api('/api/sessions?active=1');
   if (!sessions.length) return console.log(A.dim('no active sessions'));
-  console.log(A.bold(pad('SURFACE', 10) + pad('KIND', 11) + pad('AGE', 6) + pad('IDLE', 6) + pad('TOK', 8) + pad('MUX', 7) + 'TASK / KEY'));
+  console.log(A.bold(pad('SURFACE', 10) + pad('KIND', 11) + pad('AGE', 6) + pad('IDLE', 6) + pad('TOK', 8) + pad('MUX', 7) + 'DOING / KEY  (@where)'));
   for (const s of sessions) {
+    // WHAT the session is doing (live activity rollup first, then title, then the static task/key), and
+    // WHERE (working dir basename) when known — instead of the old spawn-derived "claude — <dir>" label.
+    const where = s.working_dir ? String(s.working_dir).split('/').filter(Boolean).pop() : '';
+    const what = s.activity || s.title || s.task || s.session_id;
+    const label = String(what).slice(0, 52) + (where ? '  @' + where : '');
     const line = pad(s.surface, 10) + pad(s.kind, 11) + pad(ageOf(s.started_unix), 6) +
-      pad(ageOf(s.last_activity_unix), 6) + pad(s.tokens_total || 0, 8) + pad(s.multiplexer || 'none', 7) +
-      (s.task ? String(s.task).slice(0, 50) : s.session_id);
+      pad(ageOf(s.last_activity_unix), 6) + pad(s.tokens_total || 0, 8) + pad(s.multiplexer || 'none', 7) + label;
     console.log(paint(s.surface, line));
   }
   console.log(A.dim(`\n${sessions.length} active`));
@@ -111,7 +115,7 @@ async function cmdBrief() {
   for (const [surf, tok] of Object.entries(bys)) console.log(`    ${pad(surf, 22)} ${tok}`);
   if (b.sessions && b.sessions.length) {
     console.log(A.bold('\n  active:'));
-    for (const s of b.sessions) console.log(`    ${paint(s.surface, pad(s.surface, 10))} ${A.dim(s.kind)} ${s.task ? String(s.task).slice(0, 60) : s.id}`);
+    for (const s of b.sessions) console.log(`    ${paint(s.surface, pad(s.surface, 10))} ${A.dim(s.kind)} ${String(s.activity || s.title || s.task || s.id).slice(0, 60)}`);
   }
 }
 
@@ -275,19 +279,19 @@ async function cmdSend(rest) {
   console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 async function cmdMap() {
-  // where sessions are ACTIVELY working, from recent tool activity → grouped by git repo
+  // WHAT each currently-active agent is doing + WHERE — grouped by repo (collision radar).
   const r = await api('/api/map');
   const list = r.sessions || [];
-  if (!list.length) return console.log(A.dim('no session has file activity in the last 30 min.\n' +
-    '(map covers sessions asmltr observes — channel turns + `asmltr claude` sessions; it reads real\n' +
-    ' tool activity, not the spawn dir, so a session shows up once it touches files.)'));
+  if (!list.length) return console.log(A.dim('no agent active in the last 30 min.'));
   const groups = {};
   for (const s of list) { (groups[s.repo] = groups[s.repo] || []).push(s); }
   for (const [repo, ss] of Object.entries(groups).sort((a, b) => b[1].length - a[1].length)) {
-    console.log(`${A.bold(repo)}  ${ss.length > 1 ? A.red(`⚠ ${ss.length} sessions — possible collision`) : A.dim('1 session')}`);
+    console.log(`${A.bold(repo)}  ${ss.length > 1 ? A.red(`⚠ ${ss.length} agents — possible collision`) : A.dim('1 agent')}`);
     for (const s of ss) {
-      const sub = s.dirs.map((d) => d.dir.replace(repo, '.') + (d.hits > 1 ? `(${d.hits})` : '')).join(' ');
-      console.log(`   ${paint(s.surface, pad(s.surface, 11))} ${String(s.title || s.session_id).slice(0, 40)}  ${A.dim('· ' + ageOf(s.last_activity_unix) + ' ago · ' + sub)}`);
+      const what = s.what ? String(s.what).slice(0, 64) : A.dim('(' + String(s.session_id).slice(0, 28) + ')');
+      const sub = (s.dirs || []).filter((d) => d.hits > 0).map((d) => d.dir.replace(repo, '.') + (d.hits > 1 ? `(${d.hits})` : '')).join(' ');
+      const who = s.identity ? ` ${A.dim(s.identity)}` : '';
+      console.log(`   ${paint(s.surface, pad(s.surface, 11))}${who} ${what}  ${A.dim('· ' + ageOf(s.last_activity_unix) + ' ago' + (sub ? ' · ' + sub : ''))}`);
     }
   }
 }
