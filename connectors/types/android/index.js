@@ -141,9 +141,10 @@ async function start(ctx) {
     res.json({ ok: true, conversation_key: convKey(device), streaming: devices.has(device) });
     try {
       await ctx.core.handleStream(envelope, {
-        onDelta: (t) => pushSSE(device, { type: 'delta', text: t }),        // streamed reply text
-        onThinking: (t) => pushSSE(device, { type: 'thinking', text: t }),  // reasoning steps
-        onTool: (n) => pushSSE(device, { type: 'tool', name: n }),          // tool calls
+        onDelta: (t) => pushSSE(device, { type: 'delta', text: t }),                                 // streamed reply text
+        onThinking: (t) => pushSSE(device, { type: 'thinking', text: t }),                           // reasoning steps
+        onToolCall: (t) => pushSSE(device, { type: 'tool', name: t.name, input: t.input }),          // tool call + args
+        onToolResult: (r) => pushSSE(device, { type: 'tool_result', output: r.output, is_error: r.is_error }), // its output
       });
       pushSSE(device, { type: 'done', conversation_key: convKey(device) });
     } catch (e) {

@@ -466,13 +466,13 @@ async function handle(envelope, opts = {}) {
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
           for (const c of sdkEvt.message?.content || []) {
-            if (c.type === 'tool_use') record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } });
+            if (c.type === 'tool_use') { record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } }); if (opts.onToolCall) { try { opts.onToolCall({ name: c.name, input: c.input }); } catch (_) {} } }
             else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
           }
         } else if (sdkEvt.type === 'user') {
           for (const c of sdkEvt.message?.content || []) {
             // store generous tool output so the TUI watch view can show it in full (cap guards DB bloat)
-            if (c.type === 'tool_result') record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } });
+            if (c.type === 'tool_result') { record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } }); if (opts.onToolResult) { try { opts.onToolResult({ output: truncate(toolResultText(c.content), 8000), is_error: !!c.is_error }); } catch (_) {} } }
           }
         }
       },
@@ -1012,7 +1012,8 @@ app.post('/v2/stream', async (req, res) => {
     const actions = await dispatch(req.body, {
       onText: (text) => { if (text) frame({ type: 'delta', text }); },            // token stream (voice/openai)
       onSegment: (text) => { if (text) frame({ type: 'segment', text }); },        // completed narration block (step consumers)
-      onTool: (t) => { if (t && t.name) frame({ type: 'tool', name: t.name }); },  // a tool call as it happens
+      onToolCall: (t) => { if (t && t.name) frame({ type: 'tool', name: t.name, input: t.input }); }, // a tool call + its args
+      onToolResult: (r) => { if (r) frame({ type: 'tool_result', output: r.output, is_error: !!r.is_error }); }, // its result
       onThinking: (text) => { if (text) frame({ type: 'thinking', text }); },      // a completed thinking block
     });
     frame({ type: 'done', actions });
