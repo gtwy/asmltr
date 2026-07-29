@@ -151,6 +151,27 @@ const manifest = {
             { id: 'whisper-1', label: 'whisper-1', hint: 'classic Whisper' },
           ],
         },
+        {
+          id: 'stt_endpoint', label: 'End-of-speech pause', type: 'choice', get: 'stt.vad_endpoint_ms',
+          desc: 'On push-to-talk surfaces (the mobile overlay), how long a silence ENDS your turn. Raise this if it cuts you off when you pause between sentences.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { vad_endpoint_ms: '{value}' } } },
+          choices: [
+            { id: '1000', label: '1.0s', hint: 'snappy' },
+            { id: '1600', label: '1.6s', hint: 'balanced (recommended)' },
+            { id: '2200', label: '2.2s', hint: 'relaxed' },
+            { id: '3000', label: '3.0s', hint: 'long pauses' },
+          ],
+        },
+        {
+          id: 'stt_sensitivity', label: 'Mic sensitivity', type: 'choice', get: 'stt.vad_sensitivity',
+          desc: 'How readily quiet speech counts as talking. Lower it if background noise triggers it; raise it in a quiet room.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { vad_sensitivity: '{value}' } } },
+          choices: [
+            { id: '25', label: 'Low', hint: 'noisy places' },
+            { id: '50', label: 'Medium', hint: 'default' },
+            { id: '75', label: 'High', hint: 'quiet room' },
+          ],
+        },
       ],
     },
   ],
