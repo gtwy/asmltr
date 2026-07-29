@@ -41,7 +41,9 @@ public class OverlayService extends Service {
   private FrameLayout root;
   private WebView web;
   private boolean added = false, minimized = false;
-  private int winX = -1, winY = -1; // expanded-panel position (absolute, top-left gravity); -1 = uninit
+  // Expanded floating-panel geometry: bottom-centered, offset by drag, height reported by the web (so the
+  // panel hugs the card content instead of being a fixed slab). dragY/panelH = -1 → uninitialized.
+  private int dragX = 0, dragY = -1, panelH = -1;
 
   private int dp(int v) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()); }
 
@@ -112,18 +114,19 @@ public class OverlayService extends Service {
       lp.gravity = Gravity.BOTTOM | Gravity.END;
       lp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
     } else {
-      // Expanded = a fixed floating PANEL (NOT full-screen). FLAG_NOT_TOUCH_MODAL means everything
-      // outside the panel bounds passes through to the app behind — so you can still tap other apps.
-      // Focusable (no NOT_FOCUSABLE) so the keyboard works; ADJUST_RESIZE keeps the input visible.
+      // Expanded = a floating PANEL sized to the card (NOT full-screen). FLAG_NOT_TOUCH_MODAL means
+      // everything outside the panel passes through to the app behind. Bottom-centered so it grows upward
+      // as content/keyboard change; drag nudges it via dragX/dragY offsets. Focusable → keyboard works.
       android.util.DisplayMetrics m = getResources().getDisplayMetrics();
       int panelW = Math.min(Math.round(m.widthPixels * 0.94f), dp(460));
-      int panelH = Math.round(m.heightPixels * 0.80f);
-      if (winX < 0) winX = (m.widthPixels - panelW) / 2;
-      if (winY < 0) winY = m.heightPixels - panelH - dp(12);
-      winX = Math.max(0, Math.min(winX, m.widthPixels - panelW));
-      winY = Math.max(0, Math.min(winY, m.heightPixels - panelH));
-      lp.width = panelW; lp.height = panelH;
-      lp.gravity = Gravity.TOP | Gravity.START; lp.x = winX; lp.y = winY;
+      int maxH = Math.round(m.heightPixels * 0.85f);
+      int h = panelH > 0 ? Math.min(panelH, maxH) : Math.round(m.heightPixels * 0.5f); // default until web reports
+      if (dragY < 0) dragY = dp(12);
+      int maxOffX = Math.max(0, (m.widthPixels - panelW) / 2);
+      dragX = Math.max(-maxOffX, Math.min(dragX, maxOffX));
+      dragY = Math.max(0, Math.min(dragY, Math.max(0, m.heightPixels - h)));
+      lp.width = panelW; lp.height = h;
+      lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL; lp.x = dragX; lp.y = dragY;
       lp.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
       lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
     }
@@ -146,12 +149,22 @@ public class OverlayService extends Service {
     @android.webkit.JavascriptInterface public void setMinimized(final boolean min) {
       if (root != null) root.post(new Runnable() { public void run() { setMinimizedInternal(min); } });
     }
-    // Move the floating panel (grip drag in the web). Deltas are in device px.
+    // Move the floating panel (grip drag). Deltas are device px in SCREEN space. Bottom-center gravity:
+    // +x → right, +y(offset) → up, so a downward drag (dy>0) lowers the panel (dragY -= dy).
     @android.webkit.JavascriptInterface public void dragBy(final int dx, final int dy) {
       if (root == null) return;
       root.post(new Runnable() { public void run() {
         if (minimized || !added) return;
-        winX += dx; winY += dy;
+        dragX += dx; dragY -= dy;
+        try { wm.updateViewLayout(root, params(false)); } catch (Exception e) {}
+      } });
+    }
+    // The web reports the card's pixel height so the panel window hugs the content (not a fixed slab).
+    @android.webkit.JavascriptInterface public void setPanelHeight(final int h) {
+      if (root == null || h <= 0) return;
+      root.post(new Runnable() { public void run() {
+        if (minimized || !added) return;
+        panelH = h;
         try { wm.updateViewLayout(root, params(false)); } catch (Exception e) {}
       } });
     }

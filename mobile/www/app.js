@@ -257,18 +257,29 @@ function maybeAssistLaunch() { const a = OVERLAY || location.hash.indexOf('assis
 window.asmltrStartListening = () => { if (state === 'idle') startRec(); };
 // Called by OverlayService when the card should collapse/expand; also usable from the min button.
 window.asmltrMinimize = () => { document.body.classList.add('minimized'); if (state === 'rec') stopRec(); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(true); } catch (_) {} };
-window.asmltrExpand = () => { document.body.classList.remove('minimized'); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(false); } catch (_) {} };
+window.asmltrExpand = () => { document.body.classList.remove('minimized'); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(false); } catch (_) {} reportPanelHeight(); };
+// Tell the native panel window how tall to be so it hugs the card (open sheet → grow to fit the sheet).
+function reportPanelHeight() {
+  const ov = nativeOverlay(); if (!ov || !ov.setPanelHeight || document.body.classList.contains('minimized')) return;
+  const dpr = window.devicePixelRatio || 1;
+  const sheetOpen = $('sheet') && !$('sheet').classList.contains('hidden');
+  const scrH = (window.screen && window.screen.height) || window.innerHeight || 640;
+  const h = sheetOpen ? Math.round(scrH * 0.85) : Math.ceil($('card').getBoundingClientRect().height);
+  if (h > 0) { try { ov.setPanelHeight(Math.round(h * dpr)); } catch (_) {} }
+}
 
 // ---------- overlay chrome ----------
 function initOverlayChrome() {
   const card = $('card'), handle = $('grip'); if (!card || !handle) return;
   const dpr = window.devicePixelRatio || 1;
   let sx = 0, sy = 0, ox = 0, oy = 0, lx = 0, ly = 0, dragging = false; const pos = { x: 0, y: 0 };
-  const down = (e) => { if (e.target.closest('button')) return; dragging = true; const p = e.touches ? e.touches[0] : e; sx = lx = p.clientX; sy = ly = p.clientY; ox = pos.x; oy = pos.y; };
+  // Native drag uses SCREEN coords (screenX/Y) — window-relative clientX shifts as the window moves under
+  // the finger, which caused the jitter/feedback loop.
+  const down = (e) => { if (e.target.closest('button')) return; dragging = true; const p = e.touches ? e.touches[0] : e; sx = p.clientX; sy = p.clientY; lx = p.screenX; ly = p.screenY; ox = pos.x; oy = pos.y; };
   const move = (e) => {
     if (!dragging) return; const p = e.touches ? e.touches[0] : e; const nat = nativeOverlay();
-    if (nat && nat.dragBy) { // native mode: move the floating panel window (not a CSS transform)
-      const dx = p.clientX - lx, dy = p.clientY - ly; lx = p.clientX; ly = p.clientY;
+    if (nat && nat.dragBy) {
+      const dx = p.screenX - lx, dy = p.screenY - ly; lx = p.screenX; ly = p.screenY;
       if (dx || dy) { try { nat.dragBy(Math.round(dx * dpr), Math.round(dy * dpr)); } catch (_) {} }
     } else { pos.x = ox + (p.clientX - sx); pos.y = oy + (p.clientY - sy); card.style.transform = `translate(calc(-50% + ${pos.x}px), ${pos.y}px)`; }
     e.preventDefault();
@@ -279,12 +290,19 @@ function initOverlayChrome() {
   window.addEventListener('mouseup', up); window.addEventListener('touchend', up);
   $('min').addEventListener('click', () => { window.asmltrMinimize(); });
   $('minbubble').addEventListener('click', () => { window.asmltrExpand(); if (continuous && state === 'idle') startRec(); });
+  // Native panel: cap the log by screen height (px — not window, to avoid circular sizing) and keep the
+  // native window height synced to the card via a ResizeObserver.
+  if (nativeOverlay()) {
+    const logEl = $('log'); if (logEl) logEl.style.maxHeight = Math.round(((window.screen && window.screen.height) || 640) * 0.42) + 'px';
+    try { const ro = new ResizeObserver(() => reportPanelHeight()); ro.observe(card); } catch (_) {}
+    setTimeout(reportPanelHeight, 150);
+  }
   $('close').addEventListener('click', () => { stopEverything(); try { if (window.AsmltrOverlay && window.AsmltrOverlay.close) window.AsmltrOverlay.close(); } catch (_) {} });
 }
 
 // ---------- settings ----------
-function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; $('sheet').classList.remove('hidden'); }
-function closeSheet() { $('sheet').classList.add('hidden'); }
+function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; $('sheet').classList.remove('hidden'); reportPanelHeight(); }
+function closeSheet() { $('sheet').classList.add('hidden'); reportPanelHeight(); }
 // Start a fresh conversation: stop anything running, ask the connector to forget the core session, wipe the log.
 async function newSession() {
   const m = $('sessMsg'); if (m) m.textContent = 'clearing…';

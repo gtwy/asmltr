@@ -102,6 +102,8 @@ body.overlay.minimized .minbubble svg { width: 26px; height: 26px; }
    so we drop the full-screen centering + transparent margins that used to eat touches. */
 body.overlay.native .card {
   position: static; left: auto; bottom: auto; transform: none !important;
-  width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 26px;
+  width: 100%; height: auto; max-width: none; max-height: none; border-radius: 26px;
 }
-body.overlay.native .log { max-height: none; }
+/* card hugs its content; the log gets an explicit px cap (set in JS from screen height, not the window,
+   to avoid a circular size dependency) and scrolls. The native window height tracks the card. */
+body.overlay.native .log { flex: 0 1 auto; }
