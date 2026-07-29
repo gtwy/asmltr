@@ -186,8 +186,10 @@ public class OverlayService extends Service {
             }
             if (!wakeLock.isHeld()) wakeLock.acquire(10 * 60 * 1000L);
             if (web != null) web.resumeTimers(); // keep JS/VAD running while not visible
-          } else if (wakeLock != null && wakeLock.isHeld()) {
-            wakeLock.release();
+            try { WakeWord.pause(); } catch (Throwable t) {}   // free the mic for the turn recorder
+          } else {
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+            try { WakeWord.resume(); } catch (Throwable t) {}  // hand the mic back to the wake listener
           }
         } catch (Exception e) {}
       } });

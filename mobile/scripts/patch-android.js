@@ -147,6 +147,9 @@ let g = fs.readFileSync(gradle, 'utf8');
 g = g.replace(/versionCode\s+\d+/, 'versionCode ' + vCode).replace(/versionName\s+"[^"]*"/, 'versionName "' + vName + '"');
 // androidx.webkit for WebView WebAuthn (passkeys inside the app).
 if (!g.includes('androidx.webkit:webkit')) g = g.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "androidx.webkit:webkit:1.12.1"');
+// Porcupine wake-word engine (always-on hotword). The .ppn keyword models must be generated for a
+// MATCHING Porcupine 3.x version at console.picovoice.ai.
+if (!g.includes('porcupine-android')) g = g.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "ai.picovoice:porcupine-android:3.0.3"');
 fs.writeFileSync(gradle, g);
 // Sidecar the connector's /gw/app reads to report the served version.
 fs.writeFileSync(path.join(ROOT, 'app-version.json'), JSON.stringify({ versionCode: vCode, versionName: vName }) + '\n');
