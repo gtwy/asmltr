@@ -1,19 +1,21 @@
 package com.asmltr.assistant;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInstaller;
 import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
 import android.webkit.JavascriptInterface;
-import androidx.core.content.FileProvider;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
-/** Bridge shared by the app + overlay WebViews: connector config (SharedPreferences, merge semantics)
- *  and the auto-update flow (report the installed versionCode, download a new APK, launch the system
- *  installer — Android never silently self-installs, so the user confirms the final "Update"). */
+/** Bridge for the app + overlay WebViews: connector config (SharedPreferences, merge semantics),
+ *  the installed version, and a robust in-app updater via the PackageInstaller session API (no
+ *  app-chooser, no FileProvider — streams the APK straight to the system installer + confirm dialog). */
 public class NativeConfig {
   private final Context ctx;
   public NativeConfig(Context c) { ctx = c; }
@@ -33,23 +35,34 @@ public class NativeConfig {
     catch (Exception e) { return 0; }
   }
 
-  /** Download the APK at `url` then hand it to the system package installer (user confirms). */
+  /** Download `url` and install it via a PackageInstaller session. If the app can't yet install
+   *  unknown apps, route the user to grant that first (they re-tap Update after). */
   @JavascriptInterface
   public void installUpdate(final String url) {
+    if (Build.VERSION.SDK_INT >= 26 && !ctx.getPackageManager().canRequestPackageInstalls()) {
+      Intent s = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.getPackageName()));
+      s.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      ctx.startActivity(s);
+      return;
+    }
     new Thread(new Runnable() { public void run() {
       try {
-        File out = new File(ctx.getExternalFilesDir(null), "asmltr-update.apk");
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setInstanceFollowRedirects(true); c.connect();
-        InputStream in = c.getInputStream(); FileOutputStream fo = new FileOutputStream(out);
-        byte[] b = new byte[8192]; int n; while ((n = in.read(b)) > 0) fo.write(b, 0, n);
-        fo.close(); in.close(); c.disconnect();
-        Uri uri = FileProvider.getUriForFile(ctx, ctx.getPackageName() + ".updateprovider", out);
-        Intent i = new Intent(Intent.ACTION_VIEW);
-        i.setDataAndType(uri, "application/vnd.android.package-archive");
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        ctx.startActivity(i);
-      } catch (Exception e) { /* best-effort; the browser-download fallback still works */ }
+        InputStream in = c.getInputStream();
+        PackageInstaller pi = ctx.getPackageManager().getPackageInstaller();
+        PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        int sid = pi.createSession(params);
+        PackageInstaller.Session session = pi.openSession(sid);
+        OutputStream out = session.openWrite("asmltr", 0, -1);
+        byte[] b = new byte[65536]; int n; while ((n = in.read(b)) > 0) out.write(b, 0, n);
+        session.fsync(out); out.close(); in.close(); c.disconnect();
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
+        Intent cb = new Intent(ctx, InstallReceiver.class);
+        PendingIntent pending = PendingIntent.getBroadcast(ctx, sid, cb, flags);
+        session.commit(pending.getIntentSender());
+      } catch (Exception e) { /* toast handled by the receiver on failure paths */ }
     } }).start();
   }
 }

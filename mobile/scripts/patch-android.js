@@ -50,6 +50,9 @@ const provider = `
         </provider>
 `;
 if (!x.includes('updateprovider')) x = x.replace(/<\/application>/, provider + '    </application>');
+// PackageInstaller session status receiver (launches the system install-confirm dialog).
+const receiver = '\n        <receiver android:name=".InstallReceiver" android:exported="false" />\n';
+if (!x.includes('InstallReceiver')) x = x.replace(/<\/application>/, receiver + '    </application>');
 fs.writeFileSync(mf, x);
 
 // --- versioning (drives auto-update): versionName from package.json, versionCode = M*10000+m*100+p ---
