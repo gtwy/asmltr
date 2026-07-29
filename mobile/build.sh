@@ -11,6 +11,7 @@ export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=1 -Dorg.g
 echo "==> npm install"; npm install --no-audit --no-fund
 if [ ! -d android ]; then echo "==> cap add android"; npx cap add android; fi
 echo "==> cap sync";   npx cap sync android
+echo "==> theme launcher icon from identity palette"; node scripts/gen-icon.js || true
 echo "==> patch native assist layer"; node scripts/patch-android.js
 echo "==> gradle assembleDebug (no daemon, 1 worker, Xmx1024m)"
 cd android

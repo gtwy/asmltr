@@ -13,17 +13,12 @@ fs.mkdirSync(javaDst, { recursive: true });
 for (const f of fs.readdirSync(path.join(ROOT, 'native', 'java'))) {
   fs.copyFileSync(path.join(ROOT, 'native', 'java', f), path.join(javaDst, f));
 }
-const xmlDst = path.join(APP, 'res', 'xml');
-fs.mkdirSync(xmlDst, { recursive: true });
-for (const f of fs.readdirSync(path.join(ROOT, 'native', 'res', 'xml'))) {
-  fs.copyFileSync(path.join(ROOT, 'native', 'res', 'xml', f), path.join(xmlDst, f));
-}
-// res/values (our own non-colliding files, e.g. the accessibility-service description string)
-const valuesSrc = path.join(ROOT, 'native', 'res', 'values');
-if (fs.existsSync(valuesSrc)) {
-  const valuesDst = path.join(APP, 'res', 'values');
-  fs.mkdirSync(valuesDst, { recursive: true });
-  for (const f of fs.readdirSync(valuesSrc)) fs.copyFileSync(path.join(valuesSrc, f), path.join(valuesDst, f));
+// Copy every res subdir we ship (xml, values, mipmap-* launcher icons, …) over the generated project.
+const resSrc = path.join(ROOT, 'native', 'res');
+for (const sub of fs.readdirSync(resSrc)) {
+  const from = path.join(resSrc, sub); if (!fs.statSync(from).isDirectory()) continue;
+  const to = path.join(APP, 'res', sub); fs.mkdirSync(to, { recursive: true });
+  for (const f of fs.readdirSync(from)) fs.copyFileSync(path.join(from, f), path.join(to, f));
 }
 
 const mf = path.join(APP, 'AndroidManifest.xml');
@@ -116,6 +111,28 @@ const a11ySvc = `
         </service>
 `;
 if (!x.includes('.AsmltrAccessibilityService')) x = x.replace(/<\/application>/, a11ySvc + '    </application>');
+
+// Headset/wired assistant-button entry point. The BT button fires an ACTIVITY intent (VOICE_COMMAND/
+// ASSIST/hands-free voice search) — separate from the power-button assist role — so we need an activity
+// registered for it or asmltr never appears in the "Complete action using" chooser.
+const assistAct = `
+        <activity android:name=".AssistActivity" android:exported="true" android:excludeFromRecents="true"
+            android:launchMode="singleInstance" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.speech.action.VOICE_SEARCH_HANDS_FREE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+`;
+if (!x.includes('.AssistActivity')) x = x.replace(/<\/application>/, assistAct + '    </application>');
 fs.writeFileSync(mf, x);
 
 // --- versioning (drives auto-update): versionName from package.json, versionCode = M*10000+m*100+p ---
