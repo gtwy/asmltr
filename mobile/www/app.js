@@ -1,8 +1,8 @@
 'use strict';
 /*
  * asmltr mobile assistant — voice + keyboard client for the `android` connector.
- * Overlay mode (?overlay=1): a floating glass card over any app — draggable, minimizable, closeable,
- * continuous-listening, with a Stop that aborts the running turn + readout.
+ * Streaming TTS (speaks as sentences arrive), clickable tool results, mute, and (overlay mode) a
+ * draggable/minimizable/closeable glass card with continuous listening + a Stop that aborts turn + readout.
  */
 const CFG_KEY = 'asmltr.mobile.cfg';
 const $ = (id) => document.getElementById(id);
@@ -11,6 +11,8 @@ const OVERLAY = /(?:^|[?&#])overlay(?:=1)?(?:$|[&#])/.test(location.search + loc
 const ICON = {
   mic: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>',
+  vol: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13 3a3.5 3.5 0 0 0-2-3.15v6.3A3.5 3.5 0 0 0 16 12zm-2-7.3v2.06a5.5 5.5 0 0 1 0 10.48v2.06A7.5 7.5 0 0 0 14 4.7z"/></svg>',
+  muted: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm18.3-1.3l-1.4-1.4L17 9.17 14.83 7 13.4 8.4 15.6 10.6 13.4 12.8l1.4 1.4L17 12l2.9 2.9 1.4-1.4L18.4 10.6z"/></svg>',
 };
 
 function loadCfg() {
@@ -28,12 +30,15 @@ function loadCfg() {
 function saveCfg(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
 
 let cfg = loadCfg();
+let muted = false; try { muted = localStorage.getItem('asmltr.muted') === '1'; } catch (_) {}
 let es = null, reconnectT = null;
-let state = 'idle';              // 'idle' | 'rec' | 'busy'
+let state = 'idle';              // 'idle' | 'rec' | 'busy'   (busy covers thinking + reading aloud)
 let recorder = null, chunks = [], stream = null, heardSpeech = false;
-let curBubble = null, stepsEl = null;
+let curBubble = null, stepsEl = null, lastTool = null;
 let drone = null, curAudio = null, vadRAF = 0, vadCtx = null;
 let continuous = OVERLAY, suppressRestart = false;
+// streaming TTS pipeline (synthesize each sentence as it arrives, play in order)
+let ttsBuf = '', ttsSeq = 0, ttsNextPlay = 0, ttsPlaying = false, replyTextDone = false; const ttsClips = {};
 
 // ---------- branding ----------
 function toRGB(hex) { const m = String(hex).match(/#?([0-9a-fA-F]{6})/); if (!m) return null; const n = parseInt(m[1], 16); return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`; }
@@ -55,9 +60,23 @@ function bubble(role, text) {
   el.appendChild(b); $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight; return b;
 }
 function ensureSteps() { if (stepsEl) return stepsEl; const el = document.createElement('div'); el.className = 'steps'; $('log').appendChild(el); stepsEl = el; return el; }
-function addStep(kind, text) {
-  const s = ensureSteps(); const d = document.createElement('div'); d.className = 'step step-' + kind;
-  d.textContent = (kind === 'tool' ? '⚙ ' : '… ') + text; s.appendChild(d); $('log').scrollTop = $('log').scrollHeight;
+function addThinking(text) { const s = ensureSteps(); const d = document.createElement('div'); d.className = 'step step-think'; d.textContent = '… ' + text; s.appendChild(d); $('log').scrollTop = $('log').scrollHeight; }
+function fmt(v) { try { return typeof v === 'string' ? v : JSON.stringify(v, null, 2); } catch (_) { return String(v); } }
+function addTool(name, input) {
+  const s = ensureSteps();
+  const wrap = document.createElement('div'); wrap.className = 'step step-tool tool-chip';
+  const head = document.createElement('div'); head.className = 'tool-head'; head.innerHTML = '<span class="tool-caret">▸</span> ⚙ ' + name;
+  const detail = document.createElement('pre'); detail.className = 'tool-detail hidden';
+  if (input != null) detail.textContent = 'input:\n' + fmt(input);
+  head.addEventListener('click', () => { detail.classList.toggle('hidden'); head.querySelector('.tool-caret').textContent = detail.classList.contains('hidden') ? '▸' : '▾'; });
+  wrap.appendChild(head); wrap.appendChild(detail); s.appendChild(wrap);
+  lastTool = { wrap, detail }; $('log').scrollTop = $('log').scrollHeight;
+}
+function addToolResult(output, isErr) {
+  if (!lastTool) return;
+  lastTool.detail.textContent += (lastTool.detail.textContent ? '\n\n' : '') + 'output:\n' + (output || '');
+  if (isErr) lastTool.wrap.classList.add('tool-err');
+  lastTool = null;
 }
 function setState(s) {
   state = s;
@@ -67,6 +86,7 @@ function setState(s) {
   if (icon) icon.innerHTML = s === 'busy' ? ICON.stop : ICON.mic;
   if (l) l.textContent = s === 'rec' ? 'Listening…' : s === 'busy' ? 'Stop' : 'Tap to talk';
 }
+function setMuted(on) { muted = on; try { localStorage.setItem('asmltr.muted', on ? '1' : '0'); } catch (_) {} const b = $('mute'); if (b) { b.innerHTML = on ? ICON.muted : ICON.vol; b.classList.toggle('on', on); } if (on) stopAudio(); }
 
 // ---------- SSE ----------
 function connect() {
@@ -78,16 +98,50 @@ function connect() {
   es.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
     if (m.type === 'ready') { setStatus('connected', 'pill-on'); maybeAssistLaunch(); }
-    else if (m.type === 'thinking') addStep('think', m.text);
-    else if (m.type === 'tool') addStep('tool', m.name);
-    else if (m.type === 'delta') { stopDrone(); if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text; $('log').scrollTop = $('log').scrollHeight; }
-    else if (m.type === 'done') { stopDrone(); const full = curBubble ? curBubble.textContent : ''; curBubble = null; stepsEl = null; setState('idle'); if (full.trim()) speak(full).then(afterReply); else afterReply(); }
-    else if (m.type === 'inject') { stepsEl = null; bubble('assistant', m.text); if (m.text && m.text.trim()) speak(m.text); }
-    else if (m.type === 'error') { stopDrone(); bubble('sys', '⚠ ' + m.error); setState('idle'); }
+    else if (m.type === 'thinking') addThinking(m.text);
+    else if (m.type === 'tool') addTool(m.name, m.input);
+    else if (m.type === 'tool_result') addToolResult(m.output, m.is_error);
+    else if (m.type === 'delta') { stopDrone(); if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text; feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; }
+    else if (m.type === 'done') { stopDrone(); curBubble = null; stepsEl = null; flushTTS(); }
+    else if (m.type === 'inject') { stepsEl = null; bubble('assistant', m.text); if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } }
+    else if (m.type === 'error') { stopDrone(); bubble('sys', '⚠ ' + m.error); resetTTS(); setState('idle'); }
   };
   es.onerror = () => { setStatus('reconnecting…', 'pill-warn'); if (es) { es.close(); es = null; } clearTimeout(reconnectT); reconnectT = setTimeout(connect, 2500); };
 }
 function afterReply() { if (continuous && !suppressRestart && state === 'idle') setTimeout(() => { if (continuous && !suppressRestart && state === 'idle') startRec(); }, 350); }
+
+// ---------- streaming TTS ----------
+function feedTTS(text) {
+  if (muted) return;
+  ttsBuf += text;
+  const idx = Math.max(ttsBuf.lastIndexOf('.'), ttsBuf.lastIndexOf('!'), ttsBuf.lastIndexOf('?'), ttsBuf.lastIndexOf('\n'), ttsBuf.lastIndexOf('…'));
+  if (idx >= 0) { const chunk = ttsBuf.slice(0, idx + 1).trim(); ttsBuf = ttsBuf.slice(idx + 1); if (chunk) synthSentence(chunk); }
+}
+function flushTTS() {
+  if (muted) { replyTextDone = true; finishReadout(); return; }
+  const rest = ttsBuf.trim(); ttsBuf = ''; replyTextDone = true;
+  if (rest) synthSentence(rest); else drainTTS();
+}
+async function synthSentence(text) {
+  const seq = ttsSeq++;
+  try { const { b64, mime } = await api('/gw/tts', { text }); ttsClips[seq] = suppressRestart ? null : 'data:' + (mime || 'audio/mpeg') + ';base64,' + b64; }
+  catch (_) { ttsClips[seq] = null; }
+  drainTTS();
+}
+function drainTTS() {
+  if (ttsPlaying) return;
+  if (ttsNextPlay in ttsClips) {
+    const src = ttsClips[ttsNextPlay]; delete ttsClips[ttsNextPlay]; ttsNextPlay++;
+    if (!src) return drainTTS();
+    ttsPlaying = true; const a = new Audio(src); curAudio = a;
+    a.onended = a.onerror = () => { ttsPlaying = false; if (curAudio === a) curAudio = null; drainTTS(); };
+    a.play().catch(() => { ttsPlaying = false; drainTTS(); });
+    return;
+  }
+  if (replyTextDone && ttsNextPlay >= ttsSeq) finishReadout();  // all sentences synthesized + played
+}
+function finishReadout() { resetTTS(); setState('idle'); afterReply(); }
+function resetTTS() { ttsBuf = ''; ttsSeq = 0; ttsNextPlay = 0; ttsPlaying = false; replyTextDone = false; for (const k in ttsClips) delete ttsClips[k]; }
 
 // ---------- turn ----------
 async function api(path, body) {
@@ -97,36 +151,30 @@ async function api(path, body) {
   return j;
 }
 async function sendTurn(text) {
-  if (state === 'busy') return;   // never overload a second turn onto the session
-  suppressRestart = false;
+  if (state === 'busy') return;
+  suppressRestart = false; resetTTS(); lastTool = null;
   bubble('user', text); setState('busy');
-  chime(); startDrone(); ack();
+  if (!muted) { chime(); startDrone(); }
   try { await api('/gw/turn', { text }); }
   catch (e) { stopDrone(); bubble('sys', '⚠ ' + e.message); setState('idle'); }
 }
 
-// ---------- STOP: abort the running turn + kill the readout ----------
+// ---------- STOP ----------
 function stopEverything() {
-  suppressRestart = true;
-  stopDrone(); stopAudio();
+  suppressRestart = true; stopDrone(); stopAudio(); resetTTS();
   try { api('/gw/abort', {}).catch(() => {}); } catch (_) {}
-  curBubble = null; stepsEl = null;
-  setState('idle');
+  curBubble = null; stepsEl = null; lastTool = null; setState('idle');
 }
 
 // ---------- audio ----------
-function playClip(src, vol) { return new Promise((res) => { try { const a = new Audio(src); a.volume = vol == null ? 1 : vol; curAudio = a; a.onended = a.onerror = () => { if (curAudio === a) curAudio = null; res(); }; a.play().catch(() => res()); } catch (_) { res(); } }); }
 function stopAudio() { try { if (curAudio) { curAudio.pause(); curAudio = null; } } catch (_) {} }
-function chime() { playClip('assets/chime.ogg', 0.8); }
+function chime() { try { const a = new Audio('assets/chime.ogg'); a.volume = 0.8; a.play().catch(() => {}); } catch (_) {} }
 function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'); drone.loop = true; drone.volume = 0.45; } drone.currentTime = 0; drone.play().catch(() => {}); } catch (_) {} }
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
-const ACKS = ['On it.', 'One moment.', 'Let me look.', 'Sure — checking.'];
-async function ack() { try { const t = ACKS[Math.floor(Date.now() / 500) % ACKS.length]; const { b64, mime } = await api('/gw/tts', { text: t }); if (state === 'busy') await playClip('data:' + (mime || 'audio/mpeg') + ';base64,' + b64, 0.9); } catch (_) {} }
-async function speak(text) { try { const { b64, mime } = await api('/gw/tts', { text }); if (!suppressRestart) await playClip('data:' + (mime || 'audio/mpeg') + ';base64,' + b64); } catch (_) {} }
 
 // ---------- record + VAD ----------
 async function startRec() {
-  if (state !== 'idle') return;   // no recording while a turn is in flight
+  if (state !== 'idle') return;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
@@ -139,8 +187,7 @@ async function startRec() {
 function stopRec() { stopVAD(); try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }
 async function onRecStop() {
   stopVAD(); try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
-  // No speech detected → do nothing (don't fire an empty turn when you tap off without talking).
-  if (!heardSpeech) { setState('idle'); return; }
+  if (!heardSpeech) { setState('idle'); return; }   // tapped off without speaking → nothing
   const blob = new Blob(chunks, { type: (recorder && recorder.mimeType) || 'audio/webm' });
   if (blob.size < 1200) { setState('idle'); return; }
   setState('busy');
@@ -164,7 +211,7 @@ function startVAD(mediaStream) {
       const speaking = level > Math.max(0.03, floor * 2.2 + 0.012);
       if (speaking) { heardSpeech = true; quietSince = 0; }
       else if (heardSpeech) { if (!quietSince) quietSince = now; else if (now - quietSince > 900) { stopRec(); return; } }
-      else if (dt > 7000) { stopRec(); return; }   // no speech → give up
+      else if (dt > 7000) { stopRec(); return; }
       vadRAF = requestAnimationFrame(tick);
     };
     vadRAF = requestAnimationFrame(tick);
@@ -177,7 +224,7 @@ function blobB64(blob) { return new Promise((res, rej) => { const r = new FileRe
 function maybeAssistLaunch() { const a = OVERLAY || location.hash.indexOf('assist') >= 0 || window.__ASMLTR_ASSIST === true; if (a && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); } }
 window.asmltrStartListening = () => { if (state === 'idle') startRec(); };
 
-// ---------- overlay chrome: drag / minimize / close ----------
+// ---------- overlay chrome ----------
 function initOverlayChrome() {
   const card = $('card'), handle = $('grip'); if (!card || !handle) return;
   let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false; const pos = { x: 0, y: 0 };
@@ -202,6 +249,8 @@ function init() {
   if (OVERLAY) { document.documentElement.style.background = 'transparent'; document.body.classList.add('overlay'); initOverlayChrome(); }
   $('agentName').textContent = cfg.agentName || 'assistant';
   $('talkIcon').innerHTML = ICON.mic;
+  setMuted(muted);
+  $('mute').addEventListener('click', () => setMuted(!muted));
   $('talk').addEventListener('click', () => { if (state === 'rec') stopRec(); else if (state === 'busy') stopEverything(); else startRec(); });
   $('settingsBtn').addEventListener('click', () => openSheet());
   $('cfgTest').addEventListener('click', testConn);
