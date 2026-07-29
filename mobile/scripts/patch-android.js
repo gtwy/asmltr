@@ -30,7 +30,9 @@ const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET',
   // controller; the <queries> below covers launcher apps, this guarantees the rest).
   'android.permission.QUERY_ALL_PACKAGES',
   // persistent device-control link: restart on boot, post its ongoing notification, stay alive in Doze
-  'android.permission.RECEIVE_BOOT_COMPLETED', 'android.permission.POST_NOTIFICATIONS', 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'];
+  'android.permission.RECEIVE_BOOT_COMPLETED', 'android.permission.POST_NOTIFICATIONS', 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+  // keep the CPU/mic/audio running with the screen off during a listening/processing session
+  'android.permission.WAKE_LOCK'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
