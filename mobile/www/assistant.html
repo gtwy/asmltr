@@ -8,25 +8,34 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <button id="bubble" class="bubble" aria-label="Open assistant">🎙</button>
+  <button id="minbubble" class="minbubble" aria-label="Open assistant">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>
+  </button>
 
   <div id="card" class="card">
     <header id="grip" class="bar">
       <div class="brand"><span id="agentName">assistant</span></div>
       <div class="right">
         <span id="status" class="pill pill-off">offline</span>
-        <button id="settingsBtn" class="icon" aria-label="Settings">⚙</button>
-        <button id="min" class="icon overlay-only" aria-label="Minimize">▁</button>
+        <button id="settingsBtn" class="icon" aria-label="Settings">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.34 8.5a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.32.66.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.5.42h3.84c.25 0 .45-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.24.1.52.02.66-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+        </button>
+        <button id="min" class="icon overlay-only" aria-label="Minimize">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 17h12"/></svg>
+        </button>
+        <button id="close" class="icon overlay-only" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
       </div>
     </header>
 
     <main id="log" class="log" aria-live="polite"></main>
 
     <footer class="controls">
-      <button id="talk" class="talk" aria-label="Talk"><span class="mic">🎙</span><span id="talkLabel" class="talkLabel">Tap to talk</span></button>
+      <button id="talk" class="talk" aria-label="Talk"><span id="talkIcon" class="ticon"></span><span id="talkLabel" class="talkLabel">Tap to talk</span></button>
       <div class="kbdrow">
         <input id="kbd" class="kbd" type="text" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" placeholder="Type a message…" />
-        <button id="kbdSend" class="kbdSend" aria-label="Send">&#10148;</button>
+        <button id="kbdSend" class="kbdSend" aria-label="Send"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 20.5v-6l13-2-13-2v-6l19 8z"/></svg></button>
       </div>
     </footer>
   </div>
