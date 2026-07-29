@@ -35,6 +35,23 @@ const TOOLS = [
     inputSchema: { type: 'object', required: ['screen'], properties: { screen: { type: 'string', enum: ['wifi', 'bluetooth', 'display', 'sound', 'battery', 'location', 'apps', 'settings'] }, device: dev }, additionalProperties: false } },
   { name: 'device_list_apps', tool: 'list_apps', description: 'List the launchable apps installed on the phone (label + package).',
     inputSchema: { type: 'object', properties: { device: dev }, additionalProperties: false } },
+  // ── on-screen control (needs the accessibility service enabled on the phone) ──
+  { name: 'device_read_screen', tool: 'read_screen', description: "Read the on-screen UI as a list of elements (text, class, on-screen bounds + center cx/cy, clickable/editable). Use this to SEE the layout, then tap by coordinates or text.",
+    inputSchema: { type: 'object', properties: { max: { type: 'integer', description: 'max elements (default 120)' }, device: dev }, additionalProperties: false } },
+  { name: 'device_screenshot', tool: 'screenshot', description: 'Take a screenshot of the phone and return it as an image so you can see the screen.',
+    inputSchema: { type: 'object', properties: { max_dim: { type: 'integer', description: 'longest side px (default 1024)' }, quality: { type: 'integer', description: 'JPEG quality 20-90 (default 55)' }, device: dev }, additionalProperties: false } },
+  { name: 'device_tap', tool: 'tap', description: 'Tap at screen coordinates (x,y in pixels — get them from device_read_screen bounds/cx,cy).',
+    inputSchema: { type: 'object', required: ['x', 'y'], properties: { x: { type: 'number' }, y: { type: 'number' }, device: dev }, additionalProperties: false } },
+  { name: 'device_tap_text', tool: 'tap_text', description: 'Tap the first on-screen element whose text/label contains this string (robust than raw coordinates).',
+    inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, device: dev }, additionalProperties: false } },
+  { name: 'device_long_press', tool: 'long_press', description: 'Long-press at screen coordinates (x,y).',
+    inputSchema: { type: 'object', required: ['x', 'y'], properties: { x: { type: 'number' }, y: { type: 'number' }, device: dev }, additionalProperties: false } },
+  { name: 'device_swipe', tool: 'swipe', description: 'Swipe/scroll from (x1,y1) to (x2,y2) over ms milliseconds.',
+    inputSchema: { type: 'object', required: ['x1', 'y1', 'x2', 'y2'], properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' }, ms: { type: 'integer', description: 'default 300' }, device: dev }, additionalProperties: false } },
+  { name: 'device_type', tool: 'type_text', description: 'Type text into the currently focused (or first) text field.',
+    inputSchema: { type: 'object', required: ['text'], properties: { text: { type: 'string' }, device: dev }, additionalProperties: false } },
+  { name: 'device_global', tool: 'global', description: 'Global navigation: back, home, recents, notifications, quick_settings, or lock.',
+    inputSchema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['back', 'home', 'recents', 'notifications', 'quick_settings', 'lock'] }, device: dev }, additionalProperties: false } },
 ];
 const BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
@@ -43,11 +60,12 @@ async function rpc(tool, args) {
   try {
     const r = await fetch(`${GW}/gw/rpc`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device: device || undefined, tool, args: rest }),
+      // screenshots need more headroom than the default RPC timeout
+      body: JSON.stringify({ device: device || undefined, tool, args: rest, timeout_ms: tool === 'screenshot' ? 25000 : 20000 }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) return { isError: true, text: (j && j.error) || `gateway ${r.status}` };
-    return { isError: !!(j.result && j.result.ok === false), text: JSON.stringify(j.result) };
+    return { isError: !!(j.result && j.result.ok === false), result: j.result };
   } catch (e) { return { isError: true, text: `device gateway unreachable at ${GW}: ${e.message}` }; }
 }
 
@@ -68,7 +86,16 @@ async function handle(msg) {
       const t = BY_NAME[(msg.params || {}).name];
       if (!t) return fail(msg.id, -32602, `unknown tool: ${(msg.params || {}).name}`);
       const r = await rpc(t.tool, msg.params.arguments || {});
-      return ok(msg.id, { content: [{ type: 'text', text: r.text }], isError: r.isError });
+      if (r.isError && r.text) return ok(msg.id, { content: [{ type: 'text', text: r.text }], isError: true });
+      const res = r.result || {};
+      // A screenshot comes back as base64 JPEG → hand the model an actual image block it can see.
+      if (t.tool === 'screenshot' && res.ok && res.image) {
+        return ok(msg.id, { content: [
+          { type: 'image', data: res.image, mimeType: res.mime || 'image/jpeg' },
+          { type: 'text', text: `screenshot ${res.w}x${res.h}` },
+        ], isError: false });
+      }
+      return ok(msg.id, { content: [{ type: 'text', text: JSON.stringify(res) }], isError: r.isError });
     }
     default:
       return fail(msg.id, -32601, `method not found: ${msg.method}`);

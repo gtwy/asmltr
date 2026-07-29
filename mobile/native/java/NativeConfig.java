@@ -52,6 +52,24 @@ public class NativeConfig {
     } catch (Exception e) {}
   }
 
+  /** True when the user has turned on the asmltr accessibility service (screen control). */
+  @JavascriptInterface
+  public boolean isScreenControlEnabled() {
+    try {
+      String flat = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+      return flat != null && flat.contains(ctx.getPackageName() + "/") && flat.contains("AsmltrAccessibilityService");
+    } catch (Exception e) { return false; }
+  }
+
+  /** Open Settings → Accessibility so the user can enable screen control. */
+  @JavascriptInterface
+  public void openAccessibilitySettings() {
+    try {
+      Intent i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(i);
+    } catch (Exception e) {}
+  }
+
   /** Ask the OS to exempt us from battery optimization so the link isn't suspended in Doze. */
   @JavascriptInterface
   public void requestBatteryExemption() {
