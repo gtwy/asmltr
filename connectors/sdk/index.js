@@ -101,7 +101,8 @@ function makeCoreClient(coreUrl) {
               let obj; try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
               if (obj.type === 'delta') { if (h.onDelta && obj.text) { try { h.onDelta(obj.text); } catch (_) {} } }
               else if (obj.type === 'segment') { if (h.onSegment && obj.text) { try { h.onSegment(obj.text); } catch (_) {} } }
-              else if (obj.type === 'tool') { if (h.onTool && obj.name) { try { h.onTool(obj.name); } catch (_) {} } }
+              else if (obj.type === 'tool') { if (h.onTool && obj.name) { try { h.onTool(obj.name); } catch (_) {} } if (h.onToolCall) { try { h.onToolCall(obj); } catch (_) {} } }
+              else if (obj.type === 'tool_result') { if (h.onToolResult) { try { h.onToolResult(obj); } catch (_) {} } }
               else if (obj.type === 'thinking') { if (h.onThinking && obj.text) { try { h.onThinking(obj.text); } catch (_) {} } }
               else if (obj.type === 'done') { settled = true; resolve(obj.actions || []); }
               else if (obj.type === 'error') { settled = true; reject(new Error(obj.error || 'stream error')); }
