@@ -14,6 +14,12 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+- **`package-lock.json` completed with `resolved` + `integrity` so `npm ci` works.** 614 external
+  entries carried only a pinned `version`, so every deterministic update's `npm ci` failed on lock
+  drift and fell back to a full `npm install` — ~40 minutes on a cold-cache box. Backfilled from each
+  package's registry metadata at its exact locked version, with zero version drift; updates now
+  `npm ci` in seconds. (#48)
+
 ## [0.9.0] - 2026-07-29
 
 asmltr 0.9.0 — asmltr map now reports what each active agent is doing and where (live activity + git repo mined from all tool activity incl. shell), every active agent listed with a working_dir/channel fallback; ls/sessions/brief show activity + working dir. Follow-up to #79.
