@@ -27,6 +27,23 @@ const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET',
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
+// Package visibility (Android 11+/API 30): without this, queryIntentActivities only returns a few
+// always-visible apps — so "launch facebook" can't see facebook. Declaring the MAIN/LAUNCHER + web-VIEW
+// intents makes every launchable app (and browsers) visible to the device-control tools.
+const queries = `
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+`;
+if (!x.includes('<queries>')) x = x.replace(/<application/, queries + '\n    <application');
+
 const services = `
         <service android:name=".AsmltrVoiceInteractionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true">
