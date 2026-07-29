@@ -51,6 +51,10 @@ async function submit() {
   }
 }
 
+// WebAuthn isn't exposed in a plain Android WebView (the native app) — hide the passkey option there so
+// users fall back to password + TOTP instead of a dead-end error. Regular browsers keep it.
+const webauthnAvailable = typeof window !== 'undefined' && typeof window.PublicKeyCredential === 'function'
+
 async function passkeyLogin() {
   error.value = ''
   busy.value = true
@@ -105,7 +109,7 @@ async function passkeyLogin() {
         <!-- passkey + external providers — only on the sign-in step -->
         <template v-if="!isSetup && !totpRequired">
           <div class="my-1 flex items-center gap-3 text-[11px] text-slate-600"><span class="h-px flex-1 bg-white/10"></span>or<span class="h-px flex-1 bg-white/10"></span></div>
-          <button type="button" :disabled="busy" @click="passkeyLogin"
+          <button v-if="webauthnAvailable" type="button" :disabled="busy" @click="passkeyLogin"
             class="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition-colors hover:bg-white/10 disabled:opacity-40">
             <AppIcon glyph="🔑" /> Sign in with a passkey
           </button>
