@@ -22,9 +22,16 @@ function load() { try { return JSON.parse(fs.readFileSync(file(), 'utf8')); } ca
 function save(d) { fs.mkdirSync(path.dirname(file()), { recursive: true }); fs.writeFileSync(file(), JSON.stringify(d, null, 2)); }
 
 const TOOLBELT = 'asmltr-toolbelt';
+const DEVICE = 'asmltr-device';
 // The always-on built-in: asmltr's own tools, exposed as a stdio MCP server.
 function builtin() {
   return { command: process.execPath, args: [path.join(__dirname, '..', 'mcp', 'toolbelt-server.js')], env: {}, type: 'stdio', builtin: true };
+}
+// Opt-in built-in: phone-control tools that actuate a connected android device (#77). Only provisioned
+// when ASMLTR_DEVICE_TOOLS=on (installs without the android connector shouldn't advertise phone tools).
+function builtinDevice() {
+  return { command: process.execPath, args: [path.join(__dirname, '..', 'mcp', 'device-server.js')],
+    env: { ...(process.env.ASMLTR_ANDROID_GW ? { ASMLTR_ANDROID_GW: process.env.ASMLTR_ANDROID_GW } : {}) }, type: 'stdio', builtin: true };
 }
 
 /** Merge the built-in toolbelt with user servers; user config may `disabled:true` the built-in. */
@@ -33,6 +40,11 @@ function all() {
   const tb = servers[TOOLBELT] || {};
   servers[TOOLBELT] = { ...builtin(), ...tb }; // user can only flip `disabled` on the built-in (command/args fixed)
   servers[TOOLBELT].command = builtin().command; servers[TOOLBELT].args = builtin().args; servers[TOOLBELT].builtin = true;
+  if (process.env.ASMLTR_DEVICE_TOOLS === 'on') {
+    const dv = servers[DEVICE] || {};
+    servers[DEVICE] = { ...builtinDevice(), ...dv };
+    servers[DEVICE].command = builtinDevice().command; servers[DEVICE].args = builtinDevice().args; servers[DEVICE].builtin = true;
+  }
   return servers;
 }
 function enabled() { const s = all(); return Object.fromEntries(Object.entries(s).filter(([, v]) => !v.disabled)); }
@@ -46,7 +58,7 @@ function list() {
 }
 function add(name, def) {
   const n = String(name || '').trim(); if (!/^[A-Za-z0-9._-]+$/.test(n)) throw new Error('invalid server name');
-  if (n === TOOLBELT) throw new Error('reserved name');
+  if (n === TOOLBELT || n === DEVICE) throw new Error('reserved name');
   const d = load(); d.servers = d.servers || {};
   const clean = {};
   if (def.url) { clean.type = 'http'; clean.url = String(def.url); }
@@ -99,4 +111,4 @@ function syncGemini(bin) {
   return { ok: true, added: done };
 }
 
-module.exports = { list, add, remove, setDisabled, all, enabled, forClaude, codexArgs, syncGemini, TOOLBELT };
+module.exports = { list, add, remove, setDisabled, all, enabled, forClaude, codexArgs, syncGemini, TOOLBELT, DEVICE };

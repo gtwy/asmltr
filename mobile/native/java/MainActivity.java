@@ -1,7 +1,12 @@
 package com.asmltr.assistant;
 import android.Manifest;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.webkit.WebView;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
@@ -14,6 +19,12 @@ public class MainActivity extends BridgeActivity {
     super.onCreate(savedInstanceState);
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
       requestPermissions(new String[]{ Manifest.permission.RECORD_AUDIO }, 7);
+    }
+    // One-time nudge for the "draw over other apps" grant so the persistent floating overlay can appear.
+    SharedPreferences p = getSharedPreferences("asmltr", MODE_PRIVATE);
+    if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this) && !p.getBoolean("overlayAsked", false)) {
+      p.edit().putBoolean("overlayAsked", true).apply();
+      try { startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))); } catch (Exception e) {}
     }
     WebView wv = getBridge().getWebView();
     wv.addJavascriptInterface(new NativeConfig(this), "AsmltrNative");
