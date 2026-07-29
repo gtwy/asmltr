@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon background. We own this file (it overwrites Capacitor's default of the same name) so
+     there's exactly ONE definition of ic_launcher_background — two would fail mergeResources. gen-icon.js
+     keeps the color here (dark, so the palette-tinted robot foreground pops). -->
+<resources>
+    <color name="ic_launcher_background">#14141F</color>
+</resources>

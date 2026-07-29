@@ -52,7 +52,8 @@ svg { width: 20px; height: 20px; display: block; }
 
 .sheet { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-end; z-index: 40; }
 .sheet.hidden { display: none; }
-.sheet-card { width: 100%; background: var(--panel); border-radius: 18px 18px 0 0; padding: 20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+.sheet-card { width: 100%; background: var(--panel); border-radius: 18px 18px 0 0; padding: 20px; padding-bottom: max(20px, env(safe-area-inset-bottom));
+  max-height: 92dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .sheet-card h2 { margin: 0 0 14px; font-size: 18px; }
 .sheet-card label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 .sheet-card input { width: 100%; margin-top: 4px; padding: 11px 12px; border-radius: 10px; border: 1px solid #ffffff1a; background: var(--panel2); color: var(--text); font-size: 15px; }
