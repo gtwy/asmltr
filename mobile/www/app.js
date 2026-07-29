@@ -159,12 +159,21 @@ async function api(path, body) {
   if (!r.ok || j.ok === false) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 }
+async function apiGet(path, params) {
+  const q = new URLSearchParams({ token: cfg.token, device: cfg.deviceId, ...(params || {}) }).toString();
+  const r = await fetch(cfg.baseUrl + path + '?' + q);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
 async function sendTurn(text) {
   if (state === 'busy') return;
   suppressRestart = false; resetTTS(); lastTool = null;
   bubble('user', text); setState('busy');
   if (!muted) { chime(); startDrone(); }
-  try { await api('/gw/turn', { text }); }
+  // If a session is selected in the switcher, direct the turn at it (else this device's own session).
+  const extra = activeTarget ? { target_key: activeTarget.key, target_surface: activeTarget.surface } : {};
+  try { await api('/gw/turn', { text, ...extra }); }
   catch (e) { stopDrone(); bubble('sys', '⚠ ' + e.message); setState('idle'); }
 }
 
@@ -262,7 +271,7 @@ window.asmltrExpand = () => { document.body.classList.remove('minimized'); const
 function reportPanelHeight() {
   const ov = nativeOverlay(); if (!ov || !ov.setPanelHeight || document.body.classList.contains('minimized')) return;
   const dpr = window.devicePixelRatio || 1;
-  const sheetOpen = $('sheet') && !$('sheet').classList.contains('hidden');
+  const sheetOpen = ($('sheet') && !$('sheet').classList.contains('hidden')) || ($('sessions') && !$('sessions').classList.contains('hidden'));
   const scrH = (window.screen && window.screen.height) || window.innerHeight || 640;
   const h = sheetOpen ? Math.round(scrH * 0.85) : Math.ceil($('card').getBoundingClientRect().height);
   if (h > 0) { try { ov.setPanelHeight(Math.round(h * dpr)); } catch (_) {} }
@@ -309,8 +318,64 @@ async function newSession() {
   stopEverything();
   try { const r = await api('/gw/forget', {}); if (m) m.textContent = r && r.existed ? '✓ context cleared — fresh session' : '✓ fresh session'; }
   catch (e) { if (m) m.textContent = '✗ ' + e.message; return; }
+  activeTarget = null; updateTargetBar();
   $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; resetTTS();
   bubble('sys', 'New session started.');
+}
+
+// ---------- session switcher (browse/attach any asmltr session, like the web GUI) ----------
+let activeTarget = null; // {key, surface, title} when driving another session; null = this device's own
+function updateTargetBar() {
+  const bar = $('targetBar'); if (!bar) return;
+  if (activeTarget) { bar.classList.remove('hidden'); $('targetLabel').textContent = '▸ [' + activeTarget.surface + '] ' + (activeTarget.title || activeTarget.key); }
+  else bar.classList.add('hidden');
+  reportPanelHeight();
+}
+function fmtAgo(sec) { if (!sec) return ''; const s = Math.max(0, Date.now() / 1000 - sec); if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; }
+async function openSessions() {
+  $('sessions').classList.remove('hidden'); reportPanelHeight();
+  const msg = $('sessMsg2'); if (msg) msg.textContent = 'loading…';
+  try { const r = await apiGet('/gw/sessions', {}); renderSessions(r.sessions || []); if (msg) msg.textContent = (r.sessions || []).length + ' active sessions'; }
+  catch (e) { if (msg) msg.textContent = '✗ ' + e.message; }
+}
+function renderSessions(list) {
+  const el = $('sessList'); if (!el) return; el.innerHTML = '';
+  for (const s of list) {
+    const row = document.createElement('div'); row.className = 'sessrow' + (activeTarget && activeTarget.key === s.key ? ' active' : '');
+    const head = document.createElement('div'); head.className = 'st';
+    const badge = document.createElement('span'); badge.className = 'sess-badge'; badge.textContent = s.surface;
+    const title = document.createElement('span'); title.className = 'sess-title'; title.textContent = s.title || s.key;
+    head.appendChild(badge); head.appendChild(title);
+    const sub = document.createElement('div'); sub.className = 'sess-sub';
+    sub.textContent = [fmtAgo(s.updated), s.tools ? s.tools + ' tools' : '', s.status].filter(Boolean).join(' · ') || s.key;
+    row.appendChild(head); row.appendChild(sub);
+    row.addEventListener('click', () => selectSession(s));
+    el.appendChild(row);
+  }
+}
+async function selectSession(s) {
+  activeTarget = { key: s.key, surface: s.surface, title: s.title || s.key };
+  $('sessions').classList.add('hidden');
+  updateTargetBar();
+  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null;
+  bubble('sys', 'Loaded [' + s.surface + '] ' + (s.title || s.key) + ' — your next message goes here.');
+  try {
+    const r = await apiGet('/gw/history', { key: s.key });
+    for (const it of (r.items || [])) {
+      if (it.kind === 'user') bubble('user', it.text);
+      else if (it.kind === 'assistant') bubble('assistant', it.text);
+      else if (it.kind === 'thinking') addThinking(it.text);
+      else if (it.kind === 'tool') addTool(it.name, it.input);
+      else if (it.kind === 'tool_result') addToolResult(it.output, it.is_error);
+    }
+    $('log').scrollTop = $('log').scrollHeight;
+  } catch (e) { bubble('sys', '⚠ history: ' + e.message); }
+  reportPanelHeight();
+}
+function leaveTarget() {
+  activeTarget = null; updateTargetBar();
+  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null;
+  bubble('sys', 'Back to your own session.');
 }
 async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/, ''); $('cfgMsg').textContent = 'testing…'; try { const r = await fetch(base + '/health'); const j = await r.json(); $('cfgMsg').textContent = j.status === 'ok' ? '✓ reachable' : 'unexpected'; } catch (e) { $('cfgMsg').textContent = '✗ ' + e.message; } }
 
@@ -323,6 +388,10 @@ function init() {
   $('mute').addEventListener('click', () => setMuted(!muted));
   $('talk').addEventListener('click', () => { if (state === 'rec') stopRec(); else if (state === 'busy') stopEverything(); else startRec(); });
   $('settingsBtn').addEventListener('click', () => openSheet());
+  if ($('sessionsBtn')) $('sessionsBtn').addEventListener('click', openSessions);
+  if ($('sessRefresh')) $('sessRefresh').addEventListener('click', openSessions);
+  if ($('targetLeave')) $('targetLeave').addEventListener('click', leaveTarget);
+  if ($('sessions')) $('sessions').addEventListener('click', (e) => { if (e.target === $('sessions')) { $('sessions').classList.add('hidden'); reportPanelHeight(); } });
   if ($('cfgNewSession')) $('cfgNewSession').addEventListener('click', newSession);
   $('cfgTest').addEventListener('click', testConn);
   $('cfgSave').addEventListener('click', () => {
