@@ -135,11 +135,14 @@ async function start(ctx) {
     if (requireToken && !auth(req.query.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
     try {
       const j = await collector('/api/sessions?active=1');
+      // last_activity_unix etc. are stored in MILLISECONDS despite the name → normalize to seconds so
+      // the app's "x ago" is correct (else everything reads "just now").
+      const secs = (n) => { n = Number(n) || 0; return n > 1e11 ? Math.round(n / 1000) : n; };
       const rows = (j.sessions || []).map((s) => ({
         key: s.session_id, surface: s.surface || 'core',
         title: (s.title || s.task || '').trim(), task: (s.task || '').trim(),
         status: s.status || '', identity: s.identity || '', tools: s.tool_count || 0,
-        updated: (s.last_activity_unix || s.updated_unix || s.started_unix || 0),
+        updated: secs(s.last_activity_unix || s.updated_unix || s.started_unix || 0),
       })).filter((r) => r.key).sort((a, b) => b.updated - a.updated);
       res.json({ ok: true, sessions: rows });
     } catch (e) { res.status(502).json({ ok: false, error: e.message }); }

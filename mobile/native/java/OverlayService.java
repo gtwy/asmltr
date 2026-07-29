@@ -44,6 +44,7 @@ public class OverlayService extends Service {
   // Expanded floating-panel geometry: bottom-centered, offset by drag, height reported by the web (so the
   // panel hugs the card content instead of being a fixed slab). dragY/panelH = -1 → uninitialized.
   private int dragX = 0, dragY = -1, panelH = -1;
+  private android.os.PowerManager.WakeLock wakeLock; // held while listening/working → runs screen-off
 
   private int dp(int v) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()); }
 
@@ -171,6 +172,26 @@ public class OverlayService extends Service {
     @android.webkit.JavascriptInterface public void close() {
       if (root != null) root.post(new Runnable() { public void run() { stopSelf(); } });
     }
+    // Hold/release a partial wake lock while listening/working so the mic + audio keep running with the
+    // screen off. Safety timeout so a stuck session can't drain the battery indefinitely.
+    @android.webkit.JavascriptInterface public void setAwake(final boolean on) {
+      if (root == null) return;
+      root.post(new Runnable() { public void run() {
+        try {
+          if (on) {
+            if (wakeLock == null) {
+              android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+              wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "asmltr:overlay");
+              wakeLock.setReferenceCounted(false);
+            }
+            if (!wakeLock.isHeld()) wakeLock.acquire(10 * 60 * 1000L);
+            if (web != null) web.resumeTimers(); // keep JS/VAD running while not visible
+          } else if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+          }
+        } catch (Exception e) {}
+      } });
+    }
   }
 
   private String configJs() {
@@ -199,6 +220,7 @@ public class OverlayService extends Service {
   }
 
   @Override public void onDestroy() {
+    try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception e) {}
     try { if (added && root != null) wm.removeView(root); } catch (Exception e) {}
     try { if (web != null) { web.loadUrl("about:blank"); web.destroy(); } } catch (Exception e) {}
     added = false;

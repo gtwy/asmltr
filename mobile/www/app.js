@@ -92,6 +92,8 @@ function setState(s) {
   t.className = 'talk' + (s === 'rec' ? ' rec' : s === 'busy' ? ' busy' : '');
   if (icon) icon.innerHTML = s === 'busy' ? ICON.stop : ICON.mic;
   if (l) l.textContent = s === 'rec' ? 'Listening…' : s === 'busy' ? 'Stop' : 'Tap to talk';
+  // Hold the CPU awake while listening/working so it runs with the screen off; release when idle.
+  const n = nativeOverlay(); if (n && n.setAwake) { try { n.setAwake(s === 'rec' || s === 'busy'); } catch (_) {} }
 }
 function setMuted(on) { muted = on; try { localStorage.setItem('asmltr.muted', on ? '1' : '0'); } catch (_) {} const b = $('mute'); if (b) { b.innerHTML = on ? ICON.muted : ICON.vol; b.classList.toggle('on', on); } if (on) stopAudio(); }
 
@@ -187,12 +189,16 @@ function stopEverything() {
 // ---------- audio ----------
 function stopAudio() { try { if (curAudio) { curAudio.pause(); curAudio = null; } } catch (_) {} }
 function chime() { try { const a = new Audio('assets/chime.ogg'); a.volume = 0.8; a.play().catch(() => {}); } catch (_) {} }
+// Listening cue — plays when the mic opens so hands-free users (earbud trigger, screen off) hear that
+// it's listening. Always plays (it's trigger feedback, not TTS), independent of the mute toggle.
+function listenCue() { try { const a = new Audio('assets/chime.ogg'); a.volume = 1; a.play().catch(() => {}); } catch (_) {} }
 function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'); drone.loop = true; drone.volume = 0.45; } drone.currentTime = 0; drone.play().catch(() => {}); } catch (_) {} }
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 
 // ---------- record + VAD ----------
 async function startRec() {
   if (state !== 'idle') return;
+  listenCue(); // instant auditory feedback that listening started (hands-free / screen-off)
   try {
     // IMPORTANT: echoCancellation/noiseSuppression route Chromium through its WebRTC *communication*
     // audio path, which flips Android into MODE_IN_COMMUNICATION and forces Bluetooth headsets onto the
