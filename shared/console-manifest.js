@@ -174,12 +174,12 @@ const manifest = {
         },
         {
           id: 'wake_enabled', label: 'Wake word', type: 'toggle', get: 'stt.wake_enabled',
-          desc: 'Hands-free trigger on the mobile app — say the wake phrase to open the assistant. Always-on listening (uses a little battery). Requires a keyword model for the phrase (see Wake phrase).',
+          desc: 'Hands-free trigger on the mobile app — say the wake phrase to open the assistant. Always-on, offline listening (uses a little battery). First enable downloads a ~40MB speech model to the phone.',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { wake_enabled: '{value}' } } },
         },
         {
           id: 'wake_phrase', label: 'Wake phrase', type: 'text', get: 'stt.wake_phrase',
-          desc: 'What to say to trigger the assistant (default "hey <name>"). Each phrase needs a Porcupine .ppn keyword model — generate one free at console.picovoice.ai and drop it in the connector\'s keywords/ dir named after the phrase; the app loads it automatically.',
+          desc: 'What to say to trigger the assistant (default "hey <name>"). Works instantly — offline, on-device (Vosk); no model generation. Use common words for best accuracy (uncommon names may mis-hear).',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { wake_phrase: '{value}' } } },
         },
         {

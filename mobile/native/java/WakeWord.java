@@ -9,21 +9,27 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import org.json.JSONObject;
-import ai.picovoice.porcupine.PorcupineManager;
+import org.vosk.Model;
+import org.vosk.Recognizer;
+import org.vosk.android.RecognitionListener;
+import org.vosk.android.SpeechService;
 
 /**
- * Always-on wake word via Porcupine. Runs inside the persistent DeviceControlService so "hey <name>"
- * works with the screen off. Config + the runtime access key + the keyword model come from the connector
- * (/gw/wake + /gw/wake-model), so the phrase is set in the web GUI. Heavily guarded: any failure (wake
- * off, no access key, no .ppn model for the phrase, Porcupine init error) just leaves it inert — it never
- * takes down the service. Mic handoff: the overlay pauses us while it's actively listening (setAwake),
- * then resumes us, so the wake listener and the turn recorder never fight over the microphone.
+ * Always-on wake word via Vosk — OFFLINE keyword spotting. The phrase is a runtime grammar string, so it's
+ * fully configurable in Settings with NO per-phrase model generation and nothing leaving the device (one
+ * ~40MB model, downloaded once, covers every phrase). Runs inside the persistent DeviceControlService
+ * (always-on, screen-off). On a match it fires the overlay in listen mode; mic handoff via
+ * OverlayService.setAwake → pause()/resume() so the wake listener and the turn recorder never fight the mic.
+ * Heavily guarded: any failure (wake off, no model, Vosk error) leaves it inert — it never crashes the service.
  */
 public class WakeWord {
-  private static PorcupineManager mgr;
-  private static boolean enabled = false, paused = false;
-  private static String activeSlug = "";
+  private static SpeechService speech;
+  private static Model model;
+  private static boolean enabled = false, paused = false, usePartial = false;
+  private static String activePhrase = "";
   private static Context appCtx;
 
   static void refresh(Context ctx) {
@@ -37,42 +43,75 @@ public class WakeWord {
     if (base.isEmpty() || token.isEmpty()) { stop(); return; }
     JSONObject cfg = getJson(base + "/gw/wake?token=" + enc(token));
     boolean en = cfg.optBoolean("enabled", false);
-    String accessKey = cfg.optString("access_key", "");
-    boolean hasModel = cfg.optBoolean("has_model", false);
-    String phrase = cfg.optString("phrase", "");
-    String slug = cfg.optString("slug", "");
-    float sens = (float) Math.max(0, Math.min(1, cfg.optDouble("sensitivity", 50) / 100.0));
-    if (!en || accessKey.isEmpty() || !hasModel) { stop(); enabled = false; return; }
-    if (mgr != null && enabled && slug.equals(activeSlug)) return; // already running this phrase
-    // download the keyword model for the current phrase
-    File ppn = new File(appCtx.getFilesDir(), "wake-" + slug + ".ppn");
-    if (!ppn.exists()) download(base + "/gw/wake-model?token=" + enc(token) + "&phrase=" + enc(phrase), ppn);
-    stop();
-    mgr = new PorcupineManager.Builder()
-      .setAccessKey(accessKey)
-      .setKeywordPath(ppn.getAbsolutePath())
-      .setSensitivity(sens)
-      .build(appCtx, (keywordIndex) -> onWake());
-    enabled = true; activeSlug = slug;
-    if (!paused) mgr.start();
+    String phrase = cfg.optString("phrase", "").toLowerCase().trim().replaceAll("[^a-z0-9 ]", "").trim();
+    String modelUrl = cfg.optString("model_url", "");
+    String modelId = cfg.optString("model_id", "vosk-model");
+    usePartial = cfg.optDouble("sensitivity", 50) >= 60; // higher = trigger on partials (faster, more false-accepts)
+    if (!en || phrase.isEmpty() || modelUrl.isEmpty()) { stop(); return; }
+    if (speech != null && enabled && phrase.equals(activePhrase)) return; // already listening for this phrase
+    File dir = ensureModel(modelUrl, modelId);
+    stopSpeech();
+    if (model == null) model = new Model(dir.getAbsolutePath());
+    // Grammar restricts recognition to the phrase (+ [unk]) → efficient keyword spotting.
+    Recognizer rec = new Recognizer(model, 16000.0f, "[\"" + phrase + "\", \"[unk]\"]");
+    speech = new SpeechService(rec, 16000.0f);
+    enabled = true; activePhrase = phrase;
+    if (!paused) startListening(phrase);
   }
 
+  private static void startListening(final String phrase) {
+    speech.startListening(new RecognitionListener() {
+      @Override public void onResult(String h) { if (matches(h, phrase)) onWake(); }
+      @Override public void onFinalResult(String h) { if (matches(h, phrase)) onWake(); }
+      @Override public void onPartialResult(String h) { if (usePartial && matches(h, phrase)) onWake(); }
+      @Override public void onError(Exception e) {}
+      @Override public void onTimeout() {}
+    });
+  }
+  private static boolean matches(String json, String phrase) { return json != null && json.toLowerCase().contains(phrase); }
+
   private static void onWake() {
-    // Fire the overlay in listen mode (same as the assist gesture). The overlay's setAwake(true) will
-    // pause us so its recorder gets the mic; setAwake(false) resumes us afterward.
     try {
       Intent i = new Intent(appCtx, OverlayService.class).setAction(OverlayService.ACTION_LISTEN);
       if (Build.VERSION.SDK_INT >= 26) appCtx.startForegroundService(i); else appCtx.startService(i);
     } catch (Exception e) {}
+    // the overlay's setAwake(true) pauses us so its recorder gets the mic; setAwake(false) resumes us.
   }
 
   /** Overlay is about to use the mic → free it. */
-  static synchronized void pause() { paused = true; try { if (mgr != null) mgr.stop(); } catch (Exception e) {} }
-  /** Overlay is done → resume listening for the wake word. */
-  static synchronized void resume() { paused = false; try { if (mgr != null && enabled) mgr.start(); } catch (Exception e) {} }
-  static synchronized void stop() { try { if (mgr != null) { mgr.stop(); mgr.delete(); } } catch (Exception e) {} mgr = null; enabled = false; activeSlug = ""; }
+  static synchronized void pause() { paused = true; stopSpeech(); }
+  /** Overlay is done → resume listening. */
+  static synchronized void resume() { paused = false; if (enabled && speech == null && appCtx != null) refresh(appCtx); }
+  static synchronized void stop() { stopSpeech(); try { if (model != null) model.close(); } catch (Exception e) {} model = null; enabled = false; activePhrase = ""; }
+  private static void stopSpeech() { try { if (speech != null) { speech.stop(); speech.shutdown(); } } catch (Exception e) {} speech = null; }
 
-  // ── tiny HTTP helpers ──
+  // ── model provisioning (download once, unzip to files dir) ──
+  private static File ensureModel(String url, String modelId) throws Exception {
+    File dir = new File(appCtx.getFilesDir(), modelId);
+    if (dir.isDirectory() && new File(dir, "conf").exists()) return dir; // already unpacked
+    File zip = new File(appCtx.getCacheDir(), modelId + ".zip");
+    download(url, zip);
+    unzip(zip, appCtx.getFilesDir());
+    try { zip.delete(); } catch (Exception e) {}
+    if (!dir.isDirectory()) { // some zips nest differently — find the dir that has a conf/
+      File[] kids = appCtx.getFilesDir().listFiles();
+      if (kids != null) for (File k : kids) if (k.isDirectory() && new File(k, "conf").exists()) return k;
+    }
+    return dir;
+  }
+  private static void unzip(File zip, File dest) throws Exception {
+    try (ZipInputStream zis = new ZipInputStream(new java.io.BufferedInputStream(new java.io.FileInputStream(zip)))) {
+      ZipEntry e; byte[] buf = new byte[8192];
+      while ((e = zis.getNextEntry()) != null) {
+        File out = new File(dest, e.getName());
+        if (!out.getCanonicalPath().startsWith(dest.getCanonicalPath())) continue; // zip-slip guard
+        if (e.isDirectory()) { out.mkdirs(); continue; }
+        out.getParentFile().mkdirs();
+        try (FileOutputStream fo = new FileOutputStream(out)) { int n; while ((n = zis.read(buf)) > 0) fo.write(buf, 0, n); }
+      }
+    }
+  }
+
   private static String enc(String s) { try { return URLEncoder.encode(s, "UTF-8"); } catch (Exception e) { return ""; } }
   private static JSONObject getJson(String url) throws Exception {
     HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
@@ -85,10 +124,10 @@ public class WakeWord {
   }
   private static void download(String url, File out) throws Exception {
     HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-    c.setConnectTimeout(10000); c.setReadTimeout(20000); c.setInstanceFollowRedirects(true);
+    c.setConnectTimeout(15000); c.setReadTimeout(120000); c.setInstanceFollowRedirects(true);
     if (c.getResponseCode() != 200) { c.disconnect(); throw new Exception("model http " + c.getResponseCode()); }
     InputStream in = c.getInputStream(); FileOutputStream fo = new FileOutputStream(out);
-    byte[] b = new byte[8192]; int n; while ((n = in.read(b)) > 0) fo.write(b, 0, n);
+    byte[] b = new byte[16384]; int n; while ((n = in.read(b)) > 0) fo.write(b, 0, n);
     fo.close(); in.close(); c.disconnect();
   }
 }
