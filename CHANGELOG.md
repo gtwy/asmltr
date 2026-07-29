@@ -10,6 +10,13 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **`asmltr_map` + `asmltr_who` toolbelt tools** — the working-dir collision-detection commands are
+  now exposed as structured MCP tools, not just the CLI, so any reasoning engine (including ones
+  without a shell tool) can answer "is another session already working in this repo/dir?" before
+  starting. `asmltr_sessions`' description now points at them, and the self-aware system prompt notes
+  the MCP equivalents. Closes the gap where an agent could only see a flat session list that collapsed
+  many same-directory sessions to one indistinguishable label. (#79)
+
 - Always-on **CURRENT SPEAKER** line in every turn's system prompt — authoritatively names the
   current sender (even without a cast profile) so an assistant on a shared, multi-person channel
   doesn't confuse who it's talking to or default to the box owner.
