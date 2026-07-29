@@ -52,6 +52,11 @@ public class NativeConfig {
     } catch (Exception e) {}
   }
 
+  /** Re-apply wake-word config immediately (after changing it in-app). Pokes the control service, whose
+   *  onStartCommand re-runs WakeWord.refresh with the new phrase/enabled state. */
+  @JavascriptInterface
+  public void refreshWake() { startControlLink(); }
+
   /** True when the user has turned on the asmltr accessibility service (screen control). */
   @JavascriptInterface
   public boolean isScreenControlEnabled() {
