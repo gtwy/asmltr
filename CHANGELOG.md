@@ -12,6 +12,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Changed
 
+### Fixed
+
+## [0.9.0] - 2026-07-29
+
+asmltr 0.9.0 — asmltr map now reports what each active agent is doing and where (live activity + git repo mined from all tool activity incl. shell), every active agent listed with a working_dir/channel fallback; ls/sessions/brief show activity + working dir. Follow-up to #79.
+
+### Added
+
+### Changed
+
 - **`asmltr map` now reports what each active agent is doing and where** — not just repos with
   file-edit activity. "What" is the session's live activity rollup (built from inbound + **all** tool
   events, incl. shell); "where" is the git repo it's working in, now mined from absolute paths in
