@@ -37,34 +37,37 @@ asmltr map
 ```
 
 ```text
-/root/projects/personal/asmltr   ⚠ 2 sessions — possible collision
-   claude       refactor trust store   · 3m ago · ./core/src(4) ./core
-   discord      answer about sessions  · 8m ago · ./docs
-/root/projects/client/site       1 session
-   telegram     fix the header         · 1m ago · ./themes/main
+/root/projects/personal/asmltr   ⚠ 2 agents — possible collision
+   claude       Refactoring the trust store    · 3m ago · ./core/src(4) ./core
+   discord  eve Answering a question on sessions · 8m ago · ./docs
+/root/projects/client/site       1 agent
+   telegram     Fixing the site header         · 1m ago · ./themes/main
 ```
 
-The key detail: `map` groups by the **git repo a session is actually touching**, derived from the
-file paths in its recent **tool events** — *not* the directory it was spawned in. A session shows
-up only once it actually reads or writes files, and it's attributed to wherever those files live.
+Each line is **what** an agent is doing and **where**. "What" is the session's live activity rollup
+(an AI summary refreshed from its recent inbound + **all** tool events, incl. shell), falling back to
+its title, then its task label. "Where" is the **git repo it's actually working in**, mined from the
+absolute paths in its recent tool activity.
 
 How it's computed (`GET /api/map` in `insights/collector/server.js`):
 
 1. Take active sessions, and their tool events from the last 30 minutes (`?since=` overrides).
-2. Pull file paths out of each tool's input (`file_path`, `notebook_path`, `path`).
-3. Reduce each path to its directory, tally hits per directory per session, and resolve the
-   top directory up to its enclosing **git repo root** (walks up looking for `.git`).
-4. Group sessions by that repo root.
+2. Pull absolute paths out of each tool: explicit args (`file_path`, `notebook_path`, `path`) **and**
+   paths mined from shell commands (`cd`, `git -C`, file args) — so a shell-heavy session isn't
+   invisible. Each path is resolved up to its enclosing **git repo root** (walks up to `.git`).
+3. Attribute each session to the repo it hit most; list its top sub-directories for context.
+4. Sessions with no minable file activity fall back to their spawn `working_dir` (terminal sessions)
+   or their channel location — so **every currently-active agent appears**, not only file-editors.
+5. Group sessions by repo.
 
 !!! tip "The ⚠ is a collision radar"
-    Any repo with **more than one** session working in it is flagged
-    `⚠ N sessions — possible collision`. That's your cue to check whether they're about to step
+    Any repo with **more than one** agent working in it is flagged
+    `⚠ N agents — possible collision`. That's your cue to check whether they're about to step
     on each other (use `asmltr who <path>` to zoom in, or drop an
     [announcement](announcements.md) to claim a file).
 
-If no session has file activity in the window, `map` says so and reminds you it reads *real tool
-activity, not the spawn dir* — so a freshly-started session that hasn't touched anything yet won't
-appear.
+`map` is also the right tool to answer *"what's happening in the other sessions right now?"* — it
+returns a live what/where line per active agent, not just a collision flag.
 
 ## `asmltr who <path>` — who recently touched a file or dir
 
