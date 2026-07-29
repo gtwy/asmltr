@@ -21,6 +21,8 @@ turns the assistant's cross-session `asmltr` commands into real, structured tool
 | Tool | What it does |
 |------|--------------|
 | `asmltr_sessions` | List the assistant's currently active sessions across every channel. |
+| `asmltr_map` | Collision radar: active sessions grouped by git repo / working dir (from recent file activity), flagging repos with more than one session. Check before starting work. |
+| `asmltr_who` | Which sessions recently touched a specific file or directory — a targeted collision check for one path. |
 | `asmltr_send` | Deliver a message out through any connector (Discord, Telegram, email, …). |
 | `asmltr_announce` | Post a non-coercive note other sessions see on their next turn. |
 | `asmltr_uploads` | List recent files uploaded to the shared upload area. |

@@ -17,9 +17,17 @@ const NAME = process.env.ASSISTANT_NAME || 'asmltr';
 
 // Tool definitions → (args) => argv for `node cli/asmltr.js …`. Keep names stable + engine-agnostic.
 const TOOLS = [
-  { name: 'asmltr_sessions', description: `List ${NAME}'s currently active sessions across all channels (id, surface, task, status).`,
+  { name: 'asmltr_sessions', description: `List ${NAME}'s currently active sessions across all channels (id, surface, task, status). To answer "is another session already working in this repo/dir?", use asmltr_map or asmltr_who — those group by working directory; this flat list does not.`,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     argv: () => ['ls'] },
+  { name: 'asmltr_map', description: `Collision radar: active sessions grouped by git repo / working dir, derived from real recent file tool-activity (not spawn dir), flagging any repo with more than one session. Check this BEFORE starting substantial work in a repo so you don't duplicate or clobber what another session is already doing.`,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    argv: () => ['map'] },
+  { name: 'asmltr_who', description: 'Which sessions recently touched a specific file or directory — a targeted collision check for one path before you edit it.',
+    inputSchema: { type: 'object', required: ['path'],
+      properties: { path: { type: 'string', description: 'absolute file or directory path to check' } },
+      additionalProperties: false },
+    argv: (a) => ['who', a.path] },
   { name: 'asmltr_send', description: 'Deliver a message OUT through any connector (discord, telegram, email, …) to a target.',
     inputSchema: { type: 'object', required: ['channel', 'target', 'text'],
       properties: { channel: { type: 'string', description: 'discord | telegram | email | …' }, target: { type: 'string', description: 'channel id / chat id / email address' }, text: { type: 'string' }, subject: { type: 'string', description: 'email subject (email only)' } },
