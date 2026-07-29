@@ -262,9 +262,17 @@ window.asmltrExpand = () => { document.body.classList.remove('minimized'); const
 // ---------- overlay chrome ----------
 function initOverlayChrome() {
   const card = $('card'), handle = $('grip'); if (!card || !handle) return;
-  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false; const pos = { x: 0, y: 0 };
-  const down = (e) => { if (e.target.closest('button')) return; dragging = true; const p = e.touches ? e.touches[0] : e; sx = p.clientX; sy = p.clientY; ox = pos.x; oy = pos.y; };
-  const move = (e) => { if (!dragging) return; const p = e.touches ? e.touches[0] : e; pos.x = ox + (p.clientX - sx); pos.y = oy + (p.clientY - sy); card.style.transform = `translate(calc(-50% + ${pos.x}px), ${pos.y}px)`; e.preventDefault(); };
+  const dpr = window.devicePixelRatio || 1;
+  let sx = 0, sy = 0, ox = 0, oy = 0, lx = 0, ly = 0, dragging = false; const pos = { x: 0, y: 0 };
+  const down = (e) => { if (e.target.closest('button')) return; dragging = true; const p = e.touches ? e.touches[0] : e; sx = lx = p.clientX; sy = ly = p.clientY; ox = pos.x; oy = pos.y; };
+  const move = (e) => {
+    if (!dragging) return; const p = e.touches ? e.touches[0] : e; const nat = nativeOverlay();
+    if (nat && nat.dragBy) { // native mode: move the floating panel window (not a CSS transform)
+      const dx = p.clientX - lx, dy = p.clientY - ly; lx = p.clientX; ly = p.clientY;
+      if (dx || dy) { try { nat.dragBy(Math.round(dx * dpr), Math.round(dy * dpr)); } catch (_) {} }
+    } else { pos.x = ox + (p.clientX - sx); pos.y = oy + (p.clientY - sy); card.style.transform = `translate(calc(-50% + ${pos.x}px), ${pos.y}px)`; }
+    e.preventDefault();
+  };
   const up = () => { dragging = false; };
   handle.addEventListener('mousedown', down); handle.addEventListener('touchstart', down, { passive: true });
   window.addEventListener('mousemove', move); window.addEventListener('touchmove', move, { passive: false });
@@ -290,7 +298,7 @@ async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/
 
 // ---------- wire up ----------
 function init() {
-  if (OVERLAY) { document.documentElement.style.background = 'transparent'; document.body.classList.add('overlay'); initOverlayChrome(); }
+  if (OVERLAY) { document.documentElement.style.background = 'transparent'; document.body.classList.add('overlay'); if (NATIVE) document.body.classList.add('native'); initOverlayChrome(); }
   $('agentName').textContent = cfg.agentName || 'assistant';
   $('talkIcon').innerHTML = ICON.mic;
   setMuted(muted);
