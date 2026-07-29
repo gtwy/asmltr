@@ -10,6 +10,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.8.0] - 2026-07-29
+
+asmltr 0.8.0 — android device-gateway connector, always-on CURRENT SPEAKER prompt line, inject-once system prompt on history-retaining engines, and asmltr_map/asmltr_who toolbelt tools for cross-session collision detection.
+
+### Added
+
 - **`asmltr_map` + `asmltr_who` toolbelt tools** — the working-dir collision-detection commands are
   now exposed as structured MCP tools, not just the CLI, so any reasoning engine (including ones
   without a shell tool) can answer "is another session already working in this repo/dir?" before
