@@ -125,3 +125,7 @@ body.overlay.native .log { flex: 0 1 auto; }
 .sess-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .sess-sub { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sessrow.active { border-color: rgb(var(--accent2)); }
+
+/* settings: checkbox row */
+.sheet-card label.check { display: flex; align-items: center; gap: 10px; }
+.sheet-card label.check input { width: auto; margin: 0; }
