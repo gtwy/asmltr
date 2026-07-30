@@ -211,12 +211,17 @@ function beepPair(f1, f2) {
   try {
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     const ctx = new AC(); const t0 = ctx.currentTime;
-    [[f1, 0], [f2, 0.14]].forEach(([f, dt]) => {
+    // Bluetooth (A2DP) needs ~0.3s to spin up an idle audio route, or the first tone gets clipped. Hold a
+    // near-silent primer open for the lead, then start the audible tones after the route is warm.
+    const LEAD = 0.32;
+    const po = ctx.createOscillator(), pg = ctx.createGain(); po.type = 'sine'; po.frequency.value = 200;
+    pg.gain.setValueAtTime(0.0002, t0); po.connect(pg).connect(ctx.destination); po.start(t0); po.stop(t0 + LEAD + 0.02);
+    [[f1, LEAD], [f2, LEAD + 0.14]].forEach(([f, dt]) => {
       const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f;
       g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(0.3, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.13);
       o.connect(g).connect(ctx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.14);
     });
-    setTimeout(() => { try { ctx.close(); } catch (_) {} }, 500);
+    setTimeout(() => { try { ctx.close(); } catch (_) {} }, (LEAD + 0.5) * 1000);
   } catch (_) {}
 }
 function listenCue() { beepPair(440, 660); } // ascending — "now listening"

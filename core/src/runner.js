@@ -105,7 +105,40 @@ async function generateSelfAssessment(digest) {
   };
 }
 
+// Notification triage — decide whether an incoming PHONE notification is worth reading aloud, how
+// important it is, and a natural spoken one-liner. Runs on the DEFAULT engine's cheap model (like the
+// other labelers): engine-agnostic, no tools, one shot. Powers the Android notification reader.
+async function generateNotifyTriage(notif) {
+  const eng = engines.resolve();
+  const model = process.env.ASMLTR_NOTIFY_MODEL || eng.cheapModel;
+  const n = notif || {};
+  const prompt =
+    'You triage a phone notification for a hands-free assistant that may READ it aloud over headphones. ' +
+    'Given the notification, decide if it is worth speaking, score its importance 0-100, and write a short ' +
+    'natural spoken sentence in the THIRD person (e.g. "Scout messaged you on Discord — he\'s done with the ' +
+    'project", "Your 2pm meeting starts in 10 minutes"). Skip low-value noise (marketing, promos, ' +
+    '"someone is typing", app/system chatter, ongoing/transport notifications): for those set speak=false. ' +
+    'A direct/personal message to the user outranks a group ping outranks an automated update.\n\n' +
+    'Reply with ONLY a JSON object, no preamble, no code fence:\n' +
+    '{ "speak": true|false, "priority": 0-100, "synopsis": "<one spoken sentence, no markdown/emoji>" }\n\n---\n' +
+    `app: ${String(n.app || n.package || 'unknown').slice(0, 60)}\n` +
+    `title: ${String(n.title || '').slice(0, 300)}\n` +
+    `text: ${String(n.text || '').slice(0, 800)}`;
+  const appendSystemPrompt =
+    'You are ONLY a notification-triage function. You never take actions, never use tools, never reply to ' +
+    'the notification. You output a single JSON object {speak,priority,synopsis}. Nothing else.';
+  const out = await eng.complete({ prompt, model, maxTurns: 1, appendSystemPrompt });
+  const m = out.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('notify triage: no JSON in model output');
+  const p = JSON.parse(m[0]);
+  return {
+    speak: !!p.speak,
+    priority: Math.max(0, Math.min(100, Math.round(Number(p.priority) || 0))),
+    synopsis: typeof p.synopsis === 'string' ? p.synopsis.trim().replace(/\s+/g, ' ').slice(0, 300) : '',
+  };
+}
+
 // getLastModel surfaces the concrete model id for the GUI — from whichever engine is default.
 function getLastModel() { try { return engines.resolve().getLastModel(); } catch (_) { return null; } }
 
-module.exports = { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel };
+module.exports = { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, getLastModel };
