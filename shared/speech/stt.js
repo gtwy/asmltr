@@ -40,6 +40,9 @@ function config() {
     wake_enabled: p.wake_enabled === undefined ? false : !!p.wake_enabled,
     wake_phrase: (p.wake_phrase !== undefined && p.wake_phrase !== null) ? String(p.wake_phrase) : `hey ${process.env.ASSISTANT_NAME || 'assistant'}`,
     wake_sensitivity: num(p.wake_sensitivity, 50, 0, 100),      // detection strictness (higher = more triggers, more false-accepts)
+    // Stop phrases: say one of these and the turn is dropped (NOT sent to the LLM) + listening ends —
+    // hands-free "that's all". Comma-separated; matched against the transcript before it's dispatched.
+    stop_phrases: (p.stop_phrases !== undefined && p.stop_phrases !== null) ? String(p.stop_phrases) : "that's all, i'm done, thank you, stop listening, never mind, goodbye",
     keyName: process.env.ASMLTR_STT_KEY_NAME || 'openai_api_key',
   };
 }
@@ -58,6 +61,7 @@ function setConfig(partial) {
   }
   if (partial && partial.wake_enabled !== undefined) next.wake_enabled = !!partial.wake_enabled;
   if (partial && partial.wake_phrase !== undefined) { if (partial.wake_phrase === null) delete next.wake_phrase; else next.wake_phrase = String(partial.wake_phrase); }
+  if (partial && partial.stop_phrases !== undefined) { if (partial.stop_phrases === null) delete next.stop_phrases; else next.stop_phrases = String(partial.stop_phrases); }
   try { fs.writeFileSync(cfgFile(), JSON.stringify(next)); } catch (_) {}
   return config();
 }

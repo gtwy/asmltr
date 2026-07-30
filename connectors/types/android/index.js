@@ -369,7 +369,8 @@ async function start(ctx) {
     try { const r = await fetch(CORE_VOICE); if (r.ok) { const j = await r.json(); stt = j.stt || null; } } catch (_) {}
     const vad = stt ? { endpoint_ms: stt.vad_endpoint_ms, start_ms: stt.vad_start_ms, sensitivity: stt.vad_sensitivity } : null;
     const wake = stt ? { enabled: !!stt.wake_enabled, phrase: stt.wake_phrase || '', sensitivity: stt.wake_sensitivity } : null;
-    res.json({ palette, agentName: name, vad, wake });
+    const stopPhrases = stt && stt.stop_phrases != null ? stt.stop_phrases : '';
+    res.json({ palette, agentName: name, vad, wake, stop_phrases: stopPhrases });
   });
 
   // Wake word (Vosk, offline): the app fetches config here + the model URL. The phrase is a runtime

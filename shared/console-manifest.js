@@ -183,6 +183,11 @@ const manifest = {
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { wake_phrase: '{value}' } } },
         },
         {
+          id: 'stop_phrases', label: 'Stop phrases', type: 'text', get: 'stt.stop_phrases',
+          desc: 'Comma-separated. Say one (e.g. "that\'s all", "I\'m done", "thank you") to end a hands-free turn WITHOUT sending it to the assistant — the mic just turns off. Matched on the mobile app before dispatch.',
+          set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { stop_phrases: '{value}' } } },
+        },
+        {
           id: 'wake_sensitivity', label: 'Wake sensitivity', type: 'choice', get: 'stt.wake_sensitivity',
           desc: 'How eagerly the wake word fires. Higher catches more but false-triggers more.',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { wake_sensitivity: '{value}' } } },

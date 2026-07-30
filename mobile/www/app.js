@@ -46,6 +46,13 @@ let drone = null, curAudio = null, vadRAF = 0, vadCtx = null;
 // VAD tuning — global STT settings from the web GUI/TUI (fetched via /gw/theme); forgiving defaults.
 let vadCfg = { endpoint_ms: 1600, start_ms: 8000, sensitivity: 50 };
 let wakeCfg = { enabled: false, phrase: '' }; // wake word (mirrors core voice config; editable in-app)
+// Hands-free "stop listening" phrases — say one and the turn is dropped (not sent) + the mic turns off.
+let stopPhrases = ["that's all", "i'm done", 'thank you', 'stop listening', 'never mind', 'goodbye'];
+function normPhrase(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim(); }
+function isStopPhrase(text) {
+  const t = normPhrase(text); if (!t) return false; const words = t.split(' ').length;
+  return stopPhrases.some((p) => { p = normPhrase(p); return p && (t === p || (words <= 4 && t.includes(p))); });
+}
 let continuous = OVERLAY, suppressRestart = false;
 // streaming TTS pipeline (synthesize each sentence as it arrives, play in order)
 let ttsBuf = '', ttsSeq = 0, ttsNextPlay = 0, ttsPlaying = false, replyTextDone = false; const ttsClips = {};
@@ -61,6 +68,7 @@ async function applyTheme() {
     if (a) { document.documentElement.style.setProperty('--accent', a); document.documentElement.style.setProperty('--accent2', b); }
     if (j.vad) vadCfg = { endpoint_ms: +j.vad.endpoint_ms || vadCfg.endpoint_ms, start_ms: +j.vad.start_ms || vadCfg.start_ms, sensitivity: (j.vad.sensitivity != null ? +j.vad.sensitivity : vadCfg.sensitivity) };
     if (j.wake) wakeCfg = { enabled: !!j.wake.enabled, phrase: j.wake.phrase || wakeCfg.phrase };
+    if (typeof j.stop_phrases === 'string' && j.stop_phrases.trim()) stopPhrases = j.stop_phrases.split(',').map((s) => s.trim()).filter(Boolean);
   } catch (_) {}
 }
 
@@ -228,7 +236,9 @@ async function onRecStop() {
   try {
     const b64 = await blobB64(blob);
     const { text } = await api('/gw/transcribe', { audio_base64: b64, mime: (recorder && recorder.mimeType) || 'audio/webm' });
-    if (text && text.trim()) { setState('idle'); await sendTurn(text.trim()); } else setState('idle');
+    if (text && isStopPhrase(text)) { // hands-free stop — drop the turn, don't send to the LLM, end listening
+      suppressRestart = true; stopDrone(); setState('idle'); bubble('sys', '✓ stopped listening');
+    } else if (text && text.trim()) { setState('idle'); await sendTurn(text.trim()); } else setState('idle');
   } catch (e) { bubble('sys', '⚠ ' + e.message); setState('idle'); }
 }
 function startVAD(mediaStream) {
