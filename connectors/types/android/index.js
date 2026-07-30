@@ -165,6 +165,7 @@ async function start(ctx) {
           default: break; // session-start/end/control → skip
         }
       }
+      items.sort((a, b) => (a.ts || 0) - (b.ts || 0)); // chronological for display
       res.json({ ok: true, key, items });
     } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
   });
