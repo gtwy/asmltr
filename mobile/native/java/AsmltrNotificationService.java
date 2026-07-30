@@ -10,7 +10,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
-import android.speech.tts.TextToSpeech;
 
 import org.json.JSONObject;
 
@@ -19,14 +18,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * The Android notification reader (Part B of docs/NOTIFY-READ-ALOUD.md). Captures posted notifications,
  * gates them (enabled · BT audio route · per-app deny · noise filters), collects a ~3s BURST, then asks
  * the asmltr core (via the android connector /gw/notify-triage → DEFAULT reasoning engine, on-device
  * Agent SDK, NOT a metered API) for { speak, priority, synopsis }. If speak && priority >= threshold it
- * reads the synopsis aloud with native TTS over the headphones.
+ * reads the synopsis aloud via Speech (the CONFIGURED provider/voice through /gw/tts) over the headphones.
  *
  * IMPORTANT: this path is fully local + native. It deliberately does NOT fall back to push/telegram —
  * a phone notification never bounces to another channel (that's asmltr notify / Part A, a separate system).
@@ -37,17 +35,8 @@ public class AsmltrNotificationService extends NotificationListenerService {
   private final Handler main = new Handler(Looper.getMainLooper());
   private final List<Item> burst = new ArrayList<>();
   private boolean flushScheduled = false;
-  private TextToSpeech tts;
-  private volatile boolean ttsReady = false;
 
   private static class Item { String app, title, text, pkg; long when; }
-
-  @Override public void onCreate() {
-    super.onCreate();
-    tts = new TextToSpeech(this, status -> {
-      if (status == TextToSpeech.SUCCESS) { try { tts.setLanguage(Locale.getDefault()); } catch (Throwable t) {} ttsReady = true; }
-    });
-  }
 
   private SharedPreferences prefs() { return getSharedPreferences("asmltr", Context.MODE_PRIVATE); }
 
@@ -137,16 +126,10 @@ public class AsmltrNotificationService extends NotificationListenerService {
       boolean speak = r.optBoolean("speak", false);
       int priority = r.optInt("priority", 0);
       String synopsis = r.optString("synopsis", "");
-      if (speak && priority >= threshold && !synopsis.isEmpty()) speak(synopsis);
+      // Read the synopsis in the CONFIGURED voice (ElevenLabs/OpenAI via /gw/tts), not the OS robot engine.
+      // The BT-route gate already ran before we buffered this, so no need to re-gate on headphones here.
+      if (speak && priority >= threshold && !synopsis.isEmpty()) Speech.speak(this, base, token, synopsis, false);
     } catch (Throwable t) { /* triage failed — stay silent */ }
-  }
-
-  private void speak(final String s) {
-    if (tts == null) return;
-    // wait briefly for TTS init on first use
-    for (int i = 0; i < 20 && !ttsReady; i++) { try { Thread.sleep(100); } catch (InterruptedException e) { break; } }
-    if (!ttsReady) return;
-    main.post(() -> { try { tts.speak(s, TextToSpeech.QUEUE_ADD, null, "asmltr-notif-" + System.currentTimeMillis()); } catch (Throwable t) {} });
   }
 
   // ── gates + helpers ────────────────────────────────────────────────────────
@@ -211,5 +194,4 @@ public class AsmltrNotificationService extends NotificationListenerService {
     finally { if (c != null) c.disconnect(); }
   }
 
-  @Override public void onDestroy() { try { if (tts != null) { tts.shutdown(); } } catch (Throwable t) {} super.onDestroy(); }
 }

@@ -255,9 +255,14 @@ function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 
 // ---------- record + VAD ----------
-async function startRec() {
+async function startRec(skipCue) {
   if (state !== 'idle') return;
-  listenCue(); // instant auditory feedback that listening started (hands-free / screen-off)
+  // Wake-from-closed (wake word / headset button) plays the listen cue NATIVELY (OverlayService → Chime)
+  // because the WebView beep is inaudible before the BT route is warm; skip the web cue then to avoid a
+  // double. All other starts (manual tap, continuous restart) use the web cue — audible, overlay's open.
+  const skip = skipCue || window.__ASMLTR_SKIP_CUE;
+  window.__ASMLTR_SKIP_CUE = false;
+  if (!skip) listenCue(); // instant auditory feedback that listening started (hands-free / screen-off)
   try {
     // IMPORTANT: echoCancellation/noiseSuppression route Chromium through its WebRTC *communication*
     // audio path, which flips Android into MODE_IN_COMMUNICATION and forces Bluetooth headsets onto the
@@ -333,7 +338,7 @@ async function runDeviceRPC(m) {
 
 // ---------- assist launch + native overlay controls ----------
 function maybeAssistLaunch() { const a = OVERLAY || location.hash.indexOf('assist') >= 0 || window.__ASMLTR_ASSIST === true; if (a && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); } }
-window.asmltrStartListening = () => { if (state === 'idle') startRec(); };
+window.asmltrStartListening = (skipCue) => { if (state === 'idle') startRec(skipCue); };
 // Called by OverlayService when the card should collapse/expand; also usable from the min button.
 window.asmltrMinimize = () => { document.body.classList.add('minimized'); if (state === 'rec') stopRec(); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(true); } catch (_) {} };
 window.asmltrExpand = () => { document.body.classList.remove('minimized'); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(false); } catch (_) {} reportPanelHeight(); };
