@@ -2,6 +2,11 @@ package com.asmltr.assistant;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioDeviceInfo;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.os.Build;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -15,7 +20,7 @@ import org.json.JSONObject;
 import org.vosk.Model;
 import org.vosk.Recognizer;
 import org.vosk.android.RecognitionListener;
-import org.vosk.android.SpeechService;
+import org.vosk.android.SpeechStreamService;
 
 /**
  * Always-on wake word via Vosk — OFFLINE keyword spotting. The phrase is a runtime grammar string, so it's
@@ -23,10 +28,20 @@ import org.vosk.android.SpeechService;
  * ~40MB model, downloaded once, covers every phrase). Runs inside the persistent DeviceControlService
  * (always-on, screen-off). On a match it fires the overlay in listen mode; mic handoff via
  * OverlayService.setAwake → pause()/resume() so the wake listener and the turn recorder never fight the mic.
- * Heavily guarded: any failure (wake off, no model, Vosk error) leaves it inert — it never crashes the service.
+ *
+ * ON-DEVICE MIC (call-mode fix): we capture with our OWN AudioRecord pinned to the phone's BUILT-IN mic
+ * (setPreferredDevice(TYPE_BUILTIN_MIC)) and feed it to Vosk's SpeechStreamService — instead of Vosk's
+ * SpeechService, which opens the default input and lets Android route the always-on capture to a connected
+ * Bluetooth headset's mic. The BT mic only exists on HFP/SCO, and SCO is the "call" profile — so an
+ * always-on BT capture makes earbuds sit in call mode 24/7 (hijacking their tap controls). Built-in mic =
+ * no SCO = earbuds stay on A2DP (media), controls intact. (LE Audio could carry the mic off the call
+ * profile, but budget classic-BT buds don't support it.)
+ *
+ * Heavily guarded: any failure (wake off, no model, mic/Vosk error) leaves it inert — never crashes the service.
  */
 public class WakeWord {
-  private static SpeechService speech;
+  private static SpeechStreamService stream;
+  private static AudioRecord recorder;
   private static Model model;
   private static boolean enabled = false, paused = false, usePartial = false;
   private static String activePhrase = "";
@@ -48,26 +63,68 @@ public class WakeWord {
     String modelId = cfg.optString("model_id", "vosk-model");
     usePartial = cfg.optDouble("sensitivity", 50) >= 60; // higher = trigger on partials (faster, more false-accepts)
     if (!en || phrase.isEmpty() || modelUrl.isEmpty()) { stop(); return; }
-    if (speech != null && enabled && phrase.equals(activePhrase)) return; // already listening for this phrase
+    if (stream != null && enabled && phrase.equals(activePhrase)) return; // already listening for this phrase
     File dir = ensureModel(modelUrl, modelId);
     stopSpeech();
     if (model == null) model = new Model(dir.getAbsolutePath());
-    // Grammar restricts recognition to the phrase (+ [unk]) → efficient keyword spotting.
-    Recognizer rec = new Recognizer(model, 16000.0f, "[\"" + phrase + "\", \"[unk]\"]");
-    speech = new SpeechService(rec, 16000.0f);
     enabled = true; activePhrase = phrase;
     if (!paused) startListening(phrase);
   }
 
-  private static void startListening(final String phrase) {
-    speech.startListening(new RecognitionListener() {
-      @Override public void onResult(String h) { if (matches(h, phrase)) onWake(); }
-      @Override public void onFinalResult(String h) { if (matches(h, phrase)) onWake(); }
-      @Override public void onPartialResult(String h) { if (usePartial && matches(h, phrase)) onWake(); }
-      @Override public void onError(Exception e) {}
-      @Override public void onTimeout() {}
-    });
+  private static synchronized void startListening(final String phrase) {
+    try {
+      if (model == null) return;
+      // Grammar restricts recognition to the phrase (+ [unk]) → efficient keyword spotting.
+      Recognizer rec = new Recognizer(model, 16000.0f, "[\"" + phrase + "\", \"[unk]\"]");
+      recorder = buildBuiltinMicRecorder();
+      if (recorder == null || recorder.getState() != AudioRecord.STATE_INITIALIZED) { stopSpeech(); return; }
+      recorder.startRecording();
+      stream = new SpeechStreamService(rec, new RecStream(recorder), 16000.0f);
+      stream.start(new RecognitionListener() {
+        @Override public void onResult(String h) { if (matches(h, phrase)) onWake(); }
+        @Override public void onFinalResult(String h) { if (matches(h, phrase)) onWake(); }
+        @Override public void onPartialResult(String h) { if (usePartial && matches(h, phrase)) onWake(); }
+        @Override public void onError(Exception e) {}
+        @Override public void onTimeout() {}
+      });
+    } catch (Throwable t) { stopSpeech(); }
   }
+
+  /** An AudioRecord that captures from the phone's BUILT-IN mic (never the Bluetooth headset), so the
+   *  always-on wake listener never brings up the SCO/HFP "call" link on connected earbuds. */
+  private static AudioRecord buildBuiltinMicRecorder() {
+    try {
+      final int sr = 16000;
+      int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+      if (min <= 0) min = sr; // sane fallback
+      AudioRecord r = new AudioRecord.Builder()
+          .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION) // keyword-spotting source; no comm processing
+          .setAudioFormat(new AudioFormat.Builder()
+              .setSampleRate(sr)
+              .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+              .setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
+          .setBufferSizeInBytes(min * 2)
+          .build();
+      AudioManager am = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+      if (am != null) for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_INPUTS)) {
+        if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) { r.setPreferredDevice(d); break; }
+      }
+      return r;
+    } catch (Throwable t) { return null; }
+  }
+
+  /** Blocking InputStream over the live AudioRecord — SpeechStreamService reads PCM from this off-thread. */
+  private static class RecStream extends InputStream {
+    private final AudioRecord r;
+    RecStream(AudioRecord rec) { r = rec; }
+    @Override public int read() { byte[] b = new byte[1]; int n = read(b, 0, 1); return n <= 0 ? -1 : (b[0] & 0xff); }
+    @Override public int read(byte[] b, int off, int len) {
+      if (r == null) return -1;
+      int n = r.read(b, off, len);
+      return n < 0 ? -1 : n; // negative = stopped/error → end the stream so SpeechStreamService exits cleanly
+    }
+  }
+
   private static boolean matches(String json, String phrase) { return json != null && json.toLowerCase().contains(phrase); }
 
   private static void onWake() {
@@ -81,9 +138,14 @@ public class WakeWord {
   /** Overlay is about to use the mic → free it. */
   static synchronized void pause() { paused = true; stopSpeech(); }
   /** Overlay is done → resume listening. */
-  static synchronized void resume() { paused = false; if (enabled && speech == null && appCtx != null) refresh(appCtx); }
+  static synchronized void resume() { paused = false; if (enabled && stream == null && appCtx != null) refresh(appCtx); }
   static synchronized void stop() { stopSpeech(); try { if (model != null) model.close(); } catch (Exception e) {} model = null; enabled = false; activePhrase = ""; }
-  private static void stopSpeech() { try { if (speech != null) { speech.stop(); speech.shutdown(); } } catch (Exception e) {} speech = null; }
+  private static void stopSpeech() {
+    try { if (stream != null) stream.stop(); } catch (Exception e) {}
+    stream = null;
+    try { if (recorder != null) { recorder.stop(); recorder.release(); } } catch (Exception e) {}
+    recorder = null;
+  }
 
   // ── model provisioning (download once, unzip to files dir) ──
   private static File ensureModel(String url, String modelId) throws Exception {
