@@ -388,9 +388,10 @@ async function loadVoices(provider) {
   finally { voicesLoading.value = false }
 }
 const wakePhrase = ref('')
+const stopPhrasesInput = ref('')
 const sttEndpointChoices = computed(() => field('voice', 'stt_endpoint').choices || [])
 const sttSensChoices = computed(() => field('voice', 'stt_sensitivity').choices || [])
-async function loadVoiceCfg() { try { vcfg.value = await voice.getConfig(); wakePhrase.value = vcfg.value?.stt?.wake_phrase || ''; await loadVoices(vcfg.value?.tts?.provider) } catch (_) {} }
+async function loadVoiceCfg() { try { vcfg.value = await voice.getConfig(); wakePhrase.value = vcfg.value?.stt?.wake_phrase || ''; stopPhrasesInput.value = vcfg.value?.stt?.stop_phrases || ''; await loadVoices(vcfg.value?.tts?.provider) } catch (_) {} }
 async function setVoiceCfg(part) {
   busy.value = 'voicecfg'; notice.value = ''
   try {
@@ -835,6 +836,18 @@ onMounted(async () => {
                   <input v-model="wakePhrase" type="text" placeholder="hey Eve"
                     class="flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
                   <button type="button" :disabled="!wakePhrase.trim() || busy === 'voicecfg'" @click="setVoiceCfg({ stt: { wake_phrase: wakePhrase.trim() } })"
+                    class="shrink-0 rounded-lg bg-brand-gradient px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">
+                    <Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
+                </div>
+              </div>
+              <div class="mt-3" v-if="field('voice','stop_phrases').id">
+                <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stop_phrases').label || 'Stop phrases' }}
+                  <span class="normal-case text-slate-600">— {{ field('voice','stop_phrases').desc }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input v-model="stopPhrasesInput" type="text" placeholder="that's all, I'm done, thank you"
+                    class="flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
+                  <button type="button" :disabled="busy === 'voicecfg'" @click="setVoiceCfg({ stt: { stop_phrases: stopPhrasesInput.trim() } })"
                     class="shrink-0 rounded-lg bg-brand-gradient px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">
                     <Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
                 </div>
