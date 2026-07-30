@@ -131,3 +131,8 @@ body.overlay.native .log { flex: 0 1 auto; }
 /* settings: checkbox row */
 .sheet-card label.check { display: flex; align-items: center; gap: 10px; }
 .sheet-card label.check input { width: auto; margin: 0; }
+
+/* rehydration: tap-to-load-earlier chip at the top of a resumed conversation */
+.sys-earlier { align-self: center; margin: 4px auto 8px; padding: 5px 12px; border-radius: 999px; font-size: 12px;
+  color: var(--muted); background: #ffffff0c; border: 1px solid #ffffff14; cursor: pointer; }
+.sys-earlier:active { background: #ffffff18; }
