@@ -41,7 +41,7 @@ let muted = false; try { muted = localStorage.getItem('asmltr.muted') === '1'; }
 let es = null, reconnectT = null;
 let state = 'idle';              // 'idle' | 'rec' | 'busy'   (busy covers thinking + reading aloud)
 let recorder = null, chunks = [], stream = null, heardSpeech = false;
-let curBubble = null, stepsEl = null, lastTool = null, convKey = '';
+let curBubble = null, stepsEl = null, lastTool = null, convKey = '', hydrated = false;
 let drone = null, curAudio = null, vadRAF = 0, vadCtx = null;
 // VAD tuning — global STT settings from the web GUI/TUI (fetched via /gw/theme); forgiving defaults.
 let vadCfg = { endpoint_ms: 1600, start_ms: 8000, sensitivity: 50 };
@@ -135,7 +135,7 @@ function connect() {
   es = new EventSource(url);
   es.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
-    if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) convKey = m.conversation_key; maybeAssistLaunch(); }
+    if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) convKey = m.conversation_key; if (!activeTarget && !hydrated && $('log').children.length === 0) hydrateOwn(convKey); maybeAssistLaunch(); }
     else if (m.type === 'thinking') addThinking(m.text);
     else if (m.type === 'tool') addTool(m.name, m.input);
     else if (m.type === 'tool_result') addToolResult(m.output, m.is_error);
@@ -394,7 +394,7 @@ async function newSession() {
   try { const r = await api('/gw/forget', {}); if (m) m.textContent = r && r.existed ? '✓ context cleared — fresh session' : '✓ fresh session'; }
   catch (e) { if (m) m.textContent = '✗ ' + e.message; return; }
   activeTarget = null; updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; resetTTS();
+  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; resetTTS(); hydrated = true; // fresh session — nothing to rehydrate
   bubble('sys', 'New session started.');
 }
 
@@ -428,29 +428,45 @@ function renderSessions(list) {
     el.appendChild(row);
   }
 }
+function renderHistoryItems(items) {
+  for (const it of (items || [])) {
+    if (it.kind === 'user') bubble('user', it.text);
+    else if (it.kind === 'assistant') bubble('assistant', it.text);
+    else if (it.kind === 'thinking') addThinking(it.text);
+    else if (it.kind === 'tool') addTool(it.name, it.input);
+    else if (it.kind === 'tool_result') addToolResult(it.output, it.is_error);
+  }
+  curBubble = null; // a live delta must start a fresh bubble, not append onto a historical one
+  $('log').scrollTop = $('log').scrollHeight;
+}
 async function selectSession(s) {
   activeTarget = { key: s.key, surface: s.surface, title: s.title || s.key };
   $('sessions').classList.add('hidden');
   updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null;
+  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; hydrated = true; // target view owns its history
   bubble('sys', 'Loaded [' + s.surface + '] ' + (s.title || s.key) + ' — your next message goes here.');
+  try { const r = await apiGet('/gw/history', { key: s.key, limit: '80' }); renderHistoryItems(r.items); }
+  catch (e) { bubble('sys', '⚠ history: ' + e.message); }
+  reportPanelHeight();
+}
+// Rehydrate THIS device's own conversation on (re)open — the core session persists even though the WebView
+// was destroyed on close, so show the history bubbles instead of a blank window. Lazy: recent window + a
+// tap-to-load-earlier chip.
+async function hydrateOwn(key, limit) {
+  if (!key) return; hydrated = true; limit = limit || 60;
   try {
-    const r = await apiGet('/gw/history', { key: s.key });
-    for (const it of (r.items || [])) {
-      if (it.kind === 'user') bubble('user', it.text);
-      else if (it.kind === 'assistant') bubble('assistant', it.text);
-      else if (it.kind === 'thinking') addThinking(it.text);
-      else if (it.kind === 'tool') addTool(it.name, it.input);
-      else if (it.kind === 'tool_result') addToolResult(it.output, it.is_error);
-    }
-    $('log').scrollTop = $('log').scrollHeight;
-  } catch (e) { bubble('sys', '⚠ history: ' + e.message); }
+    const r = await apiGet('/gw/history', { key, limit: String(limit) });
+    const items = r.items || [];
+    $('log').innerHTML = ''; curBubble = null; lastTool = null;
+    if (items.length >= limit) { const e = document.createElement('div'); e.className = 'sys-earlier'; e.textContent = '↑ load earlier messages'; e.addEventListener('click', () => hydrateOwn(key, limit + 200)); $('log').appendChild(e); }
+    renderHistoryItems(items);
+  } catch (_) {}
   reportPanelHeight();
 }
 function leaveTarget() {
   activeTarget = null; updateTargetBar();
   $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null;
-  bubble('sys', 'Back to your own session.');
+  hydrated = false; if (convKey) hydrateOwn(convKey); else bubble('sys', 'Back to your own session.');
 }
 async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/, ''); $('cfgMsg').textContent = 'testing…'; try { const r = await fetch(base + '/health'); const j = await r.json(); $('cfgMsg').textContent = j.status === 'ok' ? '✓ reachable' : 'unexpected'; } catch (e) { $('cfgMsg').textContent = '✗ ' + e.message; } }
 
