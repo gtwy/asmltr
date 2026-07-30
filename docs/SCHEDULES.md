@@ -1,5 +1,10 @@
 # Schedules — GUI cron for asmltr (prompt jobs + shell jobs)
 
+!!! success "Shipped"
+    Store `shared/schedules.js` · tick + endpoints in `core/src/scheduler.js` + `core/src/server.js`
+    (`/v2/schedules`) · dashboard **Schedules** view. Prompt jobs run as managed turns (no session
+    leak); shell jobs run host commands. The morning brief is now a prompt job that calls `asmltr notify`.
+
 A dashboard-managed scheduler: create jobs that fire **on a schedule**, each either an **LLM prompt**
 (runs a fresh asmltr turn on a reasoning engine) or a **shell command / script**. This is "cron with a
 GUI," and it's what powers the morning brief again + becomes the scheduler for **asmltr notify**.
@@ -40,7 +45,12 @@ A **prompt** job at 08:00 weekdays: *"Write a warm ~25-word wake-up for Jareth a
 `asmltr notify` (read-aloud)."* → engine runs → asmltr notify → phone reads it over BT. Until notify
 Part A ships, the prompt can call the existing `notify-jareth` / android `/out` push instead.
 
-## Open decisions (to confirm)
-1. Schedule UX: friendly time+weekday picker with an advanced raw-cron field (proposed) — ok?
-2. Scheduler home: core setInterval tick (proposed, simplest) vs a dedicated `scheduler` PM2 process.
-3. Shell jobs: allow arbitrary command/script (proposed, = cron parity) vs prompt-only to start.
+## Decisions (as shipped)
+1. **Schedule UX** — friendly time+weekday picker with an advanced raw-cron field. Both compile to a
+   standard 5-field cron string that everything downstream evaluates uniformly (`shared/schedules.js`).
+2. **Scheduler home** — a core `setInterval(~30s)` tick (`core/src/scheduler.js`, started from
+   `server.js`); no new process, no new dep. Per-job concurrency guard; overdue jobs fire once on the
+   next tick after downtime.
+3. **Shell jobs** — arbitrary command/script allowed (cron parity), gated behind the owner-only
+   dashboard. Prompt jobs run at operator trust via an internal, moderation-bypassed **Scheduler**
+   principal, seeded idempotently on start.

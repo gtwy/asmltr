@@ -84,6 +84,7 @@ nav:
     - MCP: connectors/mcp.md
     - GitHub: connectors/github.md
     - OpenAI-compatible: connectors/openai.md
+    - Android (device gateway): connectors/android.md
     - CLI sessions: connectors/cli.md
   - Integrations:
     - Integrations & storage: integrations/index.md
@@ -92,6 +93,8 @@ nav:
   - Operating:
     - The asmltr CLI: cli.md
     - The dashboard: dashboard.md
+    - Schedules (cron with a GUI): SCHEDULES.md
+    - Notify & read-aloud: NOTIFY-READ-ALOUD.md
     - Versioning & updates: UPDATER-DESIGN.md
     - Testing the updater: testing-the-updater.md
   - Coordination:
