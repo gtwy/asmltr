@@ -61,6 +61,28 @@ function mimeFor(fmt) {
   return { opus: 'audio/ogg', aac: 'audio/aac', wav: 'audio/wav', pcm: 'audio/L16', flac: 'audio/flac' }[fmt] || 'audio/mpeg';
 }
 
+// Normalize markdown/symbols → speakable prose so TTS doesn't vocalize literal "asterisk asterisk" etc.
+// Applied to every synth (all providers/channels). The on-screen text is untouched — only what's spoken.
+function speakable(text) {
+  let t = String(text || '');
+  t = t.replace(/```[\s\S]*?```/g, ' (code snippet) ');                 // fenced code blocks
+  t = t.replace(/`([^`]+)`/g, '$1');                                    // inline code
+  t = t.replace(/!\[[^\]]*\]\([^)]*\)/g, ' image ');                    // images
+  t = t.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');                    // links → link text
+  t = t.replace(/(https?:\/\/|www\.)\S+/gi, ' link ');                  // bare URLs
+  t = t.replace(/^\s{0,3}#{1,6}\s+/gm, '');                             // ATX headers
+  t = t.replace(/^\s{0,3}>\s?/gm, '');                                  // blockquotes
+  t = t.replace(/^\s*([-*_]\s*){3,}$/gm, '');                           // horizontal rules
+  t = t.replace(/^\s*[-*+•]\s+/gm, '');                                 // bullet markers
+  t = t.replace(/^\s*\d+\.\s+/gm, '');                                  // numbered-list markers
+  t = t.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/__([^_]+)__/g, '$1'); // bold
+  t = t.replace(/\*([^*]+)\*/g, '$1').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2'); // italic
+  t = t.replace(/~~([^~]+)~~/g, '$1');                                  // strikethrough
+  t = t.replace(/[*_#`~|>]/g, ' ');                                     // any leftover md punctuation
+  t = t.replace(/[ \t]{2,}/g, ' ').replace(/\n{2,}/g, '\n').trim();     // tidy whitespace
+  return t;
+}
+
 // OpenAI: POST /v1/audio/speech. The HTTP body streams as the audio renders, so we forward bytes to
 // `onChunk` as they land (enables sub-clip byte-streaming later) and also return the full Buffer.
 async function openaiSynthesize(text, opts, onChunk) {
@@ -127,6 +149,7 @@ async function synthesize(text, overrides = {}, onChunk) {
   if (opts.provider === 'elevenlabs' && !isEleven) opts.model = DEFAULTS.elevenlabs.model;
   if (opts.provider === 'openai' && isEleven) opts.model = DEFAULTS.openai.model;
   const mime = mimeFor(opts.format);
+  text = speakable(text); // strip markdown/symbols so they aren't vocalized as literal characters
   if (opts.provider === 'openai') { const audio = await openaiSynthesize(text, opts, onChunk); return { audio, mime, format: opts.format }; }
   if (opts.provider === 'elevenlabs') { const audio = await elevenlabsSynthesize(text, opts, onChunk); return { audio, mime, format: opts.format }; }
   throw new Error(`unknown TTS provider: ${opts.provider}`);
