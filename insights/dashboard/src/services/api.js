@@ -158,6 +158,22 @@ export const mcpApi = {
   toggle: (name, disabled) => postCore(`/v2/mcp/${encodeURIComponent(name)}/toggle`, { disabled })
 }
 
+// Schedules — "cron with a GUI": prompt jobs (managed turns) + shell jobs. Owner-only surface.
+export const schedulesApi = {
+  list: () => getCore('/v2/schedules'),
+  create: (payload) => postCore('/v2/schedules', payload),
+  update: (id, patch) => reqCore('PATCH', `/v2/schedules/${encodeURIComponent(id)}`, patch),
+  remove: (id) => reqCore('DELETE', `/v2/schedules/${encodeURIComponent(id)}`),
+  runNow: (id) => postCore(`/v2/schedules/${encodeURIComponent(id)}/run`)
+}
+
+// Notify — the proactive read-aloud / delivery-ladder primitive (Part A). Config + a test-send.
+export const notifyApi = {
+  getConfig: () => getCore('/v2/notify/config'),
+  setConfig: (body) => postCore('/v2/notify/config', body),
+  send: (body) => postCore('/v2/notify', body)
+}
+
 // Backups — encrypted, restorable snapshots. Restore is CLI-only (deliberate footgun guard).
 export const backupApi = {
   list: (destination) => getCore('/v2/backups' + (destination && destination !== 'local' ? q({ destination }) : '')),

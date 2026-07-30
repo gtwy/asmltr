@@ -114,6 +114,17 @@ const a11ySvc = `
 `;
 if (!x.includes('.AsmltrAccessibilityService')) x = x.replace(/<\/application>/, a11ySvc + '    </application>');
 
+// Notification reader (Part B): a NotificationListenerService reads incoming phone notifications aloud
+// over BT (AI synopsis + prioritization via the core). Inert until the user grants Notification access
+// in system settings. BIND_NOTIFICATION_LISTENER_SERVICE is declared on the service (granted by consent).
+const notifSvc = `
+        <service android:name=".AsmltrNotificationService"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true" android:label="@string/app_name">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
+`;
+if (!x.includes('.AsmltrNotificationService')) x = x.replace(/<\/application>/, notifSvc + '    </application>');
+
 // Headset/wired assistant-button entry point. The BT button fires an ACTIVITY intent (VOICE_COMMAND/
 // ASSIST/hands-free voice search) — separate from the power-button assist role — so we need an activity
 // registered for it or asmltr never appears in the "Complete action using" chooser.

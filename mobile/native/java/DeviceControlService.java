@@ -8,12 +8,16 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
+import android.media.AudioManager;
+import android.media.AudioDeviceInfo;
+import android.speech.tts.TextToSpeech;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.util.Locale;
 import org.json.JSONObject;
 
 /**
@@ -30,12 +34,16 @@ public class DeviceControlService extends Service {
   private volatile boolean running = false;
   private Thread worker;
   private DeviceTools tools;
+  private TextToSpeech tts;
+  private volatile boolean ttsReady = false;
 
   @Override public IBinder onBind(Intent i) { return null; }
 
   @Override public void onCreate() {
     super.onCreate();
     tools = new DeviceTools(this);
+    // Native TTS so asmltr notify (Part A) `speak` frames read aloud even with the app fully closed.
+    tts = new TextToSpeech(this, s -> { if (s == TextToSpeech.SUCCESS) { try { tts.setLanguage(Locale.getDefault()); } catch (Throwable t) {} ttsReady = true; } });
     startForeground(43, buildNotification("Connecting…"));
   }
 
@@ -73,7 +81,9 @@ public class DeviceControlService extends Service {
           if (payload.isEmpty()) continue;
           try {
             JSONObject o = new JSONObject(payload);
-            if ("device_rpc".equals(o.optString("type"))) handleRpc(base, token, device, o);
+            String type = o.optString("type");
+            if ("device_rpc".equals(type)) handleRpc(base, token, device, o);
+            else if ("speak".equals(type)) speakAloud(o.optString("text"), o.optBoolean("require_headphones", false));
           } catch (Exception ignore) {}
         }
       } catch (Exception e) {
@@ -81,6 +91,30 @@ public class DeviceControlService extends Service {
       } finally { if (c != null) try { c.disconnect(); } catch (Exception e) {} }
       if (running) { sleep(backoff); backoff = Math.min(backoff * 2, 60000); }
     }
+  }
+
+  /** Read an asmltr-notify `speak` frame aloud natively (works with the app fully closed). Honors the
+   *  frame's require_headphones flag by checking for a BT/wired output route first. */
+  private void speakAloud(String text, boolean requireHeadphones) {
+    if (text == null || text.trim().isEmpty() || tts == null) return;
+    if (requireHeadphones && !headphonesConnected()) return;
+    for (int i = 0; i < 20 && !ttsReady; i++) sleep(100);
+    if (!ttsReady) return;
+    try { tts.speak(text, TextToSpeech.QUEUE_ADD, null, "asmltr-speak-" + System.currentTimeMillis()); } catch (Throwable t) {}
+  }
+
+  private boolean headphonesConnected() {
+    try {
+      AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+      if (am == null) return false;
+      for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+        int t = d.getType();
+        if (t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            || t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == AudioDeviceInfo.TYPE_WIRED_HEADSET
+            || t == AudioDeviceInfo.TYPE_USB_HEADSET) return true;
+      }
+    } catch (Throwable t) {}
+    return false;
   }
 
   private void handleRpc(final String base, final String token, final String device, JSONObject o) {
@@ -131,5 +165,5 @@ public class DeviceControlService extends Service {
     try { ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(43, buildNotification(text)); } catch (Exception e) {}
   }
 
-  @Override public void onDestroy() { running = false; try { WakeWord.stop(); } catch (Throwable t) {} if (worker != null) worker.interrupt(); super.onDestroy(); }
+  @Override public void onDestroy() { running = false; try { WakeWord.stop(); } catch (Throwable t) {} try { if (tts != null) tts.shutdown(); } catch (Throwable t) {} if (worker != null) worker.interrupt(); super.onDestroy(); }
 }

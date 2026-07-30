@@ -142,6 +142,11 @@ function connect() {
     else if (m.type === 'delta') { stopDrone(); if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text; feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; }
     else if (m.type === 'done') { stopDrone(); curBubble = null; stepsEl = null; flushTTS(); }
     else if (m.type === 'inject') { stepsEl = null; bubble('assistant', m.text); if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } }
+    else if (m.type === 'speak') { // asmltr notify (Part A): read a proactive message aloud, not a chat turn
+      stepsEl = null;
+      bubble('sys', '🔔 ' + (m.title ? (m.title + ' — ' + m.text) : m.text));
+      if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.title ? (m.title + '. ' + m.text) : m.text); flushTTS(); }
+    }
     else if (m.type === 'device_rpc') runDeviceRPC(m);   // #77: the assistant wants to act on this phone
     else if (m.type === 'error') { stopDrone(); bubble('sys', '⚠ ' + m.error); resetTTS(); setState('idle'); }
   };
@@ -375,7 +380,7 @@ function initOverlayChrome() {
 }
 
 // ---------- settings ----------
-function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; $('sheet').classList.remove('hidden'); reportPanelHeight(); }
+function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; try { loadNotifSettings(); } catch (_) {} $('sheet').classList.remove('hidden'); reportPanelHeight(); }
 async function saveVoice() {
   const m = $('voiceMsg'); if (m) m.textContent = 'saving…';
   const enabled = $('cfgWake').checked, phrase = $('cfgWakePhrase').value.trim();
@@ -384,6 +389,39 @@ async function saveVoice() {
     wakeCfg = { enabled, phrase: (r.stt && r.stt.wake_phrase) || phrase || wakeCfg.phrase };
     try { if (window.AsmltrNative && window.AsmltrNative.refreshWake) window.AsmltrNative.refreshWake(); } catch (_) {}
     if (m) m.textContent = enabled ? '✓ wake word on — say "' + wakeCfg.phrase + '"' : '✓ saved (wake word off)';
+  } catch (e) { if (m) m.textContent = '✗ ' + e.message; }
+}
+// ── notification reader (Part B) settings — backed by the native bridge (SharedPreferences) ──────
+const NC = () => (window.AsmltrNative || null);
+function loadNotifSettings() {
+  const n = NC(); if (!n || !n.getNotifyConfig) { const w = $('cfgNotifDevices'); if (w) w.innerHTML = '<p class="msg">Notification reading needs the native app.</p>'; return; }
+  let c = {}; try { c = JSON.parse(n.getNotifyConfig() || '{}'); } catch (_) {}
+  if ($('cfgNotif')) $('cfgNotif').checked = !!c.enabled;
+  if ($('cfgNotifHp')) $('cfgNotifHp').checked = c.headphones_only !== false;
+  if ($('cfgNotifThreshold')) $('cfgNotifThreshold').value = c.threshold != null ? c.threshold : 40;
+  if ($('cfgNotifDenied')) $('cfgNotifDenied').value = c.apps_denied || '';
+  if ($('cfgNotifAccessMsg')) $('cfgNotifAccessMsg').textContent = c.access_granted ? '✓ access granted' : '⚠ not granted — tap to grant';
+  // BT/wired device picker: which routes may trigger readout (empty selection = any headphones)
+  const wrap = $('cfgNotifDevices'); if (!wrap) return;
+  let devs = []; try { devs = JSON.parse((n.listAudioDevices && n.listAudioDevices()) || '[]'); } catch (_) {}
+  const chosen = new Set((c.bt_devices || '').split(',').map((s) => s.trim()).filter(Boolean));
+  if (!devs.length) { wrap.innerHTML = '<p class="msg">No headphones connected right now. Connect a device to pick it; leave blank to allow any.</p>'; return; }
+  wrap.innerHTML = '<p class="msg" style="margin:6px 0 4px">Trigger on these devices (none checked = any headphones):</p>'
+    + devs.map((d) => `<label class="check"><input type="checkbox" class="notif-dev" value="${d.address}" ${chosen.has(d.address) ? 'checked' : ''}/> ${d.name} <span style="color:var(--muted)">(${d.type})</span></label>`).join('');
+}
+async function saveNotifSettings() {
+  const n = NC(); const m = $('cfgNotifMsg');
+  if (!n || !n.saveNotifyConfig) { if (m) m.textContent = 'needs the native app'; return; }
+  const enabled = $('cfgNotif').checked;
+  const hp = $('cfgNotifHp').checked;
+  const threshold = Math.max(0, Math.min(100, parseInt($('cfgNotifThreshold').value, 10) || 40));
+  const denied = ($('cfgNotifDenied').value || '').trim();
+  const bt = [...document.querySelectorAll('.notif-dev:checked')].map((e) => e.value).join(',');
+  try {
+    n.saveNotifyConfig(enabled, hp, threshold, denied, bt);
+    // enabling requires the one-off system Notification-access consent
+    if (enabled && n.isNotificationAccessGranted && !n.isNotificationAccessGranted()) { if (m) m.textContent = 'grant notification access to finish →'; if (n.openNotificationAccessSettings) n.openNotificationAccessSettings(); return; }
+    if (m) m.textContent = '✓ saved';
   } catch (e) { if (m) m.textContent = '✗ ' + e.message; }
 }
 function closeSheet() { $('sheet').classList.add('hidden'); reportPanelHeight(); }
@@ -484,6 +522,8 @@ function init() {
   if ($('targetLeave')) $('targetLeave').addEventListener('click', leaveTarget);
   if ($('sessions')) $('sessions').addEventListener('click', (e) => { if (e.target === $('sessions')) { $('sessions').classList.add('hidden'); reportPanelHeight(); } });
   if ($('cfgVoiceSave')) $('cfgVoiceSave').addEventListener('click', saveVoice);
+  if ($('cfgNotifSave')) $('cfgNotifSave').addEventListener('click', saveNotifSettings);
+  if ($('cfgNotifAccess')) $('cfgNotifAccess').addEventListener('click', () => { const n = NC(); if (n && n.openNotificationAccessSettings) n.openNotificationAccessSettings(); });
   if ($('cfgNewSession')) $('cfgNewSession').addEventListener('click', newSession);
   $('cfgTest').addEventListener('click', testConn);
   $('cfgSave').addEventListener('click', () => {

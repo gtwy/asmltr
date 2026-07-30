@@ -920,6 +920,32 @@ app.put('/v2/backups/schedule', (req, res) => {
 // In-process scheduler — fires runScheduled() when the interval elapses (needs a configured passphrase).
 try { backup.startScheduler({ log: (m) => console.log('[backup] ' + m) }); } catch (e) { console.log('[backup] scheduler not started: ' + e.message); }
 
+// ── Schedules — "cron with a GUI": prompt jobs (managed turns, no session leak) + shell jobs. ─────────
+// This replaces the retired `claude -p` wake-up crontab. See shared/schedules.js + core/src/scheduler.js.
+const schedules = require('../../shared/schedules');
+const scheduler = require('./scheduler');
+app.get('/v2/schedules', (req, res) => res.json({ jobs: schedules.list() }));
+app.get('/v2/schedules/:id', (req, res) => { const j = schedules.get(req.params.id); return j ? res.json(j) : res.status(404).json({ error: 'no such schedule' }); });
+app.post('/v2/schedules', (req, res) => { try { res.status(201).json(schedules.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.patch('/v2/schedules/:id', (req, res) => { try { res.json(schedules.update(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/schedules/:id', (req, res) => res.json({ ok: schedules.remove(req.params.id) }));
+// Run-now — fire a job immediately (out of band), record the outcome, return it. Async jobs (prompt turns)
+// can take a while; we await so the caller gets the result + refreshed row.
+app.post('/v2/schedules/:id/run', async (req, res) => {
+  const job = schedules.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'no such schedule' });
+  try {
+    const started = Date.now();
+    const r = job.type === 'prompt'
+      ? { status: 'ok', output: await scheduler.runPrompt(job, handle) }
+      : await scheduler.runShell(job);
+    const updated = schedules.markRan(job.id, { status: r.status, output: r.output, ranAtMs: started });
+    res.json({ ok: r.status === 'ok', ...r, job: updated });
+  } catch (e) { schedules.markRan(job.id, { status: 'error', error: e.message }); res.status(500).json({ ok: false, error: e.message }); }
+});
+try { scheduler.start({ handle, log: (m) => console.log('[scheduler] ' + m) }); }
+catch (e) { console.log('[scheduler] not started: ' + e.message); }
+
 // ── Guarded GUI restore (destructive → preview first, then a DETACHED runner that survives the core
 //    restart the restore triggers). The footgun guard is procedural: a mandatory dry-run preview + an
 //    explicit confirm flag (the GUI additionally makes the operator type the backup name).
@@ -1350,6 +1376,22 @@ app.post('/v2/notify/triage', async (req, res) => {
   if (!b.title && !b.text) return res.status(400).json({ error: 'need title or text' });
   try { res.json({ ok: true, ...(await generateNotifyTriage(b)) }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// asmltr notify (Part A) — the proactive read-aloud / delivery-ladder primitive (shared/notify.js).
+// A schedule/session calls POST /v2/notify to REACH the user; config is the delivery-ladder policy.
+const notifyLib = require('../../shared/notify');
+app.get('/v2/notify/config', (req, res) => res.json(notifyLib.getConfig()));
+app.post('/v2/notify/config', (req, res) => { try { res.json(notifyLib.setConfig(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/notify', async (req, res) => {
+  const b = req.body || {};
+  if (!b.text) return res.status(400).json({ error: 'need text' });
+  try {
+    const r = await notifyLib.notify({ text: b.text, title: b.title, force: !!b.force, speak: b.speak });
+    record({ surface: 'notify', session_id: 'notify', event_type: 'outbound', identity: 'notify', source: 'core',
+      payload: { via: r.via, delivered: r.delivered, text: truncate(b.text, 300) } });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Live "what is this session doing right now" rollup — the rolling counterpart to /v2/title.

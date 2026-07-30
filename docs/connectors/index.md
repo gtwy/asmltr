@@ -122,6 +122,7 @@ Two flags shape how the core and manager treat a connector:
 | `mcp` | OAuth 2.1 MCP server exposing an `ask_<assistant>` tool. | [MCP](mcp.md) |
 | `github` | Mention-driven, repo-aware issue assistant. | [GitHub](github.md) |
 | `openai` | OpenAI-compatible REST API (`/v1/chat/completions`). | [OpenAI-compatible](openai.md) |
+| `android` | Device gateway for the mobile app — voice/chat + a persistent control link, device actuation, read-aloud, notification reader. | [Android](android.md) |
 | `cli` | Interactive `claude` sessions in tmux, monitored + steerable. | [CLI](cli.md) |
 
 !!! tip "Discover schemas at runtime"

@@ -65,6 +65,18 @@
       <div class="row"><button id="cfgVoiceSave" class="primary">Save voice</button></div>
       <p id="voiceMsg" class="msg"></p>
 
+      <h2 style="margin-top:18px">Notifications read-aloud</h2>
+      <p class="msg" style="margin:0 0 8px">Read incoming phone notifications aloud over headphones, with an AI synopsis + prioritization. Runs on-device via your engine.</p>
+      <label class="check"><input id="cfgNotif" type="checkbox" /> Read notifications aloud</label>
+      <div class="row"><button id="cfgNotifAccess" class="secondary">Grant notification access</button></div>
+      <p id="cfgNotifAccessMsg" class="msg"></p>
+      <label class="check"><input id="cfgNotifHp" type="checkbox" /> Only when headphones are connected</label>
+      <label>Read only if priority ≥ <input id="cfgNotifThreshold" type="number" min="0" max="100" placeholder="40" /></label>
+      <label>Skip these apps (comma-separated package names)<input id="cfgNotifDenied" placeholder="com.spam.app, com.other" /></label>
+      <div id="cfgNotifDevices"></div>
+      <div class="row"><button id="cfgNotifSave" class="primary">Save notifications</button></div>
+      <p id="cfgNotifMsg" class="msg"></p>
+
       <h2 style="margin-top:18px">Session</h2>
       <label>Active session<input id="cfgSession" readonly placeholder="—" /></label>
       <div class="row"><button id="cfgNewSession" class="secondary">New session / clear context</button></div>

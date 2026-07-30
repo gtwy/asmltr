@@ -1,4 +1,12 @@
-# Notify / Read-Aloud + Notification Reader — design
+# Notify / Read-Aloud + Notification Reader
+
+!!! success "Shipped"
+    **Part A** (proactive read-aloud / delivery ladder) — `shared/notify.js`, `POST /v2/notify` +
+    `/v2/notify/config`, `asmltr notify` CLI, a `speak` frame on the android connector, and the app +
+    headless control-link reading it aloud. **Part B** (notification reader) — native
+    `AsmltrNotificationService` → `/gw/notify-triage` (default engine, on-device) → native TTS over BT,
+    with a 3s burst, per-app/headphones/threshold gating, and app settings. Config: dashboard
+    **Schedules → Notify delivery** (ladder) + the app's **⚙ Notifications** (reader).
 
 Two related capabilities, one spine: **asmltr proactively reaching the user with spoken/pushed messages**,
 and **the phone reading incoming notifications aloud**. Replaces the retired `eve-wake-up-alarms` cron hack.
@@ -74,8 +82,11 @@ in the enable flow (Android already forces the Notification-access consent scree
 ---
 
 ## Rollout phases
-1. **A1** — `speak` delivery frame + the app reads pushed messages aloud; presence/BT/quiet-hours gating.
-2. **A2** — scheduler + notify jobs (port the morning brief here, no `claude -p`); delivery ladder + confirm.
-3. **B1** — `NotificationListenerService` + settings (enable, headphones-only, per-app) → read raw title/text.
-4. **B2** — AI synopsis + prioritization (local Agent SDK) + burst-summarize.
-5. **B3** — tuning: thresholds, sender allow-lists, verbosity.
+1. **A1** ✅ — `speak` delivery frame + the app (and headless control link) read pushed messages aloud;
+   presence + quiet-hours gating, headphones hint.
+2. **A2** ✅ — scheduler ([Schedules](SCHEDULES.md)) + notify jobs (morning brief is now a prompt job that
+   calls `asmltr notify`, no `claude -p`); delivery ladder (android → push → text).
+3. **B1** ✅ — `NotificationListenerService` + settings (enable, headphones-only, per-app deny, BT-device
+   pick) with noise filters (ongoing/transport/service skipped).
+4. **B2** ✅ — AI synopsis + prioritization via the default engine (on-device Agent SDK) + 3s burst-summarize.
+5. **B3** — tuning: sender allow-lists, verbosity presets, push (web-push) step. *(future)*

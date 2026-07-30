@@ -7,7 +7,11 @@ import android.content.pm.PackageInstaller;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.media.AudioManager;
+import android.media.AudioDeviceInfo;
 import android.webkit.JavascriptInterface;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -148,5 +152,74 @@ public class NativeConfig {
         session.commit(pending.getIntentSender());
       } catch (Exception e) { /* toast handled by the receiver on failure paths */ }
     } }).start();
+  }
+
+  // ── Notification reader (Part B) config bridge ───────────────────────────────
+  /** Persist the notification-reader settings (written from the app's Notifications settings UI). */
+  @JavascriptInterface
+  public void saveNotifyConfig(boolean enabled, boolean headphonesOnly, int threshold, String deniedCsv, String btCsv) {
+    SharedPreferences.Editor e = ctx.getSharedPreferences("asmltr", Context.MODE_PRIVATE).edit();
+    e.putBoolean("notif_enabled", enabled);
+    e.putBoolean("notif_headphones_only", headphonesOnly);
+    e.putInt("notif_threshold", threshold);
+    e.putString("notif_apps_denied", deniedCsv == null ? "" : deniedCsv);
+    e.putString("notif_bt_devices", btCsv == null ? "" : btCsv);
+    e.apply();
+  }
+
+  @JavascriptInterface
+  public String getNotifyConfig() {
+    SharedPreferences p = ctx.getSharedPreferences("asmltr", Context.MODE_PRIVATE);
+    try {
+      JSONObject o = new JSONObject();
+      o.put("enabled", p.getBoolean("notif_enabled", false));
+      o.put("headphones_only", p.getBoolean("notif_headphones_only", true));
+      o.put("threshold", p.getInt("notif_threshold", 40));
+      o.put("apps_denied", p.getString("notif_apps_denied", ""));
+      o.put("bt_devices", p.getString("notif_bt_devices", ""));
+      o.put("access_granted", isNotificationAccessGranted());
+      return o.toString();
+    } catch (Exception ex) { return "{}"; }
+  }
+
+  /** Has the user granted Notification access (the once-off system consent the listener needs)? */
+  @JavascriptInterface
+  public boolean isNotificationAccessGranted() {
+    try {
+      String flat = Settings.Secure.getString(ctx.getContentResolver(), "enabled_notification_listeners");
+      return flat != null && flat.contains(ctx.getPackageName());
+    } catch (Throwable t) { return false; }
+  }
+
+  /** Route the user to the system Notification-access screen to grant/revoke the listener. */
+  @JavascriptInterface
+  public void openNotificationAccessSettings() {
+    try {
+      Intent i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      ctx.startActivity(i);
+    } catch (Throwable t) {}
+  }
+
+  /** Connected audio output routes (for the BT-device picker). JSON array of { name, address, type }. */
+  @JavascriptInterface
+  public String listAudioDevices() {
+    JSONArray arr = new JSONArray();
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      if (am != null) for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+        int t = d.getType();
+        String type = t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "bluetooth"
+            : t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ? "bluetooth"
+            : (t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == AudioDeviceInfo.TYPE_WIRED_HEADSET || t == AudioDeviceInfo.TYPE_USB_HEADSET) ? "wired" : null;
+        if (type == null) continue;
+        JSONObject o = new JSONObject();
+        o.put("name", d.getProductName() == null ? "audio device" : d.getProductName().toString());
+        o.put("address", d.getAddress() == null ? "" : d.getAddress());
+        o.put("type", type);
+        arr.put(o);
+      }
+    } catch (Throwable t) {}
+    return arr.toString();
   }
 }
