@@ -120,6 +120,12 @@ async function synthesize(text, overrides = {}, onChunk) {
     format: overrides.format || base.format,
     keyName: overrides.keyName || (overrides.provider && overrides.provider !== base.provider ? d.keyName : base.keyName),
   };
+  // Cross-provider model guard: switching provider (GUI/env) often leaves the OTHER provider's model
+  // behind — e.g. provider=elevenlabs but model='gpt-4o-mini-tts', which ElevenLabs 400s. Coerce a
+  // mismatched model to the provider's default so readout never silently dies on a stale model.
+  const isEleven = /^eleven/i.test(String(opts.model || ''));
+  if (opts.provider === 'elevenlabs' && !isEleven) opts.model = DEFAULTS.elevenlabs.model;
+  if (opts.provider === 'openai' && isEleven) opts.model = DEFAULTS.openai.model;
   const mime = mimeFor(opts.format);
   if (opts.provider === 'openai') { const audio = await openaiSynthesize(text, opts, onChunk); return { audio, mime, format: opts.format }; }
   if (opts.provider === 'elevenlabs') { const audio = await elevenlabsSynthesize(text, opts, onChunk); return { audio, mime, format: opts.format }; }
