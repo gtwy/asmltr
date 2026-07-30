@@ -138,9 +138,6 @@ function matchFilter(s) {
 const ephemeral = computed(() =>
   store.sessions.filter((s) => s.kind === 'ephemeral' && matchFilter(s)).sort(byActivity)
 )
-const persistent = computed(() =>
-  store.sessions.filter((s) => s.kind === 'persistent' && matchFilter(s)).sort(byActivity)
-)
 
 function byActivity(a, b) {
   return (b.last_activity_unix || 0) - (a.last_activity_unix || 0)
@@ -170,7 +167,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
 
 <template>
   <div>
-    <PageHeader title="Live" subtitle="Active sessions and persistent daemons across every surface">
+    <PageHeader title="Live" subtitle="Active sessions across every surface">
       <template #actions>
         <div class="relative">
           <input
@@ -236,9 +233,8 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
     </ModalShell>
 
     <!-- summary tiles -->
-    <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
       <StatTile label="Active sessions" :value="store.activeSessions.length" accent="#34D399" />
-      <StatTile label="Persistent" :value="persistent.length" accent="#22D3EE" />
       <StatTile label="Tokens (live)" :value="fmtNum(totalTokens)" accent="#8B5CF6" />
       <StatTile
         label="Tokens · 24h"
@@ -293,21 +289,5 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
       </p>
     </section>
 
-    <!-- persistent -->
-    <section>
-      <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-400">
-        <span class="h-2 w-2 rounded-full bg-cyan-400"></span>
-        Persistent daemons
-        <span class="text-slate-600">({{ persistent.length }})</span>
-      </h2>
-      <div
-        v-if="persistent.length"
-        class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
-      >
-        <SessionCard v-for="s in persistent" :key="s.session_id" :session="s" :now="now" :preview="latestBySession[s.session_id]" :mutable="mutableBySession[s.session_id]" :channel-state="channelStates[mutableBySession[s.session_id]?.channelId]" :channel-busy="channelBusy[mutableBySession[s.session_id]?.channelId]" :search-snippet="searchHits[s.session_id]?.snippet" @open="windows.openSession($event)" @toggle-channel="toggleChannel" />
-      </div>
-      <p v-else class="glass px-4 py-6 text-center text-sm text-slate-500">
-        No persistent daemons registered.
-      </p>
-    </section>  </div>
+  </div>
 </template>

@@ -318,15 +318,39 @@ async function start(ctx) {
       control: [...controlDevices.entries()].map(([id, d]) => ({ id, name: d.name, since: d.since })) });
   });
 
-  // --- manager→device push: `asmltr send android <device>` / announcements / steer ------------------
+  // --- manager→device push: `asmltr send android <device>` / announcements / steer / notify ----------
+  // kind:'inject' (default) steers text into a turn; kind:'speak' (asmltr notify, Part A) asks the device
+  // to read the text ALOUD without running a turn. A '*' / empty target broadcasts to every connected
+  // device — and to the background control link too, so read-aloud works even when the overlay is closed.
   app.post('/out', (req, res) => {
-    const { target, text } = req.body || {};
+    const { target, text, kind, title, require_headphones } = req.body || {};
     const device = String(target || '').trim();
+    if (kind === 'speak') {
+      const frame = { type: 'speak', text: String(text || ''), title: title || null, require_headphones: !!require_headphones };
+      let delivered = 0;
+      if (!device || device === '*') {
+        for (const id of devices.keys()) if (pushSSE(id, frame)) delivered++;
+        for (const id of controlDevices.keys()) if (pushControl(id, frame)) delivered++;
+      } else {
+        if (pushSSE(device, frame)) delivered++;
+        if (pushControl(device, frame)) delivered++;
+      }
+      return res.json({ ok: delivered > 0, delivered, error: delivered ? undefined : 'no device connected' });
+    }
     if (!device) return res.status(400).json({ ok: false, error: 'target device id required' });
     const delivered = pushSSE(device, { type: 'inject', text: String(text || '') });
     if (!delivered) return res.json({ ok: false, error: 'device not connected', conversation_key: convKey(device) });
     return res.json({ ok: true, conversation_key: convKey(device) });
   });
+
+  // Presence — is any assistant device reachable right now (chat stream or background control link)?
+  // The notify ladder + GUI use this to decide whether the read-aloud step can land.
+  app.get('/gw/presence', (req, res) => res.json({
+    ok: true,
+    reachable: devices.size > 0 || controlDevices.size > 0,
+    chat: devices.size, control: controlDevices.size,
+    devices: [...new Set([...devices.keys(), ...controlDevices.keys()])],
+  }));
 
   // --- edge speech: STT + TTS proxied here so the phone needs only its device token ----------------
   app.post('/gw/transcribe', async (req, res) => {

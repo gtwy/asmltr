@@ -328,6 +328,24 @@ async function cmdAnnounce(rest) {
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target}  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
 }
+// asmltr notify "<text>" [--title T] [--force] [--silent]  — proactive read-aloud / delivery ladder (Part A).
+// The morning-brief prompt (and any session) calls this to REACH the user (android read-aloud → push → text).
+async function cmdNotify(rest) {
+  const opts = { force: false }; const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--title') opts.title = rest[++i];
+    else if (t === '--force') opts.force = true;             // ignore quiet hours
+    else if (t === '--silent' || t === '--no-speak') opts.speak = false; // skip the spoken step (text only)
+    else words.push(t);
+  }
+  const text = words.join(' ');
+  if (!text) throw new Error('usage: asmltr notify "<text>" [--title <t>] [--force] [--silent]');
+  const r = await fetch(CORE_BASE + '/v2/notify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, ...opts }) })
+    .then((x) => x.json()).catch((e) => ({ error: e.message }));
+  if (r && r.delivered) console.log(A.grn(`✓ notified via ${r.via}`));
+  else console.log(A.yel('· not delivered') + A.dim(r && r.steps ? '  (' + r.steps.map((s) => `${s.step}:${s.ok ? 'ok' : (s.skipped || s.error || 'fail')}`).join(' ') + ')' : (r && r.error ? '  ' + r.error : '')));
+}
 function _parseSince(s) {
   const m = /^(\d+)\s*([smhd])$/.exec(String(s || '').trim());
   if (!m) return 0;
@@ -778,6 +796,7 @@ async function cmdVault(rest, f) {
       case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
       case 'announce': return await cmdAnnounce(rest);
+      case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();
       case 'uploads': return await cmdUploads(rest);
       case 'drafts': return await cmdDrafts(rest);
