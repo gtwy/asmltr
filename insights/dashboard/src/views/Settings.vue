@@ -387,7 +387,10 @@ async function loadVoices(provider) {
   catch (_) { dynamicVoices.value = null }
   finally { voicesLoading.value = false }
 }
-async function loadVoiceCfg() { try { vcfg.value = await voice.getConfig(); await loadVoices(vcfg.value?.tts?.provider) } catch (_) {} }
+const wakePhrase = ref('')
+const sttEndpointChoices = computed(() => field('voice', 'stt_endpoint').choices || [])
+const sttSensChoices = computed(() => field('voice', 'stt_sensitivity').choices || [])
+async function loadVoiceCfg() { try { vcfg.value = await voice.getConfig(); wakePhrase.value = vcfg.value?.stt?.wake_phrase || ''; await loadVoices(vcfg.value?.tts?.provider) } catch (_) {} }
 async function setVoiceCfg(part) {
   busy.value = 'voicecfg'; notice.value = ''
   try {
@@ -779,6 +782,62 @@ onMounted(async () => {
                   <div class="font-semibold">{{ c.label }}</div>
                   <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
                 </button>
+              </div>
+            </div>
+
+            <!-- End-of-speech pause (VAD endpoint) -->
+            <div v-if="sttEndpointChoices.length">
+              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_endpoint').label }}
+                <span class="normal-case text-slate-600">— {{ field('voice','stt_endpoint').desc }}</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button v-for="c in sttEndpointChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                  :class="String(vcfg.stt?.vad_endpoint_ms) === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                  @click="setVoiceCfg({ stt: { vad_endpoint_ms: Number(c.id) } })">
+                  <div class="font-semibold">{{ c.label }}</div>
+                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Mic sensitivity (VAD) -->
+            <div v-if="sttSensChoices.length">
+              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_sensitivity').label }}
+                <span class="normal-case text-slate-600">— {{ field('voice','stt_sensitivity').desc }}</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button v-for="c in sttSensChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                  :class="String(vcfg.stt?.vad_sensitivity) === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                  @click="setVoiceCfg({ stt: { vad_sensitivity: Number(c.id) } })">
+                  <div class="font-semibold">{{ c.label }}</div>
+                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Wake word -->
+            <div class="border-t border-white/10 pt-4">
+              <label class="flex cursor-pointer items-center justify-between gap-3">
+                <span>
+                  <span class="text-sm text-slate-200">{{ field('voice','wake_enabled').label || 'Wake word' }}</span>
+                  <span class="block text-[12px] text-slate-500">{{ field('voice','wake_enabled').desc }}</span>
+                </span>
+                <input type="checkbox" :disabled="busy === 'voicecfg'" :checked="!!vcfg.stt?.wake_enabled"
+                  @change="setVoiceCfg({ stt: { wake_enabled: $event.target.checked } })" />
+              </label>
+              <div class="mt-3">
+                <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','wake_phrase').label || 'Wake phrase' }}
+                  <span class="normal-case text-slate-600">— {{ field('voice','wake_phrase').desc }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input v-model="wakePhrase" type="text" placeholder="hey Eve"
+                    class="flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
+                  <button type="button" :disabled="!wakePhrase.trim() || busy === 'voicecfg'" @click="setVoiceCfg({ stt: { wake_phrase: wakePhrase.trim() } })"
+                    class="shrink-0 rounded-lg bg-brand-gradient px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">
+                    <Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
+                </div>
               </div>
             </div>
           </template>
