@@ -205,6 +205,20 @@ function chime() { try { const a = new Audio('assets/chime.ogg'); a.volume = 0.8
 // Listening cue — plays when the mic opens so hands-free users (earbud trigger, screen off) hear that
 // it's listening. Always plays (it's trigger feedback, not TTS), independent of the mute toggle.
 function listenCue() { try { const a = new Audio('assets/chime.ogg'); a.volume = 1; a.play().catch(() => {}); } catch (_) {} }
+// Stop cue — a short DESCENDING two-tone beep (distinct from the ascending listen chime) confirming the
+// stop phrase was caught and the mic turned off. Synthesized (no asset); plays regardless of mute.
+function stopCue() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ctx = new AC(); const t0 = ctx.currentTime;
+    [[660, 0], [440, 0.14]].forEach(([f, dt]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(0.3, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.13);
+      o.connect(g).connect(ctx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.14);
+    });
+    setTimeout(() => { try { ctx.close(); } catch (_) {} }, 500);
+  } catch (_) {}
+}
 function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'); drone.loop = true; drone.volume = 0.45; } drone.currentTime = 0; drone.play().catch(() => {}); } catch (_) {} }
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 
@@ -237,7 +251,7 @@ async function onRecStop() {
     const b64 = await blobB64(blob);
     const { text } = await api('/gw/transcribe', { audio_base64: b64, mime: (recorder && recorder.mimeType) || 'audio/webm' });
     if (text && isStopPhrase(text)) { // hands-free stop — drop the turn, don't send to the LLM, end listening
-      suppressRestart = true; stopDrone(); setState('idle'); bubble('sys', '✓ stopped listening');
+      suppressRestart = true; stopDrone(); setState('idle'); stopCue(); bubble('sys', '✓ stopped listening');
     } else if (text && text.trim()) { setState('idle'); await sendTurn(text.trim()); } else setState('idle');
   } catch (e) { bubble('sys', '⚠ ' + e.message); setState('idle'); }
 }
