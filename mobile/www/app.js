@@ -79,17 +79,33 @@ function bubble(role, text) {
   const b = document.createElement('div'); b.className = 'bubble'; b.textContent = text || '';
   el.appendChild(b); $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight; return b;
 }
-function ensureSteps() { if (stepsEl) return stepsEl; const el = document.createElement('div'); el.className = 'steps'; $('log').appendChild(el); stepsEl = el; return el; }
-function addThinking(text) { const s = ensureSteps(); const d = document.createElement('div'); d.className = 'step step-think'; d.textContent = '… ' + text; s.appendChild(d); $('log').scrollTop = $('log').scrollHeight; }
 function fmt(v) { try { return typeof v === 'string' ? v : JSON.stringify(v, null, 2); } catch (_) { return String(v); } }
+// Each thinking/tool row is appended to the log IN ORDER, and closes the current text bubble (curBubble=null)
+// so streamed reply text threads chronologically around the tools instead of stacking into one bubble.
+function addThinking(text) {
+  curBubble = null;
+  const d = document.createElement('div'); d.className = 'step step-think'; d.textContent = '… ' + text;
+  $('log').appendChild(d); $('log').scrollTop = $('log').scrollHeight;
+}
+// A short, single-line preview of a tool's input for the collapsed chip (the command/query/path/etc).
+function toolPreview(input) {
+  if (input == null) return '';
+  let s = typeof input === 'string' ? input
+    : (input.command || input.query || input.file_path || input.path || input.pattern || input.prompt || input.description || input.url || input.cmd || fmt(input));
+  return String(s).replace(/\s+/g, ' ').trim();
+}
 function addTool(name, input) {
-  const s = ensureSteps();
+  curBubble = null;
   const wrap = document.createElement('div'); wrap.className = 'step step-tool tool-chip';
-  const head = document.createElement('div'); head.className = 'tool-head'; head.innerHTML = '<span class="tool-caret">▸</span> ⚙ ' + name;
+  const head = document.createElement('div'); head.className = 'tool-head';
+  const caret = document.createElement('span'); caret.className = 'tool-caret'; caret.textContent = '▸';
+  const nm = document.createElement('span'); nm.className = 'tool-name'; nm.textContent = '⚙ ' + name;
+  const pv = document.createElement('span'); pv.className = 'tool-preview'; pv.textContent = toolPreview(input);
+  head.appendChild(caret); head.appendChild(nm); head.appendChild(pv);
   const detail = document.createElement('pre'); detail.className = 'tool-detail hidden';
   if (input != null) detail.textContent = 'input:\n' + fmt(input);
-  head.addEventListener('click', () => { detail.classList.toggle('hidden'); head.querySelector('.tool-caret').textContent = detail.classList.contains('hidden') ? '▸' : '▾'; });
-  wrap.appendChild(head); wrap.appendChild(detail); s.appendChild(wrap);
+  head.addEventListener('click', () => { detail.classList.toggle('hidden'); caret.textContent = detail.classList.contains('hidden') ? '▸' : '▾'; });
+  wrap.appendChild(head); wrap.appendChild(detail); $('log').appendChild(wrap);
   lastTool = { wrap, detail }; $('log').scrollTop = $('log').scrollHeight;
 }
 function addToolResult(output, isErr) {
@@ -210,7 +226,11 @@ function chime() { try { const a = new Audio('assets/chime.ogg'); a.volume = 0.8
 function beepPair(f1, f2) {
   try {
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
-    const ctx = new AC(); const t0 = ctx.currentTime;
+    const ctx = new AC();
+    // Wake-from-closed has no user gesture, so the context starts suspended → silent. Resume it (the
+    // overlay WebView allows gesture-less playback). Schedule the tones after a beat so resume lands.
+    try { if (ctx.state === 'suspended' && ctx.resume) ctx.resume(); } catch (_) {}
+    const t0 = ctx.currentTime;
     // Bluetooth (A2DP) needs ~0.3s to spin up an idle audio route, or the first tone gets clipped. Hold a
     // near-silent primer open for the lead, then start the audible tones after the route is warm.
     const LEAD = 0.32;
