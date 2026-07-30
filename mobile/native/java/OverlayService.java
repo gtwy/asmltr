@@ -62,10 +62,14 @@ public class OverlayService extends Service {
     if (ACTION_CLOSE.equals(action)) { stopSelf(); return START_NOT_STICKY; }
     ensureAdded();
     setMinimizedInternal(false);
+    // Native listen cue for wake-word / headset-button starts: the WebView's own beep is inaudible when
+    // waking from closed (WebView not alive, BT route cold). Play it natively (warm route) and tell the
+    // page to SKIP its cue for this listen so we don't double up.
+    if (ACTION_LISTEN.equals(action)) { try { Chime.listen(this); } catch (Throwable t) {} }
     if (web != null) web.post(new Runnable() { public void run() {
       // (re)start a listening turn on the assist gesture; a plain SHOW just surfaces the card
       String js = ACTION_LISTEN.equals(action)
-        ? "window.__ASMLTR_ASSIST=true; if(window.asmltrExpand)window.asmltrExpand(); if(window.asmltrStartListening)window.asmltrStartListening();"
+        ? "window.__ASMLTR_ASSIST=true; window.__ASMLTR_SKIP_CUE=true; if(window.asmltrExpand)window.asmltrExpand(); if(window.asmltrStartListening)window.asmltrStartListening(true);"
         : "if(window.asmltrExpand)window.asmltrExpand();";
       web.evaluateJavascript(js, null);
     } });
