@@ -65,7 +65,7 @@ async function refreshVaultLocked() {
 }
 refreshVaultLocked();
 const _vaultTimer = setInterval(refreshVaultLocked, 30000); if (_vaultTimer.unref) _vaultTimer.unref();
-const { runTurn, generateTitle, generateStatus, generateSelfAssessment, getLastModel } = require('./runner');
+const { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
 
@@ -1341,6 +1341,15 @@ app.post('/v2/title', async (req, res) => {
     res.json({ ok: true, title });
   } catch (e) { res.status(500).json({ error: e.message }); }
   finally { _titleBusy = false; }
+});
+
+// Notification triage — the Android reader posts an incoming phone notification; the DEFAULT reasoning
+// engine decides whether to read it aloud, scores importance, and returns a spoken one-liner.
+app.post('/v2/notify/triage', async (req, res) => {
+  const b = req.body || {};
+  if (!b.title && !b.text) return res.status(400).json({ error: 'need title or text' });
+  try { res.json({ ok: true, ...(await generateNotifyTriage(b)) }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Live "what is this session doing right now" rollup — the rolling counterpart to /v2/title.
