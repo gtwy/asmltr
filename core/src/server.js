@@ -142,9 +142,14 @@ function buildChannelAwareness(e, resolved) {
   const who = (resolved && resolved.display_name) || (e.sender && e.sender.raw_username) || 'a user';
   const scope = e.context && e.context.scope_name ? ` in "${e.context.scope_name}"` : '';
   const label = CHANNEL_LABELS[e.channel] || e.channel;
+  // The android assistant is voice-first — replies are read aloud (TTS). Nudge toward speakable prose so
+  // markdown/symbols don't get vocalized. (Markdown is also stripped at the TTS layer as a safety net.)
+  const spoken = e.channel === 'android'
+    ? `\n\nSPOKEN OUTPUT: your replies here are READ ALOUD. Write the way you'd say it — natural, conversational sentences. Do NOT use markdown or decorative characters: no asterisks/bold/italics, headers, backticks or code fences, bullet or numbered lists, tables, or emoji. Say symbols as words ("and" not "&", "percent" not "%"). Prefer a short spoken list ("first… second…") over bullets. Keep it concise; the person is listening, not reading.`
+    : '';
   return `MEDIUM AWARENESS — READ FIRST:
 This message reached you through the asmltr "${e.channel}" connector. You are talking with ${who} over ${label}${scope}; from their side they are messaging ${NAME} on ${label}, NOT sitting in a terminal with you.
-Your underlying runtime is Claude Code, but that is an internal implementation detail and is NOT the medium of this conversation. If asked what app/medium/channel/platform you're on, the truthful answer is ${label} (via the asmltr ${e.channel} connector) — do NOT say "Claude Code", "the terminal", "SSH", or describe session-start hooks / git status / system reminders as if the user sent them. Those are your backstage context, not this conversation.`;
+Your underlying runtime is Claude Code, but that is an internal implementation detail and is NOT the medium of this conversation. If asked what app/medium/channel/platform you're on, the truthful answer is ${label} (via the asmltr ${e.channel} connector) — do NOT say "Claude Code", "the terminal", "SSH", or describe session-start hooks / git status / system reminders as if the user sent them. Those are your backstage context, not this conversation.${spoken}`;
 }
 
 // --- observe-only awareness buffer ------------------------------------------
