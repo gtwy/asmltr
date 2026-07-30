@@ -388,6 +388,21 @@ async function start(ctx) {
       sensitivity: (stt && stt.wake_sensitivity != null) ? stt.wake_sensitivity : 50,
       model_url: VOSK_MODEL_URL, model_id: VOSK_MODEL_ID });
   });
+
+  // Notification reader (Part B): the app posts an incoming phone notification; the core's DEFAULT engine
+  // triages it → { speak, priority, synopsis }. Separate system from asmltr notify — NO push/telegram
+  // fallback; the phone either reads it over BT or stays quiet.
+  const CORE_TRIAGE = (process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle$/, '/v2/notify/triage');
+  app.post('/gw/notify-triage', async (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    try {
+      const r = await fetch(CORE_TRIAGE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app: b.app, package: b.package, title: b.title, text: b.text }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.ok === false) return res.status(502).json({ ok: false, error: (j && j.error) || `core ${r.status}` });
+      res.json({ ok: true, speak: !!j.speak, priority: j.priority || 0, synopsis: j.synopsis || '' });
+    } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  });
   // Let the phone app write voice/wake settings back (so it's configurable IN the app, not just the web GUI).
   app.post('/gw/voice-config', async (req, res) => {
     const b = req.body || {};
