@@ -255,6 +255,19 @@ function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 
 // ---------- record + VAD ----------
+// Pick the phone's built-in mic (never a Bluetooth input) so capturing a turn doesn't bring up the
+// earbuds' SCO/call link — which would mute the A2DP output the reply is spoken on. Returns null if we
+// can't tell them apart (labels need prior mic permission, which we have once a turn has run).
+async function builtinMicId() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const ins = devs.filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+    if (!ins.length) return null;
+    const bt = /blue|sco|hands|headset|buds|jbl|airpod|earbud|wireless|a2dp|hfp/i;
+    const builtin = ins.find((d) => /built|internal|phone|bottom|top|back/i.test(d.label)) || ins.find((d) => d.label && !bt.test(d.label));
+    return builtin ? builtin.deviceId : null;
+  } catch (_) { return null; }
+}
 async function startRec(skipCue) {
   if (state !== 'idle') return;
   // Wake-from-closed (wake word / headset button) plays the listen cue NATIVELY (OverlayService → Chime)
@@ -269,7 +282,16 @@ async function startRec(skipCue) {
     // HFP "call" profile — hijacking the earbud button to call-mute. Plain (unprocessed) capture keeps the
     // headset on A2DP/media so its gesture still triggers the assistant. We only record when TTS isn't
     // playing, so AEC isn't needed anyway.
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    // Also PIN the capture to the built-in mic: capturing the Bluetooth headset mic brings up the SCO
+    // (call) link, which routes audio OUTPUT to a muted SCO channel — so the spoken reply plays silently
+    // until SCO closes ~24s later. Built-in mic → no SCO → output stays on A2DP → reply is audible.
+    const base = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    const micId = await builtinMicId();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: micId ? { ...base, deviceId: { exact: micId } } : base });
+    } catch (_) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: base }); // fallback: any mic
+    }
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
     recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
     chunks = []; heardSpeech = false;
