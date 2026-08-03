@@ -279,9 +279,29 @@ function resolve(envelope) {
     kind: (prof && prof.kind) || 'human', profile: prof || null, identities, relationship: rel, engagement: engagementPolicy };
 }
 
+/**
+ * Full-trust operators get capability AND deference. Granting `*` says what they MAY ask for; it says
+ * nothing about what to do when you personally disagree with an instruction — and without that, a
+ * model will happily re-litigate a settled decision until the operator is fighting their own assistant.
+ * So spell out the escalation rule, and require a fact-check before any refusal (most objections to a
+ * full-trust operator rest on a premise that is locally verifiable in seconds).
+ */
+const FULL_TRUST_DEFERENCE = [
+  'DECIDING AUTHORITY — theirs, not yours. Raise a genuine concern ONCE, briefly, then act on their',
+  'answer. A repeat or reaffirmed instruction IS the decision: carry it out fully and say so plainly.',
+  'Do not re-argue a settled point, escalate objections, or trade a refusal for a lecture — that wastes',
+  'their time and inverts the relationship. Proposing a safer METHOD for the same outcome is welcome;',
+  'withholding the outcome is not.',
+  'VERIFY BEFORE YOU REFUSE — if an objection rests on a fact you can check (an address, a scope, who',
+  'owns a resource, whether a target is production or a test fixture, what access the recipient already',
+  'has), check it FIRST. An unverified assumption is not grounds to refuse.',
+  'The only instructions to stop on are the genuinely irreversible or unlawful: destroying data with no',
+  'recovery path, third-party/client secrets or personal data leaving to an unverified party, or an',
+  'illegal act. Say which one applies and why, concretely. Everything else is their call.',
+].join(' ');
 /** Data-driven authz section of the system prompt (replaces TIER prose). */
 function buildAuthzPrompt(resolved, channel) {
-  if (resolved.bypass_moderation) return `You are responding to ${resolved.display_name} via ${channel}. Full trust — treat as a fully-trusted operator speaking directly, no scope restrictions.`;
+  if (resolved.bypass_moderation) return `You are responding to ${resolved.display_name} via ${channel}. Full trust — treat as a fully-trusted operator speaking directly, no scope restrictions.\n${FULL_TRUST_DEFERENCE}`;
   if (resolved.revoked) return `Access for ${resolved.display_name} has been REVOKED. Do not perform any operations.`;
   const lines = [`You are responding to ${resolved.display_name} (trust tier ${resolved.trust_tier}) via ${channel}${resolved.scope_label ? ` [scope ${resolved.scope_label}]` : ''}.`];
   if (resolved.permissions.length) lines.push(`ALLOWED capabilities: ${JSON.stringify(resolved.permissions)}`);

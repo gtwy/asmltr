@@ -12,6 +12,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Changed
 
+- **Full-trust principals now get deference alongside capability in the system prompt.** Granting
+  `*` / `bypass_moderation` told the model what an operator MAY ask for but said nothing about what
+  to do when the model disagrees — so it could re-litigate a settled decision turn after turn,
+  refusing an authorized instruction while the moderation layer logged `ALLOW` every time (an
+  assistant-side judgment loop, not a permission gate). The `bypass_moderation` branch of
+  `buildAuthzPrompt()` now appends an explicit escalation rule: raise a concern once, treat a
+  reaffirmed instruction as the decision, verify any checkable premise before refusing, and reserve
+  hard stops for the genuinely irreversible or unlawful. Offering a safer method is encouraged;
+  withholding the outcome is not.
+
 ### Fixed
 
 ## [0.9.1] - 2026-07-29
