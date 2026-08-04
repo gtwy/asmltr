@@ -5,7 +5,7 @@
 // The view: a list of jobs (schedule, next/last run, status, enable toggle, run-now, edit, delete) and
 // an add/edit modal with a friendly time+weekday picker (advanced raw-cron field) + per-type payload.
 import { onMounted, reactive, ref, computed, onBeforeUnmount } from 'vue'
-import { schedulesApi, notifyApi } from '@/services/api'
+import { schedulesApi } from '@/services/api'
 import PageHeader from '@/components/PageHeader.vue'
 import ModalShell from '@/components/ModalShell.vue'
 
@@ -157,41 +157,8 @@ async function onSubmit() {
   finally { submitting.value = false }
 }
 
-// ── notify delivery config (asmltr notify, Part A) ────────────────────────────
-const notifyOpen = ref(false)
-const ncfg = reactive({ quiet_start: 23, quiet_end: 8, require_headphones: false, fb_channel: '', fb_target: '' })
-const notifyMsg = ref('')
-async function loadNotify() {
-  try {
-    const c = await notifyApi.getConfig()
-    ncfg.quiet_start = c.quiet_hours?.start ?? 23
-    ncfg.quiet_end = c.quiet_hours?.end ?? 8
-    ncfg.require_headphones = !!c.require_headphones
-    ncfg.fb_channel = c.text_fallback?.channel || ''
-    ncfg.fb_target = c.text_fallback?.target || ''
-  } catch (_) { /* notify config optional */ }
-}
-async function saveNotify() {
-  notifyMsg.value = 'saving…'
-  try {
-    await notifyApi.setConfig({
-      quiet_hours: { start: Number(ncfg.quiet_start), end: Number(ncfg.quiet_end) },
-      require_headphones: ncfg.require_headphones,
-      text_fallback: ncfg.fb_channel && ncfg.fb_target ? { channel: ncfg.fb_channel.trim(), target: ncfg.fb_target.trim() } : null
-    })
-    notifyMsg.value = '✓ saved'
-  } catch (e) { notifyMsg.value = '✗ ' + e.message }
-  setTimeout(() => (notifyMsg.value = ''), 2500)
-}
-async function testNotify() {
-  notifyMsg.value = 'sending test…'
-  try { const r = await notifyApi.send({ text: 'asmltr notify test — this is a delivery-ladder check.', title: 'Test' }); notifyMsg.value = r.delivered ? `✓ delivered via ${r.via}` : '· not delivered (no reachable step)' }
-  catch (e) { notifyMsg.value = '✗ ' + e.message }
-  setTimeout(() => (notifyMsg.value = ''), 4000)
-}
-
 let timer = null
-onMounted(() => { load(); loadNotify(); timer = setInterval(load, 30000) })
+onMounted(() => { load(); timer = setInterval(load, 30000) })
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
 
@@ -206,44 +173,6 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 
     <p v-if="error" class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300">{{ error }}</p>
 
-    <!-- notify delivery config (asmltr notify, Part A) — the read-aloud/delivery ladder a prompt job calls -->
-    <div class="glass mb-6 p-4">
-      <button type="button" class="flex w-full items-center justify-between text-left" @click="notifyOpen = !notifyOpen">
-        <span class="text-sm font-semibold text-slate-100"><AppIcon glyph="🔔" /> Notify delivery <span class="ml-1 font-normal text-slate-500">— how <span class="font-mono">asmltr notify</span> reaches you</span></span>
-        <span class="text-slate-500">{{ notifyOpen ? '▾' : '▸' }}</span>
-      </button>
-      <div v-if="notifyOpen" class="mt-4 flex flex-col gap-4">
-        <p class="text-xs text-slate-500">Ladder: <b>android read-aloud</b> (a connected assistant device reads it) → push → text fallback. Quiet hours suppress the spoken step (text still goes).</p>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div>
-            <label class="mb-1 block text-xs font-medium text-slate-300">Quiet hours start</label>
-            <input v-model="ncfg.quiet_start" type="number" min="0" max="23" class="field-input" />
-          </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-slate-300">Quiet hours end</label>
-            <input v-model="ncfg.quiet_end" type="number" min="0" max="23" class="field-input" />
-          </div>
-          <label class="flex items-end gap-2 pb-2 text-sm text-slate-300">
-            <input v-model="ncfg.require_headphones" type="checkbox" class="h-4 w-4" /> Only read aloud over headphones
-          </label>
-        </div>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label class="mb-1 block text-xs font-medium text-slate-300">Text fallback — channel</label>
-            <input v-model="ncfg.fb_channel" type="text" class="field-input font-mono" placeholder="telegram / discord / email (blank = off)" />
-          </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-slate-300">Text fallback — target</label>
-            <input v-model="ncfg.fb_target" type="text" class="field-input font-mono" placeholder="chat id / channel / address" />
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <button type="button" class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white" @click="saveNotify">Save</button>
-          <button type="button" class="act" @click="testNotify">▶ Send test</button>
-          <span class="text-xs text-slate-400">{{ notifyMsg }}</span>
-        </div>
-      </div>
-    </div>
 
     <div v-if="items.length" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="job in items" :key="job.id" class="glass glass-hover flex flex-col gap-3 p-4" :class="{ 'opacity-60': !job.enabled }">

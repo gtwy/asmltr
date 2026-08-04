@@ -3,10 +3,10 @@
 // the ONE source of truth also driving the terminal TUI. This view keeps its hand-crafted layout +
 // the bespoke status widgets (SDK version, changelog); only the declarative bits (tabs, fields, model
 // choices, toggle copy) are sourced from the manifest, so adding a setting updates both GUI and TUI.
-import { ref, onMounted, computed, reactive } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
-import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi, enginesApi, mcpApi } from '@/services/api'
+import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi, enginesApi, mcpApi, notifyApi } from '@/services/api'
 import QRCode from 'qrcode'
 import { startRegistration } from '@simplewebauthn/browser'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
@@ -416,9 +416,84 @@ async function setVoiceCfg(part) {
 async function setCustomVoice() { const v = customVoice.value.trim(); if (v) { await setVoiceCfg({ tts: { voice: v } }); customVoice.value = '' } }
 async function setCustomTtsModel() { const m = customTtsModel.value.trim(); if (m) { await setVoiceCfg({ tts: { model: m } }); customTtsModel.value = '' } }
 
+// --- Voice pipeline tester (talk to the full agent + hear it streamed back) --------------------------
+const vtPrompt = ref("Walk me through what you'd check first if a web service returned a 502, in two or three sentences.")
+const vtBusy = ref(false)
+const vtStatus = ref('')
+const vtRows = ref([])            // { kind:'ack'|'text', text }
+let vtCtrl = null
+let _chime = null, _drone = null
+const _q = []; let _playing = false
+function _audio(url) { const a = new Audio(url); return a }
+function _enqueue(b64, mime) {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  _q.push(URL.createObjectURL(new Blob([bytes], { type: mime || 'audio/mpeg' })))
+  if (!_playing) _playNext()
+}
+function _playNext() {
+  const url = _q.shift(); if (!url) { _playing = false; return }
+  _playing = true; const a = _audio(url)
+  a.onended = a.onerror = () => { URL.revokeObjectURL(url); _playNext() }
+  a.play().catch(() => _playNext())
+}
+function _stopDrone() { try { _drone && _drone.pause(); if (_drone) _drone.currentTime = 0 } catch (_) {} }
+function _stopAudio() { _stopDrone(); _q.length = 0; _playing = false }
+function vtSpeak() {
+  const text = vtPrompt.value.trim(); if (!text || vtBusy.value) return
+  if (!_chime) { _chime = _audio(voice.assetUrl('chime.ogg')) }
+  if (!_drone) { _drone = _audio(voice.assetUrl('drone.ogg')); _drone.loop = true; _drone.volume = 0.35 }
+  vtBusy.value = true; vtRows.value = []; vtStatus.value = 'connecting…'
+  const t0 = performance.now()
+  vtCtrl = voice.speak({ conversation_key: 'web:voice-test-' + Date.now(), text }, {
+    onCue: (cue) => {
+      if (cue === 'chime') { _chime.currentTime = 0; _chime.play().catch(() => {}); vtStatus.value = 'on it…' }
+      else if (cue === 'drone-start') _drone.play().catch(() => {})
+      else if (cue === 'drone-stop') { _stopDrone(); vtStatus.value = `answering… (${((performance.now() - t0) / 1000).toFixed(1)}s to first reply)` }
+    },
+    onAudio: (f) => { _enqueue(f.b64, f.mime); if (f.role === 'ack') vtRows.value.push({ kind: 'ack', text: f.text || '(acknowledgment)' }) },
+    onText: (f) => vtRows.value.push({ kind: 'text', text: f.text }),
+    onDone: () => { vtStatus.value = `done · ${((performance.now() - t0) / 1000).toFixed(1)}s total`; vtBusy.value = false; vtCtrl = null },
+    onError: (m) => { vtStatus.value = 'error: ' + m; vtBusy.value = false; vtCtrl = null; _stopDrone() },
+  })
+}
+function vtStop() { try { vtCtrl && vtCtrl.abort() } catch (_) {} _stopAudio(); vtBusy.value = false; vtStatus.value = 'stopped' }
+onBeforeUnmount(() => { try { vtCtrl && vtCtrl.abort() } catch (_) {} _stopAudio() })
+
+// --- Notify delivery ladder (asmltr notify: android read-aloud → push → text fallback) ---------------
+const ncfg = reactive({ quiet_start: 23, quiet_end: 8, require_headphones: false, fb_channel: '', fb_target: '' })
+const notifyMsg = ref('')
+async function loadNotify() {
+  try {
+    const c = await notifyApi.getConfig()
+    ncfg.quiet_start = c.quiet_hours?.start ?? 23
+    ncfg.quiet_end = c.quiet_hours?.end ?? 8
+    ncfg.require_headphones = !!c.require_headphones
+    ncfg.fb_channel = c.text_fallback?.channel || ''
+    ncfg.fb_target = c.text_fallback?.target || ''
+  } catch (_) { /* notify config optional */ }
+}
+async function saveNotify() {
+  notifyMsg.value = 'saving…'
+  try {
+    await notifyApi.setConfig({
+      quiet_hours: { start: Number(ncfg.quiet_start), end: Number(ncfg.quiet_end) },
+      require_headphones: ncfg.require_headphones,
+      text_fallback: ncfg.fb_channel && ncfg.fb_target ? { channel: ncfg.fb_channel.trim(), target: ncfg.fb_target.trim() } : null,
+    })
+    notifyMsg.value = '✓ saved'
+  } catch (e) { notifyMsg.value = '✗ ' + e.message }
+  setTimeout(() => (notifyMsg.value = ''), 2500)
+}
+async function testNotify() {
+  notifyMsg.value = 'sending test…'
+  try { const r = await notifyApi.send({ text: 'asmltr notify test — this is a delivery-ladder check.', title: 'Test' }); notifyMsg.value = r.delivered ? `✓ delivered via ${r.via}` : '· not delivered (no reachable step)' }
+  catch (e) { notifyMsg.value = '✗ ' + e.message }
+  setTimeout(() => (notifyMsg.value = ''), 4000)
+}
+
 onMounted(async () => {
   try { manifest.value = await api.manifest() } catch (_) {}
-  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadBackups(), loadSecurity(), loadOidc(), loadEngines(), loadMcp()])
+  await Promise.all([loadIdentity(), loadRuntime(true), loadUpdates(), loadVoiceCfg(), loadNotify(), loadBackups(), loadSecurity(), loadOidc(), loadEngines(), loadMcp()])
   try { ackOn.value = (await voice.getAck()).enabled } catch (_) {}
 })
 </script>
@@ -866,6 +941,31 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
+
+            <!-- Test the pipeline: talk to the full agent and hear it streamed back (was the Voice tab) -->
+            <div class="border-t border-white/10 pt-4">
+              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Test the voice pipeline
+                <span class="normal-case text-slate-600">— send a prompt through the current voice + STT settings and hear the reply streamed back</span>
+              </div>
+              <textarea v-model="vtPrompt" rows="2" placeholder="Ask something…"
+                class="w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand-violet/60"
+                @keydown.enter.exact.prevent="vtSpeak"></textarea>
+              <div class="mt-2 flex items-center gap-2">
+                <button type="button" :disabled="vtBusy || !vtPrompt.trim()" @click="vtSpeak"
+                  class="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">
+                  <AppIcon glyph="▶" /> Speak</button>
+                <button v-if="vtBusy" type="button" @click="vtStop"
+                  class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-500/20">
+                  <AppIcon glyph="⏹" /> Stop</button>
+                <span class="ml-auto text-xs text-slate-500">{{ vtStatus }}</span>
+              </div>
+              <div v-if="vtRows.length" class="mt-3 max-h-[32vh] space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                <div v-for="(r, i) in vtRows" :key="i"
+                  class="whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm border px-3 py-2 text-[13px] leading-snug"
+                  :class="r.kind === 'ack' ? 'border-white/10 bg-white/[0.03] italic text-slate-400' : 'border-white/10 bg-white/[0.05] text-slate-100'"
+                >{{ r.text }}</div>
+              </div>
+            </div>
           </template>
         </div>
 
@@ -891,6 +991,46 @@ onMounted(async () => {
           <RouterLink to="/notifications" class="mt-4 inline-flex items-center gap-1.5 text-[12px] text-brand-violet hover:underline">
             <AppIcon glyph="✦" /> View notification history
           </RouterLink>
+
+          <!-- asmltr notify delivery ladder (moved here from Schedules) — how a prompt job reaches you -->
+          <div class="mt-6 border-t border-white/10 pt-5">
+            <h3 class="mb-1 text-sm font-semibold text-slate-200"><AppIcon glyph="🔔" /> Notify delivery</h3>
+            <p class="mb-4 text-[12px] text-slate-500">
+              How <span class="font-mono">asmltr notify</span> reaches you. Ladder:
+              <b>android read-aloud</b> (a connected assistant device speaks it) → push → text fallback.
+              Quiet hours suppress the spoken step (text still goes).
+            </p>
+            <div class="flex flex-col gap-4">
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-slate-300">Quiet hours start</label>
+                  <input v-model="ncfg.quiet_start" type="number" min="0" max="23" class="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-slate-300">Quiet hours end</label>
+                  <input v-model="ncfg.quiet_end" type="number" min="0" max="23" class="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
+                </div>
+                <label class="flex items-end gap-2 pb-2 text-sm text-slate-300">
+                  <input v-model="ncfg.require_headphones" type="checkbox" class="h-4 w-4" /> Only read aloud over headphones
+                </label>
+              </div>
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-slate-300">Text fallback — channel</label>
+                  <input v-model="ncfg.fb_channel" type="text" class="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-sm text-slate-200" placeholder="telegram / discord / email (blank = off)" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-slate-300">Text fallback — target</label>
+                  <input v-model="ncfg.fb_target" type="text" class="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-sm text-slate-200" placeholder="chat id / channel / address" />
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" class="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white" @click="saveNotify">Save</button>
+                <button type="button" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 hover:bg-white/10" @click="testNotify"><AppIcon glyph="▶" /> Send test</button>
+                <span class="text-xs text-slate-400">{{ notifyMsg }}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-show="tab === 'security'" class="glass p-5">
