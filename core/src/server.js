@@ -517,10 +517,23 @@ async function handle(envelope, opts = {}) {
   const usage = noReal
     ? { tokens_in: estTok(e.content.text), tokens_out: estTok(result.text), cost_usd: 0 }
     : { tokens_in: u.tokens_in || 0, tokens_out: u.tokens_out || 0, cost_usd: u.cost_usd || 0 };
+  // Cost: the EQUIVALENT value at API rates (all engines). Claude's SDK already reports it; for engines that
+  // don't (gemini/codex), price the tokens from shared/pricing. `billed` = whether this engine bills a metered
+  // API key (subscription → not billed); billed_cost_usd is the equivalent value only when it's actually billed.
+  const enginesReg = require('../../shared/engines');
+  let authMode = 'subscription'; let usedModel = getLastModel();
+  try { authMode = (enginesReg.authInfo(engineId) || {}).mode || 'subscription'; } catch (_) {}
+  try { usedModel = usedModel || enginesReg.modelFor(engineId); } catch (_) {}
+  let costUsd = usage.cost_usd || 0;
+  if (!costUsd && (usage.tokens_in || usage.tokens_out)) {
+    try { costUsd = require('../../shared/pricing').tokenCostUsd(usedModel, usage.tokens_in, usage.tokens_out); } catch (_) {}
+  }
+  const billed = authMode === 'api_key';
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'token-usage',
     identity: usageIdentity, source: 'core',
-    tokens_in: usage.tokens_in, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd,
-    payload: { tools: result.tools.length, isError: result.isError, engine: engineId, estimated: noReal || undefined,
+    tokens_in: usage.tokens_in, tokens_out: usage.tokens_out, cost_usd: costUsd, billed_cost_usd: billed ? costUsd : 0,
+    payload: { tools: result.tools.length, isError: result.isError, engine: engineId, model: usedModel || undefined,
+      auth_mode: authMode, billed, estimated: noReal || undefined,
       principal: resolved.user_key !== usageIdentity ? resolved.user_key : undefined } });
 
   // Universal silence sentinel: if the turn ends with [[NO_REPLY]] (e.g. the agent rerouted its

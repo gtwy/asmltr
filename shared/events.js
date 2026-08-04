@@ -86,7 +86,8 @@ function buildEvent(e) {
     event_type: e.event_type,
     tokens_in: toInt(e.tokens_in),
     tokens_out: toInt(e.tokens_out),
-    cost_usd: Number.isFinite(e.cost_usd) ? e.cost_usd : 0,
+    cost_usd: Number.isFinite(e.cost_usd) ? e.cost_usd : 0,          // equivalent value at API rates (all surfaces)
+    billed_cost_usd: Number.isFinite(e.billed_cost_usd) ? e.billed_cost_usd : 0, // portion actually billed (API-key surfaces only)
     payload: e.payload && typeof e.payload === 'object' ? e.payload : {},
     source: e.source != null ? String(e.source) : null,
   });
