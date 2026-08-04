@@ -124,6 +124,32 @@ const byIdentity = computed(() => {
 
 const showCostCol = computed(() => byIdentity.value.some((r) => r.cost_usd > 0))
 
+// --- metered aux spend breakdown (tts/stt/moderation) ------------------------------------------------
+const auxRows = computed(() => store.usageAux || [])
+const hasAux = computed(() => auxRows.value.length > 0)
+// Fold the hourly aux buckets into one row per (feature, provider, model, units) for the panel.
+const auxBreakdown = computed(() => {
+  const map = {}
+  for (const a of auxRows.value) {
+    const key = `${a.feature}|${a.provider}|${a.model}|${a.units}`
+    if (!map[key]) map[key] = { feature: a.feature, provider: a.provider || '—', model: a.model || '—', units: a.units, unit_count: 0, calls: 0, cost_usd: 0, billed_cost_usd: 0 }
+    map[key].unit_count += a.unit_count || 0
+    map[key].calls += a.calls || 0
+    map[key].cost_usd += a.cost_usd || 0
+    map[key].billed_cost_usd += a.billed_cost_usd || 0
+  }
+  return Object.values(map).sort((a, b) => b.cost_usd - a.cost_usd)
+})
+// Compact unit label: seconds → mm:ss-ish minutes; chars/tokens → k-abbreviated counts.
+function fmtUnits(count, units) {
+  const n = count || 0
+  if (units === 'seconds') return `${(n / 60).toFixed(1)} min`
+  if (units === 'chars') return `${fmtNum(n)} chars`
+  if (units === 'tokens') return `${fmtNum(n)} tok`
+  return fmtNum(n)
+}
+const FEATURE_LABEL = { tts: 'Text-to-speech', stt: 'Transcription', moderation: 'Moderation', label: 'Labeling' }
+
 function tooltipStyle() {
   return {
     backgroundColor: 'rgba(15,15,25,0.95)',
@@ -263,6 +289,40 @@ onMounted(() => {
               <td :colspan="showCostCol ? 7 : 5" class="px-4 py-8 text-center text-slate-500">
                 No attribution data yet.
               </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- metered aux spend breakdown (tts / stt / moderation) -->
+    <div v-if="hasAux" class="glass mt-5 overflow-hidden">
+      <h3 class="border-b border-white/10 px-4 py-3 text-sm font-semibold text-slate-300">
+        Metered spend · by feature &amp; provider
+        <span class="ml-1 font-normal text-slate-500">· side-surfaces on API keys (voice + moderation) — this is what makes up the Billed total</span>
+      </h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-[11px] uppercase tracking-wider text-slate-500">
+              <th class="px-4 py-2 font-medium">Feature</th>
+              <th class="px-4 py-2 font-medium">Provider</th>
+              <th class="px-4 py-2 font-medium">Model</th>
+              <th class="px-4 py-2 text-right font-medium">Usage</th>
+              <th class="px-4 py-2 text-right font-medium">Calls</th>
+              <th class="px-4 py-2 text-right font-medium">Billed</th>
+              <th class="px-4 py-2 text-right font-medium">Equiv. value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in auxBreakdown" :key="a.feature + a.provider + a.model + a.units" class="border-t border-white/5 hover:bg-white/[0.03]">
+              <td class="px-4 py-2 text-slate-200">{{ FEATURE_LABEL[a.feature] || a.feature }}</td>
+              <td class="px-4 py-2 capitalize text-slate-300">{{ a.provider }}</td>
+              <td class="px-4 py-2 font-mono text-xs text-slate-400">{{ a.model }}</td>
+              <td class="px-4 py-2 text-right font-mono tabular-nums text-slate-300">{{ fmtUnits(a.unit_count, a.units) }}</td>
+              <td class="px-4 py-2 text-right font-mono tabular-nums text-slate-400">{{ fmtNum(a.calls) }}</td>
+              <td class="px-4 py-2 text-right font-mono tabular-nums text-emerald-300">{{ a.billed_cost_usd > 0 ? fmtUsd(a.billed_cost_usd) : '—' }}</td>
+              <td class="px-4 py-2 text-right font-mono tabular-nums text-cyan-300/80">{{ a.cost_usd > 0 ? fmtUsd(a.cost_usd) : '—' }}</td>
             </tr>
           </tbody>
         </table>

@@ -358,7 +358,9 @@ app.get('/api/who', requireToken, (req, res) => {
 });
 app.get('/api/usage', requireToken, (req, res) => {
   const since = Number(req.query.since) || Date.now() - 24 * 3600000;
-  res.json({ usage: dbmod.q.usage.all({ since }) });
+  // `usage` = per-(surface,identity) token rollup; `aux` = per-(feature,provider,model) metered
+  // side-surface spend (tts/stt/moderation) for the breakdown panel.
+  res.json({ usage: dbmod.q.usage.all({ since }), aux: dbmod.q.usageAux.all({ since }) });
 });
 app.get('/api/system', requireToken, (req, res) => {
   const since = Number(req.query.since) || Date.now() - 3600000;
