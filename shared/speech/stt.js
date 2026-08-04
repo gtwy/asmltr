@@ -111,20 +111,18 @@ async function realtimeToken(opts = {}) {
   const model = opts.model || cfg.model;
   const transcription = { model };
   if (cfg.language) transcription.language = cfg.language;
-  const body = {
-    session: {
-      type: 'transcription',
-      audio: {
-        input: {
-          format: { type: 'audio/pcm', rate: 24000 },
-          transcription,
-          // server_vad = OpenAI detects speech start/stop; ~600ms of silence ends a turn (auto-send trigger).
-          turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 },
-          noise_reduction: { type: 'near_field' },
-        },
-      },
-    },
+  const input = {
+    format: { type: 'audio/pcm', rate: 24000 },
+    transcription,
+    noise_reduction: { type: 'near_field' },
   };
+  // server_vad = OpenAI detects speech start/stop (~600ms silence ends a turn → auto-send trigger). The
+  // gpt-live-transcribe streaming model does NOT support server-side turn detection (it streams partials
+  // continuously; the client decides turn boundaries), so only request it for models that accept it.
+  if (!/live-transcribe/i.test(model)) {
+    input.turn_detection = { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 };
+  }
+  const body = { session: { type: 'transcription', audio: { input } } };
   const r = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
