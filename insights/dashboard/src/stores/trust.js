@@ -70,7 +70,25 @@ export const useTrustStore = defineStore('trust', {
     },
 
     surfaceFormat: (s) => (surface) =>
-      s.identifierSurfaces.find((f) => f.surface === surface) || null
+      s.identifierSurfaces.find((f) => f.surface === surface) || null,
+
+    // Lowercased lookup from any known handle → its principal: the principal id, its display_name, and
+    // every cross-channel identifier value all point at the same principal. Lets other views (e.g. Usage)
+    // fold raw channel identities into the one person the Access tab links them to.
+    identityIndex: (s) => {
+      const idx = new Map()
+      for (const p of s.principals) {
+        const put = (k) => { if (k != null && k !== '') idx.set(String(k).toLowerCase(), p) }
+        put(p.id)
+        put(p.display_name)
+        for (const i of p.identifiers || []) put(i.value)
+      }
+      return idx
+    },
+    // Resolve one raw identity string to its linked principal, or null if unlinked. Case-insensitive.
+    principalForIdentity() {
+      return (identity) => (identity ? this.identityIndex.get(String(identity).toLowerCase()) || null : null)
+    }
   },
 
   actions: {
