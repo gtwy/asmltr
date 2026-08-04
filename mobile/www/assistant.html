@@ -41,7 +41,15 @@
     <main id="log" class="log" aria-live="polite"></main>
 
     <footer class="controls">
-      <button id="talk" class="talk" aria-label="Talk"><span id="talkIcon" class="ticon"></span><span id="talkLabel" class="talkLabel">Tap to talk</span></button>
+      <button id="talk" class="talk" aria-label="Talk">
+        <span class="orbface" id="orbface">
+          <span class="orbglow" id="orbGlowA"></span>
+          <span class="orbglow b" id="orbGlowB"></span>
+          <canvas id="orbcv" width="260" height="260"></canvas>
+          <span class="eyes" id="eyes"><i class="eye" id="eyeL"></i><i class="eye" id="eyeR"></i></span>
+        </span>
+        <span id="talkLabel" class="talkLabel">Tap to talk</span>
+      </button>
       <div class="kbdrow">
         <input id="kbd" class="kbd" type="text" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" placeholder="Type a message…" />
         <button id="kbdSend" class="kbdSend" aria-label="Send"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 20.5v-6l13-2-13-2v-6l19 8z"/></svg></button>
