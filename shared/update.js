@@ -24,6 +24,10 @@ const git = async (...args) => (await execFileP('git', ['-C', REPO, ...args], { 
 /** How far behind the channel target are we? Never throws. Includes version + channel + changelog. */
 async function getUpdateStatus({ fetch = true, channel } = {}) {
   channel = channel || version.getChannel();
+  // Computed BEFORE any git call. A git-rev-parse below throws in a git-less store (a packaged
+  // or read-only install), which drops straight to the catch; computing managed here means the
+  // status still reports managed in that case, so a caller never offers an in-place update.
+  const managed = version.getManaged();
   try {
     if (fetch) { try { await git('fetch', '--quiet', '--tags', 'origin', 'main'); } catch (_) {} }
     const head = await git('rev-parse', 'HEAD');
@@ -39,10 +43,11 @@ async function getUpdateStatus({ fetch = true, channel } = {}) {
       behind = Number(await git('rev-list', '--count', `HEAD..${target}`)) || 0;
       if (behind) changelog = (await git('log', '--oneline', '--no-decorate', '-20', `HEAD..${target}`)).split('\n').filter(Boolean);
     }
-    const managed = version.getManaged(); // externally-managed installs still report "how far behind" for telemetry, but the UI shows "managed by <x>" instead of an Update button
-    return { ok: true, channel, version: version.readVersion(), latest_version: latestVersion, behind, available: behind > 0, managed: managed.managed, manager: managed.manager, head: head.slice(0, 7), remote: String(target).slice(0, 7), target: targetName, changelog, checked_at: Date.now() };
+    // Managed installs surface how far behind they are (telemetry) but never report available:
+    // the platform owns updates, so nothing should offer an Update button or auto-trigger.
+    return { ok: true, channel, version: version.readVersion(), latest_version: latestVersion, behind, available: behind > 0 && !managed.managed, managed: managed.managed, manager: managed.manager, head: head.slice(0, 7), remote: String(target).slice(0, 7), target: targetName, changelog, checked_at: Date.now() };
   } catch (e) {
-    return { ok: false, channel, version: version.readVersion(), behind: 0, available: false, error: e.message, checked_at: Date.now() };
+    return { ok: false, channel, version: version.readVersion(), behind: 0, available: false, managed: managed.managed, manager: managed.manager, error: e.message, checked_at: Date.now() };
   }
 }
 
