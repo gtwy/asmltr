@@ -10,6 +10,13 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **Discord: mid-turn steering + a `@<assistant> stop` interrupt.** A message that arrives while a
+  turn is already running in a channel is no longer dropped — if it's addressed to the assistant it's
+  queued into the running turn as guidance (via `/v2/inject`, folded into the work in progress and
+  continued, like typing mid-task in a CLI), and `@<assistant> stop` (also `cancel`/`abort`/`halt`)
+  interrupts the in-flight turn via `/v2/abort` (the session survives and stays resumable). Adds
+  `core.abort()` / `core.inject()` to the connector SDK.
+
 ### Changed
 
 - **Full-trust principals now get deference alongside capability in the system prompt.** Granting
@@ -21,8 +28,17 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   reaffirmed instruction as the decision, verify any checkable premise before refusing, and reserve
   hard stops for the genuinely irreversible or unlawful. Offering a safer method is encouraged;
   withholding the outcome is not.
+- **Mobile app (0.8.10): assistant orb refresh.** Notification "eyes" that float over the screen while
+  `notify` reads a message aloud; a softer, more organic single-hue glowing orb whose eyes react to
+  the live mic while listening and to the decoded speech envelope while replying; and the orb now
+  floats over the bottom of the chat instead of taking its own row.
 
 ### Fixed
+
+- **Conversation history is no longer truncated.** Inbound/outbound event text doubles as the stored
+  conversation record that surfaces (e.g. the mobile app) replay as history, but was clipped to a
+  telemetry-sized preview (500 chars; 200 for the android device emit), so long messages were cut off
+  when loaded from the conversation list. Conversational text is now kept effectively full (100k).
 
 ## [0.9.1] - 2026-07-29
 
