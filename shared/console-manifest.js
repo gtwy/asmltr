@@ -147,8 +147,8 @@ const manifest = {
           desc: 'The model that turns your microphone audio into text (voice input in the chat).',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { model: '{value}' } } },
           choices: [
-            { id: 'gpt-transcribe', label: 'gpt-transcribe', hint: 'newest, most accurate + cheapest (~$0.0045/min) — recommended' },
-            { id: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe', hint: 'previous flagship' },
+            { id: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe', hint: 'most accurate that works today (recommended)' },
+            { id: 'gpt-transcribe', label: 'gpt-transcribe', hint: 'newest + cheapest (~$0.0045/min) — needs OpenAI project model access (org verification); 403s until granted' },
             { id: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe', hint: 'faster, cheaper' },
             { id: 'whisper-1', label: 'whisper-1', hint: 'classic Whisper' },
           ],
