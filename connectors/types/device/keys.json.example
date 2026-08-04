@@ -1,0 +1,6 @@
+{
+  "_comment": "Device tokens for the generic device connector. Copy to keys.json (gitignored). Each token maps a device to a trust identity so moderation/trust apply per caller. Mint a token per device in the GUI (or generate a random one) and store it on the device during pairing.",
+  "keys": [
+    { "key": "REPLACE_WITH_A_LONG_RANDOM_DEVICE_TOKEN", "identity": "owner", "username": "Desk buddy", "note": "living-room voice device" }
+  ]
+}
