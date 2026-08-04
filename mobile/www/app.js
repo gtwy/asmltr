@@ -45,6 +45,78 @@ let curBubble = null, stepsEl = null, lastTool = null, convKey = '', hydrated = 
 let drone = null, curAudio = null, vadRAF = 0, vadCtx = null;
 // VAD tuning — global STT settings from the web GUI/TUI (fetched via /gw/theme); forgiving defaults.
 let vadCfg = { endpoint_ms: 1600, start_ms: 8000, sensitivity: 50 };
+
+// ---------- voiceOrb: the reactive orb-face (ambient glow + expressive eyes) ----------
+// Drives the talk control's visual. State: idle | listening | thinking | speaking. Amplitude comes from
+// the live mic (while listening, via setAmp) and the spoken reply (while speaking, via hearTTS→analyser);
+// idle/thinking synthesize a gentle breathe. Self-contained; no dependencies.
+const voiceOrb = (() => {
+  let vs = 'idle', amp = 0, ampT = 0, t = 0, extAmp = 0, extAt = 0;
+  let look = { x: 0, y: 0 }, lookT = { x: 0, y: 0 }, blink = 0, nextBlink = 80, nextLook = 150;
+  let cv, cx, eyeL, eyeR, eyes, glowA, glowB, running = false;
+  let actx = null, analyser = null, abuf = null;               // shared WebAudio for TTS amplitude
+  function els() {
+    cv = document.getElementById('orbcv'); if (!cv) return false;
+    cx = cv.getContext('2d'); eyeL = document.getElementById('eyeL'); eyeR = document.getElementById('eyeR');
+    eyes = document.getElementById('eyes'); glowA = document.getElementById('orbGlowA'); glowB = document.getElementById('orbGlowB');
+    return !!(cx && eyeL && eyeR);
+  }
+  function setState(s) { if (['idle', 'listening', 'thinking', 'speaking'].includes(s)) vs = s; }
+  function setAmp(v) { extAmp = Math.max(0, Math.min(1, v || 0)); extAt = Date.now(); }
+  function hearTTS(audioEl) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      if (!actx) { actx = new AC(); analyser = actx.createAnalyser(); analyser.fftSize = 512; analyser.connect(actx.destination); abuf = new Uint8Array(analyser.fftSize); }
+      if (actx.state === 'suspended') actx.resume().catch(() => {});
+      const srcNode = actx.createMediaElementSource(audioEl); srcNode.connect(analyser); // → analyser → speakers
+    } catch (_) { /* cross-origin / already-connected → fall back to synth speaking envelope */ }
+  }
+  function ttsRms() {
+    if (!analyser) return null;
+    analyser.getByteTimeDomainData(abuf); let s = 0;
+    for (let i = 0; i < abuf.length; i++) { const d = (abuf[i] - 128) / 128; s += d * d; }
+    return Math.sqrt(s / abuf.length);
+  }
+  function drawOrb() {
+    const w = cv.width, h = cv.height, mx = w / 2, my = h / 2, base = w * 0.27, wob = w * 0.05 * (0.4 + amp);
+    cx.clearRect(0, 0, w, h);
+    const g = cx.createRadialGradient(mx, my - 18, base * 0.2, mx, my, base * 1.5);
+    g.addColorStop(0, 'rgba(178,150,255,.95)'); g.addColorStop(.5, 'rgba(220,95,185,.5)'); g.addColorStop(1, 'rgba(34,211,238,0)');
+    cx.fillStyle = g; cx.beginPath();
+    for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.1) {
+      const r = base + Math.sin(a * 3 + t / 12) * wob + Math.sin(a * 5 - t / 9) * wob * 0.5 + amp * base * 0.22;
+      const x = mx + Math.cos(a) * r, y = my + Math.sin(a) * r; a === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y);
+    }
+    cx.closePath(); cx.fill();
+  }
+  function frame() {
+    if (!running) return;
+    t++;
+    const breathe = (Math.sin(t / 45) + 1) / 2, fresh = Date.now() - extAt < 250;
+    if (vs === 'idle') ampT = 0.12 + breathe * 0.06;
+    else if (vs === 'thinking') ampT = 0.16 + breathe * 0.05;
+    else if (vs === 'listening') ampT = fresh ? 0.2 + extAmp * 0.8 : 0.12;
+    else if (vs === 'speaking') { const r = ttsRms(); ampT = r != null ? Math.min(1, r * 5) : 0.4 + Math.abs(Math.sin(t / 5)) * 0.5; }
+    amp += (ampT - amp) * 0.18;
+    if (--nextBlink <= 0) { blink = 1; nextBlink = 100 + Math.random() * 170; }
+    if (blink > 0) { blink -= 0.18; if (blink < 0) blink = 0; }
+    if (--nextLook <= 0) { lookT = { x: (Math.random() * 2 - 1) * 4, y: (Math.random() * 2 - 1) * 3 }; nextLook = 140 + Math.random() * 190; }
+    let lx = lookT.x, ly = lookT.y;
+    if (vs === 'listening') { lx = 0; ly = -1.5; } else if (vs === 'thinking') { lx = -3.5; ly = -4; } else if (vs === 'speaking') { lx = 0; ly = 0; }
+    look.x += (lx - look.x) * 0.08; look.y += (ly - look.y) * 0.08;
+    let open = 24, rad = 9, happy = false;
+    if (vs === 'listening') { open = 27; rad = 10; } else if (vs === 'thinking') { open = 15; rad = 7; } else if (vs === 'speaking') happy = amp > 0.5, open = happy ? 12 : 22;
+    const eh = Math.max(2, open * (1 - blink));
+    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 4px 4px 12px 12px' : rad + 'px'; }
+    if (eyes) eyes.style.transform = `translate(${look.x}px,${look.y}px) scale(${1 + amp * 0.05})`;
+    if (glowA) glowA.style.transform = `scale(${1 + amp * 0.16})`;
+    if (glowB) glowB.style.transform = `scale(${1 + amp * 0.26}) rotate(${t / 7}deg)`;
+    drawOrb();
+    requestAnimationFrame(frame);
+  }
+  function start() { if (running) return; if (!els()) return; running = true; requestAnimationFrame(frame); }
+  return { start, setState, setAmp, hearTTS };
+})();
 let wakeCfg = { enabled: false, phrase: '' }; // wake word (mirrors core voice config; editable in-app)
 // Hands-free "stop listening" phrases — say one and the turn is dropped (not sent) + the mic turns off.
 let stopPhrases = ["that's all", "i'm done", 'thank you', 'stop listening', 'never mind', 'goodbye'];
@@ -116,11 +188,12 @@ function addToolResult(output, isErr) {
 }
 function setState(s) {
   state = s;
-  const t = $('talk'), icon = $('talkIcon'), l = $('talkLabel');
+  const t = $('talk'), l = $('talkLabel');
   if (!t) return;
   t.className = 'talk' + (s === 'rec' ? ' rec' : s === 'busy' ? ' busy' : '');
-  if (icon) icon.innerHTML = s === 'busy' ? ICON.stop : ICON.mic;
   if (l) l.textContent = s === 'rec' ? 'Listening…' : s === 'busy' ? 'Stop' : 'Tap to talk';
+  // Drive the orb-face: rec → listening; busy → speaking while TTS is playing, else thinking.
+  try { voiceOrb.setState(s === 'rec' ? 'listening' : s === 'busy' ? (ttsPlaying ? 'speaking' : 'thinking') : 'idle'); } catch (_) {}
   // Hold the CPU awake while listening/working so it runs with the screen off; release when idle.
   const n = nativeOverlay(); if (n && n.setAwake) { try { n.setAwake(s === 'rec' || s === 'busy'); } catch (_) {} }
 }
@@ -179,6 +252,7 @@ function drainTTS() {
     const src = ttsClips[ttsNextPlay]; delete ttsClips[ttsNextPlay]; ttsNextPlay++;
     if (!src) return drainTTS();
     ttsPlaying = true; const a = new Audio(src); curAudio = a;
+    try { voiceOrb.setState('speaking'); } catch (_) {}   // orb switches to the "speaking" envelope
     a.onended = a.onerror = () => { ttsPlaying = false; if (curAudio === a) curAudio = null; drainTTS(); };
     a.play().catch(() => { ttsPlaying = false; drainTTS(); });
     return;
@@ -327,6 +401,7 @@ function startVAD(mediaStream) {
     const rms = () => { an.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; } return Math.sqrt(s / buf.length); };
     const tick = () => {
       const level = rms(); const now = Date.now(); const dt = now - t0;
+      try { if (state === 'rec') voiceOrb.setAmp(Math.min(1, level * 6)); } catch (_) {} // orb ripples with your voice
       if (dt < 350) { floor = (floor * floorN + level) / (floorN + 1); floorN++; vadRAF = requestAnimationFrame(tick); return; }
       const speaking = level > f * Math.max(0.03, floor * 2.2 + 0.012);
       if (speaking) { heardSpeech = true; quietSince = 0; }
@@ -539,7 +614,7 @@ async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/
 function init() {
   if (OVERLAY) { document.documentElement.style.background = 'transparent'; document.body.classList.add('overlay'); if (NATIVE) document.body.classList.add('native'); initOverlayChrome(); }
   $('agentName').textContent = cfg.agentName || 'assistant';
-  $('talkIcon').innerHTML = ICON.mic;
+  try { voiceOrb.start(); } catch (_) {}   // the reactive orb-face replaces the old mic icon
   setMuted(muted);
   $('mute').addEventListener('click', () => setMuted(!muted));
   $('talk').addEventListener('click', () => { if (state === 'rec') stopRec(); else if (state === 'busy') stopEverything(); else startRec(); });
