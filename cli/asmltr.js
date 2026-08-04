@@ -526,6 +526,8 @@ function cmdHelp() {
        [-n <events>] [--full]         (hand this to another session to pull its context)
   asmltr system          current system metrics
   ${A.bold('cross-channel:')}
+  asmltr notify "<text>"               REACH the owner out-of-band (read-aloud → push → text ladder;
+       [--title T] [--force] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
        ... --subject "<subj>"           set the subject (email)
