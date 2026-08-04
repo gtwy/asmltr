@@ -248,6 +248,21 @@ async function start(ctx) {
     } catch (e) { ctx.log('owner check failed: ' + e.message); return false; }
   }
 
+  // The conversation_key the core uses for this message's session (MUST match the envelope's key so
+  // /v2/inject and /v2/abort target the right running turn).
+  function convKeyFor(message) {
+    return message.guild?.id
+      ? `discord:${ctx.instanceId}:channel:${message.channel.id}`
+      : `discord:${ctx.instanceId}:dm:${message.author.id}`;
+  }
+  // Is this bot directly addressed? @-mention, DM, a role it holds, or the caller forced it.
+  function isAddressed(message, forced) {
+    if (forced || message.channel.type === 1) return true;
+    if (message.mentions.has(client.user)) return true;
+    const botMember = message.guild ? (message.guild.members.me || message.guild.members.cache.get(client.user.id)) : null;
+    return !!botMember && message.mentions.roles.some((r) => botMember.roles.cache.has(r.id));
+  }
+
   async function handleControlCommands(message) {
     // Addressed if @-mentioned directly OR via a role this bot holds (e.g. an "@agents"
     // role, so one ping can command every bot in a group chat at once).
@@ -288,10 +303,18 @@ async function start(ctx) {
         await doUpdateAsmltr(message); return true;
       case 'leave-voice': case 'leave voice': case 'leave vc': case 'leave the voice':
         await doLeaveVoice(message); return true;
+      case 'stop': case 'cancel': case 'abort': case 'halt':
+        // Interrupt the running turn for THIS channel. The session survives and stays resumable —
+        // your next message continues it. No-op (🤷) if nothing is running.
+        if (processing.get(cid)) {
+          try { await ctx.core.abort(convKeyFor(message)); await message.react('🛑').catch(() => {}); }
+          catch (e) { ctx.log('abort failed: ' + e.message); await message.channel.send('⚠ Couldn\'t stop the current turn.'); }
+        } else { await message.react('🤷').catch(() => {}); }
+        return true;
       case 'status':
         await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`drone-on\` / \`drone-off\` · \`transcript-on\` / \`transcript-off\` · \`update-asmltr\` · \`status\``); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`drone-on\` / \`drone-off\` · \`transcript-on\` / \`transcript-off\` · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
@@ -367,7 +390,22 @@ RESPONSE RULES:
 
   async function handleMessage(message, forced) {
     const cid = message.channel.id;
-    if (processing.get(cid)) return; // already handling a message in this channel — stay silent (no channel spam)
+    if (processing.get(cid)) {
+      // A turn is already running in this channel. If THIS message is addressed to us, queue it into the
+      // running turn as steering guidance (like typing in the Claude TUI mid-run) — don't drop it, and
+      // don't start a concurrent turn. The core folds it into the work in progress and continues; its
+      // reply comes back out to the channel via the stored outbound route. Non-addressed chatter is still
+      // ignored so idle channel noise can't derail the work. (`@handle stop` interrupts — handled earlier.)
+      if (isAddressed(message, forced)) {
+        const guidance = String(message.content || '').replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (guidance) {
+          ctx.core.inject(convKeyFor(message), guidance, { by: 'operator', interrupt: false })
+            .then(() => message.react('👀').catch(() => {}))
+            .catch((e) => ctx.log('mid-turn steer failed: ' + e.message));
+        }
+      }
+      return;
+    }
     processing.set(cid, true);
     // Discord's typing indicator auto-expires after ~10s. Re-trigger it every
     // 8s so the "…is typing" shows for the ENTIRE (possibly multi-minute)
