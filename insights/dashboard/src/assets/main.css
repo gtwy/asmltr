@@ -22,6 +22,15 @@
       radial-gradient(900px circle at 12% -10%, rgb(var(--brand-violet) / 0.16), transparent 55%),
       radial-gradient(900px circle at 100% 0%, rgb(var(--brand-pink) / 0.12), transparent 50%);
     background-attachment: fixed;
+    /* App-like on mobile: never scroll the page sideways, kill the tap-flash + 300ms delay. */
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  button, a, [role="button"], input, select, textarea { touch-action: manipulation; }
+  /* Comfortable tap targets on touch devices (Material ~48dp) without bloating desktop. */
+  @media (pointer: coarse) {
+    button, [role="button"], .md-tap { min-height: 44px; }
   }
 }
 
