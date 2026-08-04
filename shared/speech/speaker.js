@@ -41,12 +41,14 @@ function cleanForSpeech(s) {
 function createSpeaker({ onText, onAudio, tts = ttsDefault, maxBuffer = 240 } = {}) {
   let buf = '';
   let seq = 0;
+  let chars = 0;                       // total characters actually synthesized (for TTS cost accounting)
   let emitChain = Promise.resolve();   // serializes audio emission in sentence order
   const inflight = [];                 // all synth promises (so finish() can await them)
 
   function enqueue(raw) {
     const text = cleanForSpeech(raw);
     if (!text) return;
+    chars += text.length;
     const mySeq = seq++;
     if (onText) { try { onText({ seq: mySeq, text }); } catch (_) {} }
     // Kick off synthesis immediately (one-ahead), but emit strictly in order via the chain.
@@ -79,12 +81,16 @@ function createSpeaker({ onText, onAudio, tts = ttsDefault, maxBuffer = 240 } = 
   return {
     /** Feed a token/delta of assistant text. */
     pushDelta(text) { if (!text) return; buf += text; drainSentences(); },
-    /** Flush the trailing partial sentence and wait for ALL audio to be emitted, in order. */
+    /** Flush the trailing partial sentence and wait for ALL audio to be emitted, in order.
+     *  Returns `{ chars }` — total characters synthesized, for TTS cost accounting. */
     async finish() {
       if (buf.trim()) { enqueue(buf); buf = ''; }
       await Promise.allSettled(inflight);
       await emitChain;
+      return { chars };
     },
+    /** Characters synthesized so far. */
+    chars() { return chars; },
   };
 }
 

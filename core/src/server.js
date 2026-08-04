@@ -48,6 +48,7 @@ const { createSpeaker } = require('../../shared/speech/speaker'); // core speech
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
 const tts = require('../../shared/speech/tts'); // TTS config (voice/model), persisted + GUI/TUI-settable
 const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
+const { auxUsage, estimateAudioSeconds } = require('../../shared/usage'); // priced token-usage events for metered aux surfaces (tts/stt/moderation)
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
 const vault = require('../../shared/vault'); // TRUST vault (credential broker + KMS) — hard dependency
@@ -380,6 +381,14 @@ async function handle(envelope, opts = {}) {
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',
     payload: { decision: mod.allowed ? 'ALLOW' : 'BLOCK', riskLevel: mod.riskLevel, monitored: !!mod.monitored, bypassed: !!mod.bypassed } });
+  // Aux cost: the moderation model ran on a metered key → record its priced token usage so it shows in
+  // the Usage view's Billed total. Attributed to the raw sender (same identity key as the turn's usage).
+  if (mod.usage && (mod.usage.tokens_in || mod.usage.tokens_out)) {
+    record(auxUsage({ surface: e.channel, session_id: e.conversation_key,
+      identity: e.sender.raw_username || e.sender.raw_id, feature: 'moderation',
+      provider: mod.usage.provider, model: mod.usage.model,
+      tokens_in: mod.usage.tokens_in, tokens_out: mod.usage.tokens_out }));
+  }
 
   if (!mod.allowed) {
     if (mod.riskLevel >= 7) await moderation.notifyBlock(resolved, e.content.text, mod, e.channel);
@@ -1114,17 +1123,27 @@ app.post('/v2/speak', async (req, res) => {
   });
   try {
     const actions = await dispatch(req.body, { onText: (text) => { if (text) speaker.pushDelta(text); } });
-    await speaker.finish();               // wait for every sentence's audio to be emitted, in order
+    const { chars } = await speaker.finish(); // wait for every sentence's audio to be emitted, in order
     stopDrone();                          // no-audio replies (e.g. NO_REPLY) still end the drone
+    emitSpeakUsage(chars);
     frame({ type: 'done', actions });
   } catch (err) {
     console.error('[core] /v2/speak error:', err.message);
+    try { emitSpeakUsage(speaker.chars()); } catch (_) {}
     try { await speaker.finish(); } catch (_) {}
     stopDrone();
     frame({ type: 'error', error: err.message });
   }
   res.end();
 });
+
+// Aux cost for a /v2/speak turn: the sentences synthesized ran on the configured TTS provider's metered
+// key. Price by characters and attribute to the web/PWA surface (this SSE endpoint carries no per-user id).
+function emitSpeakUsage(chars) {
+  if (!chars) return;
+  const c = tts.config();
+  record(auxUsage({ surface: 'assistant-web', feature: 'tts', provider: c.provider, model: c.model, chars }));
+}
 
 // Voice settings + cue assets (chime/drone) for any voice client. The spoken-ack toggle persists
 // in the asmltr state dir; the dashboard flips it here.
@@ -1181,7 +1200,11 @@ app.post('/v2/tts', async (req, res) => {
     const overrides = {};
     if (req.body.voice) overrides.voice = String(req.body.voice);
     if (req.body.model) overrides.model = String(req.body.model);
-    const { audio, mime } = await tts.synthesize(text.slice(0, 4000), overrides);
+    const spoken = text.slice(0, 4000);
+    const { audio, mime } = await tts.synthesize(spoken, overrides);
+    const c = tts.config();
+    record(auxUsage({ surface: 'assistant-web', feature: 'tts',
+      provider: c.provider, model: overrides.model || c.model, chars: spoken.length }));
     res.json({ mime, b64: audio.toString('base64') });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1227,6 +1250,10 @@ app.post('/v2/transcribe', async (req, res) => {
     const buf = Buffer.from(data_base64, 'base64');
     if (!buf.length) return res.status(400).json({ error: 'empty audio' });
     const out = await stt.transcribe(buf, { filename: filename || 'audio.webm', mime: mime || 'audio/webm', model, language });
+    // Aux cost: STT runs on a metered key. Use the model's reported duration if any, else estimate from
+    // clip size. Attributed to the web/PWA surface (this endpoint carries no per-user context).
+    const seconds = out.duration || estimateAudioSeconds(out.bytes, mime || 'audio/webm');
+    record(auxUsage({ surface: 'assistant-web', feature: 'stt', provider: 'openai', model: out.model, seconds }));
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
