@@ -10,6 +10,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.10.0] - 2026-08-04
+
+asmltr 0.10.0 — generic `device` connector: a platform-agnostic HTTP+SSE+token gateway that makes any networked device (Pi kiosk, ESP32, desk buddy) a first-class channel, with server-proxied speech and change-only capability descriptors. The android connector is unchanged; platform connectors layer extras on this base.
+
+### Added
+
 - **`device` connector — a generic device gateway.** The platform-agnostic base the `android`
   connector's gateway proved out, minus anything OS-specific: an HTTP + SSE + token surface that makes
   any networked device (a Pi kiosk, an ESP32, a desk buddy, a custom appliance) a first-class channel —
