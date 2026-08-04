@@ -15,11 +15,13 @@ Any arguments after `claude` are passed straight through to the `claude` binary.
 
 ## How it works
 
-1. **tmux.** The session is started in a **detached tmux session** (`asmltr-cli-<id>`), so it
-   survives you detaching and can be attached from elsewhere. `tmux` is required
-   (`apt install tmux`).
+1. **Multiplexer.** The session is started in a **detached multiplexer session** (`asmltr-cli-<id>`), so it
+   survives you detaching and can be attached from elsewhere. The default is **screen**, which keeps
+   output in the terminal's main buffer so the native mouse wheel scrolls scrollback; set
+   `ASMLTR_MULTIPLEXER=tmux` to use tmux instead. Whichever you pick must be installed
+   (`apt install screen` or `apt install tmux`).
 2. **Tracker.** The session is registered in a tracker JSON (`~/.asmltr/cli-sessions.json`) with its
-   tmux target, pid, cwd, and status.
+   multiplexer target, pid, cwd, and status.
 3. **Reconciler.** The insights collector reconciles that tracker
    (`insights/collector/reconcile.js`) into its sessions table, so the session shows up as a
    `claude-code` card in the dashboard. The reconciler also applies a **liveness correction** — a
@@ -29,11 +31,11 @@ Any arguments after `claude` are passed straight through to the `claude` binary.
    transcript under `~/.claude/**/*.jsonl` (the newest one created after launch), tails it, and
    streams each turn to the collector as `inbound` / `thinking` / `tool` / `tool_result` /
    `outbound` events — so the dashboard's details pane shows the live conversation and tool history.
-   It exits and emits a session-end when the tmux session goes away.
+   It exits and emits a session-end when the multiplexer session goes away.
 
 ```mermaid
 flowchart LR
-  A["asmltr claude"] --> TMUX["detached tmux<br/>asmltr-cli-&lt;id&gt;"]
+  A["asmltr claude"] --> TMUX["detached screen/tmux<br/>asmltr-cli-&lt;id&gt;"]
   A --> TRK["~/.asmltr/cli-sessions.json"]
   A --> TAIL["claude-tailer.js"]
   TAIL -->|jsonl → events| COL["collector"]
@@ -45,10 +47,11 @@ flowchart LR
 
 ## Detach and re-attach
 
-- **Detach:** `Ctrl-b d` — leaves the session running **and still monitored**.
-- **Re-attach:** `tmux attach -t <target>` — the target is the `asmltr-cli-<id>` name printed on
-  launch (also visible in the dashboard). Anyone with tmux access to the box can attach to take over
-  a session.
+- **Detach:** `Ctrl-a d` under screen (the default) or `Ctrl-b d` under tmux. Leaves the session
+  running **and still monitored**.
+- **Re-attach:** `screen -x <target>` under screen, `tmux attach -t <target>` under tmux. The target
+  is the `asmltr-cli-<id>` name printed on launch, and the exact attach command is shown in the
+  dashboard. Anyone with shell access to the box can attach to take over a session.
 - **End:** quitting `claude` ends the session; the tracker is marked `ended` and the tailer flushes
   a final event.
 
@@ -57,7 +60,7 @@ flowchart LR
 ## Resolving the `claude` binary
 
 `asmltr claude` resolves a **real** `claude` executable up front (so it fails loudly instead of
-leaving a dead tmux pane): it scans `PATH` for a regular executable file named `claude` (skipping a
+leaving a dead multiplexer pane): it scans `PATH` for a regular executable file named `claude` (skipping a
 stray directory of that name), then falls back to known install locations
 (`/usr/local/bin/claude`, `/usr/bin/claude`, `~/.claude/local/claude`, `~/.local/bin/claude`).
 

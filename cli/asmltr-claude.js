@@ -51,7 +51,7 @@ function upsert(entry) {
 const mux = require('../shared/mux');
 
 function main() {
-  const MUX = mux.current();      // 'screen' | 'tmux' (ASMLTR_MULTIPLEXER, default tmux; screen = native mouse-wheel scrollback)
+  const MUX = mux.current();      // 'screen' | 'tmux' (ASMLTR_MULTIPLEXER, default screen; screen = native mouse-wheel scrollback)
   const M = mux.provider(MUX);
   if (!mux.available(MUX)) { console.error('asmltr claude: no terminal multiplexer found — install tmux or screen (or set ASMLTR_MULTIPLEXER).'); process.exit(1); }
   const args = process.argv.slice(2);
