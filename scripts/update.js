@@ -27,6 +27,7 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 const version = require('../shared/version');
+const { depsChanged, dashboardChanged } = require('./lib/should-run');
 
 const REPO = path.join(__dirname, '..');
 const HOME = os.homedir();
@@ -44,6 +45,7 @@ const opt = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[
 const DRY = flag('dry-run');
 const FORCE = flag('force');
 const NO_DASH = flag('no-dashboard');
+const REINSTALL = flag('reinstall'); // force npm ci even when the lockfile is unchanged (see the deps guard below)
 const JSON_OUT = flag('json');
 const BY = opt('by', 'operator');
 const CHANNEL = opt('channel', version.getChannel());
@@ -164,9 +166,17 @@ function done(code, summary) {
   log(`target ${targetLabel} = ${toShort} · ${behind} commit(s) ahead`);
   if (changelog.length) log('changelog:\n  ' + changelog.join('\n  '));
 
+  // What changes between the rollback point and the target — drives the skip guards below and the
+  // dry-run plan. Both endpoints are shas, so the diff reads the same before or after the checkout.
+  const changedFiles = gitOut('diff', '--name-only', rollbackSha, targetSha).split('\n').filter(Boolean);
+  const willDeps = REINSTALL || !fs.existsSync(path.join(REPO, 'node_modules')) || depsChanged(changedFiles);
+  const willDash = !NO_DASH && dashboardChanged(changedFiles);
+
   if (DRY) {
+    const depStep = willDeps ? (fs.existsSync(path.join(REPO, 'package-lock.json')) ? 'npm ci' : 'npm install') + ' (root workspace)' : 'skip npm (deps unchanged)';
+    const dashStep = NO_DASH ? 'skip dashboard' : (willDash ? 'docker compose up -d --build (dashboard)' : 'skip dashboard (unchanged)');
     const plan = { ok: true, dryRun: true, channel: CHANNEL, from: fromSha, to: toShort, target: targetLabel, behind, changelog,
-      steps: ['git checkout ' + targetLabel, 'run setup.d steps', 'reconcile .env', (fs.existsSync(path.join(REPO, 'package-lock.json')) ? 'npm ci' : 'npm install') + ' (root workspace)', NO_DASH ? 'skip dashboard' : 'docker compose up -d --build (dashboard)', 'restart-with-rollback.sh (pm2 restart + verify + auto-rollback)'] };
+      steps: ['git checkout ' + targetLabel, 'run setup.d steps', 'reconcile .env', depStep, dashStep, 'restart-with-rollback.sh (pm2 restart + verify + auto-rollback)'] };
     log('DRY RUN — no changes made.');
     if (JSON_OUT) console.log(JSON.stringify(plan, null, 2));
     releaseLock();
@@ -198,18 +208,28 @@ function done(code, summary) {
   // deps (root workspace). Prefer `npm ci` (clean, exact-match from the committed lockfile — the
   // deterministic path, incl. native-module versions); fall back to `npm install` if there's no lock
   // or ci fails on drift. Failure → roll the code back BEFORE touching services (issue #17).
+  //
+  // Skip the install entirely when no manifest changed between the shas: `npm ci` recompiles every
+  // native module (10-20 min) for a tree that already matches the lockfile. `--reinstall` forces it
+  // for the one case a changed-file diff can't see — a Node upgrade invalidates the native builds
+  // even with an unchanged lock (ties to #73). A from-scratch tree (no node_modules) always installs.
   const hasLock = fs.existsSync(path.join(REPO, 'package-lock.json'));
-  phase(`npm ${hasLock ? 'ci' : 'install'} (root workspace)`);
-  let inst = run('npm', [hasLock ? 'ci' : 'install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
-  if (inst.code !== 0 && hasLock) {
-    log('npm ci failed (lock drift or no build cache) — retrying with npm install');
-    inst = run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
-  }
-  if (inst.code !== 0) {
-    log('dependency install FAILED — rolling back code (services untouched, still on old build)');
-    git('reset', '--hard', rollbackSha);
-    run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
-    return done(2, { error: 'dependency install failed; rolled back', from: fromSha, to: fromSha });
+  if (!willDeps) {
+    log(`deps unchanged since ${fromSha} — skipping npm ci (node_modules already matches the lockfile; --reinstall to force)`);
+    phase('deps unchanged — npm ci skipped');
+  } else {
+    phase(`npm ${hasLock ? 'ci' : 'install'} (root workspace)`);
+    let inst = run('npm', [hasLock ? 'ci' : 'install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+    if (inst.code !== 0 && hasLock) {
+      log('npm ci failed (lock drift or no build cache) — retrying with npm install');
+      inst = run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+    }
+    if (inst.code !== 0) {
+      log('dependency install FAILED — rolling back code (services untouched, still on old build)');
+      git('reset', '--hard', rollbackSha);
+      run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+      return done(2, { error: 'dependency install failed; rolled back', from: fromSha, to: fromSha });
+    }
   }
 
   // dashboard (Docker) — separate lifecycle; best-effort, does not gate the core update
@@ -219,7 +239,9 @@ function done(code, summary) {
     const overrides = (() => { try { return fs.readdirSync(insightsDir).filter((f) => /^docker-compose\..+\.yml$/.test(f)).map((f) => path.join(insightsDir, f)); } catch (_) { return []; } })();
     const compose = [...overrides, path.join(insightsDir, 'docker-compose.yml')].find((f) => fs.existsSync(f));
     const hasDocker = run('docker', ['--version']).code === 0;
-    if (compose && hasDocker) {
+    if (compose && hasDocker && !willDash) {
+      log(`dashboard unchanged since ${fromSha} — skipping docker rebuild (no insights/dashboard change)`);
+    } else if (compose && hasDocker) {
       phase('rebuild dashboard (docker compose)');
       const d = run('docker', ['compose', '-f', compose, 'up', '-d', '--build'], { timeout: 15 * 60 * 1000 });
       if (d.code !== 0) log('dashboard rebuild failed (non-fatal — core update continues). For a local-only deploy, save your compose as insights/docker-compose.<name>.yml so the updater uses it instead of the base Traefik compose.');
