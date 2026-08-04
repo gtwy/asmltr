@@ -9,31 +9,38 @@ theme:
   name: material
   logo: assets/logo.svg
   favicon: assets/logo.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: deep purple
       accent: pink
       toggle:
-        icon: material/brightness-4
+        icon: material/weather-night
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: deep purple
       accent: pink
       toggle:
-        icon: material/brightness-7
+        icon: material/weather-sunny
         name: Switch to dark mode
   features:
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
     - navigation.top
     - navigation.indexes
     - navigation.tracking
+    - navigation.footer
     - toc.follow
     - search.suggest
     - search.highlight
     - content.code.copy
     - content.code.annotate
+    - content.tabs.link
   icon:
     repo: fontawesome/brands/github
 
