@@ -93,7 +93,9 @@ async function transcribe(buffer, opts = {}) {
   });
   if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`openai stt ${r.status} ${t.slice(0, 200)}`); }
   const j = await r.json().catch(() => ({}));
-  return { text: (j.text || '').trim(), model };
+  // `duration` is only present when the model+format return it (verbose_json / some models). Fall back to
+  // the clip byte length so the caller can estimate audio seconds for cost accounting (see shared/usage).
+  return { text: (j.text || '').trim(), model, duration: j.duration, bytes: buffer.length };
 }
 
 /**
