@@ -19,9 +19,11 @@
     background:radial-gradient(circle at 55% 55%, rgb(var(--c)/.5), transparent 68%)}
   @keyframes spin{to{transform:rotate(360deg)}}
   .eyes{position:relative;z-index:2;display:flex;gap:22px}
-  .eye{width:30px;height:44px;border-radius:16px;
-    background:linear-gradient(180deg,#f4efff,#b79bff 58%,#7de8ff);
-    box-shadow:0 0 22px rgb(var(--v)/.95), 0 0 44px rgb(var(--p)/.5), inset 0 -5px 9px rgb(var(--c)/.55)}
+  /* soft single-hue glowing orbs — matches the in-app assistant orb */
+  .eye{width:26px;height:46px;border-radius:50% / 44%;
+    background:radial-gradient(ellipse 60% 44% at 50% 30%, #fff 0%, transparent 60%),
+      radial-gradient(circle at 50% 56%, rgb(var(--v)) 0%, rgb(var(--v)/.72) 100%);
+    box-shadow:0 0 26px 2px rgb(var(--v)/.85), 0 0 54px 6px rgb(var(--p)/.35)}
 </style></head>
 <body>
   <div id="face">
