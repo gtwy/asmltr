@@ -15,7 +15,7 @@ and **the phone reading incoming notifications aloud**. Replaces the retired `ev
 The morning alarms shelled raw `claude -p "..."` from cron. Problems:
 1. **Session leak** — `claude -p` registers a session via the claude-code hook but never emits a
    session-end, so every run stacked a dead "active" session in the dashboard (24 found + purged).
-2. **Fire-and-pray delivery** — it spoke via `speak-to-jareth` regardless of whether anyone could hear it
+2. **Fire-and-pray delivery** — it spoke via a host TTS script regardless of whether anyone could hear it
    ("I never hear my wake-up message"). No notion of *reachability* or confirmation.
 3. **Not configurable, not channel-aware** — hardcoded times, one delivery path.
 
@@ -45,7 +45,7 @@ connected? quiet hours?) before speaking; falls down the ladder if not reachable
 so we don't repeat or fire into the void.
 
 **Reuse, don't reinvent:** `/out` push + `/gw` speech (android connector), `shared/speech`, the draft/approval
-primitive, `notify-jareth`/`message-jareth` as the text-fallback executors.
+primitive, and the connector manager's unified `/send` as the text-fallback executor (telegram/discord/email).
 
 ---
 
