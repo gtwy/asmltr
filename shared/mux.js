@@ -4,7 +4,7 @@
  *
  * Why both: screen keeps program output in the terminal's MAIN buffer (default `altscreen off`), so
  * the native mouse wheel scrolls history the way people expect; tmux owns the alternate screen and
- * "hijacks" the wheel (you need copy-mode). Operators who prefer screen set ASMLTR_MULTIPLEXER=screen.
+ * "hijacks" the wheel (you need copy-mode). screen is the default; operators who prefer tmux set ASMLTR_MULTIPLEXER=tmux.
  *
  * Per-session ops (send-keys, alive, attach hint) dispatch on the multiplexer RECORDED for that
  * session, so a session created under one still works after the config default changes.
@@ -15,9 +15,13 @@ function available(bin) {
   try { execFileSync(bin, bin === 'screen' ? ['-v'] : ['-V'], { stdio: 'ignore' }); return true; }
   catch (e) { return bin === 'screen' && e.status === 1; } // `screen -v` prints version but exits 1
 }
-/** The configured multiplexer (ASMLTR_MULTIPLEXER=screen|tmux, default tmux), falling back to whatever's installed. */
+/** Parse ASMLTR_MULTIPLEXER into a preference: screen by default, tmux only when asked. Pure, no availability check. */
+function preferred(env) {
+  return String(env || '').toLowerCase() === 'tmux' ? 'tmux' : 'screen';
+}
+/** The configured multiplexer (ASMLTR_MULTIPLEXER=screen|tmux, default screen), falling back to whatever's installed. */
 function current() {
-  const want = (process.env.ASMLTR_MULTIPLEXER || 'tmux').toLowerCase() === 'screen' ? 'screen' : 'tmux';
+  const want = preferred(process.env.ASMLTR_MULTIPLEXER);
   if (available(want)) return want;
   const other = want === 'screen' ? 'tmux' : 'screen';
   return available(other) ? other : want; // let the caller report the missing one
@@ -51,4 +55,4 @@ const screen = {
 const providers = { tmux, screen };
 function provider(name) { return providers[name] || tmux; }
 
-module.exports = { current, available, provider, tmux, screen };
+module.exports = { current, preferred, available, provider, tmux, screen };
