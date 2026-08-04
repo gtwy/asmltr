@@ -33,12 +33,12 @@ async function load() {
 onMounted(load)
 watch(() => props.sessionId, load)
 
-// Live-merge collector-store events newer than the seeded snapshot, so a running job streams in.
+// Live-merge collector-store events newer than the seeded snapshot, then sort STRICTLY by timestamp so
+// thinking / tool / tool_result / reply thread in chronological order — regardless of which source
+// (seeded fetch vs live socket) they arrived from. Without the sort, live events pile up at the end.
 const history = computed(() => {
-  const live = store.events
-    .filter((e) => e.session_id === props.sessionId && e.ts > maxSeededTs.value)
-    .slice().reverse()
-  return [...seeded.value, ...live]
+  const live = store.events.filter((e) => e.session_id === props.sessionId && e.ts > maxSeededTs.value)
+  return [...seeded.value, ...live].sort((a, b) => (a.ts - b.ts) || ((a.id || 0) - (b.id || 0)))
 })
 const rows = computed(() => history.value.map(eventRow))
 
