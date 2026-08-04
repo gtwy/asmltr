@@ -379,7 +379,15 @@ const ttsProviderChoices = computed(() => field('voice', 'tts_provider').choices
 const dynamicVoices = ref(null)
 const voicesLoading = ref(false)
 const ttsVoiceChoices = computed(() => dynamicVoices.value || field('voice', 'tts_voice').choices || [])
-const ttsModelChoices = computed(() => field('voice', 'tts_model').choices || [])
+// ElevenLabs models (their `eleven_*` model ids — the OpenAI models in the manifest don't apply to EL).
+const EL_TTS_MODELS = [
+  { id: 'eleven_multilingual_v2', label: 'eleven_multilingual_v2', hint: 'highest quality, 29 languages' },
+  { id: 'eleven_turbo_v2_5', label: 'eleven_turbo_v2_5', hint: 'fast, low latency (recommended)' },
+  { id: 'eleven_flash_v2_5', label: 'eleven_flash_v2_5', hint: 'fastest, ~75ms' },
+  { id: 'eleven_v3', label: 'eleven_v3', hint: 'newest, most expressive (alpha)' },
+]
+// Model list follows the selected provider: ElevenLabs → eleven_* models; OpenAI → the manifest presets.
+const ttsModelChoices = computed(() => vcfg.value?.tts?.provider === 'elevenlabs' ? EL_TTS_MODELS : (field('voice', 'tts_model').choices || []))
 const sttModelChoices = computed(() => field('voice', 'stt_model').choices || [])
 async function loadVoices(provider) {
   voicesLoading.value = true
@@ -394,6 +402,11 @@ const sttSensChoices = computed(() => field('voice', 'stt_sensitivity').choices 
 async function loadVoiceCfg() { try { vcfg.value = await voice.getConfig(); wakePhrase.value = vcfg.value?.stt?.wake_phrase || ''; stopPhrasesInput.value = vcfg.value?.stt?.stop_phrases || ''; await loadVoices(vcfg.value?.tts?.provider) } catch (_) {} }
 async function setVoiceCfg(part) {
   busy.value = 'voicecfg'; notice.value = ''
+  // When the provider flips, snap the model to that provider's default so the UI never leaves an
+  // OpenAI model selected under ElevenLabs (or vice-versa) — matches the backend's coercion.
+  if (part.tts && part.tts.provider && part.tts.model === undefined) {
+    part = { ...part, tts: { ...part.tts, model: part.tts.provider === 'elevenlabs' ? 'eleven_turbo_v2_5' : 'gpt-4o-mini-tts' } }
+  }
   try {
     vcfg.value = await voice.setConfig(part); notice.value = 'Voice settings saved — applies to the next clip.'
     if (part.tts && part.tts.provider) await loadVoices(part.tts.provider) // provider changed → refresh the voice list
