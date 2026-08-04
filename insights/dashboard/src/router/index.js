@@ -7,7 +7,6 @@ const routes = [
   { path: '/usage', name: 'usage', component: () => import('@/views/Usage.vue'), meta: { title: 'Usage', icon: '▤' } },
   { path: '/system', name: 'system', component: () => import('@/views/System.vue'), meta: { title: 'System', icon: '▦' } },
   { path: '/schedules', name: 'schedules', component: () => import('@/views/Schedules.vue'), meta: { title: 'Schedules', icon: '⏱' } },
-  { path: '/voice', name: 'voice', component: () => import('@/views/Voice.vue'), meta: { title: 'Voice', icon: '🎙' } },
   { path: '/notifications', name: 'notifications', component: () => import('@/views/Notifications.vue'), meta: { title: 'Notifications', icon: '✦' } },
   { path: '/drafts', name: 'drafts', component: () => import('@/views/Drafts.vue'), meta: { title: 'Drafts', icon: '✎' } },
   { path: '/connectors', name: 'connectors', component: () => import('@/views/Connectors.vue'), meta: { title: 'Connectors', icon: '🔌' } },
