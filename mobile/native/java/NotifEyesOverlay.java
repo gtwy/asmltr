@@ -51,11 +51,12 @@ public class NotifEyesOverlay {
             ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             : WindowManager.LayoutParams.TYPE_PHONE;
         lp.format = PixelFormat.TRANSLUCENT;
-        DisplayMetrics m = app.getResources().getDisplayMetrics();
-        lp.width = Math.min(m.widthPixels, dp(app, 440));
-        lp.height = dp(app, 108);
+        // A small square element that FLOATS over the screen (upper third) — deliberately not a full-width
+        // top banner, so it reads as a little presence hovering there rather than a notification.
+        lp.width = dp(app, 210);
+        lp.height = dp(app, 210);
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        lp.y = dp(app, 36); // clear the status bar / notch
+        lp.y = dp(app, 130); // float well below the status bar / notification shade
         lp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
             | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
             | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
