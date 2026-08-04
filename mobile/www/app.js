@@ -64,14 +64,24 @@ const voiceOrb = (() => {
   // Amplitude is fed externally via setAmp — from the live mic while listening, and from the decoded
   // TTS envelope while speaking (see speakAmp). idle/thinking synthesize a gentle breathe in frame().
   function setAmp(v) { extAmp = Math.max(0, Math.min(1, v || 0)); extAt = Date.now(); }
+  // Pull the app's accent colors (Settings palette / --accent, --accent2) so the orb + eyes match the
+  // rest of the theme. Refreshed periodically in frame() so a palette change takes effect live.
+  let cA = '139,92,246', cB = '236,72,153';
+  function refreshPalette() {
+    try {
+      const cs = getComputedStyle(document.documentElement);
+      const a = cs.getPropertyValue('--accent').trim(), b = cs.getPropertyValue('--accent2').trim();
+      if (a) cA = a.replace(/\s+/g, ','); if (b) cB = b.replace(/\s+/g, ',');
+    } catch (_) {}
+  }
   function drawOrb() {
-    const w = cv.width, h = cv.height, mx = w / 2, my = h / 2, base = w * 0.27, wob = w * 0.05 * (0.4 + amp);
+    const w = cv.width, h = cv.height, mx = w / 2, my = h / 2, base = w * 0.27, wob = w * 0.05 * (0.12 + amp * 1.2);
     cx.clearRect(0, 0, w, h);
     const g = cx.createRadialGradient(mx, my - 18, base * 0.2, mx, my, base * 1.5);
-    g.addColorStop(0, 'rgba(178,150,255,.95)'); g.addColorStop(.5, 'rgba(220,95,185,.5)'); g.addColorStop(1, 'rgba(34,211,238,0)');
+    g.addColorStop(0, `rgba(${cA},.95)`); g.addColorStop(.5, `rgba(${cB},.5)`); g.addColorStop(1, `rgba(${cB},0)`);
     cx.fillStyle = g; cx.beginPath();
     for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.1) {
-      const r = base + Math.sin(a * 3 + t / 18) * wob + Math.sin(a * 5 - t / 15) * wob * 0.5 + amp * base * 0.22;
+      const r = base + Math.sin(a * 3 + t / 18) * wob + Math.sin(a * 5 - t / 15) * wob * 0.5 + amp * base * 0.3;
       const x = mx + Math.cos(a) * r, y = my + Math.sin(a) * r; a === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y);
     }
     cx.closePath(); cx.fill();
@@ -79,29 +89,34 @@ const voiceOrb = (() => {
   function frame() {
     if (!running) return;
     t++;
-    const breathe = (Math.sin(t / 45) + 1) / 2, fresh = Date.now() - extAt < 250;
-    if (vs === 'idle') ampT = 0.12 + breathe * 0.06;
-    else if (vs === 'thinking') ampT = 0.16 + breathe * 0.05;
-    else if (vs === 'listening') ampT = fresh ? 0.2 + extAmp * 0.8 : 0.12;
-    else if (vs === 'speaking') ampT = fresh ? 0.25 + extAmp * 0.75 : 0.35 + Math.abs(Math.sin(t / 8)) * 0.35; // fed by the TTS envelope (setAmp), synth fallback between clips
-    amp += (ampT - amp) * 0.18;
+    if (t % 90 === 1) refreshPalette(); // pick up live palette changes from Settings
+    const breathe = (Math.sin(t / 55) + 1) / 2, fresh = Date.now() - extAt < 250;
+    // Big gap between resting (idle/thinking: near-still, slow breathe) and active (listening/speaking:
+    // driven hard by real amplitude) so speech visibly animates the orb.
+    if (vs === 'idle') ampT = 0.05 + breathe * 0.03;
+    else if (vs === 'thinking') ampT = 0.09 + breathe * 0.04;
+    else if (vs === 'listening') ampT = fresh ? 0.22 + extAmp * 0.78 : 0.09;
+    else if (vs === 'speaking') ampT = fresh ? 0.3 + extAmp * 0.7 : 0.34 + Math.abs(Math.sin(t / 7)) * 0.4; // fed by the TTS envelope (setAmp), synth fallback between clips
+    amp += (ampT - amp) * (vs === 'speaking' || vs === 'listening' ? 0.3 : 0.1); // snappy when active, gentle at rest
     if (--nextBlink <= 0) { blink = 1; nextBlink = 100 + Math.random() * 170; }
     if (blink > 0) { blink -= 0.18; if (blink < 0) blink = 0; }
     if (--nextLook <= 0) { lookT = { x: (Math.random() * 2 - 1) * 4, y: (Math.random() * 2 - 1) * 3 }; nextLook = 140 + Math.random() * 190; }
     let lx = lookT.x, ly = lookT.y;
     if (vs === 'listening') { lx = 0; ly = -1.5; } else if (vs === 'thinking') { lx = -3.5; ly = -4; } else if (vs === 'speaking') { lx = 0; ly = 0; }
     look.x += (lx - look.x) * 0.08; look.y += (ly - look.y) * 0.08;
-    let open = 24, rad = 9, happy = false;
-    if (vs === 'listening') { open = 27; rad = 10; } else if (vs === 'thinking') { open = 15; rad = 7; } else if (vs === 'speaking') happy = amp > 0.5, open = happy ? 12 : 22;
+    // Eyes react gently — a tight height band across states (the blobs carry most of the motion).
+    let open = 23, rad = 9, happy = false;
+    if (vs === 'listening') { open = 25; rad = 10; } else if (vs === 'thinking') { open = 20; rad = 8; } else if (vs === 'speaking') { happy = amp > 0.72; open = happy ? 19 : 23; }
     const eh = Math.max(2, open * (1 - blink));
-    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 4px 4px 12px 12px' : rad + 'px'; }
-    if (eyes) eyes.style.transform = `translate(${look.x}px,${look.y}px) scale(${1 + amp * 0.05})`;
-    if (glowA) glowA.style.transform = `translate(${Math.sin(t / 130) * 8}px,${Math.cos(t / 165) * 6}px) scale(${1 + amp * 0.16})`;
-    if (glowB) glowB.style.transform = `translate(${Math.cos(t / 150) * 9}px,${Math.sin(t / 120) * 7}px) scale(${1 + amp * 0.26}) rotate(${t / 22}deg)`;
+    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 5px 5px 11px 11px' : rad + 'px'; }
+    if (eyes) eyes.style.transform = `translate(${look.x}px,${look.y}px) scale(${1 + amp * 0.025})`;
+    const dr = 1.5 + amp * 9; // drift barely moves at rest, swims when the orb is active
+    if (glowA) glowA.style.transform = `translate(${Math.sin(t / 150) * dr}px,${Math.cos(t / 185) * dr * 0.7}px) scale(${1 + amp * 0.36})`;
+    if (glowB) glowB.style.transform = `translate(${Math.cos(t / 170) * dr}px,${Math.sin(t / 140) * dr * 0.8}px) scale(${1 + amp * 0.55}) rotate(${t / 26}deg)`;
     drawOrb();
     requestAnimationFrame(frame);
   }
-  function start() { if (running) return; if (!els()) return; running = true; requestAnimationFrame(frame); }
+  function start() { if (running) return; if (!els()) return; refreshPalette(); running = true; requestAnimationFrame(frame); }
   return { start, setState, setAmp };
 })();
 let wakeCfg = { enabled: false, phrase: '' }; // wake word (mirrors core voice config; editable in-app)
