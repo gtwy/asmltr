@@ -41,9 +41,9 @@ Shell jobs execute host commands — gate behind the dashboard's owner-only 2FA 
 Prompt jobs run the engine (already trusted). Surface the shell-exec power clearly in the add form.
 
 ## Morning brief, rebuilt
-A **prompt** job at 08:00 weekdays: *"Write a warm ~25-word wake-up for Jareth and deliver it with
-`asmltr notify` (read-aloud)."* → engine runs → asmltr notify → phone reads it over BT. Until notify
-Part A ships, the prompt can call the existing `notify-jareth` / android `/out` push instead.
+A **prompt** job at 08:00 weekdays: *"Write a warm ~25-word wake-up and deliver it with `asmltr notify`
+(read-aloud)."* → engine runs → `asmltr notify` → phone reads it over BT (the ladder falls back to push
+/ text if the device isn't reachable).
 
 ## Decisions (as shipped)
 1. **Schedule UX** — friendly time+weekday picker with an advanced raw-cron field. Both compile to a
