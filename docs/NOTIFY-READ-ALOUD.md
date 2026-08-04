@@ -1,92 +1,94 @@
-# Notify / Read-Aloud + Notification Reader
+# Notify & read-aloud
 
-!!! success "Shipped"
-    **Part A** (proactive read-aloud / delivery ladder) — `shared/notify.js`, `POST /v2/notify` +
-    `/v2/notify/config`, `asmltr notify` CLI, a `speak` frame on the android connector, and the app +
-    headless control-link reading it aloud. **Part B** (notification reader) — native
-    `AsmltrNotificationService` → `/gw/notify-triage` (default engine, on-device) → native TTS over BT,
-    with a 3s burst, per-app/headphones/threshold gating, and app settings. Config: dashboard
-    **Schedules → Notify delivery** (ladder) + the app's **⚙ Notifications** (reader).
+Two ways asmltr uses **voice** to keep you in the loop when you're away from a chat window:
 
-Two related capabilities, one spine: **asmltr proactively reaching the user with spoken/pushed messages**,
-and **the phone reading incoming notifications aloud**. Replaces the retired `eve-wake-up-alarms` cron hack.
+- **Notify** — the assistant (or a [schedule](SCHEDULES.md)) proactively **reaches you** with a spoken /
+  pushed message, trying the best channel that can actually get through.
+- **Notification reader** — your phone reads **incoming notifications** aloud over your headphones as a
+  short spoken synopsis, skipping the noise.
 
-## Why the old way was wrong
-The morning alarms shelled raw `claude -p "..."` from cron. Problems:
-1. **Session leak** — `claude -p` registers a session via the claude-code hook but never emits a
-   session-end, so every run stacked a dead "active" session in the dashboard (24 found + purged).
-2. **Fire-and-pray delivery** — it spoke via a host TTS script regardless of whether anyone could hear it
-   ("I never hear my wake-up message"). No notion of *reachability* or confirmation.
-3. **Not configurable, not channel-aware** — hardcoded times, one delivery path.
-
-Rule going forward: **never generate via raw `claude -p` in automation.** Use the core fast path
-(`/v2/handle` lean/no-tools, or a static template) so sessions are managed and nothing leaks.
+Both are voice-first, both respect quiet hours, and both are configurable.
 
 ---
 
-## Part A — asmltr notify/read-aloud primitive (proactive → user)
+## Reaching you — `asmltr notify`
 
-A first-class **outbound notify** that any session/schedule can call, which picks the best way to actually
-reach the user and (ideally) confirms it landed.
+When something needs your attention out-of-band — a scheduled morning brief, "your build finished," an
+alert while you're away — the assistant calls:
 
-**Delivery ladder (best reachable wins, configurable):**
-1. **Android assistant read-aloud** — if the phone's control link is up AND BT headphones connected AND
-   the app is allowed to speak → push a `speak` frame; the app TTS-reads it (uses the existing
-   `/gw` + speech layer). This is the "spoken to me" path the wake-up wanted.
-2. **Push notification** — Web Push (PWA, already scaffolded #52) / a native notification on the phone.
-3. **Telegram / Discord / email** — text fallback via existing connectors.
+```bash
+asmltr notify "<message>" [--title "<title>"] [--force] [--silent]
+```
 
-**Scheduling:** a small scheduler (core cron table or a `scheduler` connector) fires notify jobs
-(morning brief, reminders, "pester" tasks) → each job = { when, audience, message|prompt, delivery_policy }.
-Message is either a static template or generated via the lean core path (no session leak).
+| Flag | Effect |
+|---|---|
+| `--title` | A short heading shown with the message. |
+| `--force` | Deliver even during quiet hours (use only when it's genuinely urgent). |
+| `--silent` | Skip the spoken step — deliver as text only. |
 
-**Reachability + confirmation:** the notify primitive checks device presence (control link connected? BT
-connected? quiet hours?) before speaking; falls down the ladder if not reachable; records delivered/heard
-so we don't repeat or fire into the void.
+A schedule whose prompt says *"notify me…"* or *"send me a message"* is exactly this command. It's also
+the primitive the morning brief uses.
 
-**Reuse, don't reinvent:** `/out` push + `/gw` speech (android connector), `shared/speech`, the draft/approval
-primitive, and the connector manager's unified `/send` as the text-fallback executor (telegram/discord/email).
+### The delivery ladder
 
----
+`asmltr notify` doesn't just fire and hope — it walks a **ladder** and stops at the first step that can
+actually reach you:
 
-## Part B — Android notification reader (phone notifications → spoken synopsis)
+1. **Read aloud** — if a connected assistant device (the phone app or a headless control link) is present
+   and allowed to speak, it's spoken aloud through your configured voice.
+2. **Push** — a push notification to the device (when a push sender is configured).
+3. **Text fallback** — a message to a configured channel (Telegram / Discord / email).
 
-Read incoming phone notifications aloud over BT headphones, as a smart natural-language synopsis, with
-AI prioritization so low-value ones are skipped. Like Google Assistant's notification readout, but
-conversational and selective.
+If a step isn't reachable or isn't configured, the ladder falls through to the next. The command reports
+which step delivered it (`✓ notified via android`) or that nothing landed — so a notification never
+silently vanishes into the void.
 
-**Mechanism:**
-- Native **`NotificationListenerService`** (user grants "Notification access" once) captures each posted
-  notification: `{ package, appLabel, title, text, when, category, ongoing }`.
-- Gate: only when **enabled** AND **BT audio route connected** (skip when on speaker) AND not in quiet hours.
-- Pipeline per notification (debounced/deduped, rate-limited):
-  1. App → asmltr core a lean call: given the notification, return `{ speak: bool, priority: 0-100,
-     synopsis: "natural sentence" }`. Runs on the **local Agent SDK (on-Max, not metered API)** — keeps
-     private notification content off a metered/cloud key, consistent with asmltr's no-API-key rule.
-  2. If `speak && priority >= threshold` → app TTS-reads the synopsis
-     ("scoutg just messaged you on Discord — he's done with the project").
-- **Prioritization:** the model scores importance (a DM to you > a group ping > a marketing push). Plus
-  hard rules: per-app allow/deny, category filters (skip `ongoing`/transport/foreground-service noise),
-  sender allow-list. Burst handling: if N arrive at once, summarize together ("3 new Discord messages, the
-  important one from scoutg: …") instead of reading each.
+**Quiet hours** suppress the *spoken* step (so a 3 AM brief won't wake you); the message still travels the
+rest of the ladder as text unless you passed `--force`. If no quieter step is configured, it's held rather
+than spoken.
 
-**Configurable in Settings (global voice/notify config, GUI + TUI + app):**
-- enable notification readout · only-with-headphones · quiet hours
-- priority threshold (read only ≥ X) · per-app allow/deny · sender allow-list
-- verbosity (headline vs. full synopsis) · burst-summarize on/off
+### Configuring delivery
 
-**Privacy note:** notification text is sensitive. Synopsis runs locally (Agent SDK); nothing is stored
-beyond what's needed to dedupe; readout only over a private audio route (headphones). Surface this clearly
-in the enable flow (Android already forces the Notification-access consent screen).
+Set the policy in the dashboard under **Settings → Notifications → Notify delivery**:
+
+- **Quiet hours** — the window where the spoken step is suppressed.
+- **Only read aloud over headphones** — never speak over the phone's loudspeaker.
+- **Text fallback** — the channel + target that catches messages the spoken step can't (recommended, so
+  quiet-hours notifications still reach you silently).
+
+Under the hood this is stored at `~/.asmltr/notify.json` and served by `POST /v2/notify` +
+`/v2/notify/config`; connectors are reached through the connector manager's unified send path, so there
+are no host-specific scripts to wire up.
 
 ---
 
-## Rollout phases
-1. **A1** ✅ — `speak` delivery frame + the app (and headless control link) read pushed messages aloud;
-   presence + quiet-hours gating, headphones hint.
-2. **A2** ✅ — scheduler ([Schedules](SCHEDULES.md)) + notify jobs (morning brief is now a prompt job that
-   calls `asmltr notify`, no `claude -p`); delivery ladder (android → push → text).
-3. **B1** ✅ — `NotificationListenerService` + settings (enable, headphones-only, per-app deny, BT-device
-   pick) with noise filters (ongoing/transport/service skipped).
-4. **B2** ✅ — AI synopsis + prioritization via the default engine (on-device Agent SDK) + 3s burst-summarize.
-5. **B3** — tuning: sender allow-lists, verbosity presets, push (web-push) step. *(future)*
+## Reading phone notifications aloud
+
+The **notification reader** speaks a natural-language synopsis of incoming phone notifications over your
+headphones — like a conversational, selective version of a car's "read my messages." It's a native feature
+of the Android app.
+
+### How it works
+
+- The app watches posted notifications (you grant Android's **Notification access** once).
+- Each one is judged **on-device by the local engine** — it returns whether to speak it, a priority
+  score, and a one-sentence synopsis. Because this runs on the local Agent SDK (not a metered/cloud API),
+  the content of your private notifications never leaves the device for a third-party key.
+- If it clears your threshold, the app reads the synopsis aloud
+  (*"You've got a direct message on Discord — they're done with the project"*).
+- A burst of notifications is summarized together rather than read one by one.
+
+### Gating & settings (app → **⚙ Notifications**)
+
+- **Enable readout** on/off, and **only over headphones** (skip when on the speaker).
+- **Quiet hours** — no readout during your configured window.
+- **Priority threshold** — read only notifications scored at or above your bar.
+- **Per-app allow/deny** and a **sender allow-list**; ongoing/transport/foreground-service noise is
+  filtered out automatically.
+- **Verbosity** — headline vs. full synopsis — and **burst-summarize** on/off.
+
+### Privacy
+
+Notification text is sensitive by nature. The synopsis is generated **locally**, nothing is retained
+beyond what's needed to de-duplicate a burst, and readout only happens over a private audio route
+(headphones). Android's own consent screen gates the whole feature.
