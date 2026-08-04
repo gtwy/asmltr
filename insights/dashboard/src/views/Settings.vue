@@ -785,186 +785,207 @@ onMounted(async () => {
         <!-- Voice — ack toggle + TTS voice/model + STT model, all sourced from the manifest -->
         <div v-show="tab === 'voice'" class="glass p-5">
           <h3 class="mb-1 text-sm font-semibold text-slate-200">Voice</h3>
-          <p class="mb-4 text-[12px] text-slate-500">{{ section('voice').desc }}</p>
-          <label class="mb-5 flex cursor-pointer items-center justify-between gap-3">
-            <span>
-              <span class="text-sm text-slate-200">{{ field('voice','ack').label }}</span>
-              <span class="block text-[12px] text-slate-500">{{ field('voice','ack').desc }}</span>
-            </span>
-            <button type="button" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="ackOn ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleAck">
-              <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="ackOn ? 'left-[22px]' : 'left-0.5'"></span>
-            </button>
-          </label>
+          <p class="mb-5 text-[12px] text-slate-500">{{ section('voice').desc }}</p>
 
           <template v-if="vcfg">
-            <!-- TTS provider -->
-            <div class="mb-5">
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_provider').label }}
-                <span class="normal-case text-slate-600">— {{ field('voice','tts_provider').desc }}</span>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button v-for="c in ttsProviderChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
-                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-                  :class="vcfg.tts?.provider === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
-                  @click="setVoiceCfg({ tts: { provider: c.id } })">
-                  <div class="font-semibold">{{ c.label }}</div>
-                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
-                </button>
-              </div>
-            </div>
+            <div class="space-y-7">
+              <!-- ══ Read-aloud (text-to-speech) ══════════════════════════════════ -->
+              <section class="space-y-4">
+                <h4 class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  <AppIcon glyph="🔊" class="text-sm text-brand-violet" /> Read-aloud
+                  <span class="font-medium normal-case tracking-normal text-slate-500">· how replies are spoken</span>
+                </h4>
 
-            <!-- TTS voice -->
-            <div class="mb-5">
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_voice').label }}
-                <span class="normal-case text-slate-600">— {{ field('voice','tts_voice').desc }}</span>
-              </div>
-              <div v-if="voicesLoading" class="mb-2 flex items-center gap-2 text-[11px] text-slate-500"><Spinner size="xs" />Loading {{ vcfg.tts?.provider }} voices…</div>
-              <div class="flex flex-wrap gap-2">
-                <button v-for="c in ttsVoiceChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
-                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-                  :class="vcfg.tts?.voice === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
-                  @click="setVoiceCfg({ tts: { voice: c.id } })">
-                  <div class="font-semibold">{{ c.label }}</div>
-                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
-                </button>
-              </div>
-              <div v-if="field('voice','tts_voice').allowCustom" class="mt-2 flex items-center gap-2">
-                <input v-model="customVoice" type="text" placeholder="or another voice id"
-                  class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
-                  @keydown.enter.prevent="setCustomVoice" />
-                <button type="button" :disabled="!customVoice.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomVoice"><Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
-              </div>
-            </div>
+                <!-- spoken ack -->
+                <label class="flex cursor-pointer items-center justify-between gap-3">
+                  <span>
+                    <span class="text-sm text-slate-200">{{ field('voice','ack').label }}</span>
+                    <span class="block text-[12px] text-slate-500">{{ field('voice','ack').desc }}</span>
+                  </span>
+                  <button type="button" class="relative h-6 w-11 shrink-0 rounded-full transition-colors" :class="ackOn ? 'bg-brand-violet' : 'bg-white/15'" @click="toggleAck">
+                    <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="ackOn ? 'left-[22px]' : 'left-0.5'"></span>
+                  </button>
+                </label>
 
-            <!-- TTS model -->
-            <div class="mb-5">
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_model').label }}
-                <span class="normal-case text-slate-600">— {{ field('voice','tts_model').desc }}</span>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button v-for="c in ttsModelChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
-                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-                  :class="vcfg.tts?.model === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
-                  @click="setVoiceCfg({ tts: { model: c.id } })">
-                  <div class="font-semibold">{{ c.label }}</div>
-                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
-                </button>
-              </div>
-              <div v-if="field('voice','tts_model').allowCustom" class="mt-2 flex items-center gap-2">
-                <input v-model="customTtsModel" type="text" placeholder="or another model id (e.g. eleven_turbo_v2_5)"
-                  class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
-                  @keydown.enter.prevent="setCustomTtsModel" />
-                <button type="button" :disabled="!customTtsModel.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomTtsModel"><Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
-              </div>
-            </div>
-
-            <!-- STT model -->
-            <div>
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_model').label }}
-                <span class="normal-case text-slate-600">— {{ field('voice','stt_model').desc }}</span>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button v-for="c in sttModelChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
-                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-                  :class="vcfg.stt?.model === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
-                  @click="setVoiceCfg({ stt: { model: c.id } })">
-                  <div class="font-semibold">{{ c.label }}</div>
-                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
-                </button>
-              </div>
-            </div>
-
-            <!-- End-of-speech pause (VAD endpoint) -->
-            <div v-if="sttEndpointChoices.length">
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_endpoint').label }}
-                <span class="normal-case text-slate-600">— {{ field('voice','stt_endpoint').desc }}</span>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button v-for="c in sttEndpointChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
-                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-                  :class="String(vcfg.stt?.vad_endpoint_ms) === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
-                  @click="setVoiceCfg({ stt: { vad_endpoint_ms: Number(c.id) } })">
-                  <div class="font-semibold">{{ c.label }}</div>
-                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
-                </button>
-              </div>
-            </div>
-
-            <!-- Mic sensitivity (VAD) -->
-            <div v-if="sttSensChoices.length">
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_sensitivity').label }}
-                <span class="normal-case text-slate-600">— {{ field('voice','stt_sensitivity').desc }}</span>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button v-for="c in sttSensChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
-                  class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-                  :class="String(vcfg.stt?.vad_sensitivity) === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
-                  @click="setVoiceCfg({ stt: { vad_sensitivity: Number(c.id) } })">
-                  <div class="font-semibold">{{ c.label }}</div>
-                  <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
-                </button>
-              </div>
-            </div>
-
-            <!-- Wake word -->
-            <div class="border-t border-white/10 pt-4">
-              <label class="flex cursor-pointer items-center justify-between gap-3">
-                <span>
-                  <span class="text-sm text-slate-200">{{ field('voice','wake_enabled').label || 'Wake word' }}</span>
-                  <span class="block text-[12px] text-slate-500">{{ field('voice','wake_enabled').desc }}</span>
-                </span>
-                <input type="checkbox" :disabled="busy === 'voicecfg'" :checked="!!vcfg.stt?.wake_enabled"
-                  @change="setVoiceCfg({ stt: { wake_enabled: $event.target.checked } })" />
-              </label>
-              <div class="mt-3">
-                <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','wake_phrase').label || 'Wake phrase' }}
-                  <span class="normal-case text-slate-600">— {{ field('voice','wake_phrase').desc }}</span>
+                <!-- TTS provider -->
+                <div>
+                  <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_provider').label }}
+                    <span class="normal-case text-slate-600">— {{ field('voice','tts_provider').desc }}</span>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button v-for="c in ttsProviderChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                      class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                      :class="vcfg.tts?.provider === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                      @click="setVoiceCfg({ tts: { provider: c.id } })">
+                      <div class="font-semibold">{{ c.label }}</div>
+                      <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                    </button>
+                  </div>
                 </div>
+
+                <!-- TTS voice -->
+                <div>
+                  <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_voice').label }}
+                    <span class="normal-case text-slate-600">— {{ field('voice','tts_voice').desc }}</span>
+                  </div>
+                  <div v-if="voicesLoading" class="mb-2 flex items-center gap-2 text-[11px] text-slate-500"><Spinner size="xs" />Loading {{ vcfg.tts?.provider }} voices…</div>
+                  <div class="flex flex-wrap gap-2">
+                    <button v-for="c in ttsVoiceChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                      class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                      :class="vcfg.tts?.voice === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                      @click="setVoiceCfg({ tts: { voice: c.id } })">
+                      <div class="font-semibold">{{ c.label }}</div>
+                      <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                    </button>
+                  </div>
+                  <div v-if="field('voice','tts_voice').allowCustom" class="mt-2 flex items-center gap-2">
+                    <input v-model="customVoice" type="text" placeholder="or another voice id"
+                      class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
+                      @keydown.enter.prevent="setCustomVoice" />
+                    <button type="button" :disabled="!customVoice.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomVoice"><Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
+                  </div>
+                </div>
+
+                <!-- TTS model -->
+                <div>
+                  <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_model').label }}
+                    <span class="normal-case text-slate-600">— {{ field('voice','tts_model').desc }}</span>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button v-for="c in ttsModelChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                      class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                      :class="vcfg.tts?.model === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                      @click="setVoiceCfg({ tts: { model: c.id } })">
+                      <div class="font-semibold">{{ c.label }}</div>
+                      <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                    </button>
+                  </div>
+                  <div v-if="field('voice','tts_model').allowCustom" class="mt-2 flex items-center gap-2">
+                    <input v-model="customTtsModel" type="text" placeholder="or another model id (e.g. eleven_turbo_v2_5)"
+                      class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-brand-violet/60"
+                      @keydown.enter.prevent="setCustomTtsModel" />
+                    <button type="button" :disabled="!customTtsModel.trim() || busy === 'voicecfg'" class="shrink-0 rounded-lg bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" @click="setCustomTtsModel"><Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ══ Voice input (speech-to-text) ══════════════════════════════════ -->
+              <section class="space-y-4 border-t border-white/10 pt-6">
+                <h4 class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  <AppIcon glyph="🎙" class="text-sm text-brand-violet" /> Voice input
+                  <span class="font-medium normal-case tracking-normal text-slate-500">· how your speech is transcribed</span>
+                </h4>
+
+                <!-- STT model -->
+                <div>
+                  <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_model').label }}
+                    <span class="normal-case text-slate-600">— {{ field('voice','stt_model').desc }}</span>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button v-for="c in sttModelChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                      class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                      :class="vcfg.stt?.model === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                      @click="setVoiceCfg({ stt: { model: c.id } })">
+                      <div class="font-semibold">{{ c.label }}</div>
+                      <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- End-of-speech pause (VAD endpoint) -->
+                <div v-if="sttEndpointChoices.length">
+                  <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_endpoint').label }}
+                    <span class="normal-case text-slate-600">— {{ field('voice','stt_endpoint').desc }}</span>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button v-for="c in sttEndpointChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                      class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                      :class="String(vcfg.stt?.vad_endpoint_ms) === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                      @click="setVoiceCfg({ stt: { vad_endpoint_ms: Number(c.id) } })">
+                      <div class="font-semibold">{{ c.label }}</div>
+                      <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Mic sensitivity (VAD) -->
+                <div v-if="sttSensChoices.length">
+                  <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_sensitivity').label }}
+                    <span class="normal-case text-slate-600">— {{ field('voice','stt_sensitivity').desc }}</span>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button v-for="c in sttSensChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
+                      class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
+                      :class="String(vcfg.stt?.vad_sensitivity) === c.id ? 'border-brand-violet/60 bg-brand-violet/15 text-violet-200' : 'border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/10'"
+                      @click="setVoiceCfg({ stt: { vad_sensitivity: Number(c.id) } })">
+                      <div class="font-semibold">{{ c.label }}</div>
+                      <div class="text-[10px] text-slate-500">{{ c.hint }}</div>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Wake word — a labelled sub-group inside Voice input -->
+                <div class="rounded-xl border border-white/10 bg-white/[0.02] p-3.5">
+                  <label class="flex cursor-pointer items-center justify-between gap-3">
+                    <span>
+                      <span class="text-sm text-slate-200">{{ field('voice','wake_enabled').label || 'Wake word' }}</span>
+                      <span class="block text-[12px] text-slate-500">{{ field('voice','wake_enabled').desc }}</span>
+                    </span>
+                    <input type="checkbox" :disabled="busy === 'voicecfg'" :checked="!!vcfg.stt?.wake_enabled"
+                      @change="setVoiceCfg({ stt: { wake_enabled: $event.target.checked } })" />
+                  </label>
+                  <div class="mt-3">
+                    <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','wake_phrase').label || 'Wake phrase' }}
+                      <span class="normal-case text-slate-600">— {{ field('voice','wake_phrase').desc }}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input v-model="wakePhrase" type="text" placeholder="hey Eve"
+                        class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
+                      <button type="button" :disabled="!wakePhrase.trim() || busy === 'voicecfg'" @click="setVoiceCfg({ stt: { wake_phrase: wakePhrase.trim() } })"
+                        class="shrink-0 rounded-lg bg-brand-gradient px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">
+                        <Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
+                    </div>
+                  </div>
+                  <div class="mt-3" v-if="field('voice','stop_phrases').id">
+                    <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stop_phrases').label || 'Stop phrases' }}
+                      <span class="normal-case text-slate-600">— {{ field('voice','stop_phrases').desc }}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input v-model="stopPhrasesInput" type="text" placeholder="that's all, I'm done, thank you"
+                        class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
+                      <button type="button" :disabled="busy === 'voicecfg'" @click="setVoiceCfg({ stt: { stop_phrases: stopPhrasesInput.trim() } })"
+                        class="shrink-0 rounded-lg bg-brand-gradient px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">
+                        <Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ══ Test the pipeline ══════════════════════════════════════════════ -->
+              <section class="space-y-3 border-t border-white/10 pt-6">
+                <h4 class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  <AppIcon glyph="▶" class="text-sm text-brand-violet" /> Test the pipeline
+                  <span class="font-medium normal-case tracking-normal text-slate-500">· hear a reply with the settings above</span>
+                </h4>
+                <textarea v-model="vtPrompt" rows="2" placeholder="Ask something…"
+                  class="w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand-violet/60"
+                  @keydown.enter.exact.prevent="vtSpeak"></textarea>
                 <div class="flex items-center gap-2">
-                  <input v-model="wakePhrase" type="text" placeholder="hey Eve"
-                    class="flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
-                  <button type="button" :disabled="!wakePhrase.trim() || busy === 'voicecfg'" @click="setVoiceCfg({ stt: { wake_phrase: wakePhrase.trim() } })"
-                    class="shrink-0 rounded-lg bg-brand-gradient px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">
-                    <Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
+                  <button type="button" :disabled="vtBusy || !vtPrompt.trim()" @click="vtSpeak"
+                    class="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">
+                    <AppIcon glyph="▶" /> Speak</button>
+                  <button v-if="vtBusy" type="button" @click="vtStop"
+                    class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-500/20">
+                    <AppIcon glyph="⏹" /> Stop</button>
+                  <span class="ml-auto text-xs text-slate-500">{{ vtStatus }}</span>
                 </div>
-              </div>
-              <div class="mt-3" v-if="field('voice','stop_phrases').id">
-                <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stop_phrases').label || 'Stop phrases' }}
-                  <span class="normal-case text-slate-600">— {{ field('voice','stop_phrases').desc }}</span>
+                <div v-if="vtRows.length" class="max-h-[32vh] space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                  <div v-for="(r, i) in vtRows" :key="i"
+                    class="whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm border px-3 py-2 text-[13px] leading-snug"
+                    :class="r.kind === 'ack' ? 'border-white/10 bg-white/[0.03] italic text-slate-400' : 'border-white/10 bg-white/[0.05] text-slate-100'"
+                  >{{ r.text }}</div>
                 </div>
-                <div class="flex items-center gap-2">
-                  <input v-model="stopPhrasesInput" type="text" placeholder="that's all, I'm done, thank you"
-                    class="flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-200" />
-                  <button type="button" :disabled="busy === 'voicecfg'" @click="setVoiceCfg({ stt: { stop_phrases: stopPhrasesInput.trim() } })"
-                    class="shrink-0 rounded-lg bg-brand-gradient px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">
-                    <Spinner v-if="busy === 'voicecfg'" size="xs" class="mr-1" />Set</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Test the pipeline: talk to the full agent and hear it streamed back (was the Voice tab) -->
-            <div class="border-t border-white/10 pt-4">
-              <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">Test the voice pipeline
-                <span class="normal-case text-slate-600">— send a prompt through the current voice + STT settings and hear the reply streamed back</span>
-              </div>
-              <textarea v-model="vtPrompt" rows="2" placeholder="Ask something…"
-                class="w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-brand-violet/60"
-                @keydown.enter.exact.prevent="vtSpeak"></textarea>
-              <div class="mt-2 flex items-center gap-2">
-                <button type="button" :disabled="vtBusy || !vtPrompt.trim()" @click="vtSpeak"
-                  class="rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-violet/30 disabled:opacity-40">
-                  <AppIcon glyph="▶" /> Speak</button>
-                <button v-if="vtBusy" type="button" @click="vtStop"
-                  class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-500/20">
-                  <AppIcon glyph="⏹" /> Stop</button>
-                <span class="ml-auto text-xs text-slate-500">{{ vtStatus }}</span>
-              </div>
-              <div v-if="vtRows.length" class="mt-3 max-h-[32vh] space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                <div v-for="(r, i) in vtRows" :key="i"
-                  class="whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm border px-3 py-2 text-[13px] leading-snug"
-                  :class="r.kind === 'ack' ? 'border-white/10 bg-white/[0.03] italic text-slate-400' : 'border-white/10 bg-white/[0.05] text-slate-100'"
-                >{{ r.text }}</div>
-              </div>
+              </section>
             </div>
           </template>
         </div>
