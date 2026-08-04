@@ -93,6 +93,7 @@ nav:
   - Operating:
     - The asmltr CLI: cli.md
     - The dashboard: dashboard.md
+    - Usage & cost accounting: usage.md
     - Schedules (cron with a GUI): SCHEDULES.md
     - Notify & read-aloud: NOTIFY-READ-ALOUD.md
     - Versioning & updates: UPDATER-DESIGN.md
