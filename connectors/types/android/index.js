@@ -226,7 +226,7 @@ async function start(ctx) {
     const convo = targetKey || convKey(device);
     const channel = targetKey ? (targetSurface || (convo.includes(':') ? convo.split(':')[0] : 'core')) : 'android';
 
-    ctx.emit({ event_type: 'inbound', session_id: convo, identity: who.identity, payload: { text: text.slice(0, 200) } });
+    ctx.emit({ event_type: 'inbound', session_id: convo, identity: who.identity, payload: { text: text.slice(0, 100000) } }); // keep full — this is the conversation record the app replays as history
     const envelope = {
       channel,
       conversation_key: convo,
