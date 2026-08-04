@@ -1,6 +1,6 @@
 ---
 name: asmltr
-description: How to drive asmltr — the assistant's own multi-channel backend on this machine. Use whenever you need to send/route a message to any channel (Discord, Telegram, email, …), attach or find a file, read or browse email, approve held replies, post cross-session awareness, or monitor/take over other sessions. One CLI (`asmltr`) is the front door to all of it.
+description: How to drive asmltr — the assistant's own multi-channel backend on this machine. Use whenever you need to proactively notify/reach the owner (`asmltr notify` — read-aloud/push/text ladder, e.g. from a scheduled prompt), send/route a message to any channel (Discord, Telegram, email, …), attach or find a file, read or browse email, approve held replies, post cross-session awareness, or monitor/take over other sessions. One CLI (`asmltr`) is the front door to all of it.
 ---
 
 # asmltr — your backend across every channel
@@ -35,6 +35,24 @@ asmltr send email <addr> "<body>" --subject "<subj>" [--file <path>] # email w/ 
 - Only connectors that declare attachment support accept `--file` — others return a clean error.
 - To attach something a user sent you elsewhere, find it first with `asmltr uploads` and pass its
   stored path to `--file`.
+
+## Reaching the user proactively (notify)
+
+To REACH the human owner out-of-band — a scheduled brief, a "your build is done", an alert while
+they're away from any chat — use **`asmltr notify`**. It runs a delivery **ladder** so the message
+actually lands: read aloud on a connected assistant device → push notification → text fallback,
+honoring quiet hours.
+
+```bash
+asmltr notify "<text>" [--title "<t>"] [--force] [--silent]
+```
+- `--force` ignores quiet hours; `--silent` (aka `--no-speak`) skips the spoken step (text only).
+- This is **the** way to proactively notify the owner — **including from a scheduled prompt** (a
+  schedule that says "notify me / send me a message" means `asmltr notify`). Prefer it over any
+  host-specific notification or TTS scripts: `asmltr notify` supersedes them and is what the ladder
+  calls internally.
+- Different targets, different verbs: `asmltr notify` → the **owner** (out-of-band); `asmltr send`
+  → a **specific channel**; `asmltr announce` → the other **sessions**.
 
 ## Email (send · browse · read)
 
