@@ -10,6 +10,18 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **`device` connector — a generic device gateway.** The platform-agnostic base the `android`
+  connector's gateway proved out, minus anything OS-specific: an HTTP + SSE + token surface that makes
+  any networked device (a Pi kiosk, an ESP32, a desk buddy, a custom appliance) a first-class channel —
+  its turns run through the core (identity/trust, moderation, sessions, redaction, event stream), so it
+  shows up in `asmltr map`/`ls`, is takeover-able, and `asmltr send device <id>` / announcements /
+  steer / read-aloud push to it. Speech is proxied (`/gw/transcribe` + `/gw/tts`) so a thin client
+  needs no on-device speech stack or keys. Per-device **capabilities** (screen dims, audio in/out)
+  inject a one-line surface descriptor into the turn's `system_prompt_extra` **only when they change**
+  (never per-turn). `conversation_scope` picks one thread per device or one continuous thread per user
+  across their devices. Platform connectors (`android`, iOS later) layer their extras on this base; the
+  live `android` connector is unchanged. `connectors/types/device/`, docs at `connectors/device.md`.
+
 ### Changed
 
 ### Fixed

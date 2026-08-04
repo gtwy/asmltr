@@ -91,6 +91,7 @@ nav:
     - GitHub: connectors/github.md
     - OpenAI-compatible: connectors/openai.md
     - Android (device gateway): connectors/android.md
+    - Device (generic gateway): connectors/device.md
     - CLI sessions: connectors/cli.md
   - Integrations:
     - Integrations & storage: integrations/index.md
