@@ -75,16 +75,24 @@ const voiceOrb = (() => {
     } catch (_) {}
   }
   function drawOrb() {
-    const w = cv.width, h = cv.height, mx = w / 2, my = h / 2, base = w * 0.27, wob = w * 0.05 * (0.12 + amp * 1.2);
+    const w = cv.width, h = cv.height, mx = w / 2, my = h / 2, base = w * 0.25, wob = w * 0.055 * (0.1 + amp * 1.15);
     cx.clearRect(0, 0, w, h);
-    const g = cx.createRadialGradient(mx, my - 18, base * 0.2, mx, my, base * 1.5);
-    g.addColorStop(0, `rgba(${cA},.95)`); g.addColorStop(.5, `rgba(${cB},.5)`); g.addColorStop(1, `rgba(${cB},0)`);
-    cx.fillStyle = g; cx.beginPath();
-    for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.1) {
-      const r = base + Math.sin(a * 3 + t / 18) * wob + Math.sin(a * 5 - t / 15) * wob * 0.5 + amp * base * 0.3;
-      const x = mx + Math.cos(a) * r, y = my + Math.sin(a) * r; a === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y);
+    cx.globalCompositeOperation = 'lighter'; // additive → the two lobes melt into one soft, glowing body
+    for (let i = 0; i < 2; i++) {
+      const ox = Math.sin(t / 52 + i * 2.3) * base * 0.12, oy = Math.cos(t / 63 + i * 1.7) * base * 0.1;
+      const px = mx + ox, py = my + oy, ph = t / 17 + i * 2.1, col = i ? cB : cA;
+      const g = cx.createRadialGradient(px, py - 12, base * 0.12, px, py, base * 1.55);
+      g.addColorStop(0, `rgba(${col},.5)`); g.addColorStop(.5, `rgba(${col},.14)`); g.addColorStop(1, `rgba(${cB},0)`);
+      cx.fillStyle = g; cx.beginPath();
+      for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.09) {
+        // three drifting harmonics → an organic, breathing outline rather than a plain wobble
+        const r = base + Math.sin(a * 3 + ph) * wob + Math.sin(a * 5 - t / 15) * wob * 0.5
+          + Math.sin(a * 2 + t / 23) * wob * 0.45 + amp * base * 0.3;
+        const x = px + Math.cos(a) * r, y = py + Math.sin(a) * r; a === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y);
+      }
+      cx.closePath(); cx.fill();
     }
-    cx.closePath(); cx.fill();
+    cx.globalCompositeOperation = 'source-over';
   }
   function frame() {
     if (!running) return;
