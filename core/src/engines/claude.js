@@ -94,8 +94,15 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
         if (event.session_id) engineSessionId = event.session_id;
         isError = !!event.is_error;
         if (event.usage) {
-          usage.tokens_in = event.usage.input_tokens || event.usage.inputTokens || 0;
-          usage.tokens_out = event.usage.output_tokens || event.usage.outputTokens || 0;
+          const u = event.usage;
+          // Full input = new uncached input PLUS cached context (read + creation). On a resumed session
+          // most of the prompt is a cache READ, so counting only input_tokens massively undercounts the
+          // real context (you'd see tokens_in≈2 next to tokens_out≈10k). Sum all input components.
+          const inNew = u.input_tokens || u.inputTokens || 0;
+          const inCacheRead = u.cache_read_input_tokens || u.cacheReadInputTokens || 0;
+          const inCacheWrite = u.cache_creation_input_tokens || u.cacheCreationInputTokens || 0;
+          usage.tokens_in = inNew + inCacheRead + inCacheWrite;
+          usage.tokens_out = u.output_tokens || u.outputTokens || 0;
         }
         usage.cost_usd = event.total_cost_usd || event.cost_usd || 0;
         if (typeof event.result === 'string' && !text) text = event.result;
