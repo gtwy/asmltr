@@ -77,6 +77,25 @@ CREATE TABLE IF NOT EXISTS usage_rollup (
 );
 
 -- ---------------------------------------------------------------------------
+-- Aux (side-surface) usage rollup — the metered calls a turn triggers that AREN'T the reasoning engine:
+-- TTS (chars), STT (seconds), moderation/labelers (tokens). Fed from token-usage events whose payload
+-- carries `feature`. Keyed finely so the Usage view can break spend down per provider/feature/model.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS usage_aux (
+  bucket_hour     INTEGER NOT NULL,                 -- unix hour
+  surface         TEXT    NOT NULL,                 -- triggering channel
+  feature         TEXT    NOT NULL,                 -- tts|stt|moderation|label|...
+  provider        TEXT    NOT NULL DEFAULT '',      -- openai|elevenlabs|anthropic|...
+  model           TEXT    NOT NULL DEFAULT '',
+  units           TEXT    NOT NULL DEFAULT '',      -- chars|seconds|tokens
+  unit_count      INTEGER NOT NULL DEFAULT 0,       -- sum of units (chars/seconds/tokens)
+  calls           INTEGER NOT NULL DEFAULT 0,       -- number of aux calls
+  cost_usd        REAL    NOT NULL DEFAULT 0,       -- equivalent value at API rates
+  billed_cost_usd REAL    NOT NULL DEFAULT 0,       -- portion actually billed (aux is metered → usually == cost)
+  PRIMARY KEY (bucket_hour, surface, feature, provider, model, units)
+);
+
+-- ---------------------------------------------------------------------------
 -- Notifications feed (mirrors what an admin-notify hook sent).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS notifications (

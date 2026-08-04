@@ -62,6 +62,13 @@ const _upsertUsage = db.prepare(`
     tokens_in = tokens_in + @ti, tokens_out = tokens_out + @to,
     cost_usd = cost_usd + @cost, billed_cost_usd = billed_cost_usd + @bc, msg_count = msg_count + @msg
 `);
+const _upsertAux = db.prepare(`
+  INSERT INTO usage_aux (bucket_hour, surface, feature, provider, model, units, unit_count, calls, cost_usd, billed_cost_usd)
+  VALUES (@bucket, @surface, @feature, @provider, @model, @units, @count, 1, @cost, @bc)
+  ON CONFLICT(bucket_hour, surface, feature, provider, model, units) DO UPDATE SET
+    unit_count = unit_count + @count, calls = calls + 1,
+    cost_usd = cost_usd + @cost, billed_cost_usd = billed_cost_usd + @bc
+`);
 const _insNotif = db.prepare(`
   INSERT INTO notifications (ts, channel, title, body, surface, session_id)
   VALUES (@ts, @channel, @title, @body, @surface, @session_id)
@@ -114,6 +121,23 @@ const ingestEvent = db.transaction((raw) => {
       identity: row.identity || '',
       ti: row.tokens_in, to: row.tokens_out, cost: row.cost_usd, bc: row.billed_cost_usd,
       msg: row.event_type === 'inbound' ? 1 : 0,
+    });
+  }
+
+  // aux usage rollup — a token-usage event tagged with a `feature` in its payload is a metered
+  // side-surface call (tts/stt/moderation/…). Break it out per provider/feature/model for the panel.
+  if (row.event_type === 'token-usage' && evt.payload && evt.payload.feature) {
+    const p = evt.payload;
+    _upsertAux.run({
+      bucket: Math.floor(row.ts / 3600000) * 3600000,
+      surface: row.surface,
+      feature: String(p.feature),
+      provider: p.provider ? String(p.provider) : '',
+      model: p.model ? String(p.model) : '',
+      units: p.units ? String(p.units) : '',
+      count: Number(p.count) || 0,
+      cost: row.cost_usd,
+      bc: row.billed_cost_usd,
     });
   }
 
@@ -204,6 +228,7 @@ const q = {
     ORDER BY ts DESC LIMIT 800
   `),
   usage: db.prepare(`SELECT * FROM usage_rollup WHERE bucket_hour >= @since ORDER BY bucket_hour DESC`),
+  usageAux: db.prepare(`SELECT * FROM usage_aux WHERE bucket_hour >= @since ORDER BY cost_usd DESC`),
   system: db.prepare(`SELECT * FROM system_metrics WHERE ts >= @since ORDER BY ts DESC LIMIT @limit`),
   notifications: db.prepare(`SELECT * FROM notifications ORDER BY ts DESC LIMIT @limit`),
   // proprioception 1b — latest assessment + a short history for the goal timeline
