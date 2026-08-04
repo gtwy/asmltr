@@ -289,7 +289,7 @@ const insertSystemSample = db.transaction((s) => {
   _insMetric.run(s);
   _insEvent.run({
     ts: s.ts, surface: 'system', session_id: null, identity: null, event_type: 'system-sample',
-    tokens_in: 0, tokens_out: 0, cost_usd: 0,
+    tokens_in: 0, tokens_out: 0, cost_usd: 0, billed_cost_usd: 0,
     payload: JSON.stringify({ cpu_pct: s.cpu_pct, mem_used_mb: s.mem_used_mb, disk_used_pct: s.disk_used_pct }),
     source: 'sampler',
   });
