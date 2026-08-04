@@ -24,6 +24,14 @@ test('a root package-lock.json change forces the install', () => {
 
 test('a workspace package.json change forces the install', () => {
   assert.equal(depsChanged(['core/package.json']), true);
+  assert.equal(depsChanged(['insights/collector/package.json']), true);
+});
+
+test('a non-workspace manifest (mobile) does NOT force the install', () => {
+  // mobile is a separately-built Capacitor app, not a root workspace, so its manifest
+  // does not feed the root `npm ci` and must not trigger a rebuild.
+  assert.equal(depsChanged(['mobile/package.json']), false);
+  assert.equal(depsChanged(['mobile/package.json', 'mobile/package-lock.json']), false);
 });
 
 test('a change under insights/dashboard forces the docker rebuild', () => {
