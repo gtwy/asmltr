@@ -22,7 +22,10 @@ const buckets = computed(() =>
 const totalTokens = computed(() =>
   store.usage.reduce((s, u) => s + (u.tokens_in || 0) + (u.tokens_out || 0), 0)
 )
-const totalCost = computed(() => store.usage.reduce((s, u) => s + (u.cost_usd || 0), 0))
+// Two dollar figures: EQUIVALENT value at API rates (all surfaces, incl. subscription) vs BILLED (the
+// portion that actually hits a card — API-key surfaces only). Subscription usage shows value but $0 billed.
+const totalEquiv = computed(() => store.usage.reduce((s, u) => s + (u.cost_usd || 0), 0))
+const totalBilled = computed(() => store.usage.reduce((s, u) => s + (u.billed_cost_usd || 0), 0))
 const totalMsgs = computed(() => store.usage.reduce((s, u) => s + (u.msg_count || 0), 0))
 
 // stacked area: tokens per surface over the hourly buckets
@@ -90,10 +93,11 @@ const byIdentity = computed(() => {
   const map = {}
   for (const u of store.usage) {
     const key = u.identity || '(unattributed)'
-    if (!map[key]) map[key] = { identity: key, tokens_in: 0, tokens_out: 0, cost_usd: 0, msg_count: 0, surfaces: new Set() }
+    if (!map[key]) map[key] = { identity: key, tokens_in: 0, tokens_out: 0, cost_usd: 0, billed_cost_usd: 0, msg_count: 0, surfaces: new Set() }
     map[key].tokens_in += u.tokens_in || 0
     map[key].tokens_out += u.tokens_out || 0
     map[key].cost_usd += u.cost_usd || 0
+    map[key].billed_cost_usd += u.billed_cost_usd || 0
     map[key].msg_count += u.msg_count || 0
     if (u.surface) map[key].surfaces.add(u.surface)
   }
@@ -147,22 +151,21 @@ onMounted(() => {
     <div class="glass mb-5 flex items-start gap-3 p-3 text-sm">
       <span class="text-lg">ℹ️</span>
       <p class="text-slate-300">
-        <span class="font-medium text-white">Max-plan surfaces: usage is attributed, not billed.</span>
-        Token counts reflect activity attribution; a
-        <code class="rounded bg-white/10 px-1 text-xs">$</code> figure only appears where the
-        collector recorded a real cost.
+        <span class="font-medium text-white">Two dollar figures.</span>
+        <span class="text-emerald-300">Billed</span> = what actually hits a card (metered API keys —
+        TTS/STT/moderation, and any API-key engine).
+        <span class="text-slate-200">Equivalent value</span> = what the same usage would cost at public API
+        rates — computed for <em>everything</em>, including subscription engines (Claude on Max), so you can
+        see the value even where you're not charged. Engines that don't report token counts are estimated
+        from text length.
       </p>
     </div>
 
-    <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
       <StatTile label="Tokens (window)" :value="fmtNum(totalTokens)" accent="#8B5CF6" />
       <StatTile label="Messages" :value="fmtNum(totalMsgs)" accent="#EC4899" />
-      <StatTile
-        v-if="totalCost > 0"
-        label="Attributed cost"
-        :value="fmtUsd(totalCost) || '$0'"
-        accent="#34D399"
-      />
+      <StatTile label="Billed" :value="fmtUsd(totalBilled) || '$0.00'" accent="#34D399" />
+      <StatTile label="Equivalent value" :value="fmtUsd(totalEquiv) || '$0.00'" accent="#22D3EE" />
     </div>
 
     <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -193,7 +196,8 @@ onMounted(() => {
               <th class="px-4 py-2 text-right font-medium">Tokens in</th>
               <th class="px-4 py-2 text-right font-medium">Tokens out</th>
               <th class="px-4 py-2 text-right font-medium">Msgs</th>
-              <th v-if="showCostCol" class="px-4 py-2 text-right font-medium">Cost</th>
+              <th v-if="showCostCol" class="px-4 py-2 text-right font-medium">Billed</th>
+              <th v-if="showCostCol" class="px-4 py-2 text-right font-medium">Equiv. value</th>
             </tr>
           </thead>
           <tbody>
@@ -222,11 +226,14 @@ onMounted(() => {
               <td class="px-4 py-2 text-right font-mono tabular-nums text-slate-300">{{ fmtNum(r.tokens_out) }}</td>
               <td class="px-4 py-2 text-right font-mono tabular-nums text-slate-400">{{ fmtNum(r.msg_count) }}</td>
               <td v-if="showCostCol" class="px-4 py-2 text-right font-mono tabular-nums text-emerald-300">
+                {{ r.billed_cost_usd > 0 ? fmtUsd(r.billed_cost_usd) : '—' }}
+              </td>
+              <td v-if="showCostCol" class="px-4 py-2 text-right font-mono tabular-nums text-cyan-300/80">
                 {{ r.cost_usd > 0 ? fmtUsd(r.cost_usd) : '—' }}
               </td>
             </tr>
             <tr v-if="!byIdentity.length">
-              <td :colspan="showCostCol ? 6 : 5" class="px-4 py-8 text-center text-slate-500">
+              <td :colspan="showCostCol ? 7 : 5" class="px-4 py-8 text-center text-slate-500">
                 No attribution data yet.
               </td>
             </tr>
