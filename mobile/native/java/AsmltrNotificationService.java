@@ -128,7 +128,10 @@ public class AsmltrNotificationService extends NotificationListenerService {
       String synopsis = r.optString("synopsis", "");
       // Read the synopsis in the CONFIGURED voice (ElevenLabs/OpenAI via /gw/tts), not the OS robot engine.
       // The BT-route gate already ran before we buffered this, so no need to re-gate on headphones here.
-      if (speak && priority >= threshold && !synopsis.isEmpty()) Speech.speak(this, base, token, synopsis, false);
+      if (speak && priority >= threshold && !synopsis.isEmpty()) {
+        NotifEyesOverlay.show(this, synopsis);   // float the eyes over the screen while it's read aloud
+        Speech.speak(this, base, token, synopsis, false);
+      }
     } catch (Throwable t) { /* triage failed — stay silent */ }
   }
 
