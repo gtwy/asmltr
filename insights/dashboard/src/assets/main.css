@@ -15,6 +15,10 @@
   body,
   #app {
     height: 100%;
+    /* Off-canvas fixed elements (the mobile nav drawer) must never widen the page. `clip` contains them
+       without creating a scroll container the way overflow:hidden can. */
+    overflow-x: clip;
+    max-width: 100%;
   }
   body {
     @apply bg-[#0a0a12] text-slate-200 font-sans antialiased;
@@ -28,9 +32,14 @@
     text-size-adjust: 100%;
   }
   button, a, [role="button"], input, select, textarea { touch-action: manipulation; }
-  /* Comfortable tap targets on touch devices (Material ~48dp) without bloating desktop. */
+  /* Brand-tinted native controls (checkboxes/radios/range) for consistency with the toggles. */
+  input[type="checkbox"], input[type="radio"], input[type="range"] {
+    accent-color: rgb(var(--brand-violet));
+  }
+  /* Comfortable tap targets on touch devices — opt-in via .md-tap only. (A blanket rule on every
+     <button> stretched the fixed-height toggle switches + icon buttons and broke their layout.) */
   @media (pointer: coarse) {
-    button, [role="button"], .md-tap { min-height: 44px; }
+    .md-tap { min-height: 44px; }
   }
 }
 

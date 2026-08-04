@@ -505,12 +505,12 @@ onMounted(async () => {
     <div class="mx-auto max-w-2xl">
       <p v-if="!manifest" class="glass py-8 text-center text-sm text-slate-500">loading settings…</p>
       <template v-else>
-        <!-- tab bar (from the manifest) -->
-        <div class="mb-5 flex gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
+        <!-- tab bar (from the manifest) — wraps to multiple rows on narrow screens instead of overflowing -->
+        <div class="mb-5 flex flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
           <button
             v-for="t in TABS" :key="t.id" type="button"
-            class="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
-            :class="tab === t.id ? 'bg-brand-violet/20 text-violet-200' : 'text-slate-400 hover:text-slate-200'"
+            class="grow whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+            :class="tab === t.id ? 'bg-brand-violet/20 text-violet-200' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'"
             @click="tab = t.id"
           ><AppIcon :glyph="t.icon" class="mr-1" /> {{ t.label }}</button>
         </div>
