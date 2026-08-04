@@ -1,12 +1,14 @@
 <script setup>
 import { onMounted, computed } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
+import { useTrustStore } from '@/stores/trust'
 import PageHeader from '@/components/PageHeader.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import StatTile from '@/components/StatTile.vue'
 import { surfaceMeta, fmtNum, fmtUsd } from '@/lib/format'
 
 const store = useCollectorStore()
+const trust = useTrustStore()
 
 const AXIS_COLOR = '#475569'
 const SPLIT_COLOR = 'rgba(148,163,184,0.08)'
@@ -88,12 +90,26 @@ const barOption = computed(() => {
   }
 })
 
-// per-identity attribution table
+// per-user attribution table — grouped by the TRUST PRINCIPAL, not the raw channel identity. A person
+// with several linked handles (discord id, email, github login…) in the Access tab folds into one row.
+// Unlinked identities fall back to their own (case-normalized) key, so e.g. "moneo"/"Moneo" still merge.
 const byIdentity = computed(() => {
   const map = {}
   for (const u of store.usage) {
-    const key = u.identity || '(unattributed)'
-    if (!map[key]) map[key] = { identity: key, tokens_in: 0, tokens_out: 0, cost_usd: 0, billed_cost_usd: 0, msg_count: 0, surfaces: new Set() }
+    const raw = u.identity || ''
+    const p = raw ? trust.principalForIdentity(raw) : null
+    const key = p ? `p:${p.id}` : (raw ? `i:${raw.toLowerCase()}` : '(unattributed)')
+    if (!map[key]) {
+      map[key] = {
+        key,
+        identity: p ? p.display_name : (raw || '(unattributed)'),
+        principalId: p ? p.id : null,
+        linked: !!p,
+        tokens_in: 0, tokens_out: 0, cost_usd: 0, billed_cost_usd: 0, msg_count: 0,
+        surfaces: new Set(), handles: new Set(),
+      }
+    }
+    if (raw) map[key].handles.add(raw)
     map[key].tokens_in += u.tokens_in || 0
     map[key].tokens_out += u.tokens_out || 0
     map[key].cost_usd += u.cost_usd || 0
@@ -102,7 +118,7 @@ const byIdentity = computed(() => {
     if (u.surface) map[key].surfaces.add(u.surface)
   }
   return Object.values(map)
-    .map((r) => ({ ...r, surfaces: [...r.surfaces] }))
+    .map((r) => ({ ...r, surfaces: [...r.surfaces], handles: [...r.handles] }))
     .sort((a, b) => b.tokens_in + b.tokens_out - (a.tokens_in + a.tokens_out))
 })
 
@@ -140,6 +156,8 @@ function baseOption(xData, series) {
 
 onMounted(() => {
   store.fetchUsage()
+  // Principals drive the per-user grouping (fold linked channel identities into one person).
+  if (!trust.principals.length) trust.fetchPrincipals()
 })
 </script>
 
@@ -182,16 +200,17 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- identity table -->
+    <!-- per-user table (grouped by trust principal) -->
     <div class="glass mt-5 overflow-hidden">
       <h3 class="border-b border-white/10 px-4 py-3 text-sm font-semibold text-slate-300">
-        Attribution by identity
+        Attribution by user
+        <span class="ml-1 font-normal text-slate-500">· linked channel identities are folded into one person (Access tab)</span>
       </h3>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
             <tr class="text-left text-[11px] uppercase tracking-wider text-slate-500">
-              <th class="px-4 py-2 font-medium">Identity</th>
+              <th class="px-4 py-2 font-medium">User</th>
               <th class="px-4 py-2 font-medium">Surfaces</th>
               <th class="px-4 py-2 text-right font-medium">Tokens in</th>
               <th class="px-4 py-2 text-right font-medium">Tokens out</th>
@@ -203,10 +222,18 @@ onMounted(() => {
           <tbody>
             <tr
               v-for="r in byIdentity"
-              :key="r.identity"
+              :key="r.key"
               class="border-t border-white/5 hover:bg-white/[0.03]"
             >
-              <td class="px-4 py-2 font-mono text-slate-200">{{ r.identity }}</td>
+              <td class="px-4 py-2 text-slate-200">
+                <span class="font-mono">{{ r.identity }}</span>
+                <span v-if="r.linked" class="ml-1 text-[10px] uppercase tracking-wide text-emerald-400/70" title="Linked principal in the Access tab">● linked</span>
+                <!-- folded raw handles, shown when a principal groups more than one (or the label differs) -->
+                <div
+                  v-if="r.handles.length > 1 || (r.handles.length === 1 && r.handles[0] !== r.identity)"
+                  class="mt-0.5 font-mono text-[11px] text-slate-500"
+                >{{ r.handles.join(' · ') }}</div>
+              </td>
               <td class="px-4 py-2">
                 <div class="flex flex-wrap gap-1">
                   <span
