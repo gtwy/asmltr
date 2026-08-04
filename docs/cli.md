@@ -294,7 +294,8 @@ asmltr claude
 asmltr claude --resume
 ```
 
-The session runs as a real interactive `claude` TUI (in tmux), while its events flow
+The session runs as a real interactive `claude` TUI (in a multiplexer, screen by default or tmux via
+`ASMLTR_MULTIPLEXER=tmux`), while its events flow
 to the collector like any other session — so it shows up in `ls`, `map`, `who`, the
 TUI, and the dashboard, and can be steered/taken over. See the
 [CLI-sessions connector](https://github.com/jarethmt/asmltr/blob/main/connectors/cli.md) for how these sessions are wired in.
