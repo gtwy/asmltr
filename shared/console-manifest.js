@@ -110,7 +110,7 @@ const manifest = {
         },
         {
           id: 'tts_provider', label: 'TTS provider', type: 'choice', get: 'tts.provider',
-          desc: 'ElevenLabs (richer voices; needs elevenlabs_api_key) or OpenAI. The voice/model below depend on this — for ElevenLabs, enter a voice ID / eleven_* model in the custom field.',
+          desc: 'ElevenLabs (richer voices; needs elevenlabs_api_key) or OpenAI. The voice and model lists below update to match the selected provider.',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { provider: '{value}' } } },
           choices: [
             { id: 'elevenlabs', label: 'ElevenLabs', hint: 'richer voices' },
@@ -119,7 +119,7 @@ const manifest = {
         },
         {
           id: 'tts_voice', label: 'TTS voice', type: 'choice', get: 'tts.voice', allowCustom: true,
-          desc: 'Spoken voice for read-aloud replies (OpenAI presets below; for ElevenLabs paste a voice ID).',
+          desc: 'Spoken voice for read-aloud replies — the list shows the selected provider\'s voices (your ElevenLabs account voices, or the OpenAI presets).',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { voice: '{value}' } } },
           choices: [
             { id: 'alloy', label: 'Alloy', hint: 'neutral, balanced' },
@@ -134,7 +134,7 @@ const manifest = {
         },
         {
           id: 'tts_model', label: 'TTS model', type: 'choice', get: 'tts.model', allowCustom: true,
-          desc: 'Quality vs. latency (OpenAI models below; for ElevenLabs paste an eleven_* model id).',
+          desc: 'Quality vs. latency — the list shows the selected provider\'s models (ElevenLabs eleven_* models, or the OpenAI presets).',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { tts: { model: '{value}' } } },
           choices: [
             { id: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts', hint: 'newest, steerable (recommended)' },
@@ -147,7 +147,8 @@ const manifest = {
           desc: 'The model that turns your microphone audio into text (voice input in the chat).',
           set: { service: 'core', method: 'POST', path: '/v2/voice/config', body: { stt: { model: '{value}' } } },
           choices: [
-            { id: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe', hint: 'most accurate (recommended)' },
+            { id: 'gpt-transcribe', label: 'gpt-transcribe', hint: 'newest, most accurate + cheapest (~$0.0045/min) — recommended' },
+            { id: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe', hint: 'previous flagship' },
             { id: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe', hint: 'faster, cheaper' },
             { id: 'whisper-1', label: 'whisper-1', hint: 'classic Whisper' },
           ],
