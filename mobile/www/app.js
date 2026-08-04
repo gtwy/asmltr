@@ -48,13 +48,12 @@ let vadCfg = { endpoint_ms: 1600, start_ms: 8000, sensitivity: 50 };
 
 // ---------- voiceOrb: the reactive orb-face (ambient glow + expressive eyes) ----------
 // Drives the talk control's visual. State: idle | listening | thinking | speaking. Amplitude comes from
-// the live mic (while listening, via setAmp) and the spoken reply (while speaking, via hearTTS→analyser);
+// the live mic (while listening) and the decoded TTS envelope (while speaking) — both via setAmp;
 // idle/thinking synthesize a gentle breathe. Self-contained; no dependencies.
 const voiceOrb = (() => {
   let vs = 'idle', amp = 0, ampT = 0, t = 0, extAmp = 0, extAt = 0;
   let look = { x: 0, y: 0 }, lookT = { x: 0, y: 0 }, blink = 0, nextBlink = 80, nextLook = 150;
   let cv, cx, eyeL, eyeR, eyes, glowA, glowB, running = false;
-  let actx = null, analyser = null, abuf = null;               // shared WebAudio for TTS amplitude
   function els() {
     cv = document.getElementById('orbcv'); if (!cv) return false;
     cx = cv.getContext('2d'); eyeL = document.getElementById('eyeL'); eyeR = document.getElementById('eyeR');
@@ -62,21 +61,9 @@ const voiceOrb = (() => {
     return !!(cx && eyeL && eyeR);
   }
   function setState(s) { if (['idle', 'listening', 'thinking', 'speaking'].includes(s)) vs = s; }
+  // Amplitude is fed externally via setAmp — from the live mic while listening, and from the decoded
+  // TTS envelope while speaking (see speakAmp). idle/thinking synthesize a gentle breathe in frame().
   function setAmp(v) { extAmp = Math.max(0, Math.min(1, v || 0)); extAt = Date.now(); }
-  function hearTTS(audioEl) {
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
-      if (!actx) { actx = new AC(); analyser = actx.createAnalyser(); analyser.fftSize = 512; analyser.connect(actx.destination); abuf = new Uint8Array(analyser.fftSize); }
-      if (actx.state === 'suspended') actx.resume().catch(() => {});
-      const srcNode = actx.createMediaElementSource(audioEl); srcNode.connect(analyser); // → analyser → speakers
-    } catch (_) { /* cross-origin / already-connected → fall back to synth speaking envelope */ }
-  }
-  function ttsRms() {
-    if (!analyser) return null;
-    analyser.getByteTimeDomainData(abuf); let s = 0;
-    for (let i = 0; i < abuf.length; i++) { const d = (abuf[i] - 128) / 128; s += d * d; }
-    return Math.sqrt(s / abuf.length);
-  }
   function drawOrb() {
     const w = cv.width, h = cv.height, mx = w / 2, my = h / 2, base = w * 0.27, wob = w * 0.05 * (0.4 + amp);
     cx.clearRect(0, 0, w, h);
@@ -84,7 +71,7 @@ const voiceOrb = (() => {
     g.addColorStop(0, 'rgba(178,150,255,.95)'); g.addColorStop(.5, 'rgba(220,95,185,.5)'); g.addColorStop(1, 'rgba(34,211,238,0)');
     cx.fillStyle = g; cx.beginPath();
     for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.1) {
-      const r = base + Math.sin(a * 3 + t / 12) * wob + Math.sin(a * 5 - t / 9) * wob * 0.5 + amp * base * 0.22;
+      const r = base + Math.sin(a * 3 + t / 18) * wob + Math.sin(a * 5 - t / 15) * wob * 0.5 + amp * base * 0.22;
       const x = mx + Math.cos(a) * r, y = my + Math.sin(a) * r; a === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y);
     }
     cx.closePath(); cx.fill();
@@ -96,7 +83,7 @@ const voiceOrb = (() => {
     if (vs === 'idle') ampT = 0.12 + breathe * 0.06;
     else if (vs === 'thinking') ampT = 0.16 + breathe * 0.05;
     else if (vs === 'listening') ampT = fresh ? 0.2 + extAmp * 0.8 : 0.12;
-    else if (vs === 'speaking') { const r = ttsRms(); ampT = r != null ? Math.min(1, r * 5) : 0.4 + Math.abs(Math.sin(t / 5)) * 0.5; }
+    else if (vs === 'speaking') ampT = fresh ? 0.25 + extAmp * 0.75 : 0.35 + Math.abs(Math.sin(t / 8)) * 0.35; // fed by the TTS envelope (setAmp), synth fallback between clips
     amp += (ampT - amp) * 0.18;
     if (--nextBlink <= 0) { blink = 1; nextBlink = 100 + Math.random() * 170; }
     if (blink > 0) { blink -= 0.18; if (blink < 0) blink = 0; }
@@ -109,13 +96,13 @@ const voiceOrb = (() => {
     const eh = Math.max(2, open * (1 - blink));
     for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 4px 4px 12px 12px' : rad + 'px'; }
     if (eyes) eyes.style.transform = `translate(${look.x}px,${look.y}px) scale(${1 + amp * 0.05})`;
-    if (glowA) glowA.style.transform = `scale(${1 + amp * 0.16})`;
-    if (glowB) glowB.style.transform = `scale(${1 + amp * 0.26}) rotate(${t / 7}deg)`;
+    if (glowA) glowA.style.transform = `translate(${Math.sin(t / 130) * 8}px,${Math.cos(t / 165) * 6}px) scale(${1 + amp * 0.16})`;
+    if (glowB) glowB.style.transform = `translate(${Math.cos(t / 150) * 9}px,${Math.sin(t / 120) * 7}px) scale(${1 + amp * 0.26}) rotate(${t / 22}deg)`;
     drawOrb();
     requestAnimationFrame(frame);
   }
   function start() { if (running) return; if (!els()) return; running = true; requestAnimationFrame(frame); }
-  return { start, setState, setAmp, hearTTS };
+  return { start, setState, setAmp };
 })();
 let wakeCfg = { enabled: false, phrase: '' }; // wake word (mirrors core voice config; editable in-app)
 // Hands-free "stop listening" phrases — say one and the turn is dropped (not sent) + the mic turns off.
@@ -246,13 +233,35 @@ async function synthSentence(text) {
   catch (_) { ttsClips[seq] = null; }
   drainTTS();
 }
+// Reactive speaking: decode the clip's bytes into a cheap RMS envelope and feed the orb's amplitude by
+// playback time. This only DECODES the audio for analysis — it never routes the <audio> element through
+// WebAudio (createMediaElementSource reroutes playback into a suspended graph and mutes it on WebView),
+// so playback is untouched. Falls back to the orb's synth envelope if decode fails.
+let _orbActx = null;
+async function speakAmp(a, src) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    if (!_orbActx) _orbActx = new AC();
+    const bytes = await (await fetch(src)).arrayBuffer();
+    const audio = await _orbActx.decodeAudioData(bytes);
+    const ch = audio.getChannelData(0), W = Math.max(1, Math.floor(audio.sampleRate * 0.04)); // 40ms windows
+    const env = []; let peak = 0.001;
+    for (let i = 0; i < ch.length; i += W) { let s = 0, n = 0; for (let j = i; j < i + W && j < ch.length; j++) { s += ch[j] * ch[j]; n++; } const r = Math.sqrt(s / Math.max(1, n)); env.push(r); if (r > peak) peak = r; }
+    const step = () => {
+      if (curAudio !== a || a.paused || a.ended) return;
+      try { voiceOrb.setAmp(Math.min(1, (env[Math.floor(a.currentTime / 0.04)] || 0) / peak)); } catch (_) {}
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  } catch (_) { /* decode failed → orb uses its synth speaking envelope */ }
+}
 function drainTTS() {
   if (ttsPlaying) return;
   if (ttsNextPlay in ttsClips) {
     const src = ttsClips[ttsNextPlay]; delete ttsClips[ttsNextPlay]; ttsNextPlay++;
     if (!src) return drainTTS();
     ttsPlaying = true; const a = new Audio(src); curAudio = a;
-    try { voiceOrb.setState('speaking'); } catch (_) {}   // orb switches to the "speaking" envelope
+    try { voiceOrb.setState('speaking'); speakAmp(a, src); } catch (_) {}   // orb ripples with the actual spoken audio
     a.onended = a.onerror = () => { ttsPlaying = false; if (curAudio === a) curAudio = null; drainTTS(); };
     a.play().catch(() => { ttsPlaying = false; drainTTS(); });
     return;
