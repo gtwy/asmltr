@@ -108,8 +108,18 @@ server {
     location = /manifest.webmanifest { default_type application/manifest+json; }
     location = /sw.js { add_header Cache-Control "no-cache"; }
 
-    # SPA history fallback (public — the app shell + login screen must always load)
+    # Content-hashed build assets (index-<hash>.js/.css) are immutable — cache them hard so repeat
+    # loads are instant. A new deploy produces new filenames, so this never serves stale code.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # SPA history fallback (public — the app shell + login screen must always load). The shell MUST
+    # revalidate every load (cheap 304 via ETag) so a new deploy's asset hashes reach clients — most
+    # importantly the Android WebView, which otherwise heuristically caches index.html and gets stuck
+    # on an old build even after the site updates.
     location / {
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
     }
 }
