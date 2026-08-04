@@ -36,13 +36,14 @@ function loadFileSecrets() {
 
 async function get(key) {
   if (!key) return null;
+  // 1) environment (exact, then UPPER_SNAKE) — checked BEFORE the cache so a fresh env value always
+  //    wins over a value cached earlier in the process (e.g. resolved from the vault at startup before
+  //    .env populated it, or a rotated key). Env reads are cheap; this keeps env authoritative as documented.
+  const upper = String(key).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  if (process.env[key]) return process.env[key];
+  if (process.env[upper]) return process.env[upper];
   if (cache.has(key)) return cache.get(key);
   let val = null;
-
-  // 1) environment (exact, then UPPER_SNAKE)
-  const upper = String(key).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
-  if (process.env[key]) val = process.env[key];
-  else if (process.env[upper]) val = process.env[upper];
 
   // 2) secrets file
   if (val == null) { const f = loadFileSecrets(); if (f && f[key] != null) val = String(f[key]); }
