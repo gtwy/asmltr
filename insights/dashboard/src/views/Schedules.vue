@@ -8,12 +8,17 @@ import { onMounted, reactive, ref, computed, onBeforeUnmount } from 'vue'
 import { schedulesApi } from '@/services/api'
 import PageHeader from '@/components/PageHeader.vue'
 import ModalShell from '@/components/ModalShell.vue'
+import ChatTranscript from '@/components/ChatTranscript.vue'
 
 const items = ref([])
 const loading = ref(false)
 const error = ref(null)
 const busy = reactive({}) // id -> action in flight
 const runResult = reactive({}) // id -> { ok, text }
+const outOpen = reactive({}) // id -> last-run panel expanded?
+function toggleOut(id) { outOpen[id] = !outOpen[id] }
+// The collector session_id a prompt job runs under (mirrors scheduler.js: fresh → schedule:<id>).
+function jobKey(job) { return (!job.session || job.session === 'new') ? `schedule:${job.id}` : job.session }
 
 const TYPE_META = {
   prompt: { label: 'prompt', color: '#8B5CF6', icon: '🧠' },
@@ -200,8 +205,23 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           </div>
         </div>
 
-        <!-- last output / error preview -->
-        <pre v-if="job.last_output || job.last_error" class="max-h-24 overflow-auto rounded-lg border border-white/5 bg-black/30 p-2 text-[11px] leading-relaxed text-slate-400 whitespace-pre-wrap">{{ job.last_error || job.last_output }}</pre>
+        <!-- last run — collapsible. Prompt jobs render the full chat transcript (thinking + tools +
+             reply, same as the Live session chat); shell jobs show raw stdout. -->
+        <div v-if="job.last_run || job.last_output || job.last_error" class="rounded-lg border border-white/5 bg-black/20">
+          <button type="button" class="flex w-full items-center justify-between px-2.5 py-1.5 text-[11px] text-slate-400 transition-colors hover:text-slate-200" @click="toggleOut(job.id)">
+            <span>Last run output</span>
+            <span class="text-slate-500">{{ outOpen[job.id] ? '▾ hide' : '▸ show' }}</span>
+          </button>
+          <div v-if="outOpen[job.id]" class="max-h-96 overflow-y-auto border-t border-white/5 p-2.5">
+            <ChatTranscript
+              v-if="job.type === 'prompt'"
+              :session-id="jobKey(job)"
+              empty-text="No transcript for this run — re-run to capture the full thinking + tool output."
+            />
+            <pre v-else class="whitespace-pre-wrap text-[11px] leading-relaxed text-slate-400">{{ job.last_error || job.last_output || '(no output)' }}</pre>
+            <p v-if="job.last_error && job.type === 'prompt'" class="mt-2 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-300"><AppIcon glyph="⚠" /> {{ job.last_error }}</p>
+          </div>
+        </div>
 
         <!-- actions -->
         <div class="mt-1 flex flex-wrap items-center gap-2 border-t border-white/5 pt-3">

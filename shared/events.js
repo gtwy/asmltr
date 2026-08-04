@@ -28,6 +28,7 @@ const SURFACES = Object.freeze([
   'github',
   'openai',      // OpenAI-compatible REST API (external clients / OpenRouter-style)
   'claude-code', // interactive sessions tracked via hooks
+  'schedule',    // scheduled prompt jobs (the scheduler runs a managed turn per cron)
   'system',      // the metrics sampler
   'core',        // asmltr-core itself (lifecycle / internal)
 ]);
