@@ -55,3 +55,47 @@ to write speakable prose (no markdown); a screen is told it can show formatted o
 - **`identity`**: `conversation_key = device:<instance>:identity:<callerIdentity>` — every device a
   user talks through shares **one continuous thread**, so the conversation is interface-agnostic while
   each device stays an individually addressable wire for `/out`.
+
+## Integrating a client (worked example)
+
+Any client that can hold an SSE connection and POST JSON is a device. The pattern is: **hold the
+stream open, then post turns and read the reply off the stream.**
+
+1. **Mint a token.** Add an entry to the instance's `keys.json` (gitignored):
+
+    ```json
+    { "keys": [ { "key": "<long-random>", "identity": "owner", "username": "Desk buddy" } ] }
+    ```
+
+2. **Hold the push stream open** (reconnect if it drops) — this is where replies and `/out` frames
+   arrive, so it must be connected *before* you post a turn:
+
+    ```
+    GET /gw/stream?token=<token>&device=desk-buddy&name=Desk%20buddy
+    → data: {"type":"ready","conversation_key":"device:<instance>:device:desk-buddy"}
+    ```
+
+3. **Post a turn.** It acks immediately; the reply *streams over the SSE above*, not this response.
+   Send `capabilities` so the model knows the surface (only re-sent internally when it changes):
+
+    ```
+    POST /gw/turn  { "token": "...", "device": "desk-buddy", "text": "what's on my calendar?",
+                     "capabilities": { "screen": {"w":480,"h":800}, "audio_out": true } }
+    → { "ok": true, "streaming": true }
+    # then, over the stream:
+    data: {"type":"delta","text":"You have "}      # speak/render these as they arrive
+    data: {"type":"delta","text":"two meetings…"}
+    data: {"type":"tool","name":"Bash","input":"…"}   # optional: show/ignore progress
+    data: {"type":"done"}                              # turn finished
+    ```
+
+4. **Speak edge-locally or via the proxy.** A thin client with no speech stack can `POST /gw/tts`
+   (text → audio bytes) and `POST /gw/transcribe` (audio → text) so no provider keys live on the
+   device. A client that already has its own STT/TTS just skips these.
+
+5. **Receive pushes.** `asmltr send device desk-buddy "..."`, announcements, and read-aloud all arrive
+   on the same stream as `{"type":"inject"}` (steer into the next turn) or `{"type":"speak","text":…}`
+   (read aloud now, no turn) — wire `speak` to your audio path.
+
+That's the whole contract: one held stream, `POST /gw/turn`, read frames. Nothing device-specific
+lives in asmltr — a platform connector (`android`) only *adds* endpoints on top of this base.
