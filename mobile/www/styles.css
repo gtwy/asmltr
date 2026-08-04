@@ -57,8 +57,8 @@ svg { width: 20px; height: 20px; display: block; }
 .orbface .eyes { position: relative; z-index: 3; display: flex; gap: 12px; align-items: center; justify-content: center;
   transition: transform .18s cubic-bezier(.3,1.3,.5,1); will-change: transform; }
 .orbface .eye { width: 17px; height: 24px; border-radius: 9px;
-  background: linear-gradient(180deg, #f2ecff, #b79bff 60%, #7de8ff);
-  box-shadow: 0 0 9px rgb(var(--accent)/.85), 0 0 20px rgb(var(--accent2)/.35), inset 0 -3px 5px rgb(34 211 238/.5);
+  background: linear-gradient(180deg, #ffffff, rgb(var(--accent)) 58%, rgb(var(--accent2)));
+  box-shadow: 0 0 9px rgb(var(--accent)/.85), 0 0 20px rgb(var(--accent2)/.35), inset 0 -3px 5px rgb(var(--accent2)/.5);
   transition: height .12s ease, border-radius .18s ease, transform .18s cubic-bezier(.3,1.3,.5,1); will-change: height, transform; }
 .kbdrow { display: flex; gap: 8px; }
 .kbd { flex: 1; padding: 11px 13px; border-radius: 12px; border: 1px solid #ffffff1a; background: var(--panel2); color: var(--text); font-size: 15px; }
@@ -97,7 +97,7 @@ body.overlay .bar:active { cursor: grabbing; }
 body.overlay .log { max-height: 44dvh; }
 body.overlay .assistant .bubble { background: rgba(255,255,255,0.08); }
 body.overlay .kbd { background: rgba(255,255,255,0.07); }
-body.overlay .talk.busy { background: rgba(255,255,255,0.10); }
+body.overlay .talk.busy { background: none; }  /* the orb conveys the busy/thinking state — no box behind the eyes */
 
 /* minimized → hide the card, show a clean single-color glass bubble with a mic glyph */
 body.overlay.minimized .card { display: none; }
