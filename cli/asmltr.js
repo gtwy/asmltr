@@ -549,7 +549,7 @@ function cmdHelp() {
   asmltr stop <id>       SIGINT an ephemeral session
   asmltr diff <id>       git diff of a session's worktree
   ${A.bold('sessions:')}
-  asmltr claude [args]   launch a monitored, identity-anchored claude session (tmux; takeover-able)
+  asmltr claude [args]   launch a monitored, identity-anchored claude session (screen; takeover-able)
   asmltr provision-alias create a \`<agent-name>\` → \`asmltr claude\` command (from ASSISTANT_NAME;
        [name] [--force]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
   ${A.bold('version & updates:')}

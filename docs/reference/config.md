@@ -140,8 +140,9 @@ Portable defaults; override to relocate the SQLite stores and workspaces.
 | `ASMLTR_TAILER_BACKFILL` | off (set `1` to enable) | Read historical JSONL on start (else tail only new lines) |
 | `ASMLTR_TRACKER_PATH` | — | Host hook session tracker (screen-based, one identity) |
 | `ASMLTR_TRACKER_IDENTITY` | `cli` | Identity for the host hook tracker |
-| `ASMLTR_CLI_TRACKER_PATH` | `~/.asmltr/cli-sessions.json` | `asmltr claude` (tmux) session tracker |
+| `ASMLTR_CLI_TRACKER_PATH` | `~/.asmltr/cli-sessions.json` | `asmltr claude` session tracker |
 | `ASMLTR_CLI_IDENTITY` | OS username | Identity used by the CLI / claude tailer |
+| `ASMLTR_MULTIPLEXER` | `screen` | Multiplexer for interactive `asmltr claude` sessions; set `tmux` to opt into tmux. screen keeps native mouse-wheel scrollback; tmux needs copy-mode |
 | `ASMLTR_QUERY_LOG_DIR` | — | Optional legacy query-log dir the tailer reads |
 | `ASMLTR_MOD_LOG_DIR_SRC` | — | Optional legacy moderation-log dir the tailer reads |
 
