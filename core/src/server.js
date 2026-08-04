@@ -112,6 +112,9 @@ function withKeyLock(key, fn) {
 // In-flight turns by conversation_key → AbortController, for real-time kill.
 const inFlight = new Map();
 function truncate(v, n = 400) { try { const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > n ? s.slice(0, n) + '…' : s; } catch { return ''; } }
+// Conversational text (inbound/outbound) doubles as the stored conversation record that surfaces (e.g. the
+// mobile app) replay as history — keep it effectively full, not clipped to a telemetry-sized preview.
+const CONVO_TEXT_MAX = 100000;
 
 // A model that decides a message isn't for it should emit the bare [[NO_REPLY]] token — but it often
 // PROSE-refuses instead ("That's addressed to another agent, not me…"), which then gets POSTED as spam. This
@@ -224,7 +227,7 @@ async function handle(envelope, opts = {}) {
   const _cc = e.channel_context || {};
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'inbound',
     identity: e.sender.raw_username || e.sender.raw_id, source: 'core',
-    payload: { text: e.content.text.slice(0, 500), delivery: e.delivery, server: _cc.server || null, channel: _cc.channel || null, observed: e.observe_only || undefined } });
+    payload: { text: e.content.text.slice(0, CONVO_TEXT_MAX), delivery: e.delivery, server: _cc.server || null, channel: _cc.channel || null, observed: e.observe_only || undefined } });
 
   // Observe-only: ingest for awareness, never reply. Recorded above (backend visibility); buffered
   // here so it reaches the model as context on the next real turn. No trust/moderation/turn.
@@ -574,7 +577,7 @@ async function handle(envelope, opts = {}) {
 
   const actions = [env.reply(result.text, { segments: result.segments || [] })];
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'outbound',
-    identity: resolved.user_key, source: 'core', payload: { text: truncate(result.text, 500), chars: (result.text || '').length } });
+    identity: resolved.user_key, source: 'core', payload: { text: truncate(result.text, CONVO_TEXT_MAX), chars: (result.text || '').length } });
 
   // --- REDACTION LAYER (output stage, mirrors the trust/auth input stage) -----
   // Scrub secrets from outbound text on any surface that ISN'T a private channel with
