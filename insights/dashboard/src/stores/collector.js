@@ -18,6 +18,7 @@ export const useCollectorStore = defineStore('collector', {
 
     events: [], // newest-first
     usage: [],
+    usageAux: [], // per-feature/provider metered aux spend (tts/stt/moderation)
     samples: [], // oldest-first (chart-friendly)
     notifications: [],
     brief: null,
@@ -84,6 +85,7 @@ export const useCollectorStore = defineStore('collector', {
       try {
         const data = await api.usage(params)
         this.usage = data.usage || []
+        this.usageAux = data.aux || []
         this.lastError = null
       } catch (e) {
         this.lastError = e.message
