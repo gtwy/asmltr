@@ -1,6 +1,10 @@
+<div class="asmltr-hero" markdown>
+
 # asmltr
 
 <p class="asmltr-gradient" style="font-size:1.35rem;font-weight:800;margin-top:-0.4rem">One channel-agnostic AI-assistant backend behind every chat surface — with a live insights dashboard.</p>
+
+</div>
 
 Run **one** assistant and let people reach it from **Discord, Telegram, an MCP client, GitHub issues,
 or any OpenAI-compatible client** — all through the same brain, with shared memory, a unified
