@@ -76,29 +76,36 @@ async function providerRaw(systemPrompt, userPrompt, jsonMode) {
     });
     if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const j = await r.json();
-    return (j.content || []).map((b) => b.text || '').join('').trim();
+    const text = (j.content || []).map((b) => b.text || '').join('').trim();
+    const u = j.usage || {};
+    return { text, usage: { tokens_in: u.input_tokens || 0, tokens_out: u.output_tokens || 0 } };
   }
   const client = await getOpenAIClient();
   const params = { model: MOD_MODEL, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] };
   if (jsonMode) params.response_format = { type: 'json_object' };
   const completion = await client.chat.completions.create(params);
-  return (completion.choices[0].message.content || '').trim();
+  const u = completion.usage || {};
+  return { text: (completion.choices[0].message.content || '').trim(),
+    usage: { tokens_in: u.prompt_tokens || 0, tokens_out: u.completion_tokens || 0 } };
 }
 
 // Run the classifier; returns the parsed assessment. Deterministic JSON on OpenAI + a single
 // retry so an occasional malformed reply no longer fail-secure-blocks a legitimate request.
 async function runModeration(systemPrompt, userPrompt) {
   let jsonMode = MOD_PROVIDER !== 'anthropic';
+  const usage = { tokens_in: 0, tokens_out: 0 }; // accumulate across retries — every call still costs
   for (let attempt = 1; attempt <= 2; attempt++) {
     let raw;
     try {
-      raw = await providerRaw(systemPrompt, userPrompt, jsonMode);
+      const r = await providerRaw(systemPrompt, userPrompt, jsonMode);
+      raw = r.text;
+      usage.tokens_in += r.usage.tokens_in; usage.tokens_out += r.usage.tokens_out;
     } catch (err) {
       // A model that rejects response_format → drop json mode and retry, don't hard-fail.
       if (jsonMode && /response_format|json/i.test(err.message)) { jsonMode = false; continue; }
       throw err;
     }
-    try { return extractJson(raw); }
+    try { return { assessment: extractJson(raw), usage }; }
     catch (parseErr) {
       if (attempt === 2) { console.error('[moderation] unparseable after retry:', String(raw).slice(0, 200)); throw parseErr; }
     }
@@ -173,7 +180,7 @@ async function moderate(userMessage, resolved, meta = {}) {
     : `USER: ${resolved.display_name}\nALLOWED: ${JSON.stringify(resolved.permissions)}\nREQUIRES APPROVAL: ${JSON.stringify(resolved.requires_approval)}\nFORBIDDEN: ${JSON.stringify(resolved.forbidden)}\n\nUSER'S ACTUAL MESSAGE:\n"${userMessage}"\n\nEvaluate ONLY this user message. Questions about past discussions = SAFE. Their own project = SAFE. Only block actual violations.`;
 
   try {
-    const assessment = await runModeration(systemPrompt, userPrompt);
+    const { assessment, usage } = await runModeration(systemPrompt, userPrompt);
     const allowed = assessment.riskLevel <= 6;
     const monitored = assessment.riskLevel >= 4 && assessment.riskLevel <= 6;
 
@@ -198,6 +205,9 @@ async function moderate(userMessage, resolved, meta = {}) {
       concerns: assessment.concerns,
       reasoning: assessment.reasoning,
       monitored,
+      // aux cost accounting — the moderation model runs on a metered key (usually OpenAI); the caller
+      // emits this as a priced token-usage event so it lands in the Usage view's Billed total.
+      usage: { ...usage, model: MOD_MODEL, provider: MOD_PROVIDER },
     };
   } catch (err) {
     console.error('[moderation] error (failing secure):', err.message);

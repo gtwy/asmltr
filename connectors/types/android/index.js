@@ -26,6 +26,7 @@ const path = require('path');
 // core-auth for /v2/transcribe + /v2/tts). Same shared modules the core /v2 speech endpoints use.
 const stt = require('../../../shared/speech/stt');
 const tts = require('../../../shared/speech/tts');
+const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const identity = require('../../../shared/identity'); // for /gw/theme (signature palette + agent name)
 
 const meta = {
@@ -360,6 +361,9 @@ async function start(ctx) {
       const buf = Buffer.from(String(b.audio_base64 || ''), 'base64');
       if (!buf.length) return res.status(400).json({ ok: false, error: 'audio_base64 required' });
       const r = await stt.transcribe(buf, { mime: b.mime || 'audio/webm', filename: b.filename, language: b.language });
+      // Aux cost: metered STT key → price by audio seconds (est. from clip size when no reported duration).
+      const seconds = r.duration || estimateAudioSeconds(r.bytes, b.mime || 'audio/webm');
+      ctx.emit(auxUsage({ surface: 'assistant-native', feature: 'stt', provider: 'openai', model: r.model, seconds }));
       res.json({ ok: true, text: r.text || '', model: r.model });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
@@ -370,6 +374,10 @@ async function start(ctx) {
       const text = String(b.text || '').trim();
       if (!text) return res.status(400).json({ ok: false, error: 'text required' });
       const r = await tts.synthesize(text, { voice: b.voice, model: b.model });
+      // Aux cost: metered TTS key → price by characters synthesized.
+      const c = tts.config();
+      ctx.emit(auxUsage({ surface: 'assistant-native', feature: 'tts',
+        provider: c.provider, model: b.model || c.model, chars: text.length }));
       res.json({ ok: true, mime: r.mime, b64: Buffer.from(r.audio).toString('base64') });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });

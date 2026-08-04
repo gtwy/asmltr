@@ -20,6 +20,7 @@ const express = require('express');
 const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder, Status } = require('discord.js');
 // THE shared asmltr speech layer — same TTS/STT used by the dashboard + core /v2/speak (DRY).
 const sharedTts = require('../../../shared/speech/tts');
+const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const sharedStt = require('../../../shared/speech/stt');
 
 // Assistant identity — the display name AND the spoken wake word for voice.
@@ -574,11 +575,15 @@ RESPONSE RULES:
     // Unified STT (shared/speech/stt). Per-instance language + wake-word prompt bias; model/key follow
     // the shared config (Settings > Voice) unless overridden. lang '' = auto-detect.
     const language = cfg.stt_language === undefined ? 'en' : cfg.stt_language;
-    const { text } = await sharedStt.transcribe(wav, {
+    const out = await sharedStt.transcribe(wav, {
       mime: 'audio/wav', filename: 'utt.wav', language,
       prompt: `Casual voice-chat speech; the speaker may address an assistant named ${NAME}.`,
     });
-    return text || '';
+    // Aux cost: STT runs on a metered key. Price by audio seconds (est. from clip size when the model
+    // doesn't report duration) so the Discord voice bridge's transcription cost lands in the Billed total.
+    const seconds = out.duration || estimateAudioSeconds(out.bytes, 'audio/wav');
+    ctx.emit(auxUsage({ surface: 'discord', feature: 'stt', provider: 'openai', model: out.model, seconds }));
+    return out.text || '';
   }
 
   // --- gatekeeper: does this spoken utterance ADDRESS the assistant? (heuristic v1) --------
@@ -608,6 +613,9 @@ RESPONSE RULES:
         model: cfg.tts_model || undefined,
         keyName: cfg.elevenlabs_key_name || 'elevenlabs_api_key',
       });
+      // Aux cost: ElevenLabs is a metered key → record the synthesized characters for the Billed total.
+      ctx.emit(auxUsage({ surface: 'discord', feature: 'tts', provider: 'elevenlabs',
+        model: cfg.tts_model || 'eleven_turbo_v2_5', chars: text.length }));
       return audio;
     } catch (e) { ctx.log(`[voice] tts failed: ${e.message}`); return null; }
   }
