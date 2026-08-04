@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS events (
   event_type  TEXT    NOT NULL,                 -- inbound|outbound|tool|token-usage|identity_resolved|moderation_decision|session-start|session-end|system-sample|notification|control
   tokens_in   INTEGER NOT NULL DEFAULT 0,
   tokens_out  INTEGER NOT NULL DEFAULT 0,
-  cost_usd    REAL    NOT NULL DEFAULT 0,       -- 0 for Max-subscription surfaces; >0 only where an API key backs it
+  cost_usd    REAL    NOT NULL DEFAULT 0,       -- equivalent value at API rates (computed for ALL surfaces, incl. subscription)
+  billed_cost_usd REAL NOT NULL DEFAULT 0,      -- portion actually billed to a card (API-key surfaces only; 0 for subscription)
   payload     TEXT,                             -- JSON blob
   source      TEXT                              -- concrete producer that posted it (audit)
 );
@@ -69,7 +70,8 @@ CREATE TABLE IF NOT EXISTS usage_rollup (
   identity    TEXT    NOT NULL DEFAULT '',
   tokens_in   INTEGER NOT NULL DEFAULT 0,
   tokens_out  INTEGER NOT NULL DEFAULT 0,
-  cost_usd    REAL    NOT NULL DEFAULT 0,
+  cost_usd    REAL    NOT NULL DEFAULT 0,        -- equivalent value at API rates (all surfaces)
+  billed_cost_usd REAL NOT NULL DEFAULT 0,       -- portion actually billed (API-key surfaces only)
   msg_count   INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (bucket_hour, surface, identity)
 );

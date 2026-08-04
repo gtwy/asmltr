@@ -29,6 +29,11 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   const mcols = db.prepare('PRAGMA table_info(system_metrics)').all().map((c) => c.name);
   if (!mcols.includes('swap_used_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_used_mb INTEGER DEFAULT 0');
   if (!mcols.includes('swap_total_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_total_mb INTEGER DEFAULT 0');
+  // billed_cost_usd: the actually-billed portion (API-key surfaces), split out from cost_usd (equivalent value).
+  const ecols = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
+  if (!ecols.includes('billed_cost_usd')) db.exec('ALTER TABLE events ADD COLUMN billed_cost_usd REAL NOT NULL DEFAULT 0');
+  const ucols = db.prepare('PRAGMA table_info(usage_rollup)').all().map((c) => c.name);
+  if (!ucols.includes('billed_cost_usd')) db.exec('ALTER TABLE usage_rollup ADD COLUMN billed_cost_usd REAL NOT NULL DEFAULT 0');
 }
 
 // Proprioception 1b — the considered self-assessment series (deduced goal + threads + flags +
@@ -47,15 +52,15 @@ db.exec(`CREATE TABLE IF NOT EXISTS self_assessments (
 db.exec('CREATE INDEX IF NOT EXISTS idx_self_assessments_ts ON self_assessments (ts DESC)');
 
 const _insEvent = db.prepare(`
-  INSERT INTO events (ts, surface, session_id, identity, event_type, tokens_in, tokens_out, cost_usd, payload, source)
-  VALUES (@ts, @surface, @session_id, @identity, @event_type, @tokens_in, @tokens_out, @cost_usd, @payload, @source)
+  INSERT INTO events (ts, surface, session_id, identity, event_type, tokens_in, tokens_out, cost_usd, billed_cost_usd, payload, source)
+  VALUES (@ts, @surface, @session_id, @identity, @event_type, @tokens_in, @tokens_out, @cost_usd, @billed_cost_usd, @payload, @source)
 `);
 const _upsertUsage = db.prepare(`
-  INSERT INTO usage_rollup (bucket_hour, surface, identity, tokens_in, tokens_out, cost_usd, msg_count)
-  VALUES (@bucket, @surface, @identity, @ti, @to, @cost, @msg)
+  INSERT INTO usage_rollup (bucket_hour, surface, identity, tokens_in, tokens_out, cost_usd, billed_cost_usd, msg_count)
+  VALUES (@bucket, @surface, @identity, @ti, @to, @cost, @bc, @msg)
   ON CONFLICT(bucket_hour, surface, identity) DO UPDATE SET
     tokens_in = tokens_in + @ti, tokens_out = tokens_out + @to,
-    cost_usd = cost_usd + @cost, msg_count = msg_count + @msg
+    cost_usd = cost_usd + @cost, billed_cost_usd = billed_cost_usd + @bc, msg_count = msg_count + @msg
 `);
 const _insNotif = db.prepare(`
   INSERT INTO notifications (ts, channel, title, body, surface, session_id)
@@ -95,6 +100,7 @@ const ingestEvent = db.transaction((raw) => {
     tokens_in: evt.tokens_in || 0,
     tokens_out: evt.tokens_out || 0,
     cost_usd: evt.cost_usd || 0,
+    billed_cost_usd: evt.billed_cost_usd || 0,
     payload: evt.payload ? JSON.stringify(evt.payload) : null,
     source: evt.source || null,
   };
@@ -106,7 +112,7 @@ const ingestEvent = db.transaction((raw) => {
       bucket: Math.floor(row.ts / 3600000) * 3600000,
       surface: row.surface,
       identity: row.identity || '',
-      ti: row.tokens_in, to: row.tokens_out, cost: row.cost_usd,
+      ti: row.tokens_in, to: row.tokens_out, cost: row.cost_usd, bc: row.billed_cost_usd,
       msg: row.event_type === 'inbound' ? 1 : 0,
     });
   }
