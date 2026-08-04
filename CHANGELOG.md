@@ -10,6 +10,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.9.2] - 2026-08-04
+
+Discord mid-turn steering + @<assistant> stop; full-length conversation history (no more 500-char truncation); mobile 0.8.10 orb/eyes refresh + floating notification eyes.
+
+### Added
+
 - **Discord: mid-turn steering + a `@<assistant> stop` interrupt.** A message that arrives while a
   turn is already running in a channel is no longer dropped — if it's addressed to the assistant it's
   queued into the running turn as guidance (via `/v2/inject`, folded into the work in progress and
