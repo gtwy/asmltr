@@ -75,7 +75,11 @@ public class DeviceControlService extends Service {
             JSONObject o = new JSONObject(payload);
             String type = o.optString("type");
             if ("device_rpc".equals(type)) handleRpc(base, token, device, o);
-            else if ("speak".equals(type)) Speech.speak(this, base, token, o.optString("text"), o.optBoolean("require_headphones", false));
+            else if ("speak".equals(type)) {
+              String text = o.optString("text");
+              NotifEyesOverlay.show(this, text);   // float the eyes over the screen while an asmltr-notify frame is read aloud
+              Speech.speak(this, base, token, text, o.optBoolean("require_headphones", false));
+            }
           } catch (Exception ignore) {}
         }
       } catch (Exception e) {
