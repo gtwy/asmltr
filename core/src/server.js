@@ -503,10 +503,25 @@ async function handle(envelope, opts = {}) {
   // leaves the marker stale so the next turn re-sends the full prompt. No-op on claude (canInjectOnce=false).
   if (canInjectOnce && !result.isError) { try { sessions.recordStable(e.conversation_key, stableHash, engineId); } catch (_) {} }
 
+  // Attribution: the token-usage row MUST carry the SAME identity as the inbound row (the raw sender),
+  // or the collector's per-(surface,identity) rollup splits one person into two rows — messages on the raw
+  // username, tokens on the resolved principal key — which is why some users showed msgs but 0 tokens.
+  const usageIdentity = e.sender.raw_username || e.sender.raw_id;
+  // Estimation fallback: engines that don't report usage (e.g. gemini when its stream omits the token
+  // line) would otherwise log 0 tokens for a real turn. Estimate from text length (~4 chars/token) so the
+  // number is sane, flagged `estimated` so the GUI can mark it. Input estimate is a floor (user text only,
+  // not the full system prompt/history) — honest, since we can't see the engine's real count.
+  const estTok = (s) => Math.ceil(String(s || '').length / 4);
+  const u = result.usage || {};
+  const noReal = !u.tokens_in && !u.tokens_out;
+  const usage = noReal
+    ? { tokens_in: estTok(e.content.text), tokens_out: estTok(result.text), cost_usd: 0 }
+    : { tokens_in: u.tokens_in || 0, tokens_out: u.tokens_out || 0, cost_usd: u.cost_usd || 0 };
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'token-usage',
-    identity: resolved.user_key, source: 'core',
-    tokens_in: result.usage.tokens_in, tokens_out: result.usage.tokens_out, cost_usd: result.usage.cost_usd,
-    payload: { tools: result.tools.length, isError: result.isError } });
+    identity: usageIdentity, source: 'core',
+    tokens_in: usage.tokens_in, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd,
+    payload: { tools: result.tools.length, isError: result.isError, engine: engineId, estimated: noReal || undefined,
+      principal: resolved.user_key !== usageIdentity ? resolved.user_key : undefined } });
 
   // Universal silence sentinel: if the turn ends with [[NO_REPLY]] (e.g. the agent rerouted its
   // answer to another channel via `asmltr send` and doesn't want to post here), emit no action so
