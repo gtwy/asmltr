@@ -29,5 +29,9 @@
   },
   "dependencies": {
     "aws4fetch": "^1.0.20"
+  },
+  "overrides": {
+    "undici": "^6.28.0",
+    "xml2js": "^0.6.2"
   }
 }
