@@ -26,6 +26,19 @@ const { status: updProgress, active: updActive, begin: updBegin, dismiss: updDis
 // Notifications lives as a bell icon in the header (not a nav row), so filter it out of the menu.
 const navItems = computed(() => NAV_ROUTES.filter((r) => r.name !== 'notifications'))
 
+// --- responsive nav: mobile drawer + collapsible desktop sidebar -------------------------------------
+const drawerOpen = ref(false)                 // mobile: slide-in navigation drawer
+const navCollapsed = ref(localStorage.getItem('asmltr:navCollapsed') === '1') // desktop: icon-only rail
+function toggleCollapse() {
+  navCollapsed.value = !navCollapsed.value
+  localStorage.setItem('asmltr:navCollapsed', navCollapsed.value ? '1' : '0')
+}
+// Close the mobile drawer whenever the route changes (a nav item was tapped) or on Escape.
+watch(() => route.fullPath, () => { drawerOpen.value = false })
+function onKey(e) { if (e.key === 'Escape') drawerOpen.value = false }
+onMounted(() => window.addEventListener('keydown', onKey))
+onUnmounted(() => window.removeEventListener('keydown', onKey))
+
 async function logout() {
   try { await authApi.logout() } catch (_) {}
   window.location.reload() // cookie cleared → the auth gate shows the login screen
@@ -128,82 +141,77 @@ onUnmounted(() => {
   <div v-if="!authReady" class="min-h-screen"></div>
   <AuthScreen v-else-if="needsAuth" :configured="auth.configured" :agent-name="agentName" />
   <div v-else class="flex min-h-screen flex-col lg:flex-row">
-    <!-- Sidebar (desktop) / top brand (mobile) -->
-    <aside
-      class="lg:sticky lg:top-0 lg:h-screen lg:w-60 lg:shrink-0 lg:border-r lg:border-white/10 lg:bg-black/20 lg:backdrop-blur-xl"
+    <!-- Mobile top app bar (Material): hamburger · brand · connection + quick actions -->
+    <header
+      class="sticky top-0 z-30 flex items-center gap-1 border-b border-white/10 bg-[hsl(258,26%,9%)]/85 px-2 py-1.5 backdrop-blur-xl lg:hidden"
+      style="padding-top: max(0.375rem, env(safe-area-inset-top)); padding-left: max(0.5rem, env(safe-area-inset-left))"
     >
-      <div class="flex items-center justify-between px-4 py-4 lg:flex-col lg:items-stretch lg:gap-6">
-        <!-- Brand — the configured AGENT's name, so you always know whose control plane this is -->
-        <div class="flex items-center gap-3">
-          <BrandLogo class="h-9 w-9" />
-          <div class="leading-tight">
-            <div class="text-sm font-bold tracking-tight">
-              <span class="gradient-text">{{ agentName }}</span>
-            </div>
-            <div class="text-[11px] text-slate-400">asmltr control plane</div>
-          </div>
-        </div>
+      <button type="button" aria-label="Open navigation" class="grid h-11 w-11 place-items-center rounded-xl text-slate-300 transition-colors hover:bg-white/5" @click="drawerOpen = true">
+        <AppIcon glyph="≡" class="text-xl" />
+      </button>
+      <RouterLink to="/" class="flex items-center gap-2">
+        <BrandLogo class="h-8 w-8" />
+        <span class="gradient-text text-sm font-bold tracking-tight">{{ agentName }}</span>
+      </RouterLink>
+      <div class="ml-auto flex items-center">
+        <span class="mr-1 h-2 w-2 rounded-full" :class="store.connected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-rose-500'"></span>
+        <RouterLink to="/notifications" aria-label="Notifications" class="grid h-11 w-11 place-items-center rounded-xl text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200" :class="route.name === 'notifications' ? '!text-brand-violet' : ''"><AppIcon glyph="✦" /></RouterLink>
+        <button v-if="auth.enabled" type="button" aria-label="Sign out" class="grid h-11 w-11 place-items-center rounded-xl text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300" @click="logout"><AppIcon glyph="⎋" /></button>
+      </div>
+    </header>
 
-        <!-- right side: quick actions (notifications bell + sign out) and, on mobile, the connection pill. -->
-        <div class="flex items-center gap-1">
-          <RouterLink
-            to="/notifications" title="Notifications"
-            class="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200"
-            :class="route.name === 'notifications' ? 'text-brand-violet' : ''"
-          >
-            <AppIcon glyph="✦" class="text-base" />
-          </RouterLink>
-          <button
-            v-if="auth.enabled" type="button" title="Sign out" @click="logout"
-            class="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
-          >
-            <AppIcon glyph="⎋" class="text-base" />
-          </button>
-          <div class="ml-1 flex items-center gap-2 lg:hidden">
-            <span
-              class="h-2 w-2 rounded-full"
-              :class="store.connected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-rose-500'"
-            ></span>
-            <span class="text-xs text-slate-400">{{ statusText }}</span>
-          </div>
+    <!-- Scrim behind the mobile drawer -->
+    <Transition name="fade">
+      <div v-if="drawerOpen" class="fixed inset-0 z-40 bg-black/60 lg:hidden" @click="drawerOpen = false"></div>
+    </Transition>
+
+    <!-- Navigation: slide-in drawer on mobile, persistent collapsible rail on desktop -->
+    <aside
+      class="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-white/10 bg-[hsl(258,26%,9%)]/95 backdrop-blur-xl transition-transform duration-200 ease-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:max-w-none lg:translate-x-0 lg:bg-black/20"
+      :class="[drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0', navCollapsed ? 'lg:w-[76px]' : 'lg:w-60']"
+    >
+      <!-- Brand row (+ collapse toggle on desktop, close on mobile) -->
+      <div class="flex items-center gap-3 px-4 py-4" :class="navCollapsed ? 'lg:justify-center lg:px-2' : ''">
+        <BrandLogo class="h-9 w-9 shrink-0" />
+        <div class="leading-tight" :class="navCollapsed ? 'lg:hidden' : ''">
+          <div class="text-sm font-bold tracking-tight"><span class="gradient-text">{{ agentName }}</span></div>
+          <div class="text-[11px] text-slate-400">asmltr control plane</div>
         </div>
+        <button type="button" aria-label="Collapse sidebar" class="ml-auto hidden h-8 w-8 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-300 lg:grid" :class="navCollapsed ? 'lg:hidden' : ''" @click="toggleCollapse"><AppIcon glyph="‹" /></button>
+        <button type="button" aria-label="Close navigation" class="ml-auto grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-white/5 lg:hidden" @click="drawerOpen = false"><AppIcon glyph="✕" /></button>
       </div>
 
-      <!-- Nav -->
-      <nav
-        class="flex gap-1 overflow-x-auto border-t border-white/10 px-2 py-2 lg:flex-col lg:overflow-visible lg:border-0 lg:px-3"
-      >
+      <!-- Expand toggle when the desktop rail is collapsed -->
+      <button v-if="navCollapsed" type="button" aria-label="Expand sidebar" class="mx-auto mb-1 hidden h-8 w-8 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-300 lg:grid" @click="toggleCollapse"><AppIcon glyph="›" /></button>
+
+      <!-- Nav list (scrolls if it overflows; never the whole page) -->
+      <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2" :class="navCollapsed ? 'lg:px-2' : ''">
         <RouterLink
-          v-for="item in navItems"
-          :key="item.name"
-          :to="item.path"
-          class="group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-white/5"
-          :class="route.name === item.name ? 'bg-white/[0.07] text-white gradient-border' : ''"
+          v-for="item in navItems" :key="item.name" :to="item.path"
+          :title="navCollapsed ? item.meta.title : ''"
+          class="group flex min-h-[44px] items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 transition-colors hover:bg-white/5"
+          :class="[route.name === item.name ? 'bg-white/[0.07] text-white gradient-border' : '', navCollapsed ? 'lg:justify-center lg:px-0' : '']"
         >
-          <AppIcon
-            :glyph="item.meta.icon"
-            class="w-5 text-base"
-            :class="route.name === item.name ? 'text-brand-violet' : 'text-slate-500 group-hover:text-slate-300'"
-          />
-          <span class="whitespace-nowrap">{{ item.meta.title }}</span>
+          <AppIcon :glyph="item.meta.icon" class="w-5 shrink-0 text-base" :class="route.name === item.name ? 'text-brand-violet' : 'text-slate-500 group-hover:text-slate-300'" />
+          <span class="whitespace-nowrap" :class="navCollapsed ? 'lg:hidden' : ''">{{ item.meta.title }}</span>
         </RouterLink>
       </nav>
 
-      <!-- Connection pill (desktop, bottom) -->
-      <div class="hidden lg:absolute lg:bottom-0 lg:left-0 lg:right-0 lg:block lg:px-4 lg:py-4">
-        <div class="glass flex items-center justify-between px-3 py-2">
+      <!-- Desktop quick actions (mobile has them in the top bar) -->
+      <div class="hidden items-center gap-1 border-t border-white/10 px-3 py-1.5 lg:flex" :class="navCollapsed ? 'lg:justify-center' : ''">
+        <RouterLink to="/notifications" title="Notifications" class="grid h-10 w-10 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200" :class="route.name === 'notifications' ? '!text-brand-violet' : ''"><AppIcon glyph="✦" /></RouterLink>
+        <button v-if="auth.enabled" type="button" title="Sign out" class="grid h-10 w-10 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300" @click="logout"><AppIcon glyph="⎋" /></button>
+      </div>
+
+      <!-- Connection pill -->
+      <div class="border-t border-white/10 px-3 py-3" :class="navCollapsed ? 'lg:px-2' : ''">
+        <div class="glass flex items-center justify-between px-3 py-2" :class="navCollapsed ? 'lg:justify-center lg:px-2' : ''">
           <div class="flex items-center gap-2">
-            <span
-              class="h-2 w-2 rounded-full"
-              :class="store.connected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-rose-500'"
-            ></span>
-            <span class="text-xs text-slate-300">collector {{ statusText }}</span>
+            <span class="h-2 w-2 shrink-0 rounded-full" :class="store.connected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-rose-500'"></span>
+            <span class="text-xs text-slate-300" :class="navCollapsed ? 'lg:hidden' : ''">collector {{ statusText }}</span>
           </div>
-          <span v-if="appVersion" class="font-mono text-[11px] text-slate-500" title="asmltr version">v{{ appVersion }}</span>
+          <span v-if="appVersion" class="font-mono text-[11px] text-slate-500" :class="navCollapsed ? 'lg:hidden' : ''" title="asmltr version">v{{ appVersion }}</span>
         </div>
-        <p v-if="store.lastError" class="mt-2 truncate text-[10px] text-rose-400/80" :title="store.lastError">
-          {{ store.lastError }}
-        </p>
       </div>
     </aside>
 
