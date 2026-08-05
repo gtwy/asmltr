@@ -25,7 +25,11 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-function root() { return process.env.ASMLTR_RECORDINGS_DIR || path.join(os.homedir(), '.asmltr', 'recordings'); }
+function root() {
+  if (process.env.ASMLTR_RECORDINGS_DIR) return process.env.ASMLTR_RECORDINGS_DIR;
+  // Recordings live in the Self silo (managed + backed up, not a random folder) — legacy path fallback.
+  try { return require('./silo').selfSub('recordings'); } catch (_) { return path.join(os.homedir(), '.asmltr', 'recordings'); }
+}
 function dir(id) { return path.join(root(), id); }
 function metaPath(id) { return path.join(dir(id), 'meta.json'); }
 
