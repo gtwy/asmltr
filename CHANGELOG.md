@@ -10,6 +10,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.10.1] - 2026-08-05
+
+### Added
+
 - **Release builds for the mobile app.** `mobile/build.sh release` produces a signed, 16 KB-aligned APK
   at `mobile/dist/asmltr.apk` via the new `mobile/scripts/package-apk.sh` (zipalign **then** apksigner —
   aligning after signing would invalidate the signature). The keystore comes from
