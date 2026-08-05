@@ -1,0 +1,162 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+// Isolate the upload area BEFORE requiring the module (baseDir() reads the env at call time).
+const TMP = path.join(os.tmpdir(), `asmltr-uploads-test-${process.pid}`);
+process.env.ASMLTR_UPLOADS_DIR = TMP;
+process.env.ASMLTR_UPLOAD_CHUNK_SIZE = '64';   // tiny chunks so tests exercise real multi-chunk paths
+const uploads = require('../shared/uploads');
+
+test.after(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {} });
+
+const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+// Split a buffer the way a client would: file.slice(i*chunk, (i+1)*chunk).
+function chunksOf(buf, size) {
+  const out = [];
+  for (let i = 0; i * size < buf.length; i++) out.push(buf.subarray(i * size, (i + 1) * size));
+  return out;
+}
+
+test('beginChunked mints an id and reports the chunk size without touching the manifest', () => {
+  const before = uploads.list({ limit: 0 }).length;
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'a.bin', mime: 'application/octet-stream', size: 200 });
+  assert.match(s.upload_id, /^[a-z0-9]+-[0-9a-f]{6}$/);
+  assert.equal(s.chunk_size, 64);
+  assert.deepEqual(s.received, []);
+  assert.equal(uploads.list({ limit: 0 }).length, before, 'an unfinished upload must not appear in the manifest');
+});
+
+test('chunks sent in order assemble into the original bytes and register one manifest record', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'ordered.bin', mime: 'text/plain', size: data.length });
+  chunksOf(data, s.chunk_size).forEach((c, i) => uploads.putChunk(s.upload_id, i, c));
+  const rec = uploads.finishChunked(s.upload_id);
+
+  assert.equal(rec.size, 200);
+  assert.equal(rec.channel, 'assistant-web');
+  assert.equal(rec.filename, 'ordered.bin');
+  assert.deepEqual(fs.readFileSync(rec.path), data, 'assembled file must be byte-identical');
+  assert.ok(uploads.list({ limit: 0 }).some((r) => r.id === rec.id), 'finished upload is in the manifest');
+});
+
+test('chunks that arrive out of order still assemble correctly', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'shuffled.bin', size: data.length });
+  const cs = chunksOf(data, s.chunk_size);
+  [3, 0, 2, 1].forEach((i) => { if (cs[i]) uploads.putChunk(s.upload_id, i, cs[i]); });
+  const rec = uploads.finishChunked(s.upload_id);
+  assert.deepEqual(fs.readFileSync(rec.path), data);
+});
+
+test('chunkStatus reports received indices so a client can resume, and re-sending a chunk is idempotent', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'resume.bin', size: data.length });
+  const cs = chunksOf(data, s.chunk_size);
+  uploads.putChunk(s.upload_id, 0, cs[0]);
+  uploads.putChunk(s.upload_id, 2, cs[2]);
+  uploads.putChunk(s.upload_id, 0, cs[0]);                       // duplicate: a retried chunk
+
+  const st = uploads.chunkStatus(s.upload_id);
+  assert.deepEqual(st.received, [0, 2], 'received indices are sorted and deduplicated');
+  assert.equal(st.size, 200);
+  assert.equal(st.chunk_size, 64);
+
+  uploads.putChunk(s.upload_id, 1, cs[1]);
+  uploads.putChunk(s.upload_id, 3, cs[3]);
+  assert.deepEqual(fs.readFileSync(uploads.finishChunked(s.upload_id).path), data);
+});
+
+test('chunkStatus returns null for an unknown upload id', () => {
+  assert.equal(uploads.chunkStatus('nope-000000'), null);
+});
+
+test('finishChunked refuses to assemble while chunks are missing', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'incomplete.bin', size: data.length });
+  uploads.putChunk(s.upload_id, 0, chunksOf(data, s.chunk_size)[0]);
+  const before = uploads.list({ limit: 0 }).length;
+  assert.throws(() => uploads.finishChunked(s.upload_id), /missing chunk/i);
+  assert.equal(uploads.list({ limit: 0 }).length, before, 'a failed finish must not write a manifest record');
+});
+
+test('finishChunked rejects a sha256 mismatch and leaves nothing behind', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'corrupt.bin', size: data.length, sha256: sha(Buffer.from('different')) });
+  chunksOf(data, s.chunk_size).forEach((c, i) => uploads.putChunk(s.upload_id, i, c));
+  const before = uploads.list({ limit: 0 }).length;
+  assert.throws(() => uploads.finishChunked(s.upload_id), /checksum/i);
+  assert.equal(uploads.list({ limit: 0 }).length, before);
+  assert.equal(uploads.chunkStatus(s.upload_id), null, 'a corrupt upload is discarded, not left to retry forever');
+});
+
+test('finishChunked accepts a matching sha256', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'verified.bin', size: data.length, sha256: sha(data) });
+  chunksOf(data, s.chunk_size).forEach((c, i) => uploads.putChunk(s.upload_id, i, c));
+  const rec = uploads.finishChunked(s.upload_id);
+  assert.equal(rec.sha256, sha(data));
+});
+
+test('putChunk rejects an index that is not a non-negative integer, so no path escapes the staging dir', () => {
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'evil.bin', size: 200 });
+  for (const bad of ['../../etc/passwd', '..', -1, 1.5, 'abc', null, undefined, '0x1']) {
+    assert.throws(() => uploads.putChunk(s.upload_id, bad, Buffer.from('x')), /index/i, `index ${String(bad)} must be rejected`);
+  }
+  assert.ok(!fs.existsSync(path.join(TMP, 'etc')), 'nothing was written outside the staging directory');
+});
+
+test('putChunk rejects an index past the end of the declared file', () => {
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'oob.bin', size: 200 });   // 4 chunks: 0..3
+  assert.throws(() => uploads.putChunk(s.upload_id, 4, Buffer.from('x')), /index/i);
+});
+
+test('putChunk rejects an unknown upload id', () => {
+  assert.throws(() => uploads.putChunk('nope-000000', 0, Buffer.from('x')), /unknown upload/i);
+});
+
+test('an in-flight upload is invisible to list() and recentSummary()', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'inflight-secret.bin', size: data.length });
+  uploads.putChunk(s.upload_id, 0, chunksOf(data, s.chunk_size)[0]);
+  assert.ok(!uploads.list({ limit: 0 }).some((r) => r.filename === 'inflight-secret.bin'));
+  assert.ok(!uploads.recentSummary(50).includes('inflight-secret.bin'), 'a half-written file must never be handed to the agent');
+});
+
+test('abortChunked discards the staged chunks', () => {
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'abandoned.bin', size: 200 });
+  uploads.putChunk(s.upload_id, 0, Buffer.alloc(64));
+  assert.equal(uploads.abortChunked(s.upload_id), true);
+  assert.equal(uploads.chunkStatus(s.upload_id), null);
+  assert.equal(uploads.abortChunked(s.upload_id), false, 'aborting twice is a no-op, not an error');
+});
+
+test('sweepPartials removes stale staging dirs and keeps fresh ones', () => {
+  const stale = uploads.beginChunked({ channel: 'assistant-web', filename: 'stale.bin', size: 200 });
+  const fresh = uploads.beginChunked({ channel: 'assistant-web', filename: 'fresh.bin', size: 200 });
+  // Age the stale one by backdating its staging directory.
+  const old = Date.now() - 48 * 3600 * 1000;
+  fs.utimesSync(path.join(TMP, '.partial', stale.upload_id), old / 1000, old / 1000);
+
+  assert.equal(uploads.sweepPartials(24 * 3600 * 1000), 1);
+  assert.equal(uploads.chunkStatus(stale.upload_id), null);
+  assert.ok(uploads.chunkStatus(fresh.upload_id), 'a fresh upload in progress survives the sweep');
+});
+
+test('saveFrom registers a file already on disk without ever holding it as a Buffer', () => {
+  const src = path.join(os.tmpdir(), `asmltr-savefrom-${process.pid}.bin`);
+  const data = crypto.randomBytes(500);
+  fs.writeFileSync(src, data);
+
+  const rec = uploads.saveFrom({ channel: 'telegram', tempPath: src, filename: 'moved.bin', mime: 'application/pdf', kind: 'document' });
+
+  assert.equal(rec.size, 500);
+  assert.equal(rec.mime, 'application/pdf');
+  assert.deepEqual(fs.readFileSync(rec.path), data);
+  assert.ok(!fs.existsSync(src), 'the source is moved, not copied');
+  assert.ok(uploads.list({ limit: 0 }).some((r) => r.id === rec.id));
+});
