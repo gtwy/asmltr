@@ -56,6 +56,40 @@ at the start of its next turn (`target` = `*`, a `conversation_key`, `surface:<c
 `/v2/inject` bypasses moderation (the operator is trusted) and redacts on the way out like any
 public reply. See the [injection guide](../coordination/injection.md).
 
+### File uploads
+
+Every inbound file lands in one shared, channel-agnostic area (`ASMLTR_UPLOADS_DIR`, default
+`~/.asmltr/uploads`) and gets a line in `manifest.jsonl`, so a file sent on Telegram is findable from
+a session running anywhere. Connectors call `shared/uploads` directly; the browser uses these routes.
+
+**Chunked (what the dashboard uses).** The wire unit is a fixed-size chunk, so file size is not
+bounded by any body limit, an interrupted transfer resumes from what already landed, and the server
+holds one chunk in memory rather than the file.
+
+| Endpoint | Body | Returns |
+|---|---|---|
+| `POST /v2/upload/init` | `{ filename, mime, size, sha256?, conversation_key? }` | `{ ok, upload_id, chunk_size, chunks, received }` |
+| `PUT /v2/upload/:id/:index` | raw `application/octet-stream` chunk bytes | `{ ok, received_count, chunks }` |
+| `GET /v2/upload/:id` | (none) | `{ upload_id, size, chunk_size, chunks, received }` for resume, 404 if unknown |
+| `POST /v2/upload/:id/finish` | `{ sha256? }` | `{ ok, file: { path, name, mime, kind, bytes, sha256 } }` |
+| `DELETE /v2/upload/:id` | (none) | `{ ok }`, discards a partial upload |
+
+Status codes carry the retry decision: **409** means chunks are still missing (send them), **422**
+means the assembled bytes failed the size or checksum check (start over), **404** means the upload is
+gone, **400** means the request itself is malformed. Nothing reaches the manifest until `finish`
+succeeds, so `list()` never returns a path to a half-written file. Staging dirs left by uploads that
+were never finished are swept hourly once they pass 24 hours old.
+
+`chunk_size` is chosen by the server (`ASMLTR_UPLOAD_CHUNK_SIZE`, default 8 MiB). A single chunk body
+is bounded by `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb); any reverse proxy in front needs a
+`client_max_body_size` at least that large, at **server** level so the `auth_request` subrequest gets
+it too.
+
+**One-shot (kept for compatibility).** `POST /v2/upload` takes
+`{ filename, mime, conversation_key?, data_base64 }` and returns the same `file` object. It carries
+the whole file as base64 inside the JSON body, so its ceiling is the smallest body limit on the path
+minus base64's 33% overhead. Prefer the chunked routes for anything a person picked from a file dialog.
+
 ### Trust framework
 
 The dashboard **Access** page drives these. `/trust/resolve` is also used by connectors to
