@@ -127,19 +127,26 @@ function mountUploadRoutes(app, opts = {}) {
   // NODE_ENV is not production, a stack trace carrying host paths) where every other route on this
   // surface returns { error }. The 413 is also the single most likely misconfiguration for this
   // feature, so it names the cause instead of just the number.
-  app.use('/v2/upload', (err, req, res, next) => {
-    if (res.headersSent) return next(err);
+  //
+  // Matched on method + path rather than mounted at '/v2/upload': a prefix mount also catches
+  // express.json's error for the legacy one-shot POST /v2/upload, whose limit has nothing to do with
+  // ASMLTR_UPLOAD_MAX_CHUNK, and would send an operator to raise the wrong knob.
+  app.use((err, req, res, next) => {
+    if (!IS_CHUNK_PUT(req) || res.headersSent) return next(err);
     if (err && err.type === 'entity.too.large') {
-      console.error('[core] upload chunk rejected as too large:', req.params.id || req.path, err.message);
+      console.error('[core] upload chunk rejected as too large:', req.path, err.message);
       return res.status(413).json({
         error: `chunk larger than the server's limit of ${maxChunkBody()} (raise ASMLTR_UPLOAD_MAX_CHUNK, and the proxy's client_max_body_size with it)`,
       });
     }
-    console.error('[core] upload request failed:', req.path, err && (err.stack || err.message));
+    console.error('[core] upload chunk request failed:', req.path, err && (err.stack || err.message));
     res.status(err && err.status >= 400 && err.status < 500 ? err.status : 500)
       .json({ error: 'the upload request could not be read' });
   });
 }
+
+// PUT /v2/upload/<id>/<index> only: the one route that carries a large raw body.
+const IS_CHUNK_PUT = (req) => req.method === 'PUT' && /^\/v2\/upload\/[^/]+\/[^/]+\/?$/.test(req.path);
 
 /**
  * Drop staging dirs left behind by uploads that were never finished. Unref'd so it never holds the

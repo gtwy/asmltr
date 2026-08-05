@@ -201,6 +201,27 @@ test('a chunk over the server limit returns JSON naming the cause, not an HTML s
   }
 });
 
+test('the chunk error handler does not claim the legacy one-shot route', async () => {
+  // Mounted by method+path, not by prefix: a prefix mount also caught express.json's error for
+  // POST /v2/upload, whose limit has nothing to do with ASMLTR_UPLOAD_MAX_CHUNK, and told the
+  // operator to raise the wrong setting.
+  const host = express();
+  host.use(express.json({ limit: '1kb' }));
+  host.post('/v2/upload', (req, res) => res.json({ ok: true, legacy: true }));
+  require('../core/src/upload-routes').mountUploadRoutes(host);
+  const srv3 = host.listen(0, '127.0.0.1');
+  await new Promise((r) => (srv3.listening ? r() : srv3.once('listening', r)));
+  try {
+    const res = await fetch(`http://127.0.0.1:${srv3.address().port}/v2/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data_base64: 'A'.repeat(4096) }),
+    });
+    assert.equal(res.status, 413);
+    const text = await res.text();
+    assert.ok(!/ASMLTR_UPLOAD_MAX_CHUNK/.test(text), `must not blame the chunk limit: ${text.slice(0, 120)}`);
+  } finally { srv3.close(); }
+});
+
 test('a server-side fault is a 500 that does not leak host paths', async () => {
   const init = await (await json('/v2/upload/init', { filename: 'broken.bin', size: 4096 })).json();
   fs.writeFileSync(path.join(TMP, '.partial', init.upload_id, 'meta.json'), '{truncated');
