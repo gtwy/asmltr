@@ -13,10 +13,23 @@ if [ ! -d android ]; then echo "==> cap add android"; npx cap add android; fi
 echo "==> cap sync";   npx cap sync android
 echo "==> theme launcher icon from identity palette"; node scripts/gen-icon.js || true
 echo "==> patch native assist layer"; node scripts/patch-android.js
-echo "==> gradle assembleDebug (no daemon, 1 worker, Xmx1024m)"
-cd android
-nice -n 19 ionice -c3 ./gradlew --no-daemon --max-workers=1 assembleDebug
-APK="app/build/outputs/apk/debug/app-debug.apk"
+# `./build.sh release` produces a signed, 16 KB-aligned release APK at dist/asmltr.apk (what the
+# connector serves). Release needs a keystore — it MUST be the same one previous releases used, or the
+# update cannot install over an existing app and users lose their data. Anything else builds debug.
+MODE="${1:-debug}"
+
+if [ "$MODE" = "release" ]; then
+  : "${ASMLTR_ANDROID_KEYSTORE:?release builds need ASMLTR_ANDROID_KEYSTORE (same key as previous releases)}"
+  echo "==> gradle assembleRelease (no daemon, 1 worker, Xmx1024m)"
+  cd android
+  nice -n 19 ionice -c3 ./gradlew --no-daemon --max-workers=1 assembleRelease
+  APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+else
+  echo "==> gradle assembleDebug (no daemon, 1 worker, Xmx1024m)"
+  cd android
+  nice -n 19 ionice -c3 ./gradlew --no-daemon --max-workers=1 assembleDebug
+  APK="app/build/outputs/apk/debug/app-debug.apk"
+fi
 echo "==> APK: $(pwd)/$APK"
 ls -lh "$APK"
 # Assert the built APK's version matches package.json — so a stale/cached APK can never masquerade as new.
@@ -26,4 +39,12 @@ if [ -n "$AAPT" ]; then
   GOT="$("$AAPT" dump badging "$APK" 2>/dev/null | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)"
   echo "==> APK versionName=$GOT (want $WANT)"
   [ "$GOT" = "$WANT" ] || { echo "FATAL: built APK is $GOT, expected $WANT — build did not produce the new binary"; exit 3; }
+fi
+
+if [ "$MODE" = "release" ]; then
+  # 16 KB-align then sign. Alignment must precede signing — zipalign rewrites offsets and would
+  # invalidate the signature. Needs build-tools >= 35.0.1 for zipalign's -P flag.
+  mkdir -p ../dist
+  ../scripts/package-apk.sh "$APK" ../dist/asmltr.apk
+  echo "==> release APK: $(cd .. && pwd)/dist/asmltr.apk"
 fi

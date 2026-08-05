@@ -160,8 +160,27 @@ g = g.replace(/versionCode\s+\d+/, 'versionCode ' + vCode).replace(/versionName\
 if (!g.includes('androidx.webkit:webkit')) g = g.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "androidx.webkit:webkit:1.12.1"');
 // Vosk offline wake-word engine — the phrase is a runtime grammar string (no per-phrase model), and the
 // ~40MB model is downloaded once to the phone. Fully configurable in Settings, offline, no external site.
-if (!g.includes('vosk-android')) g = g.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "com.alphacephei:vosk-android:0.3.47"');
+// Pin >= 0.3.70: earlier builds (0.3.47) shipped libvosk.so with 4 KB-aligned LOAD segments, which fails
+// the 16 KB page-size check on Android 15+ devices. Rewrite an existing pin so a stale project is upgraded.
+const VOSK = 'com.alphacephei:vosk-android:0.3.75';
+if (!g.includes('vosk-android')) g = g.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "' + VOSK + '"');
+else g = g.replace(/com\.alphacephei:vosk-android:[0-9.]+/g, VOSK);
+
+// 16 KB page-size support. Native libs must be STORED uncompressed so the loader can map them straight
+// out of the APK; the packaging step then aligns each .so on a 16 KB boundary (scripts/package-apk.sh).
+// Uncompressed JNI libs require minSdk >= 23, which is why variables.gradle is bumped below.
+if (!g.includes('useLegacyPackaging')) {
+  g = g.replace(/buildTypes\s*\{/, 'packaging {\n        jniLibs {\n            useLegacyPackaging false\n        }\n    }\n    buildTypes {');
+}
 fs.writeFileSync(gradle, g);
+
+// minSdk 23 — required for uncompressed JNI libs (see above). `cap add android` scaffolds 22.
+const varsFile = path.join(ROOT, 'android', 'variables.gradle');
+try {
+  let v = fs.readFileSync(varsFile, 'utf8');
+  const bumped = v.replace(/minSdkVersion\s*=\s*(\d+)/, (m, n) => (parseInt(n, 10) < 23 ? 'minSdkVersion = 23' : m));
+  if (bumped !== v) fs.writeFileSync(varsFile, bumped);
+} catch (_) { /* variables.gradle absent on older Capacitor scaffolds */ }
 // Sidecar the connector's /gw/app reads to report the served version.
 fs.writeFileSync(path.join(ROOT, 'app-version.json'), JSON.stringify({ versionCode: vCode, versionName: vName }) + '\n');
 console.log('patched: java, res/xml, permissions, assist services + version', vName, '(' + vCode + ') →', mf);
