@@ -139,6 +139,77 @@ test('DELETE abandons an upload in progress', async () => {
   assert.equal((await fetch(`${base}/v2/upload/${init.upload_id}`)).status, 404);
 });
 
+test('a chunk whose X-Chunk-Sha256 does not match its bytes is rejected', async () => {
+  const data = crypto.randomBytes(4096);
+  const init = await (await json('/v2/upload/init', { filename: 'tampered.bin', size: data.length })).json();
+  const chunk = chunksOf(data, init.chunk_size)[0];
+  const res = await fetch(`${base}/v2/upload/${init.upload_id}/0`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream', 'X-Chunk-Sha256': sha(Buffer.from('not these bytes')) },
+    body: chunk,
+  });
+  assert.equal(res.status, 422, 'a corrupt chunk is caught on arrival, not at assembly');
+  const st = await (await fetch(`${base}/v2/upload/${init.upload_id}`)).json();
+  assert.deepEqual(st.received, [], 'the bad chunk was not staged');
+});
+
+test('a matching X-Chunk-Sha256 is accepted', async () => {
+  const data = crypto.randomBytes(4096);
+  const init = await (await json('/v2/upload/init', { filename: 'verified-chunks.bin', size: data.length })).json();
+  for (const [i, c] of chunksOf(data, init.chunk_size).entries()) {
+    const res = await fetch(`${base}/v2/upload/${init.upload_id}/${i}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-Chunk-Sha256': sha(c) },
+      body: c,
+    });
+    assert.equal(res.status, 200);
+  }
+  const fin = await (await json(`/v2/upload/${init.upload_id}/finish`, {})).json();
+  assert.deepEqual(fs.readFileSync(fin.file.path), data);
+});
+
+test('init refuses an absurd declared size instead of planning a billion chunks', async () => {
+  const res = await json('/v2/upload/init', { filename: 'lie.bin', size: Number.MAX_SAFE_INTEGER });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /too large|maximum/i);
+});
+
+test('a chunk over the server limit returns JSON naming the cause, not an HTML stack trace', async () => {
+  // Own app so the raw limit can be set at mount time without disturbing the shared one.
+  const prev = process.env.ASMLTR_UPLOAD_MAX_CHUNK;
+  process.env.ASMLTR_UPLOAD_MAX_CHUNK = '1kb';
+  const tiny = express();
+  tiny.use(express.json());
+  require('../core/src/upload-routes').mountUploadRoutes(tiny);
+  const srv2 = tiny.listen(0, '127.0.0.1');
+  await new Promise((r) => (srv2.listening ? r() : srv2.once('listening', r)));
+  const b2 = `http://127.0.0.1:${srv2.address().port}`;
+  try {
+    const init = await (await fetch(b2 + '/v2/upload/init', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: 'big.bin', size: 100000 }),
+    })).json();
+    const res = await fetch(`${b2}/v2/upload/${init.upload_id}/0`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.alloc(64 * 1024),
+    });
+    assert.equal(res.status, 413);
+    assert.match(res.headers.get('content-type') || '', /json/, 'must not fall through to express HTML');
+    assert.match((await res.json()).error, /client_max_body_size|ASMLTR_UPLOAD_MAX_CHUNK|too large/i);
+  } finally {
+    srv2.close();
+    if (prev === undefined) delete process.env.ASMLTR_UPLOAD_MAX_CHUNK; else process.env.ASMLTR_UPLOAD_MAX_CHUNK = prev;
+  }
+});
+
+test('a server-side fault is a 500 that does not leak host paths', async () => {
+  const init = await (await json('/v2/upload/init', { filename: 'broken.bin', size: 4096 })).json();
+  fs.writeFileSync(path.join(TMP, '.partial', init.upload_id, 'meta.json'), '{truncated');
+  const res = await putChunk(init.upload_id, 0, Buffer.from('x'));
+  assert.equal(res.status, 500, 'a corrupt upload is our fault, not an unknown upload');
+  const body = await res.json();
+  assert.ok(!/\/home\/|\/root\/|\.partial/.test(body.error), `error must not carry host paths: ${body.error}`);
+});
+
 test('a chunk larger than the JSON body limit is accepted, which is the whole point', async () => {
   // 12 MiB of raw bytes: over express.json's 10mb cap, so this could never have been a JSON body.
   const big = 12 * 1024 * 1024;

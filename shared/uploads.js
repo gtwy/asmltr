@@ -85,7 +85,14 @@ function register(slot, a, size, sha256) {
     kind: a.kind || null, caption: a.caption || null,
   };
   if (sha256) rec.sha256 = sha256;
-  try { fs.appendFileSync(manifestPath(), JSON.stringify(rec) + '\n'); } catch (_) {}
+  // Best-effort, but never silent: a file that lands on disk without a manifest line is invisible to
+  // list()/get()/recentSummary(), so "find the recording I sent you" fails on every other channel with
+  // nothing anywhere to explain why. Matches core/src/emitter.js, which logs its JSONL append failures.
+  try { fs.appendFileSync(manifestPath(), JSON.stringify(rec) + '\n'); }
+  catch (err) {
+    console.error(`[uploads] manifest append failed for ${rec.id} (${rec.path}):`, err.message);
+    rec.unindexed = true;
+  }
   return rec;
 }
 
@@ -166,21 +173,50 @@ function recentSummary(n = 8) {
 const ID_RE = /^[a-z0-9]+-[0-9a-f]{6}$/;   // server-minted ids only; anything else can't name a directory
 
 function chunkSize() { return Number(process.env.ASMLTR_UPLOAD_CHUNK_SIZE) || 8 * 1024 * 1024; }
+// A declared size is a claim, not bytes: it costs a client nothing to assert one. Without a bound,
+// `size: Number.MAX_SAFE_INTEGER` plans 1.07e9 chunks and finishChunked walks every index looking for
+// what is missing, pinning the event loop for the whole core with zero bytes uploaded.
+function maxSize() { return Number(process.env.ASMLTR_UPLOAD_MAX_SIZE) || 128 * 1024 * 1024 * 1024; }
 function partialDir() { return path.join(baseDir(), '.partial'); }
 function sessionDir(id) { return path.join(partialDir(), id); }
-function discard(id) { try { fs.rmSync(sessionDir(id), { recursive: true, force: true }); } catch (_) {} }
 
-function readMeta(id) {
-  if (!ID_RE.test(String(id || ''))) return null;   // rejects traversal before the id reaches path.join
-  try { return JSON.parse(fs.readFileSync(path.join(sessionDir(id), 'meta.json'), 'utf8')); } catch { return null; }
+/** Errors carry a stable `code` so HTTP callers switch on that instead of matching message prose. */
+function uploadError(code, message) { return Object.assign(new Error(message), { code }); }
+
+/** Remove a staging dir. Returns whether it is actually gone, and says so when it isn't. */
+function discard(id) {
+  try { fs.rmSync(sessionDir(id), { recursive: true, force: true }); return true; }
+  catch (e) { console.error(`[uploads] could not discard staging for ${id}:`, e.message); return false; }
 }
 
-/** Indices already staged, ascending. */
+// null means "no such upload". An unreadable or corrupt meta.json is a DIFFERENT condition and must
+// not masquerade as one: reporting a truncated meta.json as "unknown upload" sends a 404 for an
+// upload the user just created, and the client declines to retry a 4xx.
+function readMeta(id) {
+  if (!ID_RE.test(String(id || ''))) return null;   // rejects traversal before the id reaches path.join
+  let raw;
+  try { raw = fs.readFileSync(path.join(sessionDir(id), 'meta.json'), 'utf8'); }
+  catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw uploadError('BROKEN_UPLOAD', `uploads: cannot read upload ${id}: ${e.message}`);
+  }
+  try { return JSON.parse(raw); }
+  catch { throw uploadError('BROKEN_UPLOAD', `uploads: upload ${id} has a corrupt meta.json`); }
+}
+
+/**
+ * Indices already staged, ascending. A missing directory is legitimately empty; anything else is a
+ * failure to READ, and returning [] for that told the client every chunk was missing when the bytes
+ * were already on disk.
+ */
 function receivedIndices(id) {
   try {
     return fs.readdirSync(sessionDir(id)).filter((f) => /^\d+\.part$/.test(f))
       .map((f) => parseInt(f, 10)).sort((a, b) => a - b);
-  } catch { return []; }
+  } catch (e) {
+    if (e.code === 'ENOENT') return [];
+    throw uploadError('BROKEN_UPLOAD', `uploads: cannot list staged chunks for ${id}: ${e.message}`);
+  }
 }
 
 // Accept only a literal non-negative integer. Number() alone is too permissive ('0x1' → 1), and a
@@ -188,8 +224,10 @@ function receivedIndices(id) {
 function chunkIndexOf(v, chunks) {
   const n = typeof v === 'number' ? v
     : (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : NaN);
-  if (!Number.isInteger(n) || n < 0) throw new Error(`uploads.putChunk: invalid chunk index ${JSON.stringify(v)}`);
-  if (chunks && n >= chunks) throw new Error(`uploads.putChunk: chunk index ${n} is past the end of the file (${chunks} chunks)`);
+  if (!Number.isInteger(n) || n < 0) throw uploadError('BAD_INDEX', `uploads.putChunk: invalid chunk index ${JSON.stringify(v)}`);
+  // Note `>= chunks` unconditionally: a zero-length upload has 0 chunks and must accept no index at
+  // all, where a truthiness check would have skipped the bound entirely.
+  if (n >= chunks) throw uploadError('BAD_INDEX', `uploads.putChunk: chunk index ${n} is past the end of the file (${chunks} chunks)`);
   return n;
 }
 
@@ -201,7 +239,11 @@ function chunkIndexOf(v, chunks) {
 function beginChunked(a) {
   if (!a || !a.channel) throw new Error('uploads.beginChunked: channel required');
   const size = Number(a.size);
-  if (!Number.isInteger(size) || size < 0) throw new Error('uploads.beginChunked: size must be a non-negative integer');
+  if (!Number.isInteger(size) || size < 0) throw uploadError('BAD_REQUEST', 'uploads.beginChunked: size must be a non-negative integer');
+  if (size > maxSize()) {
+    throw uploadError('BAD_REQUEST',
+      `uploads.beginChunked: declared size ${size} is too large (maximum ${maxSize()}, set ASMLTR_UPLOAD_MAX_SIZE to raise it)`);
+  }
   const cs = chunkSize();
   const ts = Date.now();
   const upload_id = ts.toString(36) + '-' + crypto.randomBytes(3).toString('hex');
@@ -216,12 +258,24 @@ function beginChunked(a) {
   return { upload_id, chunk_size: cs, chunks: meta.chunks, received: [] };
 }
 
-/** Stage one chunk. Re-sending an index overwrites it, so a retried chunk is safe. */
-function putChunk(uploadId, index, buffer) {
+/**
+ * Stage one chunk. Re-sending an index overwrites it, so a retried chunk is safe.
+ * @param {string} [sha256] optional digest of THIS chunk. Verifying per chunk is what makes the
+ *   integrity promise real without ever hashing the whole file: a client that streams a large file
+ *   cannot compute a whole-file digest without holding all of it, which is the thing chunking exists
+ *   to avoid. A bad chunk is rejected on arrival rather than at assembly.
+ */
+function putChunk(uploadId, index, buffer, sha256) {
   const meta = readMeta(uploadId);
-  if (!meta) throw new Error(`uploads.putChunk: unknown upload ${uploadId}`);
-  if (!Buffer.isBuffer(buffer)) throw new Error('uploads.putChunk: buffer required');
+  if (!meta) throw uploadError('UNKNOWN_UPLOAD', `uploads.putChunk: unknown upload ${uploadId}`);
+  if (!Buffer.isBuffer(buffer)) throw uploadError('BAD_REQUEST', 'uploads.putChunk: buffer required');
   const n = chunkIndexOf(index, meta.chunks);
+  if (sha256) {
+    const got = crypto.createHash('sha256').update(buffer).digest('hex');
+    if (got !== String(sha256).toLowerCase()) {
+      throw uploadError('INTEGRITY', `uploads.putChunk: chunk ${n} failed its checksum (got ${got}, expected ${sha256})`);
+    }
+  }
   fs.writeFileSync(path.join(sessionDir(meta.upload_id), `${n}.part`), buffer);
   const received = receivedIndices(meta.upload_id);
   return { ok: true, received_count: received.length, chunks: meta.chunks };
@@ -243,14 +297,21 @@ function chunkStatus(uploadId) {
  */
 function finishChunked(uploadId, opts = {}) {
   const meta = readMeta(uploadId);
-  if (!meta) throw new Error(`uploads.finishChunked: unknown upload ${uploadId}`);
+  if (!meta) throw uploadError('UNKNOWN_UPLOAD', `uploads.finishChunked: unknown upload ${uploadId}`);
 
+  // Count what is missing without materializing an index per chunk: only the first few are ever
+  // reported, and the array was the expensive part of an oversized declared size.
   const have = new Set(receivedIndices(meta.upload_id));
-  const missing = [];
-  for (let i = 0; i < meta.chunks; i++) if (!have.has(i)) missing.push(i);
-  if (missing.length) {
-    throw new Error(`uploads.finishChunked: missing chunk${missing.length > 1 ? 's' : ''} ` +
-      `${missing.slice(0, 10).join(',')}${missing.length > 10 ? `… (${missing.length} total)` : ''}`);
+  const firstMissing = [];
+  let missingCount = 0;
+  for (let i = 0; i < meta.chunks; i++) {
+    if (have.has(i)) continue;
+    missingCount++;
+    if (firstMissing.length < 10) firstMissing.push(i);
+  }
+  if (missingCount) {
+    throw uploadError('MISSING_CHUNKS', `uploads.finishChunked: missing chunk${missingCount > 1 ? 's' : ''} ` +
+      `${firstMissing.join(',')}${missingCount > firstMissing.length ? `… (${missingCount} total)` : ''}`);
   }
 
   const dir = sessionDir(meta.upload_id);
@@ -267,14 +328,22 @@ function finishChunked(uploadId, opts = {}) {
 
   const digest = hash.digest('hex');
   const want = opts.sha256 || meta.sha256;
+  // Check the bytes that actually reached the disk, not the bytes we meant to write. writeSync can
+  // return a short count instead of throwing when the filesystem fills, and `size`/`hash` above are
+  // both derived from the buffers, so on their own they would compare our input against itself.
+  const onDisk = fs.statSync(assembled).size;
   // A failed check discards the staging dir: a corrupt upload should be re-sent, not retried forever.
+  if (onDisk !== size) {
+    discard(meta.upload_id);
+    throw uploadError('INTEGRITY', `uploads.finishChunked: short write (${onDisk} of ${size} bytes reached disk, the upload area is probably full)`);
+  }
   if (meta.size && size !== meta.size) {
     discard(meta.upload_id);
-    throw new Error(`uploads.finishChunked: size mismatch (assembled ${size}, declared ${meta.size})`);
+    throw uploadError('INTEGRITY', `uploads.finishChunked: size mismatch (assembled ${size}, declared ${meta.size})`);
   }
   if (want && want !== digest) {
     discard(meta.upload_id);
-    throw new Error(`uploads.finishChunked: checksum mismatch (got ${digest}, expected ${want})`);
+    throw uploadError('INTEGRITY', `uploads.finishChunked: checksum mismatch (got ${digest}, expected ${want})`);
   }
 
   const rec = saveFrom({
@@ -285,24 +354,36 @@ function finishChunked(uploadId, opts = {}) {
   return rec;
 }
 
-/** Throw away a partial upload. Returns false if there was nothing to discard. */
+/** Throw away a partial upload. Returns false if there was nothing to discard, or the delete failed. */
 function abortChunked(uploadId) {
-  if (!readMeta(uploadId)) return false;
-  discard(uploadId);
-  return true;
+  if (!ID_RE.test(String(uploadId || ''))) return false;      // same traversal guard as readMeta
+  if (!fs.existsSync(sessionDir(uploadId))) return false;
+  return discard(uploadId);                                   // works even when meta.json is corrupt
 }
 
-/** Delete staging dirs older than maxAgeMs (abandoned uploads). Returns how many were removed. */
+/**
+ * Delete staging dirs older than maxAgeMs (abandoned uploads). Returns { removed, failed }; a sweep
+ * that fails on every directory used to be indistinguishable from a sweep with nothing to do, which
+ * is how a disk quietly fills.
+ */
 function sweepPartials(maxAgeMs = 24 * 3600 * 1000) {
   let names;
-  try { names = fs.readdirSync(partialDir()); } catch { return 0; }
+  try { names = fs.readdirSync(partialDir()); }
+  catch (e) {
+    if (e.code !== 'ENOENT') console.error('[uploads] cannot read the partial-upload dir:', e.message);
+    return { removed: 0, failed: 0 };
+  }
   const cutoff = Date.now() - maxAgeMs;
-  let removed = 0;
+  let removed = 0, failed = 0;
   for (const n of names) {
     const p = path.join(partialDir(), n);
-    try { if (fs.statSync(p).mtimeMs < cutoff) { fs.rmSync(p, { recursive: true, force: true }); removed++; } } catch (_) {}
+    try {
+      if (fs.statSync(p).mtimeMs >= cutoff) continue;
+      fs.rmSync(p, { recursive: true, force: true });
+      removed++;
+    } catch (e) { failed++; console.error(`[uploads] sweep could not remove ${p}:`, e.message); }
   }
-  return removed;
+  return { removed, failed };
 }
 
 module.exports = {

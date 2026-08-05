@@ -142,9 +142,75 @@ test('sweepPartials removes stale staging dirs and keeps fresh ones', () => {
   const old = Date.now() - 48 * 3600 * 1000;
   fs.utimesSync(path.join(TMP, '.partial', stale.upload_id), old / 1000, old / 1000);
 
-  assert.equal(uploads.sweepPartials(24 * 3600 * 1000), 1);
+  assert.deepEqual(uploads.sweepPartials(24 * 3600 * 1000), { removed: 1, failed: 0 });
   assert.equal(uploads.chunkStatus(stale.upload_id), null);
   assert.ok(uploads.chunkStatus(fresh.upload_id), 'a fresh upload in progress survives the sweep');
+});
+
+test('beginChunked refuses a declared size beyond the configured maximum', () => {
+  // Nothing bounded `size`, so two requests and zero bytes could pin the event loop: a 40 TB claim
+  // makes 4.77M chunks and finishChunked walks every index looking for what is missing.
+  assert.throws(() => uploads.beginChunked({ channel: 'assistant-web', filename: 'lie.bin', size: 40e12 }), /too large|maximum/i);
+  assert.throws(() => uploads.beginChunked({ channel: 'assistant-web', filename: 'lie.bin', size: Number.MAX_SAFE_INTEGER }), /too large|maximum/i);
+});
+
+test('the missing-chunk error stays short no matter how many chunks are missing', () => {
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'sparse.bin', size: 64 * 5000 });
+  uploads.putChunk(s.upload_id, 0, Buffer.alloc(64));
+  const err = (() => { try { uploads.finishChunked(s.upload_id); } catch (e) { return e; } })();
+  assert.match(err.message, /missing chunk/i);
+  assert.ok(err.message.length < 200, `message should summarize, not enumerate 4999 indices (was ${err.message.length} chars)`);
+  uploads.abortChunked(s.upload_id);
+});
+
+test('a zero-length upload still bounds the chunk index', () => {
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'zero.bin', size: 0 });
+  assert.throws(() => uploads.putChunk(s.upload_id, 999999999, Buffer.from('x')), /index/i);
+  uploads.abortChunked(s.upload_id);
+});
+
+test('failures carry a stable code so callers do not have to match on prose', () => {
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'coded.bin', size: 200 });
+  const grab = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  assert.equal(grab(() => uploads.putChunk('abc123-000000', 0, Buffer.from('x'))).code, 'UNKNOWN_UPLOAD');
+  assert.equal(grab(() => uploads.putChunk(s.upload_id, 'abc', Buffer.from('x'))).code, 'BAD_INDEX');
+  assert.equal(grab(() => uploads.finishChunked(s.upload_id)).code, 'MISSING_CHUNKS');
+  uploads.abortChunked(s.upload_id);
+
+  const c = uploads.beginChunked({ channel: 'assistant-web', filename: 'bad.bin', size: 64, sha256: 'deadbeef' });
+  uploads.putChunk(c.upload_id, 0, Buffer.alloc(64));
+  assert.equal(grab(() => uploads.finishChunked(c.upload_id)).code, 'INTEGRITY');
+});
+
+test('an unreadable staging dir is an error, not an upload with zero chunks received', () => {
+  // Reporting [] on a readdir failure told the client to re-send chunks that were already on disk.
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'locked.bin', size: 200 });
+  const cs = chunksOf(crypto.randomBytes(200), s.chunk_size);
+  cs.forEach((c, i) => uploads.putChunk(s.upload_id, i, c));
+  const dir = path.join(TMP, '.partial', s.upload_id);
+  fs.chmodSync(dir, 0o000);
+  try {
+    assert.throws(() => uploads.chunkStatus(s.upload_id), /staged chunks|permission/i);
+  } finally {
+    fs.chmodSync(dir, 0o755);
+    uploads.abortChunked(s.upload_id);
+  }
+});
+
+test('a corrupt meta.json is reported as a broken upload, not an unknown one', () => {
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'corruptmeta.bin', size: 200 });
+  fs.writeFileSync(path.join(TMP, '.partial', s.upload_id, 'meta.json'), '{not json');
+  const err = (() => { try { uploads.putChunk(s.upload_id, 0, Buffer.from('x')); } catch (e) { return e; } })();
+  assert.equal(err.code, 'BROKEN_UPLOAD', 'a truncated meta.json must not masquerade as "unknown upload"');
+  uploads.abortChunked(s.upload_id);
+});
+
+test('the assembled file is verified against what actually reached the disk', () => {
+  const data = crypto.randomBytes(200);
+  const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'ondisk.bin', size: data.length });
+  chunksOf(data, s.chunk_size).forEach((c, i) => uploads.putChunk(s.upload_id, i, c));
+  const rec = uploads.finishChunked(s.upload_id);
+  assert.equal(fs.statSync(rec.path).size, data.length, 'the registered size must match the bytes on disk');
 });
 
 test('saveFrom registers a file already on disk without ever holding it as a Buffer', () => {
