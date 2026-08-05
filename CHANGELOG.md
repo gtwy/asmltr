@@ -10,9 +10,40 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **Chunked file uploads.** `POST /v2/upload/init`, `PUT /v2/upload/:id/:index` (raw
+  `application/octet-stream`), `GET /v2/upload/:id`, `POST /v2/upload/:id/finish`, and
+  `DELETE /v2/upload/:id`, backed by `beginChunked` / `putChunk` / `chunkStatus` / `finishChunked` /
+  `abortChunked` / `sweepPartials` in `shared/uploads.js`. The wire unit is a chunk instead of the
+  file, so upload size is no longer bounded by a body limit anywhere on the path. Chunks stage under
+  `<uploads>/.partial/<id>/` and are assembled one at a time, so the server holds one chunk rather
+  than the whole file; nothing is written to the manifest until `finish` verifies size and sha256, so
+  `list()` can never hand the agent a path to a half-written file. Retried chunks are idempotent, a
+  chunk index that is not a plain integer is rejected before it reaches a path, and staging left by
+  abandoned uploads is swept hourly past a 24 hour TTL. Tuning: `ASMLTR_UPLOAD_CHUNK_SIZE`
+  (default 8 MiB) and `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb).
+- **`uploads.saveFrom({ tempPath, … })`.** Registers a file already on disk by moving it into the
+  shared area, so a file no longer has to fit in a Buffer to be registered. `save()` is unchanged for
+  connectors, which already hold Buffers.
+
 ### Changed
 
+- **The composer uploads in chunks, with real progress.** `webChat.upload(file, key, { onProgress })`
+  sends `file.slice()` chunks over XHR (fetch exposes no upload progress event) and retries a failed
+  chunk with backoff instead of failing the whole file. Each file in a multi-file pick gets its own
+  progress row; previously one shared `notice` meant five files with three failures showed a single
+  message about the last one.
+
 ### Fixed
+
+- **Uploads were capped at 767.9 KiB, not the 10 MB the core advertised.** `client_max_body_size` was
+  absent from `insights/dashboard/nginx.conf.template`, so nginx applied its 1 MiB default, and the
+  base64 JSON body spent a third of that on encoding: 786,327 bytes uploaded and 786,522 failed. An
+  ordinary 3 MB phone photo returned `413 Request Entity Too Large` with no size named anywhere in the
+  UI or the docs. The same default capped `POST /v2/backups/import` at 1 MiB despite its `limit:
+  '1024mb'`, making GUI backup import fail for any real archive. The directive is now set at **server**
+  level: scoping it to `location /v2/` is not enough, because `auth_request` runs its check as a
+  subrequest against `location = /_asmltr_authz`, which applied its own inherited 1 MiB limit and
+  turned every chunk into a 500. ([#91](https://github.com/jarethmt/asmltr/issues/91))
 
 ## [0.10.1] - 2026-08-05
 
