@@ -10,9 +10,29 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **Release builds for the mobile app.** `mobile/build.sh release` produces a signed, 16 KB-aligned APK
+  at `mobile/dist/asmltr.apk` via the new `mobile/scripts/package-apk.sh` (zipalign **then** apksigner —
+  aligning after signing would invalidate the signature). The keystore comes from
+  `ASMLTR_ANDROID_KEYSTORE`; it must be the same key previous releases used, otherwise the update cannot
+  install over an existing app and users lose their data. Requires build-tools >= 35.0.1 for `zipalign -P`.
+
 ### Changed
 
+- **The android connector serves a release APK when one exists.** `/app/gw/download` now prefers
+  `mobile/dist/asmltr.apk`, then the gradle release output, and only falls back to the debug build
+  (still overridable with `ASMLTR_ANDROID_APK`). Shipping a debug APK made Android show an
+  "App Compatibility / debuggable app" warning on launch and left the app's private data readable
+  through `run-as`.
+
 ### Fixed
+
+- **16 KB page-size compatibility (Android 15+).** Devices that boot with 16 KB memory pages refused to
+  accept the app's native libraries: `libvosk.so` shipped 4 KB-aligned LOAD segments, and because
+  `minSdk` was 22 the libs had to be packaged compressed (`extractNativeLibs=true`), which Android could
+  not verify. Fixed by pinning `vosk-android` to 0.3.75 (16 KB-aligned upstream), raising `minSdk` to 23
+  so JNI libs can be stored uncompressed (`useLegacyPackaging false`), and aligning every `.so` to a
+  16 KB boundary at packaging time. All three arm64 libraries now report `0x4000` alignment. These are
+  applied by `scripts/patch-android.js`, which owns the generated Gradle project.
 
 ## [0.10.0] - 2026-08-04
 

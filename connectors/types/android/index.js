@@ -383,9 +383,17 @@ async function start(ctx) {
   });
 
   // --- APK download: open (the app isn't a secret; the device token gates the API, not the binary) ---
-  // Default: the built debug APK; override with ASMLTR_ANDROID_APK. Install straight from the instance:
-  // https://<host>/app/gw/download
-  const APK = process.env.ASMLTR_ANDROID_APK || path.join(__dirname, '..', '..', '..', 'mobile', 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+  // Prefer a packaged RELEASE apk, fall back to the debug build. A debug APK makes Android show an
+  // "App Compatibility / debuggable app" warning on install and leaves the app's private data readable
+  // via `run-as`, so ship release when one exists. Override either with ASMLTR_ANDROID_APK.
+  // Install straight from the instance: https://<host>/app/gw/download
+  const MOBILE_DIR = path.join(__dirname, '..', '..', '..', 'mobile');
+  const APK_CANDIDATES = [
+    path.join(MOBILE_DIR, 'dist', 'asmltr.apk'),
+    path.join(MOBILE_DIR, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk'),
+    path.join(MOBILE_DIR, 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk'),
+  ];
+  const APK = process.env.ASMLTR_ANDROID_APK || APK_CANDIDATES.find((p) => fs.existsSync(p)) || APK_CANDIDATES[APK_CANDIDATES.length - 1];
   const APK_VER = path.join(__dirname, '..', '..', '..', 'mobile', 'app-version.json');
   app.get('/gw/app', (req, res) => {
     let v = {}; try { v = JSON.parse(fs.readFileSync(APK_VER, 'utf8')); } catch (_) {}
