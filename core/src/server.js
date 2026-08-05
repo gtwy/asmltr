@@ -68,7 +68,7 @@ async function refreshVaultLocked() {
 }
 refreshVaultLocked();
 const _vaultTimer = setInterval(refreshVaultLocked, 30000); if (_vaultTimer.unref) _vaultTimer.unref();
-const { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, getLastModel } = require('./runner');
+const { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, generateRecordingSummary, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
 
@@ -1276,10 +1276,25 @@ async function processRecording(id) {
     recordings.update(id, { status: 'transcribed', duration_sec: out.duration_sec });
     // Attribute the STT spend (whole-file) to the recorder surface.
     record(auxUsage({ surface: 'recorder', feature: 'stt', provider: 'openai', model: process.env.ASMLTR_STT_MODEL || 'gpt-4o-transcribe', seconds: out.duration_sec || 0 }));
+    await enrichRecording(id, out.text); // §B3 — AI title/summary/action items
   } catch (e) {
     recordings.update(id, { status: 'error', error: e.message });
     console.error('[core] recording transcribe failed:', id, e.message);
   }
+}
+
+// §B3 — enrich a recording from its transcript: semantic title, ≤500-word summary, action items,
+// highlights, participants. Respects user-locked fields (title/description edited in the UI).
+async function enrichRecording(id, transcriptText) {
+  const text = transcriptText != null ? transcriptText : recordings.transcript(id);
+  if (!text || !text.trim()) return null;
+  const sum = await generateRecordingSummary(text);
+  const locked = (recordings.get(id) || {}).ai_locked || {};
+  const patch = { status: 'enriched', action_items: sum.action_items, highlights: sum.highlights };
+  if (!locked.title && sum.title) patch.title = sum.title;
+  if (!locked.description) patch.description = sum.description;
+  if (sum.participants && sum.participants.length) patch.people = sum.participants.map((name) => ({ name }));
+  return recordings.update(id, patch);
 }
 
 // Upload raw audio bytes (octet-stream — avoids the base64-in-JSON 10MB cap, see #91). Query: source, title.
@@ -1303,6 +1318,12 @@ app.get('/v2/recordings/:id/audio', (req, res) => {
   require('fs').createReadStream(p).pipe(res);
 });
 app.delete('/v2/recordings/:id', (req, res) => res.json({ ok: recordings.remove(req.params.id) }));
+// Re-run AI enrichment from the stored transcript (e.g. after the user edits the transcript).
+app.post('/v2/recordings/:id/enrich', async (req, res) => {
+  if (!recordings.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  try { const m = await enrichRecording(req.params.id, null); res.json(m || { ok: false, error: 'no transcript' }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Agent runtime settings — the SDK version (installed vs latest-on-npm) that gates model availability,
 // the model selection (applies next turn, no restart), the last-resolved model id, and SDK auto-update.
