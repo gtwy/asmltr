@@ -16,6 +16,18 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Bounds ONE request body. nginx's 1m default silently capped every upload: the file uploader
+    # spends a third of the body on base64, so the effective ceiling was 767.9 KiB (a phone photo did
+    # not fit), and /v2/backups/import was held to 1 MiB even though the core accepts 1024mb.
+    # Uploads are chunked now, so this bounds a chunk, not a file; keep it at or above the core's
+    # ASMLTR_UPLOAD_MAX_CHUNK (default 64mb).
+    #
+    # This MUST be at server level, not inside `location /v2/`. auth_request runs the authz check as a
+    # subrequest against `location = /_asmltr_authz`, which applies its OWN limit; with the directive
+    # scoped to /v2/ the subrequest still inherited 1m, returned 413, and nginx turned that unexpected
+    # auth status into a 500 for every chunk.
+    client_max_body_size 64m;
+
     # Forward-auth subrequest target (internal — only reachable from auth_request).
     location = /_asmltr_authz {
         internal;
@@ -86,6 +98,7 @@ server {
 
     # Core control plane (/v2/inject, /v2/abort, silos, backups, vault, …). Served at root
     # on the core; keep the prefix. /v2/auth/ above is carved out (unauthenticated).
+    # Upload bodies are bounded by the server-level client_max_body_size above.
     location /v2/ {
         auth_request /_asmltr_authz;
         auth_request_set $asmltr_user $upstream_http_remote_user;
