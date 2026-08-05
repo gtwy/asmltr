@@ -48,6 +48,8 @@ const { createSpeaker } = require('../../shared/speech/speaker'); // core speech
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
 const tts = require('../../shared/speech/tts'); // TTS config (voice/model), persisted + GUI/TUI-settable
 const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
+const recordings = require('../../shared/recordings'); // recording records store (roadmap §B1, issue #94)
+const { transcribeLong } = require('../../shared/speech/transcribe-long'); // long-audio chunked transcription
 const { auxUsage, estimateAudioSeconds } = require('../../shared/usage'); // priced token-usage events for metered aux surfaces (tts/stt/moderation)
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
@@ -1260,6 +1262,47 @@ app.post('/v2/transcribe', async (req, res) => {
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// --- Recordings (roadmap §B1, issue #94) — the recording app's backend ----------------------------
+// Kick transcription (and later enrichment) in the background so upload returns immediately. Status on
+// the record moves uploaded → transcribing → transcribed (→ enriched once §B3 lands) → error.
+async function processRecording(id) {
+  const audio = recordings.audioPath(id);
+  if (!audio) { recordings.update(id, { status: 'error', error: 'audio missing' }); return; }
+  recordings.update(id, { status: 'transcribing' });
+  try {
+    const out = await transcribeLong(audio, {});
+    recordings.setTranscript(id, out.text);
+    recordings.update(id, { status: 'transcribed', duration_sec: out.duration_sec });
+    // Attribute the STT spend (whole-file) to the recorder surface.
+    record(auxUsage({ surface: 'recorder', feature: 'stt', provider: 'openai', model: process.env.ASMLTR_STT_MODEL || 'gpt-4o-transcribe', seconds: out.duration_sec || 0 }));
+  } catch (e) {
+    recordings.update(id, { status: 'error', error: e.message });
+    console.error('[core] recording transcribe failed:', id, e.message);
+  }
+}
+
+// Upload raw audio bytes (octet-stream — avoids the base64-in-JSON 10MB cap, see #91). Query: source, title.
+app.post('/v2/recordings', express.raw({ type: () => true, limit: '1024mb' }), (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  if (!buf || !buf.length) return res.status(400).json({ error: 'no audio body (send raw bytes)' });
+  const mime = req.get('Content-Type') || 'application/octet-stream';
+  const rec = recordings.create({ audio: buf, mime, source: req.query.source || 'upload', title: req.query.title || null, created: new Date().toISOString() });
+  res.json({ ok: true, id: rec.id, status: rec.status });
+  processRecording(rec.id); // fire-and-forget
+});
+app.get('/v2/recordings', (req, res) => res.json({ recordings: recordings.list() }));
+app.get('/v2/recordings/:id', (req, res) => {
+  const m = recordings.get(req.params.id); if (!m) return res.status(404).json({ error: 'not found' });
+  res.json({ ...m, transcript: recordings.transcript(req.params.id) });
+});
+app.get('/v2/recordings/:id/audio', (req, res) => {
+  const p = recordings.audioPath(req.params.id); if (!p) return res.status(404).json({ error: 'no audio' });
+  const m = recordings.get(req.params.id);
+  res.set('Content-Type', m.mime || 'application/octet-stream');
+  require('fs').createReadStream(p).pipe(res);
+});
+app.delete('/v2/recordings/:id', (req, res) => res.json({ ok: recordings.remove(req.params.id) }));
 
 // Agent runtime settings — the SDK version (installed vs latest-on-npm) that gates model availability,
 // the model selection (applies next turn, no restart), the last-resolved model id, and SDK auto-update.
