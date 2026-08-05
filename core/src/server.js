@@ -1073,6 +1073,14 @@ app.post('/v2/upload', (req, res) => {
   }
 });
 
+// Chunked uploads (/v2/upload/init · PUT /v2/upload/:id/:index · finish). The one-shot route above
+// carries the whole file as base64 in the JSON body, so its ceiling is the smallest body limit on the
+// path; these send fixed-size raw chunks instead, which makes file size irrelevant and lets an
+// interrupted transfer resume. The sweeper drops staging dirs from uploads that were never finished.
+const { mountUploadRoutes, startPartialSweeper } = require('./upload-routes');
+mountUploadRoutes(app, { record });
+startPartialSweeper();
+
 // Streaming turn: same pipeline as /v2/handle, but assistant text is streamed as it's produced.
 // SSE frames: {type:'delta', text} … then {type:'done', actions}. Deltas are redacted in-flight.
 app.post('/v2/stream', async (req, res) => {
