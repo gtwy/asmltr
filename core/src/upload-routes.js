@@ -24,18 +24,42 @@ const uploads = require('../../shared/uploads');
 
 // Safety bound on ONE chunk body, deliberately independent of the advertised chunk_size: the server
 // can raise or lower its recommendation without a client hitting a body-parser wall on a chunk in flight.
-function maxChunkBody() { return process.env.ASMLTR_UPLOAD_MAX_CHUNK || '64mb'; }
+// A typo here used to be silent: bytes.parse('64 mib') returns null and body-parser then applies NO
+// limit at all, quietly removing the bound this is here to set.
+function maxChunkBody() {
+  const raw = process.env.ASMLTR_UPLOAD_MAX_CHUNK;
+  if (!raw) return '64mb';
+  if (require('bytes').parse(raw) == null) {
+    console.error(`[core] ASMLTR_UPLOAD_MAX_CHUNK="${raw}" is not a valid size, falling back to 64mb`);
+    return '64mb';
+  }
+  return raw;
+}
 
 const kindOf = (mime) => (/^image\//.test(mime || '') ? 'image' : 'document');
 
-// shared/uploads throws plain Errors; turn the failure modes into codes a client can act on.
+// shared/uploads tags its failures with a stable `code`; map those to what the client should DO.
 // 409 = send the rest. 422 = the bytes are wrong, start over. 404 = this upload is gone.
-function statusFor(message) {
-  if (/unknown upload/i.test(message)) return 404;
-  if (/missing chunk/i.test(message)) return 409;
-  if (/checksum mismatch|size mismatch/i.test(message)) return 422;
-  if (/invalid chunk index|past the end/i.test(message)) return 400;
-  return 500;
+// Matching on message prose instead would couple the HTTP contract to strings that interpolate
+// client-supplied input, and would break on any reword.
+const STATUS_BY_CODE = {
+  UNKNOWN_UPLOAD: 404,
+  MISSING_CHUNKS: 409,
+  INTEGRITY: 422,
+  BAD_INDEX: 400,
+  BAD_REQUEST: 400,
+  BROKEN_UPLOAD: 500,
+};
+
+// Everything at 500 is OUR fault (ENOSPC, EACCES, EIO). Log it with the id so the operator has a
+// trail, and send the browser a message that says what to do instead of an absolute host path.
+function fail(res, e, where, id) {
+  const status = STATUS_BY_CODE[e.code] || 500;
+  if (status >= 500) {
+    console.error(`[core] ${where} failed${id ? ` (${id})` : ''}:`, e.stack || e.message);
+    return res.status(status).json({ error: 'the upload failed on the server, see the core logs' });
+  }
+  res.status(status).json({ error: e.message });
 }
 
 /**
@@ -58,21 +82,24 @@ function mountUploadRoutes(app, opts = {}) {
         conversationKey: conversation_key || null, kind: kindOf(mime),
       });
       res.json({ ok: true, ...s });
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) { fail(res, e, 'upload init'); }   // mkdir/write failures here are 500s, not bad requests
   });
 
   // Raw bytes, so a chunk costs exactly its own size on the wire (no base64 inflation).
+  // X-Chunk-Sha256 (optional) is verified against the bytes before they are staged.
   app.put('/v2/upload/:id/:index', express.raw({ type: () => true, limit: maxChunkBody() }), (req, res) => {
     try {
       if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'empty chunk' });
-      res.json(uploads.putChunk(req.params.id, req.params.index, req.body));
-    } catch (e) { res.status(statusFor(e.message)).json({ error: e.message }); }
+      res.json(uploads.putChunk(req.params.id, req.params.index, req.body, req.get('X-Chunk-Sha256')));
+    } catch (e) { fail(res, e, 'upload chunk', req.params.id); }
   });
 
   app.get('/v2/upload/:id', (req, res) => {
-    const st = uploads.chunkStatus(req.params.id);
-    if (!st) return res.status(404).json({ error: `unknown upload ${req.params.id}` });
-    res.json(st);
+    try {
+      const st = uploads.chunkStatus(req.params.id);
+      if (!st) return res.status(404).json({ error: `unknown upload ${req.params.id}` });
+      res.json(st);
+    } catch (e) { fail(res, e, 'upload status', req.params.id); }
   });
 
   app.post('/v2/upload/:id/finish', (req, res) => {
@@ -87,11 +114,30 @@ function mountUploadRoutes(app, opts = {}) {
         ok: true,
         file: { path: rec.path, name: rec.filename, mime: rec.mime, kind: rec.kind, bytes: rec.size, sha256: rec.sha256 },
       });
-    } catch (e) { res.status(statusFor(e.message)).json({ error: e.message }); }
+    } catch (e) { fail(res, e, 'upload finish', req.params.id); }
   });
 
   app.delete('/v2/upload/:id', (req, res) => {
-    res.json({ ok: uploads.abortChunked(req.params.id) });
+    try { res.json({ ok: uploads.abortChunked(req.params.id) }); }
+    catch (e) { fail(res, e, 'upload abort', req.params.id); }
+  });
+
+  // body-parser rejects an oversized chunk INSIDE the middleware, before any handler runs, so a route
+  // try/catch cannot see it. Without this, express's default handler answers with HTML (and, when
+  // NODE_ENV is not production, a stack trace carrying host paths) where every other route on this
+  // surface returns { error }. The 413 is also the single most likely misconfiguration for this
+  // feature, so it names the cause instead of just the number.
+  app.use('/v2/upload', (err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (err && err.type === 'entity.too.large') {
+      console.error('[core] upload chunk rejected as too large:', req.params.id || req.path, err.message);
+      return res.status(413).json({
+        error: `chunk larger than the server's limit of ${maxChunkBody()} (raise ASMLTR_UPLOAD_MAX_CHUNK, and the proxy's client_max_body_size with it)`,
+      });
+    }
+    console.error('[core] upload request failed:', req.path, err && (err.stack || err.message));
+    res.status(err && err.status >= 400 && err.status < 500 ? err.status : 500)
+      .json({ error: 'the upload request could not be read' });
   });
 }
 
@@ -102,8 +148,10 @@ function mountUploadRoutes(app, opts = {}) {
 function startPartialSweeper({ everyMs = 3600 * 1000, maxAgeMs = 24 * 3600 * 1000 } = {}) {
   const tick = () => {
     try {
-      const n = uploads.sweepPartials(maxAgeMs);
-      if (n) console.log(`[core] swept ${n} abandoned partial upload${n > 1 ? 's' : ''}`);
+      const { removed, failed } = uploads.sweepPartials(maxAgeMs);
+      if (removed) console.log(`[core] swept ${removed} abandoned partial upload${removed > 1 ? 's' : ''}`);
+      // A sweep that fails on everything must not read like a sweep with nothing to do.
+      if (failed) console.error(`[core] partial upload sweep could not remove ${failed} staging dir(s)`);
     } catch (e) { console.error('[core] partial upload sweep:', e.message); }
   };
   tick();

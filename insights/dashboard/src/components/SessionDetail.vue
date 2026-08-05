@@ -225,13 +225,15 @@ async function onFile(ev) {
         onProgress: (p) => { uploading.value = uploading.value.map((u) => (u.id === id ? { ...u, pct: Math.round(p * 100) } : u)) }
       })
       if (r.ok) attached.value = [...attached.value, r.file]
+      else failed.push(`${f.name}: the server did not confirm the upload`)   // never drop it silently
     } catch (e) {
       failed.push(`${f.name}: ${e.message}`)
     } finally {
       uploading.value = uploading.value.filter((u) => u.id !== id)
     }
   }
-  if (failed.length) notice.value = { ok: false, text: `upload failed: ${failed.join('; ')}` }
+  // Clear on success too, or a banner from a previous attempt outlives the failure it described.
+  notice.value = failed.length ? { ok: false, text: `upload failed: ${failed.join('; ')}` } : null
 }
 function removeAttachment(i) { attached.value = attached.value.filter((_, j) => j !== i) }
 
