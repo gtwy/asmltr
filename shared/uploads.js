@@ -53,27 +53,60 @@ function humanSize(n) {
  * @param {string} [a.kind]           semantic hint: 'image'|'audio'|'video'|'document'|'voice'
  * @returns {object} the manifest record (includes absolute `path`)
  */
-function save({ channel, buffer, filename, mime, caption, sender, senderId, instance, conversationKey, kind }) {
-  if (!channel) throw new Error('uploads.save: channel required');
-  if (!Buffer.isBuffer(buffer)) throw new Error('uploads.save: buffer required');
+function save(a) {
+  if (!a || !a.channel) throw new Error('uploads.save: channel required');
+  if (!Buffer.isBuffer(a.buffer)) throw new Error('uploads.save: buffer required');
+  const slot = place(a.channel, a.filename);
+  fs.writeFileSync(slot.abs, a.buffer);
+  return register(slot, a, a.buffer.length);
+}
+
+/** Allocate the on-disk destination for one inbound file: <uploads>/<channel>/<ts>-<sanitized name>. */
+function place(channel, filename) {
   const ts = Date.now();
   const dir = path.join(baseDir(), channel);
   fs.mkdirSync(dir, { recursive: true });
-  const id = ts.toString(36) + '-' + crypto.randomBytes(3).toString('hex');
   const stored = `${ts}-${sanitize(filename)}`;
-  const abs = path.join(dir, stored);
-  fs.writeFileSync(abs, buffer);
+  return { ts, id: ts.toString(36) + '-' + crypto.randomBytes(3).toString('hex'), stored, abs: path.join(dir, stored) };
+}
+
+/**
+ * Build the manifest record for a file ALREADY sitting at `slot.abs`, and append it. Single writer
+ * for every entry point (save / saveFrom / finishChunked) so the record shape can't drift between them.
+ */
+function register(slot, a, size, sha256) {
   const rec = {
-    id, ts, iso: new Date(ts).toISOString(),
-    channel, instance: instance || null,
-    sender: sender || null, sender_id: senderId != null ? String(senderId) : null,
-    conversation_key: conversationKey || null,
-    filename: filename || stored, stored_name: stored, path: abs,
-    mime: mime || 'application/octet-stream', size: buffer.length,
-    kind: kind || null, caption: caption || null,
+    id: slot.id, ts: slot.ts, iso: new Date(slot.ts).toISOString(),
+    channel: a.channel, instance: a.instance || null,
+    sender: a.sender || null, sender_id: a.senderId != null ? String(a.senderId) : null,
+    conversation_key: a.conversationKey || null,
+    filename: a.filename || slot.stored, stored_name: slot.stored, path: slot.abs,
+    mime: a.mime || 'application/octet-stream', size,
+    kind: a.kind || null, caption: a.caption || null,
   };
+  if (sha256) rec.sha256 = sha256;
   try { fs.appendFileSync(manifestPath(), JSON.stringify(rec) + '\n'); } catch (_) {}
   return rec;
+}
+
+/**
+ * Register a file that is ALREADY on disk, by moving it into the shared area. Same result as `save()`
+ * without ever holding the bytes in a Buffer, so file size stops being bounded by process memory.
+ * @param {object} a  same fields as save(), except `tempPath` replaces `buffer`
+ * @returns {object} the manifest record
+ */
+function saveFrom(a) {
+  if (!a || !a.channel) throw new Error('uploads.saveFrom: channel required');
+  if (!a.tempPath) throw new Error('uploads.saveFrom: tempPath required');
+  const size = fs.statSync(a.tempPath).size;
+  const slot = place(a.channel, a.filename);
+  try {
+    fs.renameSync(a.tempPath, slot.abs);          // atomic within one filesystem: no half-written file is ever visible
+  } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    fs.copyFileSync(a.tempPath, slot.abs); fs.unlinkSync(a.tempPath);   // staging lives on another filesystem
+  }
+  return register(slot, a, size, a.sha256);
 }
 
 /** Read + parse the manifest (newest last on disk). Returns [] if none. */
@@ -117,4 +150,162 @@ function recentSummary(n = 8) {
   }).join('\n');
 }
 
-module.exports = { save, list, get, recentSummary, readManifest, baseDir, manifestPath, humanSize };
+/* ── Chunked uploads ────────────────────────────────────────────────────────────────────────────
+ * Why: the one-shot path needs the whole file in memory at once (a Buffer here, a base64 string in
+ * the browser AND in the JSON body), so the maximum upload size is set by the smallest body limit on
+ * the path (nginx's 1 MiB default), minus base64's 33% tax. Chunking makes the wire unit a fixed
+ * chunk instead of the file, so file size stops being a limit at all, and a dropped connection
+ * resumes from the chunks already received instead of restarting at zero.
+ *
+ * Lifecycle: beginChunked → putChunk × N (any order, retries are idempotent) → finishChunked.
+ * Chunks stage under <uploads>/.partial/<upload_id>/ and are assembled one chunk at a time, so peak
+ * memory is one chunk regardless of file size. Nothing reaches the manifest until finish succeeds,
+ * so `list()` never hands the agent a path to a half-written file.
+ */
+
+const ID_RE = /^[a-z0-9]+-[0-9a-f]{6}$/;   // server-minted ids only; anything else can't name a directory
+
+function chunkSize() { return Number(process.env.ASMLTR_UPLOAD_CHUNK_SIZE) || 8 * 1024 * 1024; }
+function partialDir() { return path.join(baseDir(), '.partial'); }
+function sessionDir(id) { return path.join(partialDir(), id); }
+function discard(id) { try { fs.rmSync(sessionDir(id), { recursive: true, force: true }); } catch (_) {} }
+
+function readMeta(id) {
+  if (!ID_RE.test(String(id || ''))) return null;   // rejects traversal before the id reaches path.join
+  try { return JSON.parse(fs.readFileSync(path.join(sessionDir(id), 'meta.json'), 'utf8')); } catch { return null; }
+}
+
+/** Indices already staged, ascending. */
+function receivedIndices(id) {
+  try {
+    return fs.readdirSync(sessionDir(id)).filter((f) => /^\d+\.part$/.test(f))
+      .map((f) => parseInt(f, 10)).sort((a, b) => a - b);
+  } catch { return []; }
+}
+
+// Accept only a literal non-negative integer. Number() alone is too permissive ('0x1' → 1), and a
+// string that reaches path.join is how a chunk index becomes a path traversal.
+function chunkIndexOf(v, chunks) {
+  const n = typeof v === 'number' ? v
+    : (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : NaN);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`uploads.putChunk: invalid chunk index ${JSON.stringify(v)}`);
+  if (chunks && n >= chunks) throw new Error(`uploads.putChunk: chunk index ${n} is past the end of the file (${chunks} chunks)`);
+  return n;
+}
+
+/**
+ * Open a chunked upload. Takes the same descriptive fields as `save()`, plus the declared `size`
+ * (needed to know how many chunks to expect) and an optional `sha256` verified at finish.
+ * @returns {{upload_id: string, chunk_size: number, chunks: number, received: number[]}}
+ */
+function beginChunked(a) {
+  if (!a || !a.channel) throw new Error('uploads.beginChunked: channel required');
+  const size = Number(a.size);
+  if (!Number.isInteger(size) || size < 0) throw new Error('uploads.beginChunked: size must be a non-negative integer');
+  const cs = chunkSize();
+  const ts = Date.now();
+  const upload_id = ts.toString(36) + '-' + crypto.randomBytes(3).toString('hex');
+  fs.mkdirSync(sessionDir(upload_id), { recursive: true });
+  const meta = {
+    upload_id, ts, size, chunk_size: cs, chunks: Math.ceil(size / cs),
+    channel: a.channel, filename: a.filename || null, mime: a.mime || null, sha256: a.sha256 || null,
+    caption: a.caption || null, sender: a.sender || null, sender_id: a.senderId != null ? String(a.senderId) : null,
+    instance: a.instance || null, conversation_key: a.conversationKey || null, kind: a.kind || null,
+  };
+  fs.writeFileSync(path.join(sessionDir(upload_id), 'meta.json'), JSON.stringify(meta));
+  return { upload_id, chunk_size: cs, chunks: meta.chunks, received: [] };
+}
+
+/** Stage one chunk. Re-sending an index overwrites it, so a retried chunk is safe. */
+function putChunk(uploadId, index, buffer) {
+  const meta = readMeta(uploadId);
+  if (!meta) throw new Error(`uploads.putChunk: unknown upload ${uploadId}`);
+  if (!Buffer.isBuffer(buffer)) throw new Error('uploads.putChunk: buffer required');
+  const n = chunkIndexOf(index, meta.chunks);
+  fs.writeFileSync(path.join(sessionDir(meta.upload_id), `${n}.part`), buffer);
+  const received = receivedIndices(meta.upload_id);
+  return { ok: true, received_count: received.length, chunks: meta.chunks };
+}
+
+/** What the server already has, so a client can resume instead of restarting. Null if unknown. */
+function chunkStatus(uploadId) {
+  const meta = readMeta(uploadId);
+  if (!meta) return null;
+  return {
+    upload_id: meta.upload_id, filename: meta.filename, size: meta.size,
+    chunk_size: meta.chunk_size, chunks: meta.chunks, received: receivedIndices(meta.upload_id),
+  };
+}
+
+/**
+ * Assemble the staged chunks, verify them, and register the result in the manifest.
+ * @returns {object} the manifest record, same shape `save()` returns (plus `sha256`)
+ */
+function finishChunked(uploadId, opts = {}) {
+  const meta = readMeta(uploadId);
+  if (!meta) throw new Error(`uploads.finishChunked: unknown upload ${uploadId}`);
+
+  const have = new Set(receivedIndices(meta.upload_id));
+  const missing = [];
+  for (let i = 0; i < meta.chunks; i++) if (!have.has(i)) missing.push(i);
+  if (missing.length) {
+    throw new Error(`uploads.finishChunked: missing chunk${missing.length > 1 ? 's' : ''} ` +
+      `${missing.slice(0, 10).join(',')}${missing.length > 10 ? `… (${missing.length} total)` : ''}`);
+  }
+
+  const dir = sessionDir(meta.upload_id);
+  const assembled = path.join(dir, 'assembled');
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(assembled, 'w');
+  let size = 0;
+  try {
+    for (let i = 0; i < meta.chunks; i++) {          // one chunk resident at a time, never the whole file
+      const b = fs.readFileSync(path.join(dir, `${i}.part`));
+      fs.writeSync(fd, b); hash.update(b); size += b.length;
+    }
+  } finally { fs.closeSync(fd); }
+
+  const digest = hash.digest('hex');
+  const want = opts.sha256 || meta.sha256;
+  // A failed check discards the staging dir: a corrupt upload should be re-sent, not retried forever.
+  if (meta.size && size !== meta.size) {
+    discard(meta.upload_id);
+    throw new Error(`uploads.finishChunked: size mismatch (assembled ${size}, declared ${meta.size})`);
+  }
+  if (want && want !== digest) {
+    discard(meta.upload_id);
+    throw new Error(`uploads.finishChunked: checksum mismatch (got ${digest}, expected ${want})`);
+  }
+
+  const rec = saveFrom({
+    ...meta, tempPath: assembled, sha256: digest,
+    conversationKey: meta.conversation_key, senderId: meta.sender_id,
+  });
+  discard(meta.upload_id);
+  return rec;
+}
+
+/** Throw away a partial upload. Returns false if there was nothing to discard. */
+function abortChunked(uploadId) {
+  if (!readMeta(uploadId)) return false;
+  discard(uploadId);
+  return true;
+}
+
+/** Delete staging dirs older than maxAgeMs (abandoned uploads). Returns how many were removed. */
+function sweepPartials(maxAgeMs = 24 * 3600 * 1000) {
+  let names;
+  try { names = fs.readdirSync(partialDir()); } catch { return 0; }
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (const n of names) {
+    const p = path.join(partialDir(), n);
+    try { if (fs.statSync(p).mtimeMs < cutoff) { fs.rmSync(p, { recursive: true, force: true }); removed++; } } catch (_) {}
+  }
+  return removed;
+}
+
+module.exports = {
+  save, saveFrom, list, get, recentSummary, readManifest, baseDir, manifestPath, humanSize,
+  beginChunked, putChunk, chunkStatus, finishChunked, abortChunked, sweepPartials, chunkSize,
+};
