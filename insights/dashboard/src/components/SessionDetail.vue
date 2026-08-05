@@ -217,6 +217,10 @@ async function onFile(ev) {
   const files = Array.from(ev.target.files || [])
   ev.target.value = ''
   const failed = []
+  // Drop a stale banner from a PREVIOUS upload only. `notice` is shared with send/inject/stop/voice,
+  // and an upload now runs long enough that clearing it wholesale would wipe a message the user is
+  // still reading (stop a turn mid-upload and the upload's success would erase the confirmation).
+  if (notice.value?.upload) notice.value = null
   for (const f of files) {
     const id = ++uploadSeq                     // stable key: progress updates replace the row object
     uploading.value = [...uploading.value, { id, name: f.name, pct: 0 }]
@@ -232,8 +236,7 @@ async function onFile(ev) {
       uploading.value = uploading.value.filter((u) => u.id !== id)
     }
   }
-  // Clear on success too, or a banner from a previous attempt outlives the failure it described.
-  notice.value = failed.length ? { ok: false, text: `upload failed: ${failed.join('; ')}` } : null
+  if (failed.length) notice.value = { ok: false, upload: true, text: `upload failed: ${failed.join('; ')}` }
 }
 function removeAttachment(i) { attached.value = attached.value.filter((_, j) => j !== i) }
 
