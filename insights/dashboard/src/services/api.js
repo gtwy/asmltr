@@ -101,6 +101,26 @@ export const silosApi = {
   rm: (id = 'self', path) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`)
 }
 
+// Recordings (roadmap §B1/§B3, issues #94/#96) — the recording app's backend, served on the core.
+export const recordingsApi = {
+  list: () => getCore('/v2/recordings'),
+  get: (id) => getCore(`/v2/recordings/${encodeURIComponent(id)}`),
+  enrich: (id) => postCore(`/v2/recordings/${encodeURIComponent(id)}/enrich`, {}),
+  remove: (id) => reqCore('DELETE', `/v2/recordings/${encodeURIComponent(id)}`),
+  audioUrl: (id) => `/v2/recordings/${encodeURIComponent(id)}/audio`,
+  // Raw-bytes upload (octet-stream) — dodges the base64-in-JSON size cap. `file` is a browser File/Blob.
+  async upload(file, { source = 'upload', title } = {}) {
+    const res = await fetch(`/v2/recordings${q({ source, title })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', Accept: 'application/json' },
+      body: file
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.error || `upload -> ${res.status} ${res.statusText}`)
+    return json
+  }
+}
+
 // Auth — session gate (roadmap P1). status/setup/login/logout are public; the session cookie is httpOnly.
 export const authApi = {
   status: () => getCore('/v2/auth/status'),
