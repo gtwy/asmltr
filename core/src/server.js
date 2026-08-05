@@ -1326,6 +1326,36 @@ app.post('/v2/recordings/:id/enrich', async (req, res) => {
   try { const m = await enrichRecording(req.params.id, null); res.json(m || { ok: false, error: 'no transcript' }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// B5 (#98): file a recording into a topic STREAM — append its summary + action items as a lightweight,
+// searchable 'recording' event that REFERENCES the audio (which stays in the silo). Optionally fire a
+// prompt about it into a session. Connects the recorder to streams (the meeting's "save to a stream").
+app.post('/v2/recordings/:id/to-stream', async (req, res) => {
+  const rec = recordings.get(req.params.id); if (!rec) return res.status(404).json({ error: 'recording not found' });
+  const b = req.body || {};
+  const s = streams.get(String(b.stream_id || b.stream || '')); if (!s) return res.status(404).json({ error: 'unknown stream' });
+  const parts = ['Recording: ' + (rec.title || 'Untitled')];
+  if (rec.description) parts.push(rec.description);
+  if (rec.action_items && rec.action_items.length) parts.push('Action items:\n- ' + rec.action_items.join('\n- '));
+  const transcript = recordings.transcript(rec.id);
+  if (transcript) parts.push('Transcript:\n' + transcript); // full text so stream recall (FTS) can search it
+  const eid = streams.append(s.id, {
+    source: 'recorder', kind: 'recording', text: parts.join('\n\n'),
+    meta: { recording_id: rec.id, title: rec.title, audio: recordings.audioPath(rec.id), duration_sec: rec.duration_sec, people: rec.people },
+  });
+  recordings.update(rec.id, { stream_id: s.id, stream_slug: s.slug }); // link back
+  // Optional: fire a prompt about this recording into a fresh session on the stream's channel.
+  let fired = null;
+  if (b.prompt && String(b.prompt).trim()) {
+    try {
+      const key = `stream:${s.slug}:${Date.now()}`;
+      streams.attach(s.id, key);
+      const prompt = `${b.prompt}\n\n[Recording "${rec.title}" was just filed into stream "${s.slug}". Its transcript + summary are in the stream — use \`asmltr streams recall ${s.slug} "…"\` if you need detail.]`;
+      handle({ channel: 'core', conversation_key: key, message_id: String(Date.now()), sender: { raw_id: 'recorder', raw_username: 'recorder' }, content: { text: prompt }, delivery: 'async', public: false }).catch(() => {});
+      fired = key;
+    } catch (_) {}
+  }
+  res.json({ ok: true, stream: s.slug, event_id: eid, fired_session: fired });
+});
 
 // --- Streams (roadmap §A, issue #93) — topic/project event streams: shared, on-demand recall + freshness.
 app.get('/v2/streams', (req, res) => res.json({ streams: streams.list() }));
