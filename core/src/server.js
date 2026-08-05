@@ -49,6 +49,7 @@ const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient
 const tts = require('../../shared/speech/tts'); // TTS config (voice/model), persisted + GUI/TUI-settable
 const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
 const recordings = require('../../shared/recordings'); // recording records store (roadmap §B1, issue #94)
+const streams = require('./streams'); // topic/project event streams — shared recall + freshness (roadmap §A, #93)
 const { transcribeLong } = require('../../shared/speech/transcribe-long'); // long-audio chunked transcription
 const { auxUsage, estimateAudioSeconds } = require('../../shared/usage'); // priced token-usage events for metered aux surfaces (tts/stt/moderation)
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
@@ -1324,6 +1325,47 @@ app.post('/v2/recordings/:id/enrich', async (req, res) => {
   try { const m = await enrichRecording(req.params.id, null); res.json(m || { ok: false, error: 'no transcript' }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// --- Streams (roadmap §A, issue #93) — topic/project event streams: shared, on-demand recall + freshness.
+app.get('/v2/streams', (req, res) => res.json({ streams: streams.list() }));
+app.post('/v2/streams', (req, res) => {
+  const b = req.body || {};
+  if (!b.name) return res.status(400).json({ error: 'name required' });
+  res.json(streams.create({ name: b.name, description: b.description }));
+});
+// Freshness watermark for a session (MUST precede /:id so "freshness" isn't captured as an id). Per
+// attached stream, how many events from OTHER sources since the session was last told. `ack=1` advances
+// the cursor (call after the nudge is shown). Edge-triggered.
+app.get('/v2/streams/freshness', (req, res) => {
+  const key = String(req.query.session || '');
+  if (!key) return res.status(400).json({ error: 'session required' });
+  const fresh = streams.freshness(key);
+  if (req.query.ack === '1') for (const f of fresh) streams.markAnnounced(key, f.stream_id, f.total_external);
+  res.json({ streams: fresh, fresh: fresh.filter((f) => f.new > 0) });
+});
+app.get('/v2/streams/:id', (req, res) => {
+  const s = streams.get(req.params.id); if (!s) return res.status(404).json({ error: 'not found' });
+  res.json({ ...s, events: streams.recent(s.id, Math.min(parseInt(req.query.n, 10) || 50, 500)) });
+});
+app.delete('/v2/streams/:id', (req, res) => res.json({ ok: streams.remove(req.params.id) }));
+// Append an event to a stream (a note, a filed asset, a session turn — the turn hook uses this).
+app.post('/v2/streams/:id/events', (req, res) => {
+  const b = req.body || {};
+  const id = streams.append(req.params.id, { source: b.source, session_key: b.session_key, kind: b.kind, text: b.text, meta: b.meta, ts: b.ts });
+  if (id == null) return res.status(404).json({ error: 'unknown stream' });
+  res.json({ ok: true, event_id: id });
+});
+// Recall: FTS5/BM25 search within a stream (q), or the recent tail if no query. This is the on-demand pull.
+app.get('/v2/streams/:id/recall', (req, res) => {
+  const s = streams.get(req.params.id); if (!s) return res.status(404).json({ error: 'not found' });
+  const n = Math.min(parseInt(req.query.n, 10) || 20, 200);
+  res.json({ stream: s.slug, results: req.query.q ? streams.search(s.id, req.query.q, n) : streams.recent(s.id, n) });
+});
+app.post('/v2/streams/:id/attach', (req, res) => {
+  const s = streams.attach(req.params.id, String((req.body || {}).session_key || '')); if (!s) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, stream: s.slug });
+});
+app.post('/v2/streams/:id/detach', (req, res) => { streams.detach(req.params.id, String((req.body || {}).session_key || '')); res.json({ ok: true }); });
 
 // Agent runtime settings — the SDK version (installed vs latest-on-npm) that gates model availability,
 // the model selection (applies next turn, no restart), the last-resolved model id, and SDK auto-update.
