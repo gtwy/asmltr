@@ -16,11 +16,15 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   `abortChunked` / `sweepPartials` in `shared/uploads.js`. The wire unit is a chunk instead of the
   file, so upload size is no longer bounded by a body limit anywhere on the path. Chunks stage under
   `<uploads>/.partial/<id>/` and are assembled one at a time, so the server holds one chunk rather
-  than the whole file; nothing is written to the manifest until `finish` verifies size and sha256, so
-  `list()` can never hand the agent a path to a half-written file. Retried chunks are idempotent, a
-  chunk index that is not a plain integer is rejected before it reaches a path, and staging left by
-  abandoned uploads is swept hourly past a 24 hour TTL. Tuning: `ASMLTR_UPLOAD_CHUNK_SIZE`
-  (default 8 MiB) and `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb).
+  than the whole file; nothing is written to the manifest until `finish` verifies the assembled
+  length against both the declared size and the bytes that actually reached the disk, so `list()` can
+  never hand the agent a path to a half-written file. Content is verified per chunk via
+  `X-Chunk-Sha256`, which keeps the integrity check honest without hashing the whole file (hashing
+  the whole file would mean holding it, the thing chunking exists to avoid); a whole-file `sha256` is
+  still accepted from clients that know it. Retried chunks are idempotent, a chunk index that is not
+  a plain integer is rejected before it reaches a path, and staging left by abandoned uploads is
+  swept hourly past a 24 hour TTL. Tuning: `ASMLTR_UPLOAD_CHUNK_SIZE` (default 8 MiB),
+  `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb), `ASMLTR_UPLOAD_MAX_SIZE` (default 128 GiB).
 - **`uploads.saveFrom({ tempPath, … })`.** Registers a file already on disk by moving it into the
   shared area, so a file no longer has to fit in a Buffer to be registered. `save()` is unchanged for
   connectors, which already hold Buffers.
@@ -40,10 +44,21 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   base64 JSON body spent a third of that on encoding: 786,327 bytes uploaded and 786,522 failed. An
   ordinary 3 MB phone photo returned `413 Request Entity Too Large` with no size named anywhere in the
   UI or the docs. The same default capped `POST /v2/backups/import` at 1 MiB despite its `limit:
-  '1024mb'`, making GUI backup import fail for any real archive. The directive is now set at **server**
-  level: scoping it to `location /v2/` is not enough, because `auth_request` runs its check as a
-  subrequest against `location = /_asmltr_authz`, which applied its own inherited 1 MiB limit and
-  turned every chunk into a 500. ([#91](https://github.com/jarethmt/asmltr/issues/91))
+  '1024mb'`, making GUI backup import fail for any real archive. The directive is now set to `1024m`
+  at **server** level. Both parts matter: scoping it to `location /v2/` is not enough, because
+  `auth_request` runs its check as a subrequest against `location = /_asmltr_authz`, which applied its
+  own inherited 1 MiB limit and turned every chunk into a 500; and the value has to match the core's
+  own ceiling for `/v2/backups/import`, because that route is not chunked and posts its archive as a
+  single body, so whatever is set here is the real backup-import cap.
+  ([#91](https://github.com/jarethmt/asmltr/issues/91))
+
+- **Upload failures are no longer silent or misreported.** A manifest append that fails now logs
+  instead of being swallowed, so a file that lands on disk without an index says so. Server-side
+  faults (`ENOSPC`, `EACCES`) are logged with the upload id and answered with a generic message
+  rather than a 400 or an absolute host path in the response body. A `readdir` failure on a staging
+  dir is no longer reported as "every chunk is missing", a corrupt `meta.json` is no longer reported
+  as "unknown upload", an oversized chunk returns JSON rather than an Express stack trace, and a
+  sweep that fails on every directory no longer looks identical to a sweep with nothing to do.
 
 ## [0.10.1] - 2026-08-05
 

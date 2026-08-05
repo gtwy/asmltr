@@ -69,21 +69,32 @@ holds one chunk in memory rather than the file.
 | Endpoint | Body | Returns |
 |---|---|---|
 | `POST /v2/upload/init` | `{ filename, mime, size, sha256?, conversation_key? }` | `{ ok, upload_id, chunk_size, chunks, received }` |
-| `PUT /v2/upload/:id/:index` | raw `application/octet-stream` chunk bytes | `{ ok, received_count, chunks }` |
+| `PUT /v2/upload/:id/:index` | raw `application/octet-stream` chunk bytes, optional `X-Chunk-Sha256` | `{ ok, received_count, chunks }` |
 | `GET /v2/upload/:id` | (none) | `{ upload_id, size, chunk_size, chunks, received }` for resume, 404 if unknown |
 | `POST /v2/upload/:id/finish` | `{ sha256? }` | `{ ok, file: { path, name, mime, kind, bytes, sha256 } }` |
 | `DELETE /v2/upload/:id` | (none) | `{ ok }`, discards a partial upload |
 
 Status codes carry the retry decision: **409** means chunks are still missing (send them), **422**
-means the assembled bytes failed the size or checksum check (start over), **404** means the upload is
-gone, **400** means the request itself is malformed. Nothing reaches the manifest until `finish`
-succeeds, so `list()` never returns a path to a half-written file. Staging dirs left by uploads that
-were never finished are swept hourly once they pass 24 hours old.
+means the bytes failed an integrity check (start over), **404** means the upload is gone, **400**
+means the request itself is malformed, **413** means one chunk exceeded the server or proxy body
+limit. Nothing reaches the manifest until `finish` succeeds, so `list()` never returns a path to a
+half-written file. Staging dirs left by uploads that were never finished are swept hourly once they
+pass 24 hours old.
+
+**Integrity.** `finish` always checks the assembled length against the declared `size`, and against
+what actually reached the disk. Content is verified per chunk via `X-Chunk-Sha256`, which is how the
+guarantee holds without hashing the whole file: computing a whole-file digest means holding the whole
+file, the exact thing chunking avoids. The dashboard sends it whenever `crypto.subtle` is available
+(any secure context, which includes localhost). The whole-file `sha256` at `init` or `finish` stays
+supported for clients that already know it.
 
 `chunk_size` is chosen by the server (`ASMLTR_UPLOAD_CHUNK_SIZE`, default 8 MiB). A single chunk body
-is bounded by `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb); any reverse proxy in front needs a
-`client_max_body_size` at least that large, at **server** level so the `auth_request` subrequest gets
-it too.
+is bounded by `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb), and the declared file size by
+`ASMLTR_UPLOAD_MAX_SIZE` (default 128 GiB, which stops a client from claiming a size whose chunk
+count would itself be expensive to walk). Any reverse proxy in front needs a `client_max_body_size`
+at least as large as one chunk, at **server** level so the `auth_request` subrequest gets it too.
+Note that `/v2/backups/import` is not chunked and posts its archive as one body, so that same
+directive is what caps a backup import.
 
 **One-shot (kept for compatibility).** `POST /v2/upload` takes
 `{ filename, mime, conversation_key?, data_base64 }` and returns the same `file` object. It carries
