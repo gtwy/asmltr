@@ -237,7 +237,7 @@ function chunkIndexOf(v, chunks) {
  * @returns {{upload_id: string, chunk_size: number, chunks: number, received: number[]}}
  */
 function beginChunked(a) {
-  if (!a || !a.channel) throw new Error('uploads.beginChunked: channel required');
+  if (!a || !a.channel) throw uploadError('BAD_REQUEST', 'uploads.beginChunked: channel required');
   const size = Number(a.size);
   if (!Number.isInteger(size) || size < 0) throw uploadError('BAD_REQUEST', 'uploads.beginChunked: size must be a non-negative integer');
   if (size > maxSize()) {
