@@ -280,17 +280,72 @@ export const webChat = {
     return ac
   },
 
-  // Attach a file: base64 it and POST to the core, which stores it in the shared upload area and
-  // returns the on-disk path. The next message references that path so the agent can Read it.
-  async upload(file, conversation_key) {
-    const data_base64 = await new Promise((resolve, reject) => {
-      const r = new FileReader()
-      r.onload = () => resolve(String(r.result).split(',')[1] || '')
-      r.onerror = () => reject(new Error('read failed'))
-      r.readAsDataURL(file)
+  // Attach a file: send it as fixed-size raw chunks and let the core assemble it. The old path
+  // base64'd the whole file into one JSON body, which capped uploads at whatever the smallest body
+  // limit on the route allowed (767.9 KiB in practice) and held the file in memory three times over.
+  // Chunking makes file size irrelevant, gives real byte-level progress, and retries a failed chunk
+  // instead of the whole file. Returns the same { ok, file } shape as before.
+  // opts: { onProgress(fraction 0..1), signal }
+  async upload(file, conversation_key, opts = {}) {
+    if (!file.size) throw new Error('empty file')
+    const init = await postCore('/v2/upload/init', {
+      filename: file.name, mime: file.type, size: file.size, conversation_key
     })
-    return postCore('/v2/upload', { filename: file.name, mime: file.type, conversation_key, data_base64 })
+    const { upload_id, chunk_size, chunks } = init
+    const done = new Set(init.received || [])
+
+    let sent = 0
+    const report = (inFlight = 0) => opts.onProgress?.(Math.min(1, (sent + inFlight) / file.size))
+    report()
+
+    for (let i = 0; i < chunks; i++) {
+      if (done.has(i)) continue
+      const blob = file.slice(i * chunk_size, Math.min(file.size, (i + 1) * chunk_size))
+      await withRetry(() => putChunk(upload_id, i, blob, { onProgress: report, signal: opts.signal }))
+      sent += blob.size
+      report()
+    }
+    return postCore(`/v2/upload/${upload_id}/finish`, {})
   }
+}
+
+// One chunk, over XHR rather than fetch: fetch exposes no upload progress event, so a large chunk on
+// a slow link would otherwise sit at zero with nothing to show the user.
+function putChunk(uploadId, index, blob, { onProgress, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', `/v2/upload/${uploadId}/${index}`)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded) }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(JSON.parse(xhr.responseText || '{}'))
+      let msg = `chunk ${index} -> ${xhr.status}`
+      try { msg = JSON.parse(xhr.responseText).error || msg } catch { /* non-JSON error page */ }
+      reject(Object.assign(new Error(msg), { status: xhr.status }))
+    }
+    xhr.onerror = () => reject(new Error('network error'))
+    xhr.onabort = () => reject(Object.assign(new Error('aborted'), { aborted: true }))
+    if (signal) {
+      if (signal.aborted) return xhr.abort()
+      signal.addEventListener('abort', () => xhr.abort(), { once: true })
+    }
+    xhr.send(blob)
+  })
+}
+
+// Retry a chunk through transient failures (dropped connection, 5xx, rate limit). A 4xx other than
+// 408/429 means the request itself is wrong, so retrying it unchanged can only fail the same way.
+async function withRetry(fn, { attempts = 4, baseMs = 400 } = {}) {
+  let last
+  for (let a = 0; a < attempts; a++) {
+    try { return await fn() } catch (e) {
+      last = e
+      if (e.aborted) throw e
+      if (e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) throw e
+      if (a < attempts - 1) await new Promise((r) => setTimeout(r, baseMs * 2 ** a))
+    }
+  }
+  throw last
 }
 
 // Voice — the core speech layer. `speak()` streams a turn as interleaved transcript + audio-clip
