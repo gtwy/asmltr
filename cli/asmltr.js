@@ -380,6 +380,41 @@ async function cmdUploads(rest) {
     console.log(`     ${A.dim(`id ${r.id} · from ${r.sender || '?'} · ${r.path}`)}`);
   }
 }
+// Topic/project event streams (roadmap §A). `asmltr streams` [·show·recall·new·rm]. Sessions check the
+// list before starting longer-running work and create a stream when a task deserves its own thread.
+async function cmdStreams(rest) {
+  const sub = rest[0];
+  if (sub === 'new' || sub === 'create') {
+    const name = rest[1]; if (!name) { console.error(A.red('usage: asmltr streams new <name> ["description"]')); return process.exit(1); }
+    const s = await coreApi('/v2/streams', 'POST', { name, description: rest.slice(2).join(' ') });
+    if (s.error) { console.error(A.red('✗ ' + s.error)); return process.exit(1); }
+    return void console.log(A.grn('✓ created stream ') + A.bold(s.slug) + A.dim('  ' + s.id));
+  }
+  if (sub === 'show' || sub === 'events') {
+    const s = await coreApi('/v2/streams/' + encodeURIComponent(rest[1] || ''));
+    if (s.error) { console.error(A.red('✗ ' + s.error)); return process.exit(1); }
+    console.log(A.bold(s.name) + A.dim('  (' + s.slug + ')') + (s.description ? '\n' + A.dim(s.description) : ''));
+    for (const e of (s.events || [])) console.log(A.dim(new Date(e.ts).toLocaleString() + ' [' + (e.kind || '') + '] ' + (e.source || '')) + '  ' + (e.text || ''));
+    return;
+  }
+  if (sub === 'recall' || sub === 'search') {
+    const r = await coreApi('/v2/streams/' + encodeURIComponent(rest[1] || '') + '/recall?q=' + encodeURIComponent(rest.slice(2).join(' ')));
+    if (r.error) { console.error(A.red('✗ ' + r.error)); return process.exit(1); }
+    if (!r.results || !r.results.length) return void console.log(A.dim('(no matches)'));
+    for (const e of r.results) console.log(A.dim('[' + (e.kind || '') + '] ' + (e.source || '')) + '  ' + (e.text || ''));
+    return;
+  }
+  if (sub === 'rm' || sub === 'delete') { await coreApi('/v2/streams/' + encodeURIComponent(rest[1] || ''), 'DELETE'); return void console.log(A.grn('✓ removed ' + rest[1])); }
+  const { streams: list } = await coreApi('/v2/streams');
+  if (!list || !list.length) return void console.log(A.dim('No streams yet. Create one: ') + 'asmltr streams new <name> ["description"]');
+  for (const s of list) {
+    const last = s.last_ts ? new Date(s.last_ts).toLocaleString() : '—';
+    const active = (s.active_sessions || []).length;
+    console.log(A.bold(s.slug.padEnd(22)) + A.dim(String(s.event_count).padStart(5) + ' events · last ' + last + (active ? '  · ' + active + ' active' : '')));
+    if (s.description) console.log('  ' + A.dim(s.description));
+  }
+}
+
 async function cmdSteer(rest) {
   // asmltr steer <conversation_key> "<guidance>" [--from <label>] [--interrupt]
   // COERCIVE: pushes guidance into another session's LIVE turn. Off unless ASMLTR_MESH_STEER=on.
@@ -801,6 +836,7 @@ async function cmdVault(rest, f) {
       case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();
       case 'uploads': return await cmdUploads(rest);
+      case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
       case 'steer': return await cmdSteer(rest);

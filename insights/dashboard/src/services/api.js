@@ -121,6 +121,15 @@ export const recordingsApi = {
   }
 }
 
+// Streams (roadmap §A, issue #93) — topic/project event streams: list, create, read, recall (FTS search).
+export const streamsApi = {
+  list: () => getCore('/v2/streams'),
+  get: (id) => getCore(`/v2/streams/${encodeURIComponent(id)}`),
+  create: (name, description) => postCore('/v2/streams', { name, description }),
+  recall: (id, q) => getCore(`/v2/streams/${encodeURIComponent(id)}/recall${q ? '?q=' + encodeURIComponent(q) : ''}`),
+  remove: (id) => reqCore('DELETE', `/v2/streams/${encodeURIComponent(id)}`)
+}
+
 // Auth — session gate (roadmap P1). status/setup/login/logout are public; the session cookie is httpOnly.
 export const authApi = {
   status: () => getCore('/v2/auth/status'),
