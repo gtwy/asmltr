@@ -10,7 +10,17 @@ build order.
 
 ---
 
-## A. Event streams per topic — "context banks" (FOUNDATION)
+## A. Streams — event streams per topic (FOUNDATION)
+
+> **Terminology:** these are **streams** (`asmltr streams`), not "context banks" — a stream *is* a per-topic
+> event stream. Recall = **retrieve-on-demand** via a tool (appends at the prompt tail → cache-safe; never
+> spliced into replayed history). A small always-on **working-set summary** rides the stable prompt block
+> (re-sent only on change via `stableHash` inject-once). Freshness is an **edge-triggered watermark**: a
+> session is told "↑ N new" only when the count of events *from other sources* rises past what it was last
+> told (its own writes never re-trigger it); the nudge lives in the **volatile tail**. Search: SQLite
+> **FTS5/BM25** now → **sqlite-vec** + tiny static embeddings + **RRF** later. Prior-art basis: Letta shared
+> memory blocks (injected working-set) + archival retrieve-on-demand; A2A `contextId` = a correlation key
+> only (borrow it), MCP resources/tools = the recall surface. See the recall-design briefing on issue #93.
 
 **The insight (Jareth):** we don't need a brand-new "context bank" primitive — we need to *organize the
 event stream we already have by topic*. Today the collector catches every event from every session into one
