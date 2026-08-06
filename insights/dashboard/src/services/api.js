@@ -106,6 +106,7 @@ export const recordingsApi = {
   list: () => getCore('/v2/recordings'),
   get: (id) => getCore(`/v2/recordings/${encodeURIComponent(id)}`),
   enrich: (id) => postCore(`/v2/recordings/${encodeURIComponent(id)}/enrich`, {}),
+  diarize: (id) => postCore(`/v2/recordings/${encodeURIComponent(id)}/diarize`, {}),
   patch: (id, body) => reqCore('PATCH', `/v2/recordings/${encodeURIComponent(id)}`, body),
   toStream: (id, body) => postCore(`/v2/recordings/${encodeURIComponent(id)}/to-stream`, body),
   remove: (id) => reqCore('DELETE', `/v2/recordings/${encodeURIComponent(id)}`),
