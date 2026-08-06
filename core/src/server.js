@@ -1375,13 +1375,17 @@ app.post('/v2/recordings/:id/diarize', (req, res) => {
   const audio = recordings.audioPath(rec.id); if (!audio) return res.status(400).json({ error: 'no audio' });
   res.json({ ok: true, id: rec.id, status: 'diarizing' });
   (async () => {
-    recordings.update(rec.id, { status: 'diarizing' });
+    recordings.update(rec.id, { status: 'diarizing', error: null }); // clear any stale error from a prior run
     try {
-      const out = await transcribeLongDiarized(audio, {});
+      const out = await transcribeLongDiarized(audio, {
+        onProgress: (p) => console.log(`[core] diarize ${rec.id} chunk ${p.index}/${p.total}` + (p.error ? ` FAILED: ${p.error}` : ` (${p.segments} segs)`)),
+      });
       const speakers = [...new Set(out.segments.map((s) => s.speaker).filter(Boolean))];
       recordings.setTranscript(rec.id, out.text);
-      recordings.update(rec.id, { status: 'enriched', segments: out.segments, speakers, diarized: true, duration_sec: out.duration_sec });
+      recordings.update(rec.id, { status: 'enriched', segments: out.segments, speakers, diarized: true,
+        duration_sec: out.duration_sec, diarize_failed_chunks: (out.failed_chunks || []).length || undefined });
       record(auxUsage({ surface: 'recorder', feature: 'stt', provider: 'openai', model: 'gpt-4o-transcribe-diarize', seconds: out.duration_sec || 0 }));
+      console.log(`[core] diarize ${rec.id} done: ${out.segments.length} segs, ${speakers.length} speakers` + (out.failed_chunks && out.failed_chunks.length ? `, ${out.failed_chunks.length} chunk(s) skipped` : ''));
     } catch (e) { recordings.update(rec.id, { status: 'error', error: 'diarize: ' + e.message }); console.error('[core] diarize failed:', rec.id, e.message); }
   })();
 });

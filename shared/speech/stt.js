@@ -127,9 +127,19 @@ async function transcribeDiarized(buffer, opts = {}) {
       fd.append('known_speaker_references[]', `data:${k.mime || 'audio/mp3'};base64,${b64}`);
     }
   }
-  const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: fd,
-  });
+  // Hard timeout — the diarize endpoint can occasionally stall on a chunk; without this the whole
+  // long-audio job hangs forever. Default 5 min/request; override via opts.timeoutMs.
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), opts.timeoutMs || 300000);
+  let r;
+  try {
+    r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: fd, signal: ac.signal,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`openai diarize timed out after ${(opts.timeoutMs || 300000) / 1000}s`);
+    throw e;
+  } finally { clearTimeout(to); }
   if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`openai diarize ${r.status} ${t.slice(0, 200)}`); }
   const j = await r.json().catch(() => ({}));
   const segments = Array.isArray(j.segments) ? j.segments.map((s) => ({
