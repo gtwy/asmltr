@@ -123,6 +123,12 @@ export const recordingsApi = {
   }
 }
 
+// Voice engines (epic #113) — the pluggable role/capability voice layer.
+export const voiceEnginesApi = {
+  get: () => getCore('/v2/voice/engines'),
+  bind: (role, engine) => postCore('/v2/voice/engines/bind', { role, engine })
+}
+
 // Streams (roadmap §A, issue #93) — topic/project event streams: list, create, read, recall (FTS search).
 export const streamsApi = {
   list: () => getCore('/v2/streams'),

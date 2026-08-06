@@ -6,6 +6,7 @@
 import { ref, onMounted, onBeforeUnmount, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
+import VoiceEngines from '@/components/VoiceEngines.vue'
 import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi, enginesApi, mcpApi, notifyApi } from '@/services/api'
 import QRCode from 'qrcode'
 import { startRegistration } from '@simplewebauthn/browser'
@@ -786,6 +787,8 @@ onMounted(async () => {
         <div v-show="tab === 'voice'" class="glass p-5">
           <h3 class="mb-1 text-sm font-semibold text-slate-200">Voice</h3>
           <p class="mb-5 text-[12px] text-slate-500">{{ section('voice').desc }}</p>
+
+          <VoiceEngines />
 
           <template v-if="vcfg">
             <div class="space-y-7">
