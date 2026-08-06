@@ -89,12 +89,19 @@ async function transcribeLongDiarized(audioPath, opts = {}) {
     if (seg.status !== 0) throw new Error('ffmpeg segment failed: ' + (seg.stderr || '').trim().slice(0, 300));
     const chunks = fs.readdirSync(work).filter((f) => /^chunk_\d+\.mp3$/.test(f)).sort();
     if (!chunks.length) throw new Error('no audio chunks produced');
-    const segments = []; const parts = [];
+    const segments = []; const parts = []; const failedChunks = [];
     let known = opts.known || null; // caller-supplied named refs win; else we seed from chunk 0 below
     for (let i = 0; i < chunks.length; i++) {
       const chunkPath = path.join(work, chunks[i]);
       const buf = fs.readFileSync(chunkPath);
-      const out = await stt.transcribeDiarized(buf, { filename: chunks[i], mime: 'audio/mpeg', language: opts.language, known });
+      // Per-chunk resilience: one slow/failed chunk must NOT sink a 70-minute job. Try once, retry once,
+      // then skip that chunk (recording a gap) and press on.
+      let out = null;
+      for (let attempt = 0; attempt < 2 && !out; attempt++) {
+        try { out = await stt.transcribeDiarized(buf, { filename: chunks[i], mime: 'audio/mpeg', language: opts.language, known, timeoutMs: opts.timeoutMs }); }
+        catch (e) { if (attempt === 1) { failedChunks.push(i); onProgress({ index: i + 1, total: chunks.length, error: e.message }); } }
+      }
+      if (!out) continue;
       const offset = i * chunkSec;
       for (const s of (out.segments || [])) {
         segments.push({ speaker: s.speaker != null ? String(s.speaker) : null,
@@ -107,8 +114,9 @@ async function transcribeLongDiarized(audioPath, opts = {}) {
       }
       onProgress({ index: i + 1, total: chunks.length, segments: segments.length });
     }
+    if (failedChunks.length === chunks.length) throw new Error('all diarize chunks failed (last: check key/model access)');
     const speakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))];
-    return { text: parts.join('\n\n'), segments, speakers, chunks: chunks.length, duration_sec: duration };
+    return { text: parts.join('\n\n'), segments, speakers, chunks: chunks.length, failed_chunks: failedChunks, duration_sec: duration };
   } finally {
     try { fs.rmSync(work, { recursive: true, force: true }); } catch (_) {}
   }
