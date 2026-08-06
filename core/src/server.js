@@ -1185,8 +1185,18 @@ app.get('/v2/voice/engines', async (req, res) => {
 });
 app.post('/v2/voice/engines/bind', (req, res) => {
   const b = req.body || {};
-  try { res.json({ ok: true, bindings: voiceEngines.bind(String(b.role || ''), b.engine || null) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const bindings = voiceEngines.bind(String(b.role || ''), b.engine || null);
+    // Propagate the engine choice into the LIVE voice config so every surface that reads it — stt/tts,
+    // the realtime token, the recorder, the Discord voice bridge, and the Android app's /gw/transcribe &
+    // /gw/tts proxies — follows automatically, no matter who set the binding (GUI, CLI, or API). Only for
+    // engines whose adapter is actually wired (`ready`); a `planned` engine records the binding but doesn't
+    // touch the live config until its adapter lands.
+    const e = b.engine && voiceEngines.IMPLEMENTED.has(b.engine) ? voiceEngines.ENGINES[b.engine] : null;
+    if (e && b.role === 'synthesize') tts.setConfig({ provider: e.provider, model: e.model });
+    else if (e && b.role === 'transcribe') stt.setConfig({ model: e.model });
+    res.json({ ok: true, bindings });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/v2/voice/config', (req, res) => {
   const b = req.body || {};
