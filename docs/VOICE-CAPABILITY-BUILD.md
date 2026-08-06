@@ -23,9 +23,14 @@ tested, so the GUI stops showing it as "(planned)".
 - ✅ Store `segments` + `speakers[]` on the record; `POST /v2/recordings/:id/diarize` core route.
 - ✅ Speaker-grouped transcript in `insights/dashboard/src/views/Recordings.vue` (Diarize button, stable
   per-speaker colours, timestamps). App rendering still TODO (needs APK rebuild).
-- ⛔ **BLOCKED — not yet done:** add `openai-transcribe-diarize` to `IMPLEMENTED` + **test** on the meeting
-  recording (`rec_...` in the Self silo). Gated on OpenAI project access to `gpt-4o-transcribe-diarize`
-  (403). Once access lands: flip IMPLEMENTED → 'ready', then diarize the meeting and eyeball the turns.
+- ✅ **DONE (2026-08-06):** access enabled → `openai-transcribe-diarize` is in `IMPLEMENTED` = 'ready'.
+  Verified end-to-end through the core `/diarize` endpoint on a 22-min (3-chunk) slice: 292 segments,
+  4 speakers, labels held consistent A/B/C/D across all 3 chunks, 0 failed chunks.
+- Two live-only API requirements found + fixed: `chunking_strategy` is mandatory; `known_speaker_references[]`
+  are base64 data-URI strings (not file parts). Plus resilience: per-request timeout + per-chunk retry/skip
+  + `chunk i/N` progress logs (one stalled chunk no longer hangs a 70-min job).
+- **Latency note:** ~5 min per 10-min chunk (OpenAI diarize speed) → a 72-min meeting ≈ 35–40 min. Fine as
+  a background job; a live/streaming diarize path (step 4) is the answer for real-time.
 
 ### 2. People records + linking (#95/#111)
 - A people store (`shared/people.js`): `{id,name,voiceprint_ref?}`. Link a recording's speakers → people
