@@ -52,13 +52,13 @@ onMounted(load)
     <div v-if="!data" class="text-sm text-slate-500">Loading…</div>
     <div v-else class="space-y-4">
       <div v-for="role in data.roles" :key="role" class="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-        <div class="flex items-center justify-between gap-3 mb-2">
-          <div>
+        <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
+          <div class="min-w-0">
             <span class="text-sm font-medium text-slate-200">{{ ROLE_LABEL[role] }}</span>
             <span class="block text-[11px] text-slate-500">{{ ROLE_DESC[role] }}</span>
           </div>
           <select :value="boundId(role)" :disabled="busy === role" @change="bind(role, $event.target.value)"
-                  class="text-sm rounded-lg bg-white/5 border border-white/10 px-2 py-1.5 outline-none focus:border-white/25 max-w-[16rem]">
+                  class="text-sm rounded-lg bg-white/5 border border-white/10 px-2 py-1.5 outline-none focus:border-white/25 w-full sm:w-auto max-w-full sm:max-w-[16rem] min-w-0 truncate">
             <option value="">— none —</option>
             <option v-for="e in enginesFor(role)" :key="e.id" :value="e.id" :disabled="(data.status[e.id] || 'planned') !== 'ready'">
               {{ e.label }}{{ STATUS_SUFFIX[data.status[e.id]] || ' (planned)' }}
