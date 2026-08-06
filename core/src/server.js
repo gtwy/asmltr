@@ -1320,6 +1320,17 @@ app.get('/v2/recordings/:id/audio', (req, res) => {
   require('fs').createReadStream(p).pipe(res);
 });
 app.delete('/v2/recordings/:id', (req, res) => res.json({ ok: recordings.remove(req.params.id) }));
+// Patch editable recording fields (title/description → lock from AI overwrite) + capture markers (the
+// in-recording timestamp/tag button). Markers: [{ t_sec, label? }].
+app.patch('/v2/recordings/:id', (req, res) => {
+  if (!recordings.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  const b = req.body || {}, patch = {}, lock = {};
+  if (typeof b.title === 'string') { patch.title = b.title; lock.title = true; }
+  if (typeof b.description === 'string') { patch.description = b.description; lock.description = true; }
+  if (Array.isArray(b.markers)) patch.markers = b.markers.map((m) => ({ t_sec: +m.t_sec || 0, label: String(m.label || '').slice(0, 120) })).slice(0, 500);
+  if (Object.keys(lock).length) patch.ai_locked = lock;
+  res.json(recordings.update(req.params.id, patch));
+});
 // Re-run AI enrichment from the stored transcript (e.g. after the user edits the transcript).
 app.post('/v2/recordings/:id/enrich', async (req, res) => {
   if (!recordings.get(req.params.id)) return res.status(404).json({ error: 'not found' });
