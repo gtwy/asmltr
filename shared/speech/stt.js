@@ -99,6 +99,43 @@ async function transcribe(buffer, opts = {}) {
 }
 
 /**
+ * Transcribe with SPEAKER DIARIZATION (roadmap §B2 / epic #113). OpenAI gpt-4o-transcribe-diarize with
+ * response_format=diarized_json → { text, segments:[{speaker,start,end,text}], model }. Optionally LABEL
+ * known people by name: opts.known = [{ name, audio:Buffer, mime }] (≤4) → known_speaker_references.
+ * Same ~25MB/request cap as transcribe(), so long files are chunked by the caller; cross-chunk speaker
+ * consistency is the caller's job (pass known refs, or re-cluster) — see docs/VOICE-CAPABILITY-BUILD.md.
+ */
+async function transcribeDiarized(buffer, opts = {}) {
+  const cfg = config();
+  const key = await secrets.get(opts.keyName || cfg.keyName);
+  if (!key) throw new Error(`no STT key (secret '${opts.keyName || cfg.keyName}' is empty)`);
+  const model = opts.model || 'gpt-4o-transcribe-diarize';
+  const fd = new FormData();
+  fd.append('file', new Blob([buffer], { type: opts.mime || 'audio/webm' }), opts.filename || 'audio.webm');
+  fd.append('model', model);
+  fd.append('response_format', 'diarized_json');
+  if (opts.language) fd.append('language', opts.language);
+  for (const k of (opts.known || []).slice(0, 4)) {
+    if (k && k.name && k.audio) {
+      fd.append('known_speaker_names[]', k.name);
+      fd.append('known_speaker_references[]', new Blob([k.audio], { type: k.mime || 'audio/webm' }), (k.name || 'ref') + '.webm');
+    }
+  }
+  const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: fd,
+  });
+  if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`openai diarize ${r.status} ${t.slice(0, 200)}`); }
+  const j = await r.json().catch(() => ({}));
+  const segments = Array.isArray(j.segments) ? j.segments.map((s) => ({
+    speaker: s.speaker != null ? String(s.speaker) : null,
+    start: s.start != null ? +s.start : null, end: s.end != null ? +s.end : null,
+    text: (s.text || '').trim(),
+  })).filter((s) => s.text) : [];
+  const text = (j.text && j.text.trim()) || segments.map((s) => (s.speaker ? s.speaker + ': ' : '') + s.text).join('\n');
+  return { text, segments, model, duration: j.duration, bytes: buffer.length };
+}
+
+/**
  * Mint a short-lived ephemeral token for an OpenAI Realtime *transcription* session (streaming STT
  * with server-side VAD). The browser uses this token to connect to OpenAI directly (WebRTC) and
  * receive streaming transcript deltas + speech-start/stop events — the real key never leaves here.
@@ -133,4 +170,4 @@ async function realtimeToken(opts = {}) {
   return { value: j.value, expires_at: j.expires_at, model };
 }
 
-module.exports = { transcribe, config, setConfig, realtimeToken };
+module.exports = { transcribe, transcribeDiarized, config, setConfig, realtimeToken };
