@@ -48,4 +48,38 @@ async function transcribeLong(audioPath, opts = {}) {
   }
 }
 
-module.exports = { transcribeLong, ffprobeDuration };
+// Diarized long-audio transcription (epic #113 / #111). Same chunking as transcribeLong, but each chunk
+// goes through stt.transcribeDiarized; segment start/end times are offset by the chunk position so they're
+// absolute. NOTE: speaker labels are per-chunk (chunk N's "Speaker 1" may not equal chunk N+1's) unless
+// `known` references are supplied — cross-chunk stitching is the caller's polish (see VOICE-CAPABILITY-BUILD.md).
+async function transcribeLongDiarized(audioPath, opts = {}) {
+  if (!fs.existsSync(audioPath)) throw new Error('audio not found: ' + audioPath);
+  const chunkSec = opts.chunkSec || 600;
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-diar-'));
+  try {
+    const duration = ffprobeDuration(audioPath);
+    const seg = spawnSync('ffmpeg', ['-v', 'error', '-i', audioPath, '-ac', '1', '-ar', '16000', '-b:a', '32k',
+      '-f', 'segment', '-segment_time', String(chunkSec), path.join(work, 'chunk_%03d.mp3')], { encoding: 'utf8' });
+    if (seg.status !== 0) throw new Error('ffmpeg segment failed: ' + (seg.stderr || '').trim().slice(0, 300));
+    const chunks = fs.readdirSync(work).filter((f) => /^chunk_\d+\.mp3$/.test(f)).sort();
+    if (!chunks.length) throw new Error('no audio chunks produced');
+    const segments = []; const parts = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const buf = fs.readFileSync(path.join(work, chunks[i]));
+      const out = await stt.transcribeDiarized(buf, { filename: chunks[i], mime: 'audio/mpeg', language: opts.language, known: opts.known });
+      const offset = i * chunkSec;
+      for (const s of (out.segments || [])) {
+        segments.push({ speaker: s.speaker != null ? `${chunks.length > 1 ? 'c' + i + ':' : ''}${s.speaker}` : null,
+          start: s.start != null ? s.start + offset : null, end: s.end != null ? s.end + offset : null, text: s.text });
+      }
+      parts.push((out.text || '').trim());
+      onProgress({ index: i + 1, total: chunks.length, segments: segments.length });
+    }
+    return { text: parts.join('\n\n'), segments, chunks: chunks.length, duration_sec: duration };
+  } finally {
+    try { fs.rmSync(work, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+module.exports = { transcribeLong, transcribeLongDiarized, ffprobeDuration };

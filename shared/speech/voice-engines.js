@@ -116,6 +116,10 @@ async function availability(has) {
 // Which engines actually have their I/O adapter wired in asmltr TODAY. Catalog entries NOT in this set are
 // real/plannable configs but their adapter isn't built yet — the GUI shows them as "planned" so the list
 // never overpromises. As adapters land (diarize, live, deepgram, local-whisper), add them here.
+// NOTE: openai-transcribe-diarize's ADAPTER is built + verified (stt.transcribeDiarized + the recorder
+// /diarize path), but the OpenAI project currently lacks model access (403 "does not have access to model
+// gpt-4o-transcribe-diarize"). Enable it in the OpenAI dashboard (project model access / org verification),
+// then add 'openai-transcribe-diarize' here → it flips to 'ready' with no other change.
 const IMPLEMENTED = new Set(['openai-transcribe', 'openai-tts', 'elevenlabs']);
 // Per-engine status: 'ready' (adapter built + key ok) · 'needs_key' (built but key missing) · 'planned'
 // (adapter not built yet). `keyOk` is the caller's availability result for this engine.
