@@ -788,7 +788,7 @@ onMounted(async () => {
           <h3 class="mb-1 text-sm font-semibold text-slate-200">Voice</h3>
           <p class="mb-5 text-[12px] text-slate-500">{{ section('voice').desc }}</p>
 
-          <VoiceEngines />
+          <VoiceEngines @changed="loadVoiceCfg" />
 
           <template v-if="vcfg">
             <div class="space-y-7">
@@ -810,8 +810,8 @@ onMounted(async () => {
                   </button>
                 </label>
 
-                <!-- TTS provider -->
-                <div>
+                <!-- TTS provider — now chosen in the Voice engines panel above (synthesize role) -->
+                <div v-if="false">
                   <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_provider').label }}
                     <span class="normal-case text-slate-600">— {{ field('voice','tts_provider').desc }}</span>
                   </div>
@@ -879,8 +879,8 @@ onMounted(async () => {
                   <span class="font-medium normal-case tracking-normal text-slate-500">· how your speech is transcribed</span>
                 </h4>
 
-                <!-- STT model -->
-                <div>
+                <!-- STT model — now chosen in the Voice engines panel above (transcribe role) -->
+                <div v-if="false">
                   <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_model').label }}
                     <span class="normal-case text-slate-600">— {{ field('voice','stt_model').desc }}</span>
                   </div>

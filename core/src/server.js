@@ -1180,7 +1180,8 @@ app.get('/v2/voice/engines', async (req, res) => {
   let avail = {};
   try { avail = await voiceEngines.availability(async (n) => { try { return !!(await secrets.get(n)); } catch (_) { return false; } }); } catch (_) {}
   const resolved = {}; for (const role of c.roles) resolved[role] = voiceEngines.resolve(role);
-  res.json({ roles: c.roles, engines: c.engines, availability: avail, bindings: c.bindings, resolved });
+  const status = {}; for (const id of Object.keys(c.engines)) status[id] = voiceEngines.statusOf(id, avail[id]);
+  res.json({ roles: c.roles, engines: c.engines, availability: avail, status, bindings: c.bindings, resolved });
 });
 app.post('/v2/voice/engines/bind', (req, res) => {
   const b = req.body || {};

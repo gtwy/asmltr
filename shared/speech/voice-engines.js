@@ -113,6 +113,19 @@ async function availability(has) {
   return out;
 }
 
+// Which engines actually have their I/O adapter wired in asmltr TODAY. Catalog entries NOT in this set are
+// real/plannable configs but their adapter isn't built yet — the GUI shows them as "planned" so the list
+// never overpromises. As adapters land (diarize, live, deepgram, local-whisper), add them here.
+const IMPLEMENTED = new Set(['openai-transcribe', 'openai-tts', 'elevenlabs']);
+// Per-engine status: 'ready' (adapter built + key ok) · 'needs_key' (built but key missing) · 'planned'
+// (adapter not built yet). `keyOk` is the caller's availability result for this engine.
+function statusOf(id, keyOk) {
+  const e = ENGINES[id]; if (!e) return 'unknown';
+  if (!IMPLEMENTED.has(id)) return 'planned';
+  if (e.key && !keyOk) return 'needs_key';
+  return 'ready';
+}
+
 function catalog() { return { roles: ROLES, engines: ENGINES, bindings: readBindings() }; }
 
-module.exports = { ROLES, ENGINES, resolve, capabilities, bind, enginesForRole, availability, catalog, readBindings };
+module.exports = { ROLES, ENGINES, IMPLEMENTED, resolve, capabilities, bind, enginesForRole, availability, statusOf, catalog, readBindings };
