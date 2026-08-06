@@ -61,3 +61,12 @@ tested, so the GUI stops showing it as "(planned)".
 - Bind each engine in Settings→Voice Engines → chips + status correct; `ready` ones selectable.
 - Config bridge: binding an engine updates `/v2/voice/config` (verified) → surfaces follow.
 - Cost: diarize ~$0.006/min (same as transcribe).
+
+## ⚠️ BLOCKER found (2026-08-06): OpenAI project lacks diarize-model access
+The diarize adapter (`stt.transcribeDiarized` + `POST /v2/recordings/:id/diarize`) is built and VERIFIED
+correct — the request is well-formed. But the OpenAI project returns:
+`403 Project proj_… does not have access to model gpt-4o-transcribe-diarize`.
+**Action (Jareth):** enable `gpt-4o-transcribe-diarize` for the project in the OpenAI dashboard
+(Project → model access, and/or complete org verification). Then add `openai-transcribe-diarize` to the
+`IMPLEMENTED` set in `shared/speech/voice-engines.js` → it's instantly 'ready' and the recorder diarize
+path works (test: `POST /v2/recordings/<meeting-id>/diarize`). Same likely applies to `gpt-live-transcribe`.

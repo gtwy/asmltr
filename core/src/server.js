@@ -50,7 +50,7 @@ const tts = require('../../shared/speech/tts'); // TTS config (voice/model), per
 const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
 const recordings = require('../../shared/recordings'); // recording records store (roadmap §B1, issue #94)
 const streams = require('./streams'); // topic/project event streams — shared recall + freshness (roadmap §A, #93)
-const { transcribeLong } = require('../../shared/speech/transcribe-long'); // long-audio chunked transcription
+const { transcribeLong, transcribeLongDiarized } = require('../../shared/speech/transcribe-long'); // long-audio chunked transcription (+ diarized)
 const voiceEngines = require('../../shared/speech/voice-engines'); // pluggable voice engines: roles + capability manifest (#113)
 const secrets = require('../../shared/secrets'); // secret presence checks (voice-engine availability)
 const { auxUsage, estimateAudioSeconds } = require('../../shared/usage'); // priced token-usage events for metered aux surfaces (tts/stt/moderation)
@@ -1368,6 +1368,23 @@ app.post('/v2/recordings/:id/enrich', async (req, res) => {
 // B5 (#98): file a recording into a topic STREAM — append its summary + action items as a lightweight,
 // searchable 'recording' event that REFERENCES the audio (which stays in the silo). Optionally fire a
 // prompt about it into a session. Connects the recorder to streams (the meeting's "save to a stream").
+// Diarized (speaker-labeled) re-transcription of a recording (epic #113 / #111). Runs the audio through
+// gpt-4o-transcribe-diarize → stores speaker segments + speaker list on the record. Async: returns immediately.
+app.post('/v2/recordings/:id/diarize', (req, res) => {
+  const rec = recordings.get(req.params.id); if (!rec) return res.status(404).json({ error: 'not found' });
+  const audio = recordings.audioPath(rec.id); if (!audio) return res.status(400).json({ error: 'no audio' });
+  res.json({ ok: true, id: rec.id, status: 'diarizing' });
+  (async () => {
+    recordings.update(rec.id, { status: 'diarizing' });
+    try {
+      const out = await transcribeLongDiarized(audio, {});
+      const speakers = [...new Set(out.segments.map((s) => s.speaker).filter(Boolean))];
+      recordings.setTranscript(rec.id, out.text);
+      recordings.update(rec.id, { status: 'enriched', segments: out.segments, speakers, diarized: true, duration_sec: out.duration_sec });
+      record(auxUsage({ surface: 'recorder', feature: 'stt', provider: 'openai', model: 'gpt-4o-transcribe-diarize', seconds: out.duration_sec || 0 }));
+    } catch (e) { recordings.update(rec.id, { status: 'error', error: 'diarize: ' + e.message }); console.error('[core] diarize failed:', rec.id, e.message); }
+  })();
+});
 app.post('/v2/recordings/:id/to-stream', async (req, res) => {
   const rec = recordings.get(req.params.id); if (!rec) return res.status(404).json({ error: 'recording not found' });
   const b = req.body || {};
