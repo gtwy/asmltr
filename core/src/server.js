@@ -51,6 +51,8 @@ const stt = require('../../shared/speech/stt'); // STT (transcription) — audio
 const recordings = require('../../shared/recordings'); // recording records store (roadmap §B1, issue #94)
 const streams = require('./streams'); // topic/project event streams — shared recall + freshness (roadmap §A, #93)
 const { transcribeLong } = require('../../shared/speech/transcribe-long'); // long-audio chunked transcription
+const voiceEngines = require('../../shared/speech/voice-engines'); // pluggable voice engines: roles + capability manifest (#113)
+const secrets = require('../../shared/secrets'); // secret presence checks (voice-engine availability)
 const { auxUsage, estimateAudioSeconds } = require('../../shared/usage'); // priced token-usage events for metered aux surfaces (tts/stt/moderation)
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
@@ -1169,6 +1171,21 @@ app.get('/v2/voice/config', (req, res) => {
   const { keyName: _t, ...ttsCfg } = tts.config();
   const { keyName: _s, ...sttCfg } = stt.config();
   res.json({ tts: ttsCfg, stt: sttCfg });
+});
+// Voice ENGINES (#113): the pluggable role/capability layer. GET returns roles, the engine catalog with
+// availability (key present?), current bindings, and the resolved engine+capabilities per role — surfaces
+// gate features on these. POST /bind sets a role → engine.
+app.get('/v2/voice/engines', async (req, res) => {
+  const c = voiceEngines.catalog();
+  let avail = {};
+  try { avail = await voiceEngines.availability(async (n) => { try { return !!(await secrets.get(n)); } catch (_) { return false; } }); } catch (_) {}
+  const resolved = {}; for (const role of c.roles) resolved[role] = voiceEngines.resolve(role);
+  res.json({ roles: c.roles, engines: c.engines, availability: avail, bindings: c.bindings, resolved });
+});
+app.post('/v2/voice/engines/bind', (req, res) => {
+  const b = req.body || {};
+  try { res.json({ ok: true, bindings: voiceEngines.bind(String(b.role || ''), b.engine || null) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/v2/voice/config', (req, res) => {
   const b = req.body || {};
