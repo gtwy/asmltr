@@ -14,17 +14,18 @@ tested, so the GUI stops showing it as "(planned)".
 
 ## Build order (do in this sequence, test each)
 
-### 1. openai-transcribe-diarize → ready  (flagship, file diarization)
-- Wire `transcribeDiarized` into the recorder path. `shared/speech/transcribe-long.js` chunks past 25MB, so:
-  when the resolved **transcribe** engine has `caps.diarization`, run the diarized call per chunk and stitch.
-  **Cross-chunk speaker consistency**: chunk N's "Speaker 1" ≠ chunk N+1's. Fix by, after chunk 0, extracting
-  a short reference clip per speaker and passing them as `known` to later chunks (or a light re-cluster on
-  embeddings). MVP acceptable: per-chunk labels + a note; proper stitching is the polish.
-- Store `segments` on the recording record (`shared/recordings.js` meta) + `speakers[]`.
-- Render a **speaker-grouped transcript** in `insights/dashboard/src/views/Recordings.vue` (and later the app).
-- Add `openai-transcribe-diarize` to `IMPLEMENTED`. **Test:** re-transcribe the meeting recording
-  (`rec_...` in the Self silo) → verify speaker-labeled segments.
-- Add a core route to trigger a diarized re-transcribe of an existing recording (e.g. `POST /v2/recordings/:id/diarize`).
+### 1. openai-transcribe-diarize → ready  (flagship, file diarization) — CODE-COMPLETE, blocked on access
+- ✅ `transcribeLongDiarized` (transcribe-long.js): chunks → per-chunk `stt.transcribeDiarized` → absolute
+  segment times.
+- ✅ **Cross-chunk speaker consistency**: `buildKnownRefsFromChunk` auto-seeds `known_speaker_references`
+  from chunk 0's top-4-airtime speakers (2–8s single-speaker clips) → later chunks reuse one label per voice.
+  Caller-supplied `known` still wins.
+- ✅ Store `segments` + `speakers[]` on the record; `POST /v2/recordings/:id/diarize` core route.
+- ✅ Speaker-grouped transcript in `insights/dashboard/src/views/Recordings.vue` (Diarize button, stable
+  per-speaker colours, timestamps). App rendering still TODO (needs APK rebuild).
+- ⛔ **BLOCKED — not yet done:** add `openai-transcribe-diarize` to `IMPLEMENTED` + **test** on the meeting
+  recording (`rec_...` in the Self silo). Gated on OpenAI project access to `gpt-4o-transcribe-diarize`
+  (403). Once access lands: flip IMPLEMENTED → 'ready', then diarize the meeting and eyeball the turns.
 
 ### 2. People records + linking (#95/#111)
 - A people store (`shared/people.js`): `{id,name,voiceprint_ref?}`. Link a recording's speakers → people
