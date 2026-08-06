@@ -114,11 +114,17 @@ async function transcribeDiarized(buffer, opts = {}) {
   fd.append('file', new Blob([buffer], { type: opts.mime || 'audio/webm' }), opts.filename || 'audio.webm');
   fd.append('model', model);
   fd.append('response_format', 'diarized_json');
+  // Diarization models REQUIRE a chunking_strategy (the API segments internally by voice activity).
+  // 'auto' lets the server pick VAD boundaries; override via opts.chunkingStrategy (string or object).
+  const cs = opts.chunkingStrategy || 'auto';
+  fd.append('chunking_strategy', typeof cs === 'string' ? cs : JSON.stringify(cs));
   if (opts.language) fd.append('language', opts.language);
+  // known_speaker_references[] are base64 DATA-URI STRINGS (not file parts) — one per name, ≤4.
   for (const k of (opts.known || []).slice(0, 4)) {
     if (k && k.name && k.audio) {
-      fd.append('known_speaker_names[]', k.name);
-      fd.append('known_speaker_references[]', new Blob([k.audio], { type: k.mime || 'audio/webm' }), (k.name || 'ref') + '.webm');
+      const b64 = (Buffer.isBuffer(k.audio) ? k.audio : Buffer.from(k.audio)).toString('base64');
+      fd.append('known_speaker_names[]', String(k.name));
+      fd.append('known_speaker_references[]', `data:${k.mime || 'audio/mp3'};base64,${b64}`);
     }
   }
   const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
