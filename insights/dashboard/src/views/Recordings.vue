@@ -4,6 +4,9 @@
 // audio to create a recording; it transcribes + enriches in the background and the list polls until done.
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { recordingsApi } from '@/services/api'
+import RecorderPanel from '@/components/RecorderPanel.vue'
+
+async function onSaved(id) { await loadList(); if (id) select(id) }
 
 const items = ref([])
 const selectedId = ref(null)
@@ -84,6 +87,8 @@ onBeforeUnmount(() => clearInterval(poll))
       </button>
       <input ref="fileInput" type="file" accept="audio/*,video/*" class="hidden" @change="onPick" />
     </div>
+
+    <RecorderPanel @saved="onSaved" />
 
     <p v-if="error" class="mb-3 text-sm text-rose-300 bg-rose-500/10 rounded-lg px-3 py-2">{{ error }}</p>
 
