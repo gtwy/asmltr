@@ -48,10 +48,35 @@ async function transcribeLong(audioPath, opts = {}) {
   }
 }
 
+// From chunk 0's diarized segments, cut a short single-speaker reference clip per speaker and return them
+// as `known` refs ({name, audio, mime}). Feeding these to later chunks makes gpt-4o-transcribe-diarize
+// return the SAME label for a given voice across chunks (cross-chunk speaker consistency) instead of
+// re-numbering per chunk. OpenAI caps known refs at 4, so we seed the 4 speakers with the most airtime.
+function buildKnownRefsFromChunk(chunkPath, segs, work) {
+  const byS = new Map(); // speaker → { start, end, dur } of its cleanest (longest) single segment + total airtime
+  for (const s of segs) {
+    if (s.speaker == null || s.start == null || s.end == null) continue;
+    const dur = s.end - s.start; if (!(dur > 0)) continue;
+    const cur = byS.get(s.speaker) || { start: s.start, end: s.end, dur: 0, total: 0 };
+    if (dur > cur.dur) { cur.start = s.start; cur.end = s.end; cur.dur = dur; }
+    cur.total += dur; byS.set(s.speaker, cur);
+  }
+  const ranked = [...byS.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 4); // OpenAI ≤4
+  const known = [];
+  ranked.forEach(([speaker, seg], idx) => {
+    const clip = Math.min(8, Math.max(2, seg.dur)); // 2–8s reference from that speaker's longest turn
+    const refPath = path.join(work, `ref_${idx}.mp3`);
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(seg.start), '-t', String(clip), '-i', chunkPath,
+      '-ac', '1', '-ar', '16000', '-b:a', '32k', refPath], { encoding: 'utf8' });
+    if (r.status === 0 && fs.existsSync(refPath)) known.push({ name: String(speaker), audio: fs.readFileSync(refPath), mime: 'audio/mpeg' });
+  });
+  return known.length ? known : null;
+}
+
 // Diarized long-audio transcription (epic #113 / #111). Same chunking as transcribeLong, but each chunk
 // goes through stt.transcribeDiarized; segment start/end times are offset by the chunk position so they're
-// absolute. NOTE: speaker labels are per-chunk (chunk N's "Speaker 1" may not equal chunk N+1's) unless
-// `known` references are supplied — cross-chunk stitching is the caller's polish (see VOICE-CAPABILITY-BUILD.md).
+// absolute. Cross-chunk speaker CONSISTENCY: after chunk 0 we auto-seed `known_speaker_references` from its
+// speakers (unless the caller passed explicit `known`), so a voice keeps ONE label across the whole file.
 async function transcribeLongDiarized(audioPath, opts = {}) {
   if (!fs.existsSync(audioPath)) throw new Error('audio not found: ' + audioPath);
   const chunkSec = opts.chunkSec || 600;
@@ -65,21 +90,28 @@ async function transcribeLongDiarized(audioPath, opts = {}) {
     const chunks = fs.readdirSync(work).filter((f) => /^chunk_\d+\.mp3$/.test(f)).sort();
     if (!chunks.length) throw new Error('no audio chunks produced');
     const segments = []; const parts = [];
+    let known = opts.known || null; // caller-supplied named refs win; else we seed from chunk 0 below
     for (let i = 0; i < chunks.length; i++) {
-      const buf = fs.readFileSync(path.join(work, chunks[i]));
-      const out = await stt.transcribeDiarized(buf, { filename: chunks[i], mime: 'audio/mpeg', language: opts.language, known: opts.known });
+      const chunkPath = path.join(work, chunks[i]);
+      const buf = fs.readFileSync(chunkPath);
+      const out = await stt.transcribeDiarized(buf, { filename: chunks[i], mime: 'audio/mpeg', language: opts.language, known });
       const offset = i * chunkSec;
       for (const s of (out.segments || [])) {
-        segments.push({ speaker: s.speaker != null ? `${chunks.length > 1 ? 'c' + i + ':' : ''}${s.speaker}` : null,
+        segments.push({ speaker: s.speaker != null ? String(s.speaker) : null,
           start: s.start != null ? s.start + offset : null, end: s.end != null ? s.end + offset : null, text: s.text });
       }
       parts.push((out.text || '').trim());
+      // Seed cross-chunk speaker refs from chunk 0 (only if the caller didn't pin known speakers already).
+      if (i === 0 && !opts.known && chunks.length > 1) {
+        try { known = buildKnownRefsFromChunk(chunkPath, out.segments || [], work) || known; } catch (_) {}
+      }
       onProgress({ index: i + 1, total: chunks.length, segments: segments.length });
     }
-    return { text: parts.join('\n\n'), segments, chunks: chunks.length, duration_sec: duration };
+    const speakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))];
+    return { text: parts.join('\n\n'), segments, speakers, chunks: chunks.length, duration_sec: duration };
   } finally {
     try { fs.rmSync(work, { recursive: true, force: true }); } catch (_) {}
   }
 }
 
-module.exports = { transcribeLong, transcribeLongDiarized, ffprobeDuration };
+module.exports = { transcribeLong, transcribeLongDiarized, buildKnownRefsFromChunk, ffprobeDuration };
