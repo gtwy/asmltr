@@ -3,7 +3,10 @@
 // / converse) and see its capabilities. Surfaces gate features on the resolved engine's manifest. Mirrors
 // Settings→Engines for reasoning. Bindings persist server-side; engines with a missing key show as unavailable.
 import { ref, onMounted } from 'vue'
-import { voiceEnginesApi } from '@/services/api'
+import { voiceEnginesApi, voice } from '@/services/api'
+
+const emit = defineEmits(['changed'])
+const STATUS_SUFFIX = { ready: '', needs_key: ' (no key)', planned: ' (planned)' }
 
 const data = ref(null)
 const error = ref(null)
@@ -26,7 +29,15 @@ function caps(role) { return (data.value.resolved[role] && data.value.resolved[r
 
 async function bind(role, engine) {
   busy.value = role
-  try { await voiceEnginesApi.bind(role, engine || null); await load() } catch (e) { error.value = e.message } finally { busy.value = '' }
+  try {
+    await voiceEnginesApi.bind(role, engine || null)
+    // The engine pick IS the provider/model choice — keep the live TTS/STT config in sync so the
+    // dependent sub-settings below (voice, model) follow it, until surfaces fully consume resolve().
+    const e = engine && data.value.engines[engine]
+    if (e && role === 'synthesize') await voice.setConfig({ tts: { provider: e.provider, model: e.model } }).catch(() => {})
+    else if (e && role === 'transcribe') await voice.setConfig({ stt: { model: e.model } }).catch(() => {})
+    await load(); emit('changed')
+  } catch (e) { error.value = e.message } finally { busy.value = '' }
 }
 onMounted(load)
 </script>
@@ -49,8 +60,8 @@ onMounted(load)
           <select :value="boundId(role)" :disabled="busy === role" @change="bind(role, $event.target.value)"
                   class="text-sm rounded-lg bg-white/5 border border-white/10 px-2 py-1.5 outline-none focus:border-white/25 max-w-[16rem]">
             <option value="">— none —</option>
-            <option v-for="e in enginesFor(role)" :key="e.id" :value="e.id" :disabled="!data.availability[e.id]">
-              {{ e.label }}{{ data.availability[e.id] ? '' : ' (no key)' }}
+            <option v-for="e in enginesFor(role)" :key="e.id" :value="e.id" :disabled="(data.status[e.id] || 'planned') !== 'ready'">
+              {{ e.label }}{{ STATUS_SUFFIX[data.status[e.id]] || ' (planned)' }}
             </option>
           </select>
         </div>
