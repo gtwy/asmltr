@@ -19,7 +19,7 @@ const fileInput = ref(null)
 let poll = null
 
 const selected = computed(() => items.value.find((r) => r.id === selectedId.value) || null)
-const anyBusy = computed(() => items.value.some((r) => r.status === 'transcribing' || r.status === 'uploaded'))
+const anyBusy = computed(() => items.value.some((r) => ['transcribing', 'uploaded', 'diarizing'].includes(r.status)))
 
 async function loadList() {
   try {
@@ -57,12 +57,29 @@ async function remove(id) {
   try { await recordingsApi.remove(id); if (selectedId.value === id) { selectedId.value = null; detail.value = null } await loadList() }
   catch (e) { error.value = e.message }
 }
+// Re-transcribe with speaker diarization (splits the transcript into speaker-labeled turns). Async on the
+// core — the list poll picks up the 'diarizing' → 'enriched' transition and the segment view appears.
+async function diarize() {
+  if (!selected.value) return
+  loading.value = true; error.value = null
+  try { await recordingsApi.diarize(selected.value.id); await loadList(); await loadDetail(selected.value.id) }
+  catch (e) { error.value = e.message } finally { loading.value = false }
+}
+// Stable per-speaker colour so the same speaker reads the same across turns.
+const SPEAKER_COLORS = ['text-sky-300', 'text-emerald-300', 'text-violet-300', 'text-amber-300', 'text-rose-300', 'text-teal-300']
+const speakerColor = (name) => {
+  const list = detail.value?.speakers || []
+  const i = list.indexOf(name)
+  return SPEAKER_COLORS[(i >= 0 ? i : String(name).length) % SPEAKER_COLORS.length]
+}
+function fmtTs(sec) { if (sec == null) return ''; const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return `${m}:${String(s).padStart(2, '0')}` }
 
 function fmtDate(s) { if (!s) return ''; const d = new Date(s); return isNaN(d) ? s : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 function fmtDur(sec) { if (!sec) return ''; const m = Math.floor(sec / 60), s = Math.round(sec % 60); return m ? `${m}m ${s}s` : `${s}s` }
 const STATUS = {
   uploaded: ['Uploaded', 'text-slate-400 bg-white/5'],
   transcribing: ['Transcribing…', 'text-amber-300 bg-amber-500/10'],
+  diarizing: ['Diarizing…', 'text-amber-300 bg-amber-500/10'],
   transcribed: ['Transcribed', 'text-sky-300 bg-sky-500/10'],
   enriched: ['Ready', 'text-emerald-300 bg-emerald-500/10'],
   error: ['Error', 'text-rose-300 bg-rose-500/10']
@@ -114,6 +131,9 @@ onBeforeUnmount(() => clearInterval(poll))
           <div class="flex items-center gap-2 shrink-0">
             <button class="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50"
                     :disabled="loading || !detail.has_transcript" @click="reEnrich">Re-summarize</button>
+            <button class="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50"
+                    :disabled="loading || detail.status === 'diarizing'" @click="diarize"
+                    title="Re-transcribe with speaker labels">{{ detail.diarized ? 'Re-diarize' : 'Diarize' }}</button>
             <button class="text-xs px-2 py-1 rounded-lg text-rose-300 bg-rose-500/10 hover:bg-rose-500/20" @click="remove(detail.id)">Delete</button>
           </div>
         </div>
@@ -124,6 +144,7 @@ onBeforeUnmount(() => clearInterval(poll))
         <audio :src="recordingsApi.audioUrl(detail.id)" controls preload="none" class="w-full mb-4 h-9"></audio>
 
         <p v-if="detail.status === 'transcribing'" class="text-sm text-amber-300">Transcribing… this can take a minute for a long recording.</p>
+        <p v-else-if="detail.status === 'diarizing'" class="text-sm text-amber-300">Separating speakers… re-transcribing with diarization.</p>
         <p v-else-if="detail.status === 'error'" class="text-sm text-rose-300">Failed: {{ detail.error }}</p>
 
         <div v-if="detail.people && detail.people.length" class="mb-3 flex flex-wrap gap-1.5">
@@ -149,7 +170,24 @@ onBeforeUnmount(() => clearInterval(poll))
           </ul>
         </div>
 
-        <div v-if="detail.transcript">
+        <!-- Speaker-grouped transcript when diarized; plain transcript otherwise. -->
+        <div v-if="detail.segments && detail.segments.length" class="mb-2">
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <h3 class="text-xs uppercase tracking-wide text-slate-500">Speakers</h3>
+            <span v-for="sp in detail.speakers" :key="sp" class="text-[11px] px-1.5 py-0.5 rounded-full bg-white/5" :class="speakerColor(sp)">{{ sp }}</span>
+          </div>
+          <button class="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 mb-2" @click="showTranscript = !showTranscript">
+            {{ showTranscript ? 'Hide' : 'Show' }} diarized transcript ({{ detail.segments.length }} turns)
+          </button>
+          <div v-if="showTranscript" class="space-y-2 max-h-[28rem] overflow-auto bg-black/20 rounded-lg p-3">
+            <div v-for="(s, i) in detail.segments" :key="i" class="text-[13px] leading-relaxed">
+              <span class="font-semibold" :class="speakerColor(s.speaker)">{{ s.speaker || 'Speaker' }}</span>
+              <span v-if="s.start != null" class="text-slate-600 text-[11px] ml-1.5">{{ fmtTs(s.start) }}</span>
+              <span class="text-slate-300 ml-1">{{ s.text }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="detail.transcript">
           <button class="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 mb-2" @click="showTranscript = !showTranscript">
             {{ showTranscript ? 'Hide' : 'Show' }} full transcript ({{ Math.round((detail.transcript || '').length / 1000) }}k chars)
           </button>
