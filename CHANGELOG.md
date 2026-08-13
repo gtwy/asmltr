@@ -14,6 +14,29 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.11.0] - 2026-08-13
+
+asmltr 0.11.0 — channel-agnostic outbound file/image attachments, rendered inline in the assistant app and the dashboard.
+
+### Added
+
+- **Channel-agnostic outbound file & image attachments.** `asmltr send <channel> <target> --file <path>`
+  and `asmltr notify --file <path>` now deliver images and files across every capable connector.
+  Outbound standardizes on a single `kind:'file'` send that each connector maps to its native transport
+  (Telegram photo/document, Discord attachment, email MIME) — the same symmetry inbound already had.
+- **The Android app receives attachments inline.** The `android` connector gained a token-gated
+  `GET /gw/file` endpoint (opaque id → allow-listed path, no traversal) plus a `media` SSE frame, and
+  declares `supports_attachments_out`. The assistant app renders images inline in the chat thread and
+  replays them from history; non-image files show as a tappable chip.
+- **The dashboard renders image artifacts inline** in the chat thread; other files keep the download chip.
+- **`notify --file`** delivers an image to a reachable device as inline media, and otherwise sends the
+  actual file through the text-fallback channel (falling back to text if that channel can't attach).
+
+### Fixed
+
+- **Telegram outbound files.** A `kind:'file'` send now routes by MIME to `sendPhoto`/`sendDocument`
+  instead of falling through to an empty text message (which Telegram rejected with "message text is empty").
+
 ## [0.10.1] - 2026-08-05
 
 ### Added
