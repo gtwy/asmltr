@@ -285,7 +285,9 @@ async function start(ctx) {
     const convo = targetKey || convKey(device);
     const channel = targetKey ? (targetSurface || (convo.includes(':') ? convo.split(':')[0] : 'core')) : 'android';
 
-    ctx.emit({ event_type: 'inbound', session_id: convo, identity: who.identity, payload: { text: text.slice(0, 100000) } }); // keep full — this is the conversation record the app replays as history
+    // Surface MUST be 'assistant-native' — 'android' isn't a valid event surface, so it'd be dropped and
+    // never persist to history (why user/assistant/thinking text didn't replay on overlay reopen).
+    ctx.emit({ surface: 'assistant-native', event_type: 'inbound', session_id: convo, identity: who.identity, payload: { text: text.slice(0, 100000) } }); // keep full — this is the conversation record the app replays as history
     const envelope = {
       channel,
       conversation_key: convo,
@@ -305,13 +307,16 @@ async function start(ctx) {
 
     // Ack immediately (the reply streams over the SSE, not this POST response).
     res.json({ ok: true, conversation_key: convo, streaming: devices.has(device) });
+    let replyText = ''; // accumulate streamed reply so it persists to history (live pushSSE alone isn't retained)
     try {
       await ctx.core.handleStream(envelope, {
-        onDelta: (t) => pushSSE(device, { type: 'delta', text: t }),                                 // streamed reply text
-        onThinking: (t) => pushSSE(device, { type: 'thinking', text: t }),                           // reasoning steps
-        onToolCall: (t) => pushSSE(device, { type: 'tool', name: t.name, input: t.input }),          // tool call + args
-        onToolResult: (r) => pushSSE(device, { type: 'tool_result', output: r.output, is_error: r.is_error }), // its output
+        onDelta: (t) => { replyText += t; pushSSE(device, { type: 'delta', text: t }); },            // streamed reply text
+        onThinking: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'thinking', session_id: convo, identity: 'assistant', payload: { text: t } }); pushSSE(device, { type: 'thinking', text: t }); }, // reasoning steps
+        onToolCall: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool', session_id: convo, identity: 'assistant', payload: { tool: t.name, input: t.input } }); pushSSE(device, { type: 'tool', name: t.name, input: t.input }); }, // tool call + args
+        onToolResult: (r) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool_result', session_id: convo, identity: 'assistant', payload: { output: r.output, is_error: r.is_error } }); pushSSE(device, { type: 'tool_result', output: r.output, is_error: r.is_error }); }, // its output
       });
+      // Persist the assistant's final reply under 'assistant-native' so it replays on reopen (symmetric with media).
+      if (replyText.trim()) ctx.emit({ surface: 'assistant-native', event_type: 'outbound', session_id: convo, identity: 'assistant', payload: { text: replyText } });
       pushSSE(device, { type: 'done', conversation_key: convo });
     } catch (e) {
       ctx.log(`android turn error (${device}): ${e.message}`);
@@ -402,7 +407,17 @@ async function start(ctx) {
       const name = path.basename(real);
       const cap = String(caption || '');
       const id = registerMedia(real, mime, name);
-      const targetIds = (!device || device === '*') ? [...devices.keys()] : [device];
+      // Resolve the target → connected device ids: a device id matches directly; an IDENTITY (e.g. 'owner')
+      // matches every device authed under it; '*'/empty broadcasts to all. Falls back to the raw target so
+      // an offline device id still gets a replayable record. (Was: raw target used as a device-map key, so
+      // sending to identity 'owner' silently matched nothing yet reported success.)
+      let targetIds;
+      if (!device || device === '*') targetIds = [...devices.keys()];
+      else if (devices.has(device)) targetIds = [device];
+      else {
+        const byIdentity = [...devices.entries()].filter(([, d]) => d.identity === device).map(([k]) => k);
+        targetIds = byIdentity.length ? byIdentity : [device];
+      }
       let delivered = 0; const seen = new Set();
       for (const dev of targetIds) {
         if (seen.has(dev)) continue; seen.add(dev);
@@ -414,12 +429,12 @@ async function start(ctx) {
         const d = devices.get(dev);
         if (d && pushSSE(dev, { type: 'media', url: mediaUrl(id, d.token), mime, name, caption: cap })) delivered++;
       }
-      const explicit = device && device !== '*';
-      const anyTok = explicit && devices.get(device) && devices.get(device).token;
-      return res.json({ ok: delivered > 0 || !!explicit, delivered, id, mime, name,
-        url: mediaUrl(id, anyTok || undefined),
-        conversation_key: explicit ? convKey(device) : undefined,
-        error: (delivered > 0 || explicit) ? undefined : 'no device connected' });
+      // Honest result: `delivered` counts LIVE pushes only. 0 (offline / no match) → ok:false so the notify
+      // ladder and `asmltr send` don't report a false success; the record still replays on reconnect.
+      return res.json({ ok: delivered > 0, delivered, id, mime, name,
+        url: mediaUrl(id, undefined),
+        conversation_key: targetIds.length === 1 ? convKey(targetIds[0]) : undefined,
+        error: delivered > 0 ? undefined : 'no matching connected device (saved for reconnect)' });
     }
     if (kind === 'speak') {
       const frame = { type: 'speak', text: String(text || ''), title: title || null, require_headphones: !!require_headphones };

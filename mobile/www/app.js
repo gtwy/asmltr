@@ -161,6 +161,26 @@ function bubble(role, text) {
   const b = document.createElement('div'); b.className = 'bubble'; b.textContent = text || '';
   el.appendChild(b); $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight; return b;
 }
+// Full-viewport image viewer: tap an inline image → fills the app window over the chat, with a close
+// button, tap-the-backdrop-to-dismiss, Escape, and hardware-back (a pushed history entry the back gesture
+// pops) — so it never traps you with no way back to the chat.
+let _lightboxClose = null;
+function closeLightbox() { if (_lightboxClose) { const fn = _lightboxClose; _lightboxClose = null; fn(); } }
+function openLightbox(src, cap) {
+  closeLightbox();
+  const lb = document.createElement('div'); lb.className = 'lightbox';
+  const img = document.createElement('img'); img.className = 'lightbox-img'; img.src = src; img.alt = cap || 'image';
+  const close = document.createElement('button'); close.className = 'lightbox-close'; close.setAttribute('aria-label', 'Close'); close.textContent = '✕';
+  const onKey = (e) => { if (e.key === 'Escape') closeLightbox(); };
+  const onPop = () => { _lightboxClose = null; lb.remove(); document.removeEventListener('keydown', onKey); };
+  _lightboxClose = () => { lb.remove(); document.removeEventListener('keydown', onKey); window.removeEventListener('popstate', onPop); try { if (history.state && history.state.lightbox) history.back(); } catch (_) {} };
+  lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });   // tap backdrop
+  close.addEventListener('click', (e) => { e.stopPropagation(); closeLightbox(); });
+  document.addEventListener('keydown', onKey);
+  try { history.pushState({ lightbox: 1 }, ''); window.addEventListener('popstate', onPop, { once: true }); } catch (_) {} // hardware-back closes the viewer, not the overlay
+  if (cap) { const c = document.createElement('div'); c.className = 'lightbox-cap'; c.textContent = cap; lb.appendChild(c); }
+  lb.appendChild(img); lb.appendChild(close); document.body.appendChild(lb);
+}
 // Inline attachment bubble (a `media` frame or a `media` history item): {url, mime, name, caption}.
 // Image mimes render inline (tap to open full); anything else is a tappable file chip. The url is a
 // gateway path (/gw/file?…) — prefix baseUrl, and ensure a device token rides along (history omits it).
@@ -173,7 +193,7 @@ function mediaBubble(role, m) {
   if (String(m.mime || '').startsWith('image/')) {
     const img = document.createElement('img'); img.className = 'media-img'; img.loading = 'lazy';
     img.alt = m.caption || m.name || 'image'; img.src = src;
-    img.addEventListener('click', () => { if (src) window.open(src, '_blank'); });
+    img.addEventListener('click', () => { if (src) openLightbox(src, m.caption || m.name || ''); });
     b.appendChild(img);
   } else {
     const a = document.createElement('a'); a.className = 'media-file'; a.href = src; a.target = '_blank';
