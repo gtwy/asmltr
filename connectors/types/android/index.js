@@ -22,6 +22,11 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
+const silo = require('../../../shared/silo');          // Self silo (allowed base for outbound files)
+const uploads = require('../../../shared/uploads');    // shared upload area (allowed base for outbound files)
+const { guessMime } = require('../../../shared/mimeguess'); // MIME for the media frame + /gw/file Content-Type
 // Speech is proxied through this connector so the phone has ONE token-authed surface (no separate
 // core-auth for /v2/transcribe + /v2/tts). Same shared modules the core /v2 speech endpoints use.
 const stt = require('../../../shared/speech/stt');
@@ -33,7 +38,8 @@ const meta = {
   type: 'android',
   displayName: 'Android assistant',
   // Push channel: the manager /send router + announcements/steer reach a device via POST /out.
-  outbound: { kinds: ['text'], target: { required: true, label: 'Device id' } },
+  // 'file' → a `media` SSE frame the app renders inline (image) or as a download (served by /gw/file).
+  outbound: { kinds: ['text', 'file'], target: { required: true, label: 'Device id' } },
   configSchema: {
     type: 'object',
     properties: {
@@ -83,6 +89,48 @@ async function start(ctx) {
     try { d.res.write(`data: ${JSON.stringify(obj)}\n\n`); return true; } catch (_) { return false; }
   }
 
+  // --- outbound file attachments: opaque id → real file, served by /gw/file -------------------------
+  // Outbound files (kind:'file') can't be inlined into an SSE frame, so we register the file under an
+  // opaque id and stream it from a token-gated /gw/file. The id map is the PRIMARY guard: a device can
+  // only fetch files a trusted send explicitly registered (no path param → no traversal). We ALSO clamp
+  // to an allowlist of base dirs (defense-in-depth) and persist the map to disk so ids survive a restart
+  // (history replay can re-serve them). Override the allowlist with ASMLTR_ANDROID_FILE_BASES (':'-sep).
+  const MEDIA_DB = process.env.ASMLTR_ANDROID_MEDIA_DB || path.join(os.homedir(), '.asmltr', 'android-media.jsonl');
+  const mediaMap = new Map(); // id → { path, mime, name }
+  (function loadMedia() {
+    try { for (const line of fs.readFileSync(MEDIA_DB, 'utf8').split('\n')) {
+      if (!line.trim()) continue; const r = JSON.parse(line);
+      if (r && r.id && r.path) mediaMap.set(r.id, { path: r.path, mime: r.mime, name: r.name });
+    } } catch (_) {}
+  })();
+  function allowedBases() {
+    if (process.env.ASMLTR_ANDROID_FILE_BASES) {
+      return process.env.ASMLTR_ANDROID_FILE_BASES.split(':').filter(Boolean)
+        .map((p) => { try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); } });
+    }
+    const bases = [];
+    try { bases.push(fs.realpathSync(silo.selfSub('artifacts'))); } catch (_) {} // finished agent outputs
+    try { bases.push(fs.realpathSync(uploads.baseDir())); } catch (_) {}         // shared inbound files
+    return bases;
+  }
+  function underAllowed(real) {
+    return allowedBases().some((b) => real === b || real.startsWith(b + path.sep));
+  }
+  function registerMedia(real, mime, name) {
+    const id = crypto.randomBytes(9).toString('base64url');
+    mediaMap.set(id, { path: real, mime, name });
+    try { fs.mkdirSync(path.dirname(MEDIA_DB), { recursive: true }); fs.appendFileSync(MEDIA_DB, JSON.stringify({ id, path: real, mime, name, at: Date.now() }) + '\n'); } catch (_) {}
+    return id;
+  }
+  // Connector-relative URL (leading slash) the app resolves against its configured gateway base — exactly
+  // like it builds `${cfg.baseUrl}/gw/stream`. The device token rides as a query param so the URL is
+  // self-authorizing (drop straight into <img src>, no headers). Token omitted → replay rebuilds it per-request.
+  function mediaUrl(id, token) {
+    const q = new URLSearchParams({ id });
+    if (token) q.set('token', token);
+    return `/gw/file?${q.toString()}`;
+  }
+
   const app = express();
   app.use(express.json({ limit: '16mb' })); // room for base64 audio on /gw/transcribe
   // The mobile WebView is a different origin (capacitor://localhost). These endpoints are token-authed,
@@ -108,7 +156,8 @@ async function start(ctx) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     // Replace any stale stream for this device (reconnect).
     const prev = devices.get(device); if (prev && prev.res !== res) { try { prev.res.end(); } catch (_) {} }
-    devices.set(device, { res, name, identity: who.identity, since: Date.now() });
+    // Keep the device's own token so an outbound `media` frame can hand it a self-authorizing /gw/file URL.
+    devices.set(device, { res, name, identity: who.identity, since: Date.now(), token: req.query.token });
     res.write(`data: ${JSON.stringify({ type: 'ready', device, conversation_key: convKey(device) })}\n\n`);
     ctx.emit({ event_type: 'control', session_id: convKey(device), identity: who.identity, payload: { action: 'device-connected', device } });
     try { ctx.heartbeat(); } catch (_) {}
@@ -159,7 +208,17 @@ async function start(ctx) {
         let p = {}; try { p = typeof e.payload === 'string' ? JSON.parse(e.payload) : (e.payload || {}); } catch (_) {}
         switch (e.event_type) {
           case 'inbound': items.push({ kind: 'user', text: p.text || '', ts: e.ts }); break;
-          case 'outbound': items.push({ kind: 'assistant', text: p.text || '', ts: e.ts }); break;
+          case 'outbound':
+            // An outbound with a `media` payload is an attachment — replay it as a `media` item, rebuilding
+            // the /gw/file URL with THIS requester's token (tokens are never persisted in the event log).
+            if (p.media && p.media.id) {
+              const q = new URLSearchParams({ id: p.media.id });
+              if (req.query.token) q.set('token', String(req.query.token));
+              items.push({ kind: 'media', url: `/gw/file?${q.toString()}`, mime: p.media.mime, name: p.media.name, caption: p.media.caption || p.text || '', ts: e.ts });
+            } else {
+              items.push({ kind: 'assistant', text: p.text || '', ts: e.ts });
+            }
+            break;
           case 'thinking': items.push({ kind: 'thinking', text: p.text || '', ts: e.ts }); break;
           case 'tool': items.push({ kind: 'tool', name: p.tool || p.name || 'tool', input: p.input, ts: e.ts }); break;
           case 'tool_result': items.push({ kind: 'tool_result', output: p.output || '', is_error: !!p.is_error, ts: e.ts }); break;
@@ -235,9 +294,13 @@ async function start(ctx) {
       content: { text },
       delivery: 'sync',
       public: false, // 1:1 authed device; redaction still applies unless the identity is full-trust
-      channel_context: { device },
+      // `target` mirrors `device` so the core's ATTACHMENTS system-prompt hint renders the exact command
+      // (`asmltr send android <device> --file …`).
+      channel_context: { device, target: device },
       context: { scope_name: targetKey ? `Session ${convo}` : 'Android assistant' },
-      capabilities: { max_message_chars: 100000, supports_markdown: false, streaming: true, supports_attachments_out: false },
+      // This channel CAN receive outbound files (rendered as a `media` frame + served by /gw/file), so the
+      // core tells the agent it may attach here instead of claiming it can't.
+      capabilities: { max_message_chars: 100000, supports_markdown: false, streaming: true, supports_attachments_out: true },
     };
 
     // Ack immediately (the reply streams over the SSE, not this POST response).
@@ -324,8 +387,40 @@ async function start(ctx) {
   // to read the text ALOUD without running a turn. A '*' / empty target broadcasts to every connected
   // device — and to the background control link too, so read-aloud works even when the overlay is closed.
   app.post('/out', (req, res) => {
-    const { target, text, kind, title, require_headphones } = req.body || {};
+    const { target, text, kind, title, require_headphones, path: filePath, caption } = req.body || {};
     const device = String(target || '').trim();
+    // kind:'file' → register the file + push a `media` frame the app renders inline / downloads via /gw/file.
+    // A '*'/empty target broadcasts to every connected device (each gets a URL bearing its OWN token).
+    if (kind === 'file') {
+      const fp = String(filePath || '');
+      if (!fp) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
+      let real, st;
+      try { real = fs.realpathSync(fp); st = fs.statSync(real); } catch (_) { return res.status(404).json({ ok: false, error: 'file not found' }); }
+      if (!st.isFile()) return res.status(400).json({ ok: false, error: 'not a file' });
+      if (!underAllowed(real)) return res.status(403).json({ ok: false, error: 'file must live under an allowed base (Self silo artifacts / shared uploads)' });
+      const mime = guessMime(real);
+      const name = path.basename(real);
+      const cap = String(caption || '');
+      const id = registerMedia(real, mime, name);
+      const targetIds = (!device || device === '*') ? [...devices.keys()] : [device];
+      let delivered = 0; const seen = new Set();
+      for (const dev of targetIds) {
+        if (seen.has(dev)) continue; seen.add(dev);
+        // Persist a token-FREE renderable record so a reconnecting device replays the attachment via
+        // /gw/history (which rebuilds the URL with the requester's own token). Emitted even if the live
+        // push below fails, so an offline device still sees it on next connect. Surface must be the
+        // canonical 'assistant-native' — 'android' isn't a valid event surface, so it'd be dropped.
+        ctx.emit({ surface: 'assistant-native', event_type: 'outbound', session_id: convKey(dev), identity: 'assistant', payload: { text: cap, media: { id, mime, name, caption: cap } } });
+        const d = devices.get(dev);
+        if (d && pushSSE(dev, { type: 'media', url: mediaUrl(id, d.token), mime, name, caption: cap })) delivered++;
+      }
+      const explicit = device && device !== '*';
+      const anyTok = explicit && devices.get(device) && devices.get(device).token;
+      return res.json({ ok: delivered > 0 || !!explicit, delivered, id, mime, name,
+        url: mediaUrl(id, anyTok || undefined),
+        conversation_key: explicit ? convKey(device) : undefined,
+        error: (delivered > 0 || explicit) ? undefined : 'no device connected' });
+    }
     if (kind === 'speak') {
       const frame = { type: 'speak', text: String(text || ''), title: title || null, require_headphones: !!require_headphones };
       let delivered = 0;
@@ -459,6 +554,23 @@ async function start(ctx) {
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     res.setHeader('Content-Disposition', 'attachment; filename="asmltr.apk"');
     fs.createReadStream(APK).pipe(res);
+  });
+
+  // Serve an outbound attachment referenced by a `media` frame's URL. Token-gated (any valid device
+  // token) like /gw/stream + /gw/wake. Security: serves ONLY files a prior kind:'file' send registered
+  // (opaque id → real path — no path param, so no traversal), and re-validates the real path is a file
+  // under an allowed base. Content-Type from the stored MIME so <img src> renders it directly.
+  app.get('/gw/file', (req, res) => {
+    if (requireToken && !auth(req.query.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    const rec = mediaMap.get(String(req.query.id || ''));
+    if (!rec) return res.status(404).json({ ok: false, error: 'unknown media id' });
+    let real, st;
+    try { real = fs.realpathSync(rec.path); st = fs.statSync(real); } catch (_) { return res.status(404).json({ ok: false, error: 'file gone' }); }
+    if (!st.isFile() || !underAllowed(real)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    res.setHeader('Content-Type', rec.mime || guessMime(real));
+    res.setHeader('Content-Length', String(st.size));
+    res.setHeader('Content-Disposition', `inline; filename="${(rec.name || path.basename(real)).replace(/["\\]/g, '')}"`);
+    fs.createReadStream(real).on('error', () => { try { res.destroy(); } catch (_) {} }).pipe(res);
   });
 
   const httpServer = app.listen(PORT, BIND, () => ctx.log(`android device gateway on ${BIND}:${PORT} (${requireToken ? 'token required' : 'OPEN'})`));
