@@ -14,6 +14,26 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.11.1] - 2026-08-13
+
+Follow-up fixes to the outbound-attachment feature, from on-device testing.
+
+### Fixed
+- **Assistant-app chat history now replays turn text.** Android turn events (user text, thinking, tool
+  steps, assistant reply) were emitted under the surface `android`, which isn't a valid event surface, so
+  they were dropped and never persisted — only attachments (emitted under `assistant-native`) survived, so
+  reopening the overlay restored images but not the conversation. Turn events now persist under
+  `assistant-native` and replay on reopen.
+- **`asmltr send android <identity>` reaches the device and reports honestly.** The file path matched only
+  by device id, so sending to an identity (e.g. `owner`) silently matched no live stream yet returned
+  success. It now resolves an identity to every connected device for that identity, and a zero live-delivery
+  reports `ok:false` (the record still replays on reconnect) instead of a false success.
+
+### Added
+- **Full-screen image viewer in the assistant app.** Tapping an inline image opens it over the chat with a
+  close button, tap-the-backdrop / Escape / hardware-back to dismiss — instead of opening trapped inside the
+  overlay with no way back.
+
 ## [0.11.0] - 2026-08-13
 
 asmltr 0.11.0 — channel-agnostic outbound file/image attachments, rendered inline in the assistant app and the dashboard.
