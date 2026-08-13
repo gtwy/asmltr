@@ -36,6 +36,10 @@ svg { width: 20px; height: 20px; display: block; }
 .media-img { display: block; max-width: 100%; max-height: 60vh; border-radius: 11px; cursor: pointer; }
 .media-file { display: inline-block; padding: 6px 10px; color: rgb(var(--accent)); text-decoration: none; word-break: break-all; }
 .media-cap { font-size: 13px; color: var(--muted); padding: 5px 7px 2px; white-space: pre-wrap; }
+.lightbox { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.94); display: flex; align-items: center; justify-content: center; padding: 8px; }
+.lightbox-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+.lightbox-close { position: fixed; top: 12px; right: 12px; width: 42px; height: 42px; border-radius: 50%; border: none; background: rgba(255,255,255,0.16); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.lightbox-cap { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 14px; background: linear-gradient(transparent, rgba(0,0,0,0.6)); color: #eee; font-size: 13px; text-align: center; white-space: pre-wrap; }
 .tool-head { cursor: pointer; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tool-caret { display: inline-block; width: 10px; flex: none; color: var(--muted); }
 .tool-name { flex: none; font-family: ui-monospace, monospace; }
