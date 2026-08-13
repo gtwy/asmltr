@@ -65,34 +65,65 @@ let _pushSender = null;
 function setPushSender(fn) { _pushSender = typeof fn === 'function' ? fn : null; }
 
 /**
- * Deliver `text` to the user via the best reachable step.
- *   opts: { text, title?, force?, speak? }  — force ignores quiet hours; speak=false skips the spoken step.
+ * Deliver `text` (and optionally a `file`) to the user via the best reachable step.
+ *   opts: { text, title?, force?, speak?, file? }  — force ignores quiet hours; speak=false skips the
+ *   spoken step; file attaches a path (android → `media` frame; text fallback → sent as an attachment).
  * Returns { delivered, via, steps } — steps is the per-attempt log (for telemetry / the GUI test button).
  */
 async function notify(opts = {}) {
   const text = String(opts.text || '').trim();
-  if (!text) throw new Error('notify needs text');
+  const file = opts.file ? String(opts.file) : null;   // optional attachment (--file): deliver alongside/as the notification
+  if (!text && !file) throw new Error('notify needs text or a file');
   const cfg = getConfig();
   const quiet = !opts.force && inQuietHours(cfg);
+  const body = opts.title ? `${opts.title}\n${text}` : text; // combined text for the caption / text fallback
   const steps = [];
+  let fileUrl = null; // the android media URL, handed to the push step (best-effort link)
 
   for (const step of cfg.ladder || []) {
     try {
       if (step === 'android') {
-        if (opts.speak === false || quiet) { steps.push({ step, skipped: quiet ? 'quiet-hours' : 'speak-off' }); continue; }
-        const r = await send({ channel: cfg.android_channel, target: cfg.android_target, kind: 'speak', text, title: opts.title, require_headphones: !!cfg.require_headphones });
-        const ok = !!(r.ok && (r.delivered == null || r.delivered > 0));
-        steps.push({ step, ok, delivered: r.delivered, error: r.error });
+        const parts = [];
+        // Visual attachment (file) → a `media` frame; delivered even during quiet hours (it isn't audible).
+        if (file) {
+          const rf = await send({ channel: cfg.android_channel, target: cfg.android_target, kind: 'file', path: file, caption: body || undefined });
+          const ok = !!(rf.ok && (rf.delivered == null || rf.delivered > 0));
+          if (rf.url) fileUrl = rf.url;
+          parts.push({ what: 'file', ok, delivered: rf.delivered, error: rf.error });
+        }
+        // Spoken read-aloud (suppressed by quiet hours / speak:false).
+        const speakOff = opts.speak === false || quiet;
+        if (!speakOff && text) {
+          const rs = await send({ channel: cfg.android_channel, target: cfg.android_target, kind: 'speak', text, title: opts.title, require_headphones: !!cfg.require_headphones });
+          const ok = !!(rs.ok && (rs.delivered == null || rs.delivered > 0));
+          parts.push({ what: 'speak', ok, delivered: rs.delivered, error: rs.error });
+        }
+        if (!parts.length) { steps.push({ step, skipped: quiet ? 'quiet-hours' : 'speak-off' }); continue; }
+        const ok = parts.some((p) => p.ok);
+        steps.push({ step, ok, parts });
         if (ok) return { delivered: true, via: 'android', steps };
       } else if (step === 'push') {
         if (!_pushSender) { steps.push({ step, skipped: 'no-push-sender' }); continue; }
-        const r = await _pushSender({ text, title: opts.title });
+        // Pass the file + its (best-effort) link so a future push integration can attach/link it.
+        const r = await _pushSender({ text, title: opts.title, file: file || undefined, url: fileUrl || undefined });
         steps.push({ step, ok: !!(r && r.ok !== false) });
         if (r && r.ok !== false) return { delivered: true, via: 'push', steps };
       } else if (step === 'text') {
         const fb = cfg.text_fallback;
         if (!fb || !(fb.channel || fb.instance_id) || !fb.target) { steps.push({ step, skipped: 'no-fallback-configured' }); continue; }
-        const r = await send({ channel: fb.channel, instance_id: fb.instance_id, target: fb.target, kind: 'text', text: opts.title ? `${opts.title}\n${text}` : text });
+        let r;
+        if (file) {
+          // Channel-agnostic: deliver the ACTUAL file through the fallback channel (telegram/discord/email
+          // all accept kind:'file' now) with the notify text as caption — better than a token-bearing
+          // internal /gw/file link, which isn't an externally-resolvable URL. Fall back to text if the
+          // channel can't attach.
+          r = await send({ channel: fb.channel, instance_id: fb.instance_id, target: fb.target, kind: 'file', path: file, caption: body || undefined });
+          if (!r.ok && /attachment|support/i.test(r.error || '')) {
+            r = await send({ channel: fb.channel, instance_id: fb.instance_id, target: fb.target, kind: 'text', text: body });
+          }
+        } else {
+          r = await send({ channel: fb.channel, instance_id: fb.instance_id, target: fb.target, kind: 'text', text: body });
+        }
         steps.push({ step, ok: !!r.ok, error: r.error });
         if (r.ok) return { delivered: true, via: 'text', steps };
       } else {
