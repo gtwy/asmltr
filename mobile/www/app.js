@@ -161,6 +161,28 @@ function bubble(role, text) {
   const b = document.createElement('div'); b.className = 'bubble'; b.textContent = text || '';
   el.appendChild(b); $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight; return b;
 }
+// Inline attachment bubble (a `media` frame or a `media` history item): {url, mime, name, caption}.
+// Image mimes render inline (tap to open full); anything else is a tappable file chip. The url is a
+// gateway path (/gw/file?…) — prefix baseUrl, and ensure a device token rides along (history omits it).
+function mediaBubble(role, m) {
+  const el = document.createElement('div'); el.className = 'msg-row ' + (role || 'assistant');
+  const b = document.createElement('div'); b.className = 'bubble media';
+  let src = m && m.url ? String(m.url) : '';
+  if (src && !/^https?:/i.test(src)) src = cfg.baseUrl + src;
+  if (src && cfg.token && !/[?&]token=/.test(src)) src += (src.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(cfg.token);
+  if (String(m.mime || '').startsWith('image/')) {
+    const img = document.createElement('img'); img.className = 'media-img'; img.loading = 'lazy';
+    img.alt = m.caption || m.name || 'image'; img.src = src;
+    img.addEventListener('click', () => { if (src) window.open(src, '_blank'); });
+    b.appendChild(img);
+  } else {
+    const a = document.createElement('a'); a.className = 'media-file'; a.href = src; a.target = '_blank';
+    a.rel = 'noopener'; a.textContent = '📎 ' + (m.name || 'file');
+    b.appendChild(a);
+  }
+  if (m.caption) { const c = document.createElement('div'); c.className = 'media-cap'; c.textContent = m.caption; b.appendChild(c); }
+  el.appendChild(b); $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight; return b;
+}
 function fmt(v) { try { return typeof v === 'string' ? v : JSON.stringify(v, null, 2); } catch (_) { return String(v); } }
 // Each thinking/tool row is appended to the log IN ORDER, and closes the current text bubble (curBubble=null)
 // so streamed reply text threads chronologically around the tools instead of stacking into one bubble.
@@ -230,6 +252,7 @@ function connect() {
       bubble('sys', '🔔 ' + (m.title ? (m.title + ' — ' + m.text) : m.text));
       if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.title ? (m.title + '. ' + m.text) : m.text); flushTTS(); }
     }
+    else if (m.type === 'media') { stepsEl = null; curBubble = null; mediaBubble('assistant', m); }  // inline image/file attachment
     else if (m.type === 'device_rpc') runDeviceRPC(m);   // #77: the assistant wants to act on this phone
     else if (m.type === 'error') { stopDrone(); bubble('sys', '⚠ ' + m.error); resetTTS(); setState('idle'); }
   };
@@ -607,6 +630,7 @@ function renderHistoryItems(items) {
     else if (it.kind === 'thinking') addThinking(it.text);
     else if (it.kind === 'tool') addTool(it.name, it.input);
     else if (it.kind === 'tool_result') addToolResult(it.output, it.is_error);
+    else if (it.kind === 'media') mediaBubble('assistant', it);
   }
   curBubble = null; // a live delta must start a fresh bubble, not append onto a historical one
   $('log').scrollTop = $('log').scrollHeight;
