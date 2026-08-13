@@ -1640,9 +1640,9 @@ app.get('/v2/notify/config', (req, res) => res.json(notifyLib.getConfig()));
 app.post('/v2/notify/config', (req, res) => { try { res.json(notifyLib.setConfig(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/notify', async (req, res) => {
   const b = req.body || {};
-  if (!b.text) return res.status(400).json({ error: 'need text' });
+  if (!b.text && !b.file) return res.status(400).json({ error: 'need text or file' });
   try {
-    const r = await notifyLib.notify({ text: b.text, title: b.title, force: !!b.force, speak: b.speak });
+    const r = await notifyLib.notify({ text: b.text, title: b.title, force: !!b.force, speak: b.speak, file: b.file });
     record({ surface: 'notify', session_id: 'notify', event_type: 'outbound', identity: 'notify', source: 'core',
       payload: { via: r.via, delivered: r.delivered, text: truncate(b.text, 300) } });
     res.json({ ok: true, ...r });
