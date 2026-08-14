@@ -491,7 +491,10 @@ async function start(ctx) {
     const b = req.body || {};
     if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
     try {
-      const t = await stt.realtimeToken({ model: b.model });
+      // Realtime = the 'realtime_transcribe' voice role (epic #113) → gpt-live-transcribe (streaming
+      // partials, no server_vad), distinct from the batch 'transcribe' model. stt.realtimeToken already
+      // mints via /v1/realtime/client_secrets with the transcription session baked in.
+      const t = await stt.realtimeToken({ model: b.model || 'gpt-live-transcribe' });
       res.json({ ok: true, value: t.value, expires_at: t.expires_at, model: t.model });
     } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
   });
