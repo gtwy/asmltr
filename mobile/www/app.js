@@ -541,7 +541,24 @@ async function runDeviceRPC(m) {
 }
 
 // ---------- assist launch + native overlay controls ----------
-function maybeAssistLaunch() { const a = OVERLAY || location.hash.indexOf('assist') >= 0 || window.__ASMLTR_ASSIST === true; if (a && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); } }
+// Auto-listen-on-open (default OFF): a plain overlay open must NOT grab the mic. An ASSIST-GESTURE
+// launch (opened via the digital-assistant gesture / wake) always auto-listens — that's the "opened a
+// certain way" intent. The toggle only affects a plain open. Persisted device-local (localStorage +
+// best-effort NativeConfig), read from the native cfg blob when present.
+const AUTOLISTEN_KEY = 'asmltr.autolisten';
+function autoListenOnOpen() {
+  try { const nc = window.__ASMLTR_NATIVE_CFG || {}; if (typeof nc.autoListen === 'boolean') return nc.autoListen; } catch (_) {}
+  try { return localStorage.getItem(AUTOLISTEN_KEY) === '1'; } catch (_) { return false; }
+}
+function setAutoListen(on) {
+  try { localStorage.setItem(AUTOLISTEN_KEY, on ? '1' : '0'); } catch (_) {}
+  try { if (window.AsmltrNative && window.AsmltrNative.setAutoListen) window.AsmltrNative.setAutoListen(!!on); } catch (_) {}
+}
+function maybeAssistLaunch() {
+  const assistGesture = location.hash.indexOf('assist') >= 0 || window.__ASMLTR_ASSIST === true;
+  const auto = assistGesture || (OVERLAY && autoListenOnOpen());
+  if (auto && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); }
+}
 window.asmltrStartListening = (skipCue) => { if (state === 'idle') startRec(skipCue); };
 // Called by OverlayService when the card should collapse/expand; also usable from the min button.
 window.asmltrMinimize = () => { document.body.classList.add('minimized'); if (state === 'rec') stopRec(); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(true); } catch (_) {} };
@@ -589,7 +606,7 @@ function initOverlayChrome() {
 }
 
 // ---------- settings ----------
-function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; try { loadNotifSettings(); } catch (_) {} $('sheet').classList.remove('hidden'); reportPanelHeight(); }
+function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgAutoListen')) $('cfgAutoListen').checked = autoListenOnOpen(); if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; try { loadNotifSettings(); } catch (_) {} $('sheet').classList.remove('hidden'); reportPanelHeight(); }
 async function saveVoice() {
   const m = $('voiceMsg'); if (m) m.textContent = 'saving…';
   const enabled = $('cfgWake').checked, phrase = $('cfgWakePhrase').value.trim();
@@ -731,6 +748,7 @@ function init() {
   if ($('sessRefresh')) $('sessRefresh').addEventListener('click', openSessions);
   if ($('targetLeave')) $('targetLeave').addEventListener('click', leaveTarget);
   if ($('sessions')) $('sessions').addEventListener('click', (e) => { if (e.target === $('sessions')) { $('sessions').classList.add('hidden'); reportPanelHeight(); } });
+  if ($('cfgAutoListen')) $('cfgAutoListen').addEventListener('change', (e) => setAutoListen(e.target.checked)); // device-local, persists immediately
   if ($('cfgVoiceSave')) $('cfgVoiceSave').addEventListener('click', saveVoice);
   if ($('cfgNotifSave')) $('cfgNotifSave').addEventListener('click', saveNotifSettings);
   if ($('cfgNotifAccess')) $('cfgNotifAccess').addEventListener('click', () => { const n = NC(); if (n && n.openNotificationAccessSettings) n.openNotificationAccessSettings(); });
