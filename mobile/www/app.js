@@ -591,7 +591,7 @@ function blobB64(blob) { return new Promise((res, rej) => { const r = new FileRe
 // transcript is used on endpoint. Batch /gw/transcribe stays the fallback (off, no token, or any error).
 // Gated by the device-local "Live transcription" setting. NOTE: the exact OpenAI realtime WebRTC URL +
 // event names can shift; on ANY failure we degrade silently to batch, so the feature is safe-by-default.
-let rtPC = null, rtDC = null, rtActive = false, rtFinal = '', rtPartial = '', rtCapEl = null;
+let rtPC = null, rtDC = null, rtActive = false, rtFinal = '', rtPartial = '', rtCapEl = null, rtGen = 0;
 function sttRealtimeOn() { try { return localStorage.getItem('asmltr.sttmode') === 'realtime'; } catch (_) { return false; } }
 function setSttRealtime(on) { try { localStorage.setItem('asmltr.sttmode', on ? 'realtime' : 'batch'); } catch (_) {} }
 function realtimeFinalText() { return (rtFinal + ' ' + rtPartial).replace(/\s+/g, ' ').trim(); }
@@ -601,11 +601,17 @@ function liveCaption(text) {
 }
 function clearLiveCaption() { try { if (rtCapEl && rtCapEl.parentElement) rtCapEl.parentElement.remove(); } catch (_) {} rtCapEl = null; }
 async function startRealtimeSTT(micStream) {
+  // Setup is async (token mint + SDP round-trip). A short utterance can end BEFORE it finishes, so guard
+  // with a generation token: stopRealtimeSTT() bumps rtGen, and any awaited step here that finds its gen
+  // stale closes its own half-built peer and bails — otherwise the connection would open AFTER we stopped
+  // (transcribing with the mic off = token burn) and the next listen would stack a 2nd stream (the doubling).
+  stopRealtimeSTT();                 // tear down any prior/in-flight session first
+  const gen = ++rtGen;
   rtActive = false; rtFinal = ''; rtPartial = '';
   try {
     if (!window.RTCPeerConnection || !micStream) return;
     const tok = await api('/gw/realtime-token', {});
-    if (!tok || !tok.value) return;
+    if (gen !== rtGen || !tok || !tok.value) return; // superseded/stopped during token mint
     const pc = new RTCPeerConnection(); rtPC = pc;
     for (const tr of micStream.getAudioTracks()) pc.addTrack(tr, micStream);
     const dc = pc.createDataChannel('oai-events'); rtDC = dc;
@@ -626,22 +632,29 @@ async function startRealtimeSTT(micStream) {
         bubble('sys', '⚠ live STT: ' + em);
       }
     };
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped while wiring the peer
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped during offer
     // GA WebRTC SDP exchange endpoint. The old beta `/v1/realtime?intent=transcription` was retired
     // ("the realtime beta API is no longer supported"); the session type/model ride in the ephemeral secret.
     const r = await fetch('https://api.openai.com/v1/realtime/calls', {
       method: 'POST', headers: { Authorization: 'Bearer ' + tok.value, 'Content-Type': 'application/sdp' }, body: offer.sdp,
     });
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped during the SDP round-trip
     if (!r.ok) throw new Error('realtime sdp ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 160));
     await pc.setRemoteDescription({ type: 'answer', sdp: await r.text() });
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped before it went live
     rtActive = true;
   } catch (e) {
     // Surface the reason when the user explicitly enabled live STT (else stay quiet); batch still covers the turn.
-    if (sttRealtimeOn()) { try { bubble('sys', '⚠ live STT unavailable: ' + (e && e.message ? e.message : e)); } catch (_) {} }
-    stopRealtimeSTT();
+    if (gen === rtGen && sttRealtimeOn()) { try { bubble('sys', '⚠ live STT unavailable: ' + (e && e.message ? e.message : e)); } catch (_) {} }
+    if (gen === rtGen) stopRealtimeSTT();
   }
 }
+// Idempotent + race-proof: bumping rtGen invalidates any in-flight startRealtimeSTT so it can't publish a
+// live connection after we've stopped. Called on every listen-end path (onRecStop / stopEverything).
 function stopRealtimeSTT() {
+  rtGen++;
   rtActive = false;
   try { if (rtDC) rtDC.close(); } catch (_) {}
   try { if (rtPC) rtPC.close(); } catch (_) {}
