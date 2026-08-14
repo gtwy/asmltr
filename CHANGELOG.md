@@ -14,6 +14,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.12.1] - 2026-08-13
+
+### Fixed
+- **Live transcription now actually transcribes.** The WebRTC transcription session was never sent its
+  `session.update` config over the data channel, so it connected but emitted nothing (the "enabled but no
+  caption" bug). It now configures the session (model + server_vad) on data-channel open, and surfaces
+  OpenAI's error events + SDP failures visibly (instead of silently falling back) when live STT is enabled.
+
 ## [0.12.0] - 2026-08-13
 
 Assistant-app overlay overhaul: multi-session tabs, sub-agent visibility, live streaming transcription, and a batch of voice-UX fixes.

@@ -609,6 +609,17 @@ async function startRealtimeSTT(micStream) {
     const pc = new RTCPeerConnection(); rtPC = pc;
     for (const tr of micStream.getAudioTracks()) pc.addTrack(tr, micStream);
     const dc = pc.createDataChannel('oai-events'); rtDC = dc;
+    // A transcription session does NOTHING until it's configured over the data channel — send
+    // session.update on open (model from the minted token; server_vad so segments finalize). Without
+    // this the socket connects but never emits a single transcription event (the "on but silent" bug).
+    dc.onopen = () => {
+      try {
+        dc.send(JSON.stringify({ type: 'session.update', session: {
+          type: 'transcription',
+          audio: { input: { transcription: { model: tok.model || 'gpt-4o-transcribe' }, turn_detection: { type: 'server_vad' } } },
+        } }));
+      } catch (e) { if (sttRealtimeOn()) bubble('sys', '⚠ live STT config: ' + e.message); }
+    };
     dc.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
       const type = String(m.type || '');
@@ -617,6 +628,10 @@ async function startRealtimeSTT(micStream) {
       } else if (/input_audio_transcription\.completed/.test(type)) {
         const seg = (m.transcript != null ? m.transcript : rtPartial) || '';
         rtFinal = (rtFinal + ' ' + seg).replace(/\s+/g, ' ').trim(); rtPartial = ''; liveCaption(rtFinal);
+      } else if (type === 'error' && sttRealtimeOn()) {
+        // Surface OpenAI's own error so a schema/model mismatch is diagnosable instead of silently falling back.
+        const em = (m.error && (m.error.message || m.error.code)) || JSON.stringify(m).slice(0, 200);
+        bubble('sys', '⚠ live STT: ' + em);
       }
     };
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
@@ -624,10 +639,14 @@ async function startRealtimeSTT(micStream) {
     const r = await fetch('https://api.openai.com/v1/realtime?intent=transcription' + (model ? '&model=' + encodeURIComponent(model) : ''), {
       method: 'POST', headers: { Authorization: 'Bearer ' + tok.value, 'Content-Type': 'application/sdp' }, body: offer.sdp,
     });
-    if (!r.ok) throw new Error('realtime sdp ' + r.status);
+    if (!r.ok) throw new Error('realtime sdp ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 160));
     await pc.setRemoteDescription({ type: 'answer', sdp: await r.text() });
     rtActive = true;
-  } catch (_) { stopRealtimeSTT(); } // silent → batch /gw/transcribe takes over on endpoint
+  } catch (e) {
+    // Surface the reason when the user explicitly enabled live STT (else stay quiet); batch still covers the turn.
+    if (sttRealtimeOn()) { try { bubble('sys', '⚠ live STT unavailable: ' + (e && e.message ? e.message : e)); } catch (_) {} }
+    stopRealtimeSTT();
+  }
 }
 function stopRealtimeSTT() {
   rtActive = false;
