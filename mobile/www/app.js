@@ -397,7 +397,7 @@ async function sendTurn(text) {
 
 // ---------- STOP ----------
 function stopEverything() {
-  suppressRestart = true; stopDrone(); stopAudio(); resetTTS();
+  suppressRestart = true; stopDrone(); stopAudio(); resetTTS(); stopRealtimeSTT(); clearLiveCaption();
   try { api('/gw/abort', {}).catch(() => {}); } catch (_) {}
   curBubble = null; stepsEl = null; lastTool = null; setState('idle');
   // Distinct "turn killed" feedback: a low descending double-tone (NOT the listen/stop mic cues), a
@@ -484,18 +484,24 @@ async function startRec(skipCue) {
     chunks = []; heardSpeech = false;
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     recorder.onstop = onRecStop; recorder.start(); setState('rec'); startVAD(stream);
+    if (sttRealtimeOn()) startRealtimeSTT(stream); // live captions while speaking (batch stays the fallback)
   } catch (e) { bubble('sys', '⚠ mic: ' + e.message); setState('idle'); }
 }
 function stopRec() { stopVAD(); try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }
 async function onRecStop() {
-  stopVAD(); try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+  stopVAD();
+  // Capture the streaming transcript (if any) BEFORE tearing the session down, then close it + drop the caption.
+  const rtUsed = rtActive, rtText = realtimeFinalText(); stopRealtimeSTT(); clearLiveCaption();
+  try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
   if (!heardSpeech) { setState('idle'); return; }   // tapped off without speaking → nothing
   const blob = new Blob(chunks, { type: (recorder && recorder.mimeType) || 'audio/webm' });
-  if (blob.size < 1200) { setState('idle'); return; }
+  if (!rtText && blob.size < 1200) { setState('idle'); return; }
   setState('busy');
   try {
-    const b64 = await blobB64(blob);
-    const { text } = await api('/gw/transcribe', { audio_base64: b64, mime: (recorder && recorder.mimeType) || 'audio/webm' });
+    // Prefer the live streaming transcript; fall back to batch /gw/transcribe when realtime was off/failed.
+    let text;
+    if (rtUsed && rtText) text = rtText;
+    else { const b64 = await blobB64(blob); text = (await api('/gw/transcribe', { audio_base64: b64, mime: (recorder && recorder.mimeType) || 'audio/webm' })).text; }
     if (text && isStopPhrase(text)) { // hands-free stop — drop the turn, don't send to the LLM, end listening
       suppressRestart = true; stopDrone(); setState('idle'); stopCue(); bubble('sys', '✓ stopped listening');
     } else if (text && text.trim()) { setState('idle'); await sendTurn(text.trim()); } else setState('idle');
@@ -553,6 +559,58 @@ function startVAD(mediaStream) {
 }
 function stopVAD() { if (vadRAF) cancelAnimationFrame(vadRAF); vadRAF = 0; try { if (vadCtx) { vadCtx.close(); vadCtx = null; } } catch (_) {} }
 function blobB64(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); }); }
+
+// ---------- live (streaming) STT ----------
+// OPTIONAL streaming transcription: reuse the live mic track and open a WebRTC session DIRECTLY to
+// OpenAI realtime transcription using an ephemeral secret minted by the connector (/gw/realtime-token —
+// the real key stays on the host). Partial deltas paint a live caption bubble while you speak; the final
+// transcript is used on endpoint. Batch /gw/transcribe stays the fallback (off, no token, or any error).
+// Gated by the device-local "Live transcription" setting. NOTE: the exact OpenAI realtime WebRTC URL +
+// event names can shift; on ANY failure we degrade silently to batch, so the feature is safe-by-default.
+let rtPC = null, rtDC = null, rtActive = false, rtFinal = '', rtPartial = '', rtCapEl = null;
+function sttRealtimeOn() { try { return localStorage.getItem('asmltr.sttmode') === 'realtime'; } catch (_) { return false; } }
+function setSttRealtime(on) { try { localStorage.setItem('asmltr.sttmode', on ? 'realtime' : 'batch'); } catch (_) {} }
+function realtimeFinalText() { return (rtFinal + ' ' + rtPartial).replace(/\s+/g, ' ').trim(); }
+function liveCaption(text) {
+  if (!rtCapEl) { rtCapEl = bubble('user', ''); if (rtCapEl.parentElement) rtCapEl.parentElement.classList.add('live'); }
+  rtCapEl.textContent = text || '…'; $('log').scrollTop = $('log').scrollHeight;
+}
+function clearLiveCaption() { try { if (rtCapEl && rtCapEl.parentElement) rtCapEl.parentElement.remove(); } catch (_) {} rtCapEl = null; }
+async function startRealtimeSTT(micStream) {
+  rtActive = false; rtFinal = ''; rtPartial = '';
+  try {
+    if (!window.RTCPeerConnection || !micStream) return;
+    const tok = await api('/gw/realtime-token', {});
+    if (!tok || !tok.value) return;
+    const pc = new RTCPeerConnection(); rtPC = pc;
+    for (const tr of micStream.getAudioTracks()) pc.addTrack(tr, micStream);
+    const dc = pc.createDataChannel('oai-events'); rtDC = dc;
+    dc.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
+      const type = String(m.type || '');
+      if (/input_audio_transcription\.delta/.test(type) && m.delta != null) {
+        rtPartial += m.delta; liveCaption(realtimeFinalText());
+      } else if (/input_audio_transcription\.completed/.test(type)) {
+        const seg = (m.transcript != null ? m.transcript : rtPartial) || '';
+        rtFinal = (rtFinal + ' ' + seg).replace(/\s+/g, ' ').trim(); rtPartial = ''; liveCaption(rtFinal);
+      }
+    };
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    const model = tok.model || '';
+    const r = await fetch('https://api.openai.com/v1/realtime?intent=transcription' + (model ? '&model=' + encodeURIComponent(model) : ''), {
+      method: 'POST', headers: { Authorization: 'Bearer ' + tok.value, 'Content-Type': 'application/sdp' }, body: offer.sdp,
+    });
+    if (!r.ok) throw new Error('realtime sdp ' + r.status);
+    await pc.setRemoteDescription({ type: 'answer', sdp: await r.text() });
+    rtActive = true;
+  } catch (_) { stopRealtimeSTT(); } // silent → batch /gw/transcribe takes over on endpoint
+}
+function stopRealtimeSTT() {
+  rtActive = false;
+  try { if (rtDC) rtDC.close(); } catch (_) {}
+  try { if (rtPC) rtPC.close(); } catch (_) {}
+  rtDC = null; rtPC = null;
+}
 
 // ---------- #77 device control ----------
 // The assistant emits a device_rpc frame; we run it against this phone via the native AsmltrDevice
@@ -638,7 +696,7 @@ function initOverlayChrome() {
 }
 
 // ---------- settings ----------
-function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgAutoListen')) $('cfgAutoListen').checked = autoListenOnOpen(); if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; try { loadNotifSettings(); } catch (_) {} $('sheet').classList.remove('hidden'); reportPanelHeight(); }
+function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgAutoListen')) $('cfgAutoListen').checked = autoListenOnOpen(); if ($('cfgSttRt')) $('cfgSttRt').checked = sttRealtimeOn(); if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; try { loadNotifSettings(); } catch (_) {} $('sheet').classList.remove('hidden'); reportPanelHeight(); }
 async function saveVoice() {
   const m = $('voiceMsg'); if (m) m.textContent = 'saving…';
   const enabled = $('cfgWake').checked, phrase = $('cfgWakePhrase').value.trim();
@@ -782,6 +840,7 @@ function init() {
   if ($('targetLeave')) $('targetLeave').addEventListener('click', leaveTarget);
   if ($('sessions')) $('sessions').addEventListener('click', (e) => { if (e.target === $('sessions')) { $('sessions').classList.add('hidden'); reportPanelHeight(); } });
   if ($('cfgAutoListen')) $('cfgAutoListen').addEventListener('change', (e) => setAutoListen(e.target.checked)); // device-local, persists immediately
+  if ($('cfgSttRt')) $('cfgSttRt').addEventListener('change', (e) => setSttRealtime(e.target.checked)); // device-local streaming-STT toggle
   if ($('cfgVoiceSave')) $('cfgVoiceSave').addEventListener('click', saveVoice);
   if ($('cfgNotifSave')) $('cfgNotifSave').addEventListener('click', saveNotifSettings);
   if ($('cfgNotifAccess')) $('cfgNotifAccess').addEventListener('click', () => { const n = NC(); if (n && n.openNotificationAccessSettings) n.openNotificationAccessSettings(); });
