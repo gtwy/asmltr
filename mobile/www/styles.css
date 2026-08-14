@@ -164,6 +164,21 @@ body.overlay.native .card {
    to avoid a circular size dependency) and scrolls. The native window height tracks the card. */
 body.overlay.native .log { flex: 0 1 auto; }
 
+/* ===== multi-session tab strip ===== */
+.tabstrip { display: flex; gap: 4px; padding: 5px 8px; overflow-x: auto; background: var(--panel);
+  border-bottom: 1px solid #ffffff0f; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.tabstrip::-webkit-scrollbar { display: none; }
+.tabstrip.hidden { display: none; }
+.tab { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 46%; padding: 5px 10px;
+  border: 1px solid #ffffff14; border-radius: 999px; background: var(--panel2); color: var(--muted);
+  font-size: 12px; font-weight: 600; cursor: pointer; }
+.tab.active { color: #fff; border-color: rgb(var(--accent2)); background: rgb(var(--accent)/.18); }
+.tab .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab.dirty::before { content: ''; width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: rgb(var(--accent2)); box-shadow: 0 0 6px rgb(var(--accent2)); } /* unseen activity on a background tab */
+.tab .tab-x { flex: none; opacity: .6; font-size: 11px; padding: 0 1px; }
+.tab .tab-x:active { opacity: 1; }
+
 /* ===== session switcher ===== */
 .targetbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(139,92,246,0.14);
   border-bottom: 1px solid #ffffff10; font-size: 12px; }

@@ -292,27 +292,51 @@ function connect() {
   es = new EventSource(url);
   es.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
-    if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) convKey = m.conversation_key; if (!activeTarget && !hydrated && $('log').children.length === 0) hydrateOwn(convKey); maybeAssistLaunch(); }
-    else if (m.type === 'thinking') addThinking(m.text);
-    else if (m.type === 'tool') addTool(m.name, m.input);
-    else if (m.type === 'tool_result') addToolResult(m.output, m.is_error);
-    else if (m.type === 'subagent') addSubagent(m);   // live sub-agent panel (Claude only)
-    else if (m.type === 'delta') { stopDrone(); if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text; feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; }
-    else if (m.type === 'done') { stopDrone(); curBubble = null; stepsEl = null; flushTTS(); }
-    else if (m.type === 'inject') { stepsEl = null; bubble('assistant', m.text); if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } }
-    else if (m.type === 'speak') { // asmltr notify (Part A): read a proactive message aloud, not a chat turn
-      stepsEl = null;
-      bubble('sys', '🔔 ' + (m.title ? (m.title + ' — ' + m.text) : m.text));
-      if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.title ? (m.title + '. ' + m.text) : m.text); flushTTS(); }
+    if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) { convKey = m.conversation_key; if (ownTab) ownTab.key = convKey; } if (!activeTarget && !hydrated && $('log').children.length === 0) hydrateOwn(convKey); maybeAssistLaunch(); return; }
+    if (m.type === 'device_rpc') { runDeviceRPC(m); return; }   // #77: act on this phone (device-level, tab-agnostic)
+    // Multi-tab demultiplex: frames carry `key` (their conversation). A frame for a BACKGROUND tab is
+    // buffered (keeps accumulating, never speaks) and replayed when that tab is activated; a frame for
+    // the ACTIVE tab (or a keyless push like inject/speak) renders live and drives TTS.
+    const tab = frameTab(m);
+    if (tab && tab !== activeTab) {
+      tab.pending.push(m); if (tab.pending.length > 2000) tab.pending.splice(0, tab.pending.length - 2000); // guard runaway buffers
+      if ((m.type === 'delta' || m.type === 'done') && !tab.dirty) { tab.dirty = true; updateTabStrip(); } // flag activity once
+      return;
     }
-    else if (m.type === 'media') { stepsEl = null; curBubble = null; mediaBubble('assistant', m); }  // inline image/file attachment
-    else if (m.type === 'device_rpc') runDeviceRPC(m);   // #77: the assistant wants to act on this phone
-    else if (m.type === 'error') { stopDrone(); bubble('sys', '⚠ ' + m.error); resetTTS(); setState('idle'); }
+    renderFrame(m, true);
   };
   es.onerror = () => { setStatus('reconnecting…', 'pill-warn'); if (es) { es.close(); es = null; } clearTimeout(reconnectT); reconnectT = setTimeout(connect, 2500); };
 }
 function minimized() { return document.body.classList.contains('minimized'); }
 function afterReply() { if (continuous && !suppressRestart && !minimized() && state === 'idle') setTimeout(() => { if (continuous && !suppressRestart && !minimized() && state === 'idle') startRec(); }, 350); }
+
+// Render ONE stream frame into the (already-active) log. `live` = this is the active tab's real-time
+// turn → drive TTS + drone + mic restart; false = a catch-up replay of buffered background frames
+// (paint the DOM only, never speak). All render helpers target $('log') = the active tab's node.
+function renderFrame(m, live) {
+  switch (m.type) {
+    case 'thinking': addThinking(m.text); break;
+    case 'tool': addTool(m.name, m.input); break;
+    case 'tool_result': addToolResult(m.output, m.is_error); break;
+    case 'subagent': addSubagent(m); break;                     // live sub-agent panel (Claude only)
+    case 'delta':
+      if (live) stopDrone();
+      if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text;
+      if (live) feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; break;
+    case 'done':
+      curBubble = null; stepsEl = null; if (live) { stopDrone(); flushTTS(); } break;
+    case 'inject':
+      stepsEl = null; bubble('assistant', m.text);
+      if (live && m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } break;
+    case 'speak':                                               // asmltr notify (Part A): read aloud, not a turn
+      stepsEl = null; bubble('sys', '🔔 ' + (m.title ? (m.title + ' — ' + m.text) : m.text));
+      if (live && m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.title ? (m.title + '. ' + m.text) : m.text); flushTTS(); } break;
+    case 'media': stepsEl = null; curBubble = null; mediaBubble('assistant', m); break; // inline image/file
+    case 'error':
+      if (live) stopDrone(); bubble('sys', '⚠ ' + m.error); if (live) { resetTTS(); setState('idle'); } break;
+    default: break;
+  }
+}
 
 // ---------- streaming TTS ----------
 function feedTTS(text) {
@@ -747,13 +771,77 @@ async function newSession() {
   stopEverything();
   try { const r = await api('/gw/forget', {}); if (m) m.textContent = r && r.existed ? '✓ context cleared — fresh session' : '✓ fresh session'; }
   catch (e) { if (m) m.textContent = '✗ ' + e.message; return; }
-  activeTarget = null; updateTargetBar();
+  if (ownTab && activeTab !== ownTab) switchTab(ownTab); // "new session" always clears the OWN device session
   $('log').innerHTML = ''; curBubble = null; resetSubPanel(); stepsEl = null; lastTool = null; resetTTS(); hydrated = true; // fresh session — nothing to rehydrate
   bubble('sys', 'New session started.');
 }
 
-// ---------- session switcher (browse/attach any asmltr session, like the web GUI) ----------
-let activeTarget = null; // {key, surface, title} when driving another session; null = this device's own
+// ---------- multi-session tabs (hold several live sessions at once) ----------
+// The device holds ONE gateway SSE; the connector tags every frame with its conversation `key`, so we
+// demultiplex that single stream into per-session TABS. Each tab owns its own <main class="log"> DOM
+// node (detached when backgrounded, remounted on switch) + its own working state (curBubble/lastTool/
+// sub-agent panel/hydrated). The ACTIVE tab renders live and drives TTS; background tabs buffer their
+// frames (`pending`) and keep accumulating, replaying silently when activated — so nothing is lost on
+// switch and only the active tab ever speaks. Tab 0 is this device's own session.
+let tabs = [], activeTab = null, ownTab = null, tabSeq = 0;
+let activeTarget = null; // mirrors the active tab: {key,surface,title} for an attached session, null for own
+function makeTab(o) {
+  const logEl = document.createElement('main'); logEl.className = 'log'; logEl.setAttribute('aria-live', 'polite');
+  return { id: 't' + (++tabSeq), own: !!o.own, key: o.key || '', surface: o.surface || '', title: o.title || '',
+    logEl, curBubble: null, lastTool: null, stepsEl: null, subPanel: null, subRows: {}, hydrated: false,
+    pending: [], dirty: false, needsHistory: false };
+}
+function initTabs() {
+  // Adopt the static #log as the own tab's node so existing markup/sizing carries over.
+  ownTab = makeTab({ own: true, title: 'Me' }); ownTab.logEl = document.getElementById('log');
+  tabs = [ownTab]; activeTab = ownTab; activeTarget = null;
+}
+// Persist / restore the working globals that belong to whichever tab is currently mounted.
+function saveTabState(t) { if (!t) return; t.curBubble = curBubble; t.lastTool = lastTool; t.stepsEl = stepsEl; t.subPanel = subPanel; t.subRows = subRows; t.hydrated = hydrated; }
+function restoreTabState(t) { curBubble = t.curBubble; lastTool = t.lastTool; stepsEl = t.stepsEl; subPanel = t.subPanel; subRows = t.subRows; hydrated = t.hydrated; }
+// Which tab does a frame belong to? Match on its `key`; keyless pushes (inject/speak/media from /out)
+// land on the active tab. A key with no open tab also falls back to the active tab (render live).
+function frameTab(m) { if (m && m.key) { const t = tabs.find((x) => x.key === m.key); if (t) return t; } return activeTab; }
+function switchTab(tab) {
+  if (!tab || tab === activeTab) { if (tab) { tab.dirty = false; updateTabStrip(); } return; }
+  // leaving the current tab: stop its mic/readout (TTS follows the active tab only) and stash its state
+  if (state === 'rec') stopRec();
+  suppressRestart = true; stopDrone(); stopAudio(); resetTTS();
+  saveTabState(activeTab);
+  const oldEl = activeTab.logEl;
+  tab.logEl.id = 'log'; if (nativeOverlay() && oldEl.style.maxHeight) tab.logEl.style.maxHeight = oldEl.style.maxHeight;
+  oldEl.removeAttribute('id'); oldEl.replaceWith(tab.logEl); // swap the mounted node
+  activeTab = tab; restoreTabState(tab);
+  activeTarget = tab.own ? null : { key: tab.key, surface: tab.surface, title: tab.title };
+  suppressRestart = false; setState('idle');
+  // catch-up: replay everything that streamed in while this tab was backgrounded (no TTS)
+  const pend = tab.pending; tab.pending = []; tab.dirty = false;
+  for (const fr of pend) renderFrame(fr, false);
+  updateTabStrip(); updateTargetBar();
+  $('log').scrollTop = $('log').scrollHeight; reportPanelHeight();
+}
+function closeTab(tab) {
+  if (!tab || tab.own) return;                 // the own session tab is permanent
+  const wasActive = tab === activeTab;
+  const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1);
+  if (wasActive) switchTab(tabs[Math.max(0, i - 1)] || ownTab);
+  else updateTabStrip();
+}
+function updateTabStrip() {
+  const strip = $('tabstrip'); if (!strip) return;
+  strip.classList.toggle('hidden', tabs.length <= 1);
+  strip.innerHTML = '';
+  for (const t of tabs) {
+    const b = document.createElement('button'); b.className = 'tab' + (t === activeTab ? ' active' : '') + (t.dirty && t !== activeTab ? ' dirty' : '');
+    b.setAttribute('role', 'tab');
+    const label = t.own ? 'Me' : (t.title || t.key);
+    const nm = document.createElement('span'); nm.className = 'tab-name'; nm.textContent = label; b.appendChild(nm);
+    b.addEventListener('click', () => switchTab(t));
+    if (!t.own) { const x = document.createElement('span'); x.className = 'tab-x'; x.textContent = '✕'; x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(t); }); b.appendChild(x); }
+    strip.appendChild(b);
+  }
+  reportPanelHeight();
+}
 function updateTargetBar() {
   const bar = $('targetBar'); if (!bar) return;
   if (activeTarget) { bar.classList.remove('hidden'); $('targetLabel').textContent = '▸ [' + activeTarget.surface + '] ' + (activeTarget.title || activeTarget.key); }
@@ -770,7 +858,7 @@ async function openSessions() {
 function renderSessions(list) {
   const el = $('sessList'); if (!el) return; el.innerHTML = '';
   for (const s of list) {
-    const row = document.createElement('div'); row.className = 'sessrow' + (activeTarget && activeTarget.key === s.key ? ' active' : '');
+    const row = document.createElement('div'); row.className = 'sessrow' + (tabs.some((t) => t.key === s.key) ? ' active' : '');
     const head = document.createElement('div'); head.className = 'st';
     const badge = document.createElement('span'); badge.className = 'sess-badge'; badge.textContent = s.surface;
     const title = document.createElement('span'); title.className = 'sess-title'; title.textContent = s.title || s.key;
@@ -795,14 +883,17 @@ function renderHistoryItems(items) {
   curBubble = null; // a live delta must start a fresh bubble, not append onto a historical one
   $('log').scrollTop = $('log').scrollHeight;
 }
+// Selecting a session OPENS it as a tab (or focuses its existing tab) — sessions stay live side-by-side
+// instead of swapping the single view. First open lazily loads its history into the new tab.
 async function selectSession(s) {
-  activeTarget = { key: s.key, surface: s.surface, title: s.title || s.key };
   $('sessions').classList.add('hidden');
-  updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; resetSubPanel(); stepsEl = null; lastTool = null; hydrated = true; // target view owns its history
+  const existing = tabs.find((t) => t.key === s.key);
+  if (existing) { switchTab(existing); reportPanelHeight(); return; }
+  const tab = makeTab({ key: s.key, surface: s.surface, title: s.title || s.key });
+  tabs.push(tab); switchTab(tab); tab.hydrated = true; hydrated = true; // this tab owns its own history
   bubble('sys', 'Loaded [' + s.surface + '] ' + (s.title || s.key) + ' — your next message goes here.');
-  try { const r = await apiGet('/gw/history', { key: s.key, limit: '80' }); renderHistoryItems(r.items); }
-  catch (e) { bubble('sys', '⚠ history: ' + e.message); }
+  try { const r = await apiGet('/gw/history', { key: s.key, limit: '80' }); if (activeTab === tab) renderHistoryItems(r.items); }
+  catch (e) { if (activeTab === tab) bubble('sys', '⚠ history: ' + e.message); }
   reportPanelHeight();
 }
 // Rehydrate THIS device's own conversation on (re)open — the core session persists even though the WebView
@@ -819,15 +910,13 @@ async function hydrateOwn(key, limit) {
   } catch (_) {}
   reportPanelHeight();
 }
-function leaveTarget() {
-  activeTarget = null; updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; resetSubPanel(); stepsEl = null; lastTool = null;
-  hydrated = false; if (convKey) hydrateOwn(convKey); else bubble('sys', 'Back to your own session.');
-}
+// The targetBar "close tab" button closes the current attached tab (returns to whatever's behind it).
+function leaveTarget() { if (activeTab && !activeTab.own) closeTab(activeTab); }
 async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/, ''); $('cfgMsg').textContent = 'testing…'; try { const r = await fetch(base + '/health'); const j = await r.json(); $('cfgMsg').textContent = j.status === 'ok' ? '✓ reachable' : 'unexpected'; } catch (e) { $('cfgMsg').textContent = '✗ ' + e.message; } }
 
 // ---------- wire up ----------
 function init() {
+  initTabs(); // the own-device session tab (tab 0) must exist before any frame/hydrate lands
   if (OVERLAY) { document.documentElement.style.background = 'transparent'; document.body.classList.add('overlay'); if (NATIVE) document.body.classList.add('native'); initOverlayChrome(); }
   $('agentName').textContent = cfg.agentName || 'assistant';
   try { voiceOrb.start(); } catch (_) {}   // the reactive orb-face replaces the old mic icon

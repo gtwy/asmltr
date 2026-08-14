@@ -311,9 +311,11 @@ async function start(ctx) {
     let replyText = ''; // accumulate streamed reply so it persists to history (live pushSSE alone isn't retained)
     try {
       await ctx.core.handleStream(envelope, {
-        onDelta: (t) => { replyText += t; pushSSE(device, { type: 'delta', text: t }); },            // streamed reply text
-        onThinking: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'thinking', session_id: convo, identity: 'assistant', payload: { text: t } }); pushSSE(device, { type: 'thinking', text: t }); }, // reasoning steps
-        onToolCall: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool', session_id: convo, identity: 'assistant', payload: { tool: t.name, input: t.input } }); pushSSE(device, { type: 'tool', name: t.name, input: t.input }); }, // tool call + args
+        // `key: convo` tags every frame with its conversation so the app can demultiplex concurrent
+        // turns into the right session TAB (one device SSE carries all of a device's live sessions).
+        onDelta: (t) => { replyText += t; pushSSE(device, { type: 'delta', key: convo, text: t }); },            // streamed reply text
+        onThinking: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'thinking', session_id: convo, identity: 'assistant', payload: { text: t } }); pushSSE(device, { type: 'thinking', key: convo, text: t }); }, // reasoning steps
+        onToolCall: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool', session_id: convo, identity: 'assistant', payload: { tool: t.name, input: t.input } }); pushSSE(device, { type: 'tool', key: convo, name: t.name, input: t.input }); }, // tool call + args
         onToolResult: (r) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool_result', session_id: convo, identity: 'assistant', payload: { output: r.output, is_error: r.is_error } }); pushSSE(device, { type: 'tool_result', key: convo, output: r.output, is_error: r.is_error }); }, // its output
         // Sub-agent (Task) lifecycle → SSE `subagent` frame the app renders in a live panel (Claude only;
         // Codex/Gemini never emit these so the app simply never shows the panel).
@@ -324,7 +326,7 @@ async function start(ctx) {
       pushSSE(device, { type: 'done', conversation_key: convo });
     } catch (e) {
       ctx.log(`android turn error (${device}): ${e.message}`);
-      pushSSE(device, { type: 'error', error: e.message });
+      pushSSE(device, { type: 'error', key: convo, error: e.message });
     }
     try { ctx.heartbeat(); } catch (_) {}
   });
