@@ -481,6 +481,18 @@ async function start(ctx) {
       res.json({ ok: true, text: r.text || '', model: r.model });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
+  // Live (streaming) STT: mint a short-lived EPHEMERAL OpenAI realtime-transcription secret so the phone
+  // can open a WebRTC session straight to OpenAI and receive partial transcript deltas while the user
+  // speaks — the real openai key never leaves the host (minted in shared/speech/stt.realtimeToken).
+  // The overlay falls back to batch /gw/transcribe when this is off or fails.
+  app.post('/gw/realtime-token', async (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    try {
+      const t = await stt.realtimeToken({ model: b.model });
+      res.json({ ok: true, value: t.value, expires_at: t.expires_at, model: t.model });
+    } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  });
   app.post('/gw/tts', async (req, res) => {
     const b = req.body || {};
     if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
