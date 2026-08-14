@@ -609,17 +609,9 @@ async function startRealtimeSTT(micStream) {
     const pc = new RTCPeerConnection(); rtPC = pc;
     for (const tr of micStream.getAudioTracks()) pc.addTrack(tr, micStream);
     const dc = pc.createDataChannel('oai-events'); rtDC = dc;
-    // A transcription session does NOTHING until it's configured over the data channel — send
-    // session.update on open (model from the minted token; server_vad so segments finalize). Without
-    // this the socket connects but never emits a single transcription event (the "on but silent" bug).
-    dc.onopen = () => {
-      try {
-        dc.send(JSON.stringify({ type: 'session.update', session: {
-          type: 'transcription',
-          audio: { input: { transcription: { model: tok.model || 'gpt-4o-transcribe' }, turn_detection: { type: 'server_vad' } } },
-        } }));
-      } catch (e) { if (sttRealtimeOn()) bubble('sys', '⚠ live STT config: ' + e.message); }
-    };
+    // The transcription session (model, turn detection, etc.) is baked into the ephemeral secret when the
+    // connector mints it via /v1/realtime/client_secrets — the client sends NO session.update; it just
+    // receives transcription events on this data channel.
     dc.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
       const type = String(m.type || '');
@@ -635,8 +627,9 @@ async function startRealtimeSTT(micStream) {
       }
     };
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
-    const model = tok.model || '';
-    const r = await fetch('https://api.openai.com/v1/realtime?intent=transcription' + (model ? '&model=' + encodeURIComponent(model) : ''), {
+    // GA WebRTC SDP exchange endpoint. The old beta `/v1/realtime?intent=transcription` was retired
+    // ("the realtime beta API is no longer supported"); the session type/model ride in the ephemeral secret.
+    const r = await fetch('https://api.openai.com/v1/realtime/calls', {
       method: 'POST', headers: { Authorization: 'Bearer ' + tok.value, 'Content-Type': 'application/sdp' }, body: offer.sdp,
     });
     if (!r.ok) throw new Error('realtime sdp ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 160));

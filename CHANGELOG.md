@@ -14,6 +14,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.12.2] - 2026-08-13
+
+### Fixed
+- **Live transcription now connects (GA endpoint) with the right model.** The SDP exchange used OpenAI's
+  retired beta endpoint (`/v1/realtime?intent=transcription` → HTTP 400 "beta API is no longer supported");
+  it now posts to the GA `/v1/realtime/calls`. The realtime role also mints **gpt-live-transcribe** (the
+  streaming model, no server_vad) instead of the batch gpt-4o-transcribe, aligning with the voice-engine
+  role split (epic #113). The client no longer sends a redundant session.update — the session is configured
+  in the minted ephemeral secret.
+
 ## [0.12.1] - 2026-08-13
 
 ### Fixed
