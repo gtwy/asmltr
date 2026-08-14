@@ -222,6 +222,7 @@ async function start(ctx) {
           case 'thinking': items.push({ kind: 'thinking', text: p.text || '', ts: e.ts }); break;
           case 'tool': items.push({ kind: 'tool', name: p.tool || p.name || 'tool', input: p.input, ts: e.ts }); break;
           case 'tool_result': items.push({ kind: 'tool_result', output: p.output || '', is_error: !!p.is_error, ts: e.ts }); break;
+          case 'subagent': items.push({ kind: 'subagent', id: p.id, name: p.name, status: p.status, summary: p.summary || '', ts: e.ts }); break;
           default: break; // session-start/end/control → skip
         }
       }
@@ -313,7 +314,10 @@ async function start(ctx) {
         onDelta: (t) => { replyText += t; pushSSE(device, { type: 'delta', text: t }); },            // streamed reply text
         onThinking: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'thinking', session_id: convo, identity: 'assistant', payload: { text: t } }); pushSSE(device, { type: 'thinking', text: t }); }, // reasoning steps
         onToolCall: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool', session_id: convo, identity: 'assistant', payload: { tool: t.name, input: t.input } }); pushSSE(device, { type: 'tool', name: t.name, input: t.input }); }, // tool call + args
-        onToolResult: (r) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool_result', session_id: convo, identity: 'assistant', payload: { output: r.output, is_error: r.is_error } }); pushSSE(device, { type: 'tool_result', output: r.output, is_error: r.is_error }); }, // its output
+        onToolResult: (r) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool_result', session_id: convo, identity: 'assistant', payload: { output: r.output, is_error: r.is_error } }); pushSSE(device, { type: 'tool_result', key: convo, output: r.output, is_error: r.is_error }); }, // its output
+        // Sub-agent (Task) lifecycle → SSE `subagent` frame the app renders in a live panel (Claude only;
+        // Codex/Gemini never emit these so the app simply never shows the panel).
+        onSubagent: (s) => { ctx.emit({ surface: 'assistant-native', event_type: 'subagent', session_id: convo, identity: 'assistant', payload: { id: s.id, name: s.name, status: s.status, summary: s.summary } }); pushSSE(device, { type: 'subagent', key: convo, id: s.id, name: s.name, status: s.status, summary: s.summary }); },
       });
       // Persist the assistant's final reply under 'assistant-native' so it replays on reopen (symmetric with media).
       if (replyText.trim()) ctx.emit({ surface: 'assistant-native', event_type: 'outbound', session_id: convo, identity: 'assistant', payload: { text: replyText } });

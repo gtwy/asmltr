@@ -21,7 +21,14 @@ const id = 'claude';
 const cheapModel = process.env.ASMLTR_TITLE_MODEL || 'haiku';
 let _lastModel = null; // the concrete model id the alias resolved to (surfaced to the GUI)
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, onDelta, onSegment, onTool, onThinking, images = [] }) {
+// Best-effort text summary of a tool_result's content (string | array of {type:'text',text} blocks).
+function _resultText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map((c) => (c && c.type === 'text' ? c.text : (typeof c === 'string' ? c : ''))).join(' ').trim();
+  return '';
+}
+
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, onDelta, onSegment, onTool, onThinking, onSubagent, images = [] }) {
   const query = q();
   const options = {
     stream: true,
@@ -62,6 +69,10 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
   const tools = [];
   let usage = { tokens_in: 0, tokens_out: 0, cost_usd: 0 };
   let isError = false;
+  // Sub-agent (Task tool) lifecycle: a `Task` tool_use spawns a sub-agent (it runs and dies WITH this
+  // turn); its matching tool_result is where it finishes. Surface start/stop via onSubagent so a UI can
+  // show a live "sub-agents for this turn" panel. View-only — the SDK exposes no per-sub-agent kill.
+  const subagents = new Map(); // tool_use_id → { name }
 
   for await (const event of response) {
     if (abortController && abortController.signal.aborted) break;
@@ -85,8 +96,22 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
           } else if (c.type === 'tool_use') {
             tools.push({ id: c.id, name: c.name, input: c.input });
             if (onTool) { try { onTool({ name: c.name, input: c.input }); } catch (_) {} }
+            if (c.name === 'Task') { // spawns a sub-agent
+              const nm = (c.input && (c.input.description || c.input.subagent_type)) || 'sub-agent';
+              subagents.set(c.id, { name: nm });
+              if (onSubagent) { try { onSubagent({ id: c.id, name: nm, status: 'running', summary: (c.input && c.input.description) || '' }); } catch (_) {} }
+            }
           } else if (c.type === 'thinking' && c.thinking && onThinking) {
             try { onThinking(c.thinking); } catch (_) {}
+          }
+        }
+        break;
+      case 'user':
+        // a sub-agent (Task) finishing shows up as the tool_result for its tool_use id
+        for (const c of event.message?.content || []) {
+          if (c && c.type === 'tool_result' && subagents.has(c.tool_use_id)) {
+            const sa = subagents.get(c.tool_use_id); subagents.delete(c.tool_use_id);
+            if (onSubagent) { try { onSubagent({ id: c.tool_use_id, name: sa.name, status: 'stopped', summary: _resultText(c.content).slice(0, 400) }); } catch (_) {} }
           }
         }
         break;
@@ -114,6 +139,9 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
         break;
     }
   }
+
+  // any sub-agents still open when the turn ends die with it — report them stopped so the UI closes them out
+  if (onSubagent) for (const [tid, sa] of subagents) { try { onSubagent({ id: tid, name: sa.name, status: 'stopped', summary: '' }); } catch (_) {} }
 
   return { text: text.trim(), segments: segments.filter(Boolean), engineSessionId, tools, usage, isError };
 }
