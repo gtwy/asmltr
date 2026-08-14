@@ -239,6 +239,37 @@ function addToolResult(output, isErr) {
   if (isErr) lastTool.wrap.classList.add('tool-err');
   lastTool = null;
 }
+// Sub-agent panel: a live "sub-agents for this turn" section. A `subagent` frame (Claude only —
+// Codex/Gemini never emit them, so this panel simply never appears there = the capability gate) opens
+// the panel on the first running agent and updates each agent's row in place (running ● → stopped ✓).
+// View-only: sub-agents die with the turn and the SDK exposes no per-sub-agent kill.
+let subPanel = null, subRows = {};
+function resetSubPanel() { subPanel = null; subRows = {}; }
+function addSubagent(s) {
+  if (!s || !s.id) return;
+  curBubble = null;
+  if (!subPanel) {
+    subPanel = document.createElement('div'); subPanel.className = 'subpanel';
+    const h = document.createElement('div'); h.className = 'subpanel-head'; h.textContent = '🤖 sub-agents';
+    subPanel.appendChild(h); $('log').appendChild(subPanel); subRows = {};
+  }
+  let row = subRows[s.id];
+  if (!row) {
+    row = document.createElement('div'); row.className = 'subrow';
+    const dot = document.createElement('span'); dot.className = 'subdot';
+    const nm = document.createElement('span'); nm.className = 'subname';
+    const sm = document.createElement('span'); sm.className = 'subsum';
+    row.appendChild(dot); row.appendChild(nm); row.appendChild(sm);
+    subPanel.appendChild(row); subRows[s.id] = row;
+    row._dot = dot; row._nm = nm; row._sm = sm;
+  }
+  const stopped = s.status === 'stopped';
+  row.classList.toggle('done', stopped);
+  row._dot.textContent = stopped ? '✓' : '●';
+  row._nm.textContent = s.name || 'sub-agent';
+  if (s.summary) row._sm.textContent = s.summary;
+  $('log').scrollTop = $('log').scrollHeight;
+}
 function setState(s) {
   state = s;
   const t = $('talk'), l = $('talkLabel');
@@ -265,6 +296,7 @@ function connect() {
     else if (m.type === 'thinking') addThinking(m.text);
     else if (m.type === 'tool') addTool(m.name, m.input);
     else if (m.type === 'tool_result') addToolResult(m.output, m.is_error);
+    else if (m.type === 'subagent') addSubagent(m);   // live sub-agent panel (Claude only)
     else if (m.type === 'delta') { stopDrone(); if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text; feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; }
     else if (m.type === 'done') { stopDrone(); curBubble = null; stepsEl = null; flushTTS(); }
     else if (m.type === 'inject') { stepsEl = null; bubble('assistant', m.text); if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } }
@@ -354,7 +386,7 @@ async function apiGet(path, params) {
 }
 async function sendTurn(text) {
   if (state === 'busy') return;
-  suppressRestart = false; resetTTS(); lastTool = null;
+  suppressRestart = false; resetTTS(); lastTool = null; resetSubPanel();
   bubble('user', text); setState('busy');
   if (!muted) { chime(); startDrone(); }
   // If a session is selected in the switcher, direct the turn at it (else this device's own session).
@@ -658,7 +690,7 @@ async function newSession() {
   try { const r = await api('/gw/forget', {}); if (m) m.textContent = r && r.existed ? '✓ context cleared — fresh session' : '✓ fresh session'; }
   catch (e) { if (m) m.textContent = '✗ ' + e.message; return; }
   activeTarget = null; updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; resetTTS(); hydrated = true; // fresh session — nothing to rehydrate
+  $('log').innerHTML = ''; curBubble = null; resetSubPanel(); stepsEl = null; lastTool = null; resetTTS(); hydrated = true; // fresh session — nothing to rehydrate
   bubble('sys', 'New session started.');
 }
 
@@ -699,6 +731,7 @@ function renderHistoryItems(items) {
     else if (it.kind === 'thinking') addThinking(it.text);
     else if (it.kind === 'tool') addTool(it.name, it.input);
     else if (it.kind === 'tool_result') addToolResult(it.output, it.is_error);
+    else if (it.kind === 'subagent') addSubagent(it);
     else if (it.kind === 'media') mediaBubble('assistant', it);
   }
   curBubble = null; // a live delta must start a fresh bubble, not append onto a historical one
@@ -708,7 +741,7 @@ async function selectSession(s) {
   activeTarget = { key: s.key, surface: s.surface, title: s.title || s.key };
   $('sessions').classList.add('hidden');
   updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; hydrated = true; // target view owns its history
+  $('log').innerHTML = ''; curBubble = null; resetSubPanel(); stepsEl = null; lastTool = null; hydrated = true; // target view owns its history
   bubble('sys', 'Loaded [' + s.surface + '] ' + (s.title || s.key) + ' — your next message goes here.');
   try { const r = await apiGet('/gw/history', { key: s.key, limit: '80' }); renderHistoryItems(r.items); }
   catch (e) { bubble('sys', '⚠ history: ' + e.message); }
@@ -722,7 +755,7 @@ async function hydrateOwn(key, limit) {
   try {
     const r = await apiGet('/gw/history', { key, limit: String(limit) });
     const items = r.items || [];
-    $('log').innerHTML = ''; curBubble = null; lastTool = null;
+    $('log').innerHTML = ''; curBubble = null; resetSubPanel(); lastTool = null;
     if (items.length >= limit) { const e = document.createElement('div'); e.className = 'sys-earlier'; e.textContent = '↑ load earlier messages'; e.addEventListener('click', () => hydrateOwn(key, limit + 200)); $('log').appendChild(e); }
     renderHistoryItems(items);
   } catch (_) {}
@@ -730,7 +763,7 @@ async function hydrateOwn(key, limit) {
 }
 function leaveTarget() {
   activeTarget = null; updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null;
+  $('log').innerHTML = ''; curBubble = null; resetSubPanel(); stepsEl = null; lastTool = null;
   hydrated = false; if (convKey) hydrateOwn(convKey); else bubble('sys', 'Back to your own session.');
 }
 async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/, ''); $('cfgMsg').textContent = 'testing…'; try { const r = await fetch(base + '/health'); const j = await r.json(); $('cfgMsg').textContent = j.status === 'ok' ? '✓ reachable' : 'unexpected'; } catch (e) { $('cfgMsg').textContent = '✗ ' + e.message; } }

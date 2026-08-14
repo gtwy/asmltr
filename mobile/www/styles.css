@@ -49,6 +49,18 @@ svg { width: 20px; height: 20px; display: block; }
 .tool-err .tool-head { color: #fca5a5; }
 .icon.on { color: rgb(var(--accent2)); }
 
+/* sub-agent panel — a live list of Task sub-agents spawned during the active turn (running → stopped) */
+.subpanel { align-self: stretch; max-width: 92%; margin: 2px 0; padding: 7px 10px; border-radius: 12px;
+  background: rgb(var(--accent2)/.08); border: 1px solid rgb(var(--accent2)/.28); }
+.subpanel-head { font-size: 11px; font-weight: 700; letter-spacing: .3px; color: rgb(var(--accent2)); margin-bottom: 4px; }
+.subrow { display: flex; align-items: baseline; gap: 7px; font-size: 12px; padding: 2px 0; }
+.subdot { flex: none; color: var(--warn); font-size: 10px; animation: subpulse 1.2s ease-in-out infinite; }
+.subrow.done .subdot { color: var(--on); animation: none; }
+.subname { flex: none; font-weight: 600; color: var(--text); }
+.subrow.done .subname { color: var(--muted); }
+.subsum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+@keyframes subpulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
 .controls { padding: 12px 14px; padding-bottom: max(12px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 9px; }
 /* The reactive orb-face IS the talk control: a glowing ambient orb with expressive eyes that reacts to
    the voice state + live audio amplitude (driven from app.js voiceOrb). */
