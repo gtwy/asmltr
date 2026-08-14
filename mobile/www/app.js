@@ -116,7 +116,8 @@ const voiceOrb = (() => {
     let open = 23, rad = 9, happy = false;
     if (vs === 'listening') { open = 25; rad = 10; } else if (vs === 'thinking') { open = 20; rad = 8; } else if (vs === 'speaking') { happy = amp > 0.72; open = happy ? 19 : 23; }
     const eh = Math.max(2, open * (1 - blink));
-    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 5px 5px 11px 11px' : rad + 'px'; }
+    const bright = vs === 'listening'; // listening → noticeably whiter/brighter eyes (see .eye.bright)
+    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 5px 5px 11px 11px' : rad + 'px'; e.classList.toggle('bright', bright); }
     if (eyes) eyes.style.transform = `translate(${look.x}px,${look.y}px) scale(${1 + amp * 0.025})`;
     const dr = 1.5 + amp * 9; // drift barely moves at rest, swims when the orb is active
     if (glowA) glowA.style.transform = `translate(${Math.sin(t / 150) * dr}px,${Math.cos(t / 185) * dr * 0.7}px) scale(${1 + amp * 0.36})`;
