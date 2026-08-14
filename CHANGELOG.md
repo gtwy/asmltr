@@ -14,6 +14,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.12.3] - 2026-08-13
+
+### Fixed
+- **Live transcription no longer double-transcribes or runs while the mic is off.** `startRealtimeSTT` is
+  async (token mint + SDP round-trip); a short utterance could end before setup finished, so the connection
+  opened *after* stop — transcribing with the mic off (token burn) and stacking a second stream on the next
+  listen (the "everything comes back twice" doubling). A generation guard now closes any superseded/in-flight
+  session and tears the peer down on every listen-end path, so there is never a live realtime session unless
+  listening is active.
+
 ## [0.12.2] - 2026-08-13
 
 ### Fixed
