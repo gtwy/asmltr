@@ -485,6 +485,11 @@ async function handle(envelope, opts = {}) {
       onSegment: opts.onSegment ? _pushSegment : undefined,
       onTool: opts.onTool ? ((t) => { try { opts.onTool(t); } catch (_) {} }) : undefined,
       onThinking: opts.onThinking ? _pushThinking : undefined,
+      // Sub-agent (Task) lifecycle → record for history replay + forward live to a step consumer.
+      onSubagent: (s) => {
+        try { record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core', event_type: 'subagent', payload: { id: s.id, name: s.name, status: s.status, summary: truncate(s.summary, 500) } }); } catch (_) {}
+        if (opts.onSubagent) { try { opts.onSubagent(s); } catch (_) {} }
+      },
       onEvent: (sdkEvt) => {
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
@@ -1092,6 +1097,7 @@ app.post('/v2/stream', async (req, res) => {
       onToolCall: (t) => { if (t && t.name) frame({ type: 'tool', name: t.name, input: t.input }); }, // a tool call + its args
       onToolResult: (r) => { if (r) frame({ type: 'tool_result', output: r.output, is_error: !!r.is_error }); }, // its result
       onThinking: (text) => { if (text) frame({ type: 'thinking', text }); },      // a completed thinking block
+      onSubagent: (s) => { if (s && s.id) frame({ type: 'subagent', id: s.id, name: s.name, status: s.status, summary: s.summary }); }, // sub-agent (Task) start/stop
     });
     frame({ type: 'done', actions });
   } catch (err) {
