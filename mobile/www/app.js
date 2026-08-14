@@ -368,6 +368,10 @@ function stopEverything() {
   suppressRestart = true; stopDrone(); stopAudio(); resetTTS();
   try { api('/gw/abort', {}).catch(() => {}); } catch (_) {}
   curBubble = null; stepsEl = null; lastTool = null; setState('idle');
+  // Distinct "turn killed" feedback: a low descending double-tone (NOT the listen/stop mic cues), a
+  // visible system bubble, and the orb back to idle (already via setState) — so a hands-free / screen-off
+  // user recognises the kill by ear, and the chat shows the turn was dropped.
+  killCue(); bubble('sys', '⏹ turn stopped');
 }
 
 // ---------- audio ----------
@@ -401,6 +405,7 @@ function beepPair(f1, f2) {
 }
 function listenCue() { beepPair(440, 660); } // ascending — "now listening"
 function stopCue() { beepPair(660, 440); }   // descending — "stopped, mic off"
+function killCue() { beepPair(330, 220); }   // low descending "thunk" — turn KILLED (distinct from the mic cues)
 function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'); drone.loop = true; drone.volume = 0.45; } drone.currentTime = 0; drone.play().catch(() => {}); } catch (_) {} }
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 
