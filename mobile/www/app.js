@@ -463,25 +463,51 @@ async function onRecStop() {
     } else if (text && text.trim()) { setState('idle'); await sendTurn(text.trim()); } else setState('idle');
   } catch (e) { bubble('sys', '⚠ ' + e.message); setState('idle'); }
 }
+// End-of-speech detection. Design bias: WAIT TOO LONG rather than cut early. Key fixes over the old
+// loop (which froze the noise floor after the 350ms prime and then clipped people mid-sentence):
+//   • the floor keeps SLOWLY adapting during silence (tracks drifting room tone, never ratchets up on
+//     the speaker's own voice), so the threshold doesn't go stale.
+//   • a min-utterance guard: we can't endpoint within the first ~1s of detected speech (a slow starter
+//     or a mid-thought pause won't drop the turn).
+//   • the hangover honours the user's relaxed endpoint_ms from /gw/theme, floored + padded so it's
+//     never trigger-happy, and requires SUSTAINED sub-threshold silence (any speech frame resets it).
 function startVAD(mediaStream) {
   try {
     vadCtx = new (window.AudioContext || window.webkitAudioContext)();
     const src = vadCtx.createMediaStreamSource(mediaStream);
     const an = vadCtx.createAnalyser(); an.fftSize = 1024; src.connect(an);
     const buf = new Uint8Array(an.fftSize);
-    const t0 = Date.now(); let floor = 0.01, floorN = 0, quietSince = 0;
+    const t0 = Date.now(); let floor = 0.01, floorN = 0, quietSince = 0, speechStart = 0;
     // sensitivity 0..100 → threshold scale 1.5 (needs louder) .. 0.5 (more sensitive); 50 = neutral.
     const f = 1.5 - (Math.max(0, Math.min(100, vadCfg.sensitivity)) / 100);
-    const endpointMs = vadCfg.endpoint_ms || 1600, startMs = vadCfg.start_ms || 8000;
+    // Honour the user's relaxed endpoint_ms, but never endpoint faster than a floor (people pause), and
+    // add a hangover so it leans toward "waits too long" over "cuts early".
+    const endpointMs = Math.max(900, vadCfg.endpoint_ms || 1600) + 400;
+    const startMs = vadCfg.start_ms || 8000;
+    const MIN_UTTER_MS = 1000; // can't endpoint in the first ~1s of detected speech (min-utterance guard)
     const rms = () => { an.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; } return Math.sqrt(s / buf.length); };
+    const thresh = () => f * Math.max(0.03, floor * 2.2 + 0.012);
     const tick = () => {
       const level = rms(); const now = Date.now(); const dt = now - t0;
       try { if (state === 'rec') voiceOrb.setAmp(Math.min(1, level * 6)); } catch (_) {} // orb ripples with your voice
+      // prime the floor from the opening (pre-speech) window
       if (dt < 350) { floor = (floor * floorN + level) / (floorN + 1); floorN++; vadRAF = requestAnimationFrame(tick); return; }
-      const speaking = level > f * Math.max(0.03, floor * 2.2 + 0.012);
-      if (speaking) { heardSpeech = true; quietSince = 0; }
-      else if (heardSpeech) { if (!quietSince) quietSince = now; else if (now - quietSince > endpointMs) { stopRec(); return; } }
-      else if (dt > startMs) { stopRec(); return; }
+      const speaking = level > thresh();
+      if (speaking) {
+        heardSpeech = true; if (!speechStart) speechStart = now; quietSince = 0;
+      } else {
+        // slowly track ambient drift during genuine near-silence only (never while a voice is active),
+        // so the threshold stays honest without creeping up on the speaker.
+        if (level < floor * 1.5) floor += (level - floor) * 0.02;
+        if (heardSpeech) {
+          // min-utterance guard: hold off endpointing until the utterance has run ~1s.
+          if (speechStart && now - speechStart < MIN_UTTER_MS) { vadRAF = requestAnimationFrame(tick); return; }
+          // require SUSTAINED silence: a single speech frame above resets quietSince, so a flicker
+          // (a between-words dip) can't trip the endpoint — only continuous silence for the hangover.
+          if (!quietSince) quietSince = now;
+          else if (now - quietSince > endpointMs) { stopRec(); return; }
+        } else if (dt > startMs) { stopRec(); return; } // never spoke → give up after start window
+      }
       vadRAF = requestAnimationFrame(tick);
     };
     vadRAF = requestAnimationFrame(tick);
