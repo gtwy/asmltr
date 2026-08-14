@@ -14,6 +14,35 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.12.0] - 2026-08-13
+
+Assistant-app overlay overhaul: multi-session tabs, sub-agent visibility, live streaming transcription, and a batch of voice-UX fixes.
+
+### Added
+- **Multi-session tabs in the assistant app.** The overlay can hold several live sessions at once — a tab
+  strip switches between them without closing any. The device holds one gateway SSE; the connector now tags
+  every frame with its conversation key and the app demultiplexes that stream into per-session tabs. The
+  active tab renders live and drives TTS; background tabs keep streaming and buffer their frames (replayed
+  silently on activation), so no in-flight state is lost on switch and only the active tab speaks.
+- **Sub-agent visibility panel.** The Claude engine detects Task sub-agent start/stop from the SDK stream
+  and surfaces it via a new `onSubagent` callback; the core records a `subagent` event + streams a frame,
+  and the app renders a live per-turn panel (running ● → stopped ✓). Capability-gated — only engines with a
+  sub-agent concept emit it, so Codex/Gemini never show the panel. View-only (the SDK exposes no per-sub-agent kill).
+- **Live streaming transcription in the overlay.** A device-gated `/gw/realtime-token` mints an ephemeral
+  OpenAI realtime-transcription secret (the real key never leaves the host); the overlay opens a WebRTC
+  transcription session and paints a live caption as you speak, finalizing on endpoint. Falls back silently
+  to batch transcription when disabled or unavailable.
+- **Setting: "Auto-listen when the overlay opens" (default off).** A plain overlay open no longer forces the
+  mic on — you can just type; an assist-gesture launch still opens straight into listening.
+- **Distinct stop-turn feedback.** Killing an in-flight turn now plays a recognizable cue and shows a
+  "⏹ turn stopped" line, matching the existing listen/stop-listening sounds.
+
+### Fixed
+- **VAD no longer cuts you off mid-sentence.** The noise floor keeps adapting during pauses, a minimum-utterance
+  guard prevents endpointing in the first second of speech, the relaxed sensitivity/endpoint settings are
+  honored, and endpointing requires sustained (not flickering) silence.
+- **Listening-mode eyes are noticeably whiter/brighter** so it's obvious the mic is hot.
+
 ## [0.11.1] - 2026-08-13
 
 Follow-up fixes to the outbound-attachment feature, from on-device testing.
