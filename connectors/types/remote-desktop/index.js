@@ -39,6 +39,9 @@ const meta = {
       turn_enabled: { type: 'boolean', title: 'Enable TURN fallback (relays media through server)', default: false },
       turn_url: { type: 'string', title: 'TURN url', default: '' },
       turn_secret_key: { type: 'string', title: 'TURN shared-secret vault key (coturn REST auth)', default: '' },
+      // Cast-to-device: the broker doesn't hold a phone's SSE (the android connector does), so to project
+      // a host onto a device it calls the android gateway's internal /out push path. Localhost, no new dep.
+      android_gw_url: { type: 'string', title: 'Android gateway URL (cast-to-device push target)', default: 'http://127.0.0.1:3027' },
     },
   },
 };
@@ -91,6 +94,9 @@ async function start(ctx) {
       return { view: false, control: false, tier: 0, user_key: identity, display_name: identity }; // fail closed
     }
   }
+
+  // Where to reach the android connector's device gateway for cast-to-device pushes (its /out path).
+  const ANDROID_GW = (cfg.android_gw_url || process.env.ASMLTR_ANDROID_GW_URL || 'http://127.0.0.1:3027').replace(/\/+$/, '');
 
   const app = express();
   app.use(express.json({ limit: '2mb' }));
@@ -199,6 +205,53 @@ async function start(ctx) {
       }
       return res.status(400).json({ ok: false, error: `unknown message type: ${type}` });
     } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  // --- cast-to-device: project a registered host onto a target android device --------------------------
+  // "Open host X's live stream on my phone." The broker doesn't hold the phone's SSE (the android
+  // connector does), so it calls that connector's internal /out push with a new `open-remote-desktop`
+  // kind; the app navigates to its RD viewer for host_id. Trust-gated to FULL TRUST (the control grant):
+  // pushing a stream onto someone's device — and optionally handing it input control — is a control-tier
+  // action, so a view-only principal cannot cast. device omitted / '*' → every connected device of the
+  // caller. control is additionally clamped by the caller's own control grant (defense in depth; the
+  // viewer's later `connect` is STILL re-checked against the phone token's grants by the broker).
+  app.post('/rd/cast', async (req, res) => {
+    const b = req.body || {};
+    const who = auth(b.token);
+    if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid token' });
+    const g = await grants(who.identity);
+    if (!g.control) return res.status(403).json({ ok: false, error: 'cast requires full trust (control grant)' });
+    const hostId = String(b.host_id || '');
+    if (!hostId) return res.status(400).json({ ok: false, error: 'host_id required' });
+    const control = !!b.control && g.control;
+    const device = String(b.device || '').trim(); // '' → the android connector broadcasts to all connected devices
+    try {
+      const r = await fetch(ANDROID_GW + '/out', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'open-remote-desktop', target: device, host_id: hostId, control }),
+      });
+      const j = await r.json().catch(() => ({}));
+      ctx.emit({ surface: 'assistant-native', event_type: 'control', session_id: `rd:cast:${hostId}`, identity: who.identity, payload: { action: 'cast', host_id: hostId, device: device || '*', control, delivered: (j && j.delivered) || 0 } });
+      if (!r.ok || j.ok === false) return res.status(502).json({ ok: false, error: (j && j.error) || `android gateway ${r.status}`, delivered: (j && j.delivered) || 0 });
+      return res.json({ ok: true, delivered: j.delivered || 0, host_id: hostId, control });
+    } catch (e) { return res.status(502).json({ ok: false, error: 'android gateway unreachable: ' + e.message }); }
+  });
+
+  // Which android devices can we cast to? Proxy the android gateway's device list (view-gated) so the
+  // dashboard can offer a target picker; empty/'*' in /rd/cast still broadcasts to all connected devices.
+  app.get('/rd/devices', async (req, res) => {
+    const who = auth(req.query.token);
+    if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid token' });
+    const g = await grants(who.identity);
+    if (!g.view) return res.json({ ok: true, devices: [], can_cast: false });
+    try {
+      const r = await fetch(ANDROID_GW + '/gw/devices');
+      const j = await r.json().catch(() => ({}));
+      // Merge chat + background-control links, dedupe by id, keep a friendly name.
+      const seen = new Map();
+      for (const d of [...(j.devices || []), ...(j.control || [])]) if (d && d.id && !seen.has(d.id)) seen.set(d.id, { id: d.id, name: d.name || d.id });
+      res.json({ ok: true, devices: [...seen.values()], can_cast: g.control });
+    } catch (e) { res.json({ ok: true, devices: [], can_cast: g.control, error: e.message }); }
   });
 
   app.get('/rd/health', (_req, res) => res.json({ ok: true, hosts: hosts.size, viewers: viewers.size, sessions: sessions.size }));

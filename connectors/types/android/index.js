@@ -398,7 +398,7 @@ async function start(ctx) {
   // to read the text ALOUD without running a turn. A '*' / empty target broadcasts to every connected
   // device — and to the background control link too, so read-aloud works even when the overlay is closed.
   app.post('/out', (req, res) => {
-    const { target, text, kind, title, require_headphones, path: filePath, caption } = req.body || {};
+    const { target, text, kind, title, require_headphones, path: filePath, caption, host_id, control } = req.body || {};
     const device = String(target || '').trim();
     // kind:'file' → register the file + push a `media` frame the app renders inline / downloads via /gw/file.
     // A '*'/empty target broadcasts to every connected device (each gets a URL bearing its OWN token).
@@ -444,6 +444,24 @@ async function start(ctx) {
     }
     if (kind === 'speak') {
       const frame = { type: 'speak', text: String(text || ''), title: title || null, require_headphones: !!require_headphones };
+      let delivered = 0;
+      if (!device || device === '*') {
+        for (const id of devices.keys()) if (pushSSE(id, frame)) delivered++;
+        for (const id of controlDevices.keys()) if (pushControl(id, frame)) delivered++;
+      } else {
+        if (pushSSE(device, frame)) delivered++;
+        if (pushControl(device, frame)) delivered++;
+      }
+      return res.json({ ok: delivered > 0, delivered, error: delivered ? undefined : 'no device connected' });
+    }
+    // kind:'open-remote-desktop' → tell the app to OPEN a live remote-desktop stream from host_id (the
+    // cast-to-device primitive; the remote-desktop broker's /rd/cast calls this). Pushed to the chat SSE
+    // (which navigates the WebView to the RD viewer) AND the background control link. '*'/empty target
+    // broadcasts to every connected device. This is the "open a live host stream on this device" sibling
+    // of the `media` screenshot frame the app already renders inline.
+    if (kind === 'open-remote-desktop') {
+      const frame = { type: 'open-remote-desktop', host_id: String(host_id || ''), control: !!control };
+      if (!frame.host_id) return res.status(400).json({ ok: false, error: 'open-remote-desktop requires host_id' });
       let delivered = 0;
       if (!device || device === '*') {
         for (const id of devices.keys()) if (pushSSE(id, frame)) delivered++;
