@@ -45,6 +45,10 @@ type rtcSession struct {
 	pc      *webrtc.PeerConnection
 	cancel  context.CancelFunc
 	started int32 // atomic: capture launched once
+
+	mu         sync.Mutex
+	remoteSet  bool                      // the remote (viewer) SDP has been applied
+	pendingICE []webrtc.ICECandidateInit // remote candidates that arrived before the remote SDP (buffered, then flushed)
 }
 
 // NewAgent resolves ffmpeg, builds a Pion API with H.264+Opus registered, and returns a ready Agent.
@@ -320,6 +324,18 @@ func (a *Agent) handleRemoteSDP(msg signalMsg) {
 	}
 	if err := sess.pc.SetRemoteDescription(desc); err != nil {
 		logf("session %s: set remote description: %v", msg.SessionID, err)
+		return
+	}
+	// Remote SDP is now set — flush any ICE candidates that arrived early (buffered by handleRemoteICE).
+	sess.mu.Lock()
+	sess.remoteSet = true
+	pending := sess.pendingICE
+	sess.pendingICE = nil
+	sess.mu.Unlock()
+	for _, init := range pending {
+		if err := sess.pc.AddICECandidate(init); err != nil {
+			logf("session %s: add buffered ice candidate: %v", msg.SessionID, err)
+		}
 	}
 }
 
@@ -336,6 +352,15 @@ func (a *Agent) handleRemoteICE(msg signalMsg) {
 		logf("session %s: parse remote ice: %v", msg.SessionID, err)
 		return
 	}
+	// If the remote SDP isn't applied yet, buffer the candidate — AddICECandidate errors otherwise
+	// (InvalidStateError). handleRemoteSDP flushes the buffer once SetRemoteDescription succeeds.
+	sess.mu.Lock()
+	if !sess.remoteSet {
+		sess.pendingICE = append(sess.pendingICE, init)
+		sess.mu.Unlock()
+		return
+	}
+	sess.mu.Unlock()
 	if err := sess.pc.AddICECandidate(init); err != nil {
 		logf("session %s: add ice candidate: %v", msg.SessionID, err)
 	}
