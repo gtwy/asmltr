@@ -1,0 +1,12 @@
+# Built binaries
+host-remote-desktop.exe
+host-remote-desktop
+*.exe
+
+# Bundled ffmpeg is fetched at build time (scripts/fetch-ffmpeg.sh), never committed (large binary).
+assets/ffmpeg.exe
+assets/*.zip
+
+# Local runtime config may carry a token — keep it out of git (commit config.example.json instead).
+config.json
+config.local.json
