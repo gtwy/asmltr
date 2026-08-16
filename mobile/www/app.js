@@ -294,6 +294,7 @@ function connect() {
     let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
     if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) { convKey = m.conversation_key; if (ownTab) ownTab.key = convKey; } if (!activeTarget && !hydrated && $('log').children.length === 0) hydrateOwn(convKey); maybeAssistLaunch(); return; }
     if (m.type === 'device_rpc') { runDeviceRPC(m); return; }   // #77: act on this phone (device-level, tab-agnostic)
+    if (m.type === 'open-remote-desktop') { openRemoteDesktop(m); return; } // cast-to-device: open a live host stream here (tab-agnostic)
     // Multi-tab demultiplex: frames carry `key` (their conversation). A frame for a BACKGROUND tab is
     // buffered (keeps accumulating, never speaks) and replayed when that tab is activated; a frame for
     // the ACTIVE tab (or a keyless push like inject/speak) renders live and drives TTS.
@@ -677,6 +678,18 @@ async function runDeviceRPC(m) {
   } catch (e) { result = { ok: false, error: String(e && e.message || e) }; }
   addTool('device:' + tool, args); addToolResult(JSON.stringify(result), !result.ok);
   try { await api('/gw/rpc-result', { id, result }); } catch (_) {}
+}
+
+// ---------- cast-to-device: open a live remote-desktop stream on this phone ----------
+// A trusted caster (the dashboard's "Cast to my phone" / the assistant) pushed an open-remote-desktop
+// frame over this device's SSE. Navigate to the RD viewer with the host (and control flag) as query
+// params; remote-desktop.js auto-connects to it. Tab-agnostic, like device_rpc — this is the primitive
+// by which a live host stream is projected onto a device (sibling of the inline `media` screenshot).
+function openRemoteDesktop(m) {
+  if (!m || !m.host_id) return;
+  const q = new URLSearchParams({ host: String(m.host_id) });
+  if (m.control) q.set('control', '1');
+  try { location.href = 'remote-desktop.html?' + q.toString(); } catch (_) {}
 }
 
 // ---------- assist launch + native overlay controls ----------

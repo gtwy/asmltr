@@ -398,6 +398,25 @@ async function testBroker() {
   catch (e) { $('rdCfgMsg').textContent = '✗ ' + e.message; }
 }
 
+// ---------- cast-to-device auto-open ----------
+// Opened via remote-desktop.html?host=<id>&control=<0|1> — a trusted caster pushed an
+// open-remote-desktop directive (the dashboard's "Cast to my phone" / the assistant) and app.js
+// navigated here. Auto-connect straight to that host instead of waiting for a tap. Falls back to a
+// synthetic host entry if the broker's list doesn't (yet) include it, so a just-registered host still opens.
+async function maybeAutoOpen() {
+  let params; try { params = new URLSearchParams(location.search); } catch (_) { return; }
+  const host = params.get('host'); if (!host) return;
+  const wantControl = params.get('control') === '1';
+  if (!cfg.brokerUrl || !cfg.token) { openSettings('A host was cast to this device — set the broker URL and token to open it.'); return; }
+  setStatus('opening cast…', 'warn');
+  try {
+    const r = await rdMsg({ type: 'list' });
+    const found = (r.hosts || []).find((h) => h.host_id === host)
+      || { host_id: host, name: host, caps: { video: true, control: wantControl } };
+    connectHost(found, wantControl && !!(found.caps && found.caps.control));
+  } catch (e) { setStatus('✗ ' + e.message, 'off'); }
+}
+
 // ---------- back / leave ----------
 function goBack() {
   if (!$('rdStage').classList.contains('hidden')) { disconnect(); return; }  // in a session → drop it, show list
@@ -429,5 +448,6 @@ function init() {
   window.addEventListener('pagehide', () => { try { teardown(); } catch (_) {} });
   window.addEventListener('beforeunload', () => { try { teardown(); } catch (_) {} });
   refreshHosts();
+  maybeAutoOpen(); // cast-to-device: ?host=<id>&control=<0|1> auto-connects straight to that host
 }
 document.addEventListener('DOMContentLoaded', init);
