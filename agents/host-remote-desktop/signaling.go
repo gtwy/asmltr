@@ -70,14 +70,17 @@ func (s *Signaling) post(ctx context.Context, payload map[string]any) error {
 	return nil
 }
 
-// sendSDP relays a local description (offer/answer) to the other peer via the broker.
+// sendSDP relays a local description (offer/answer) to the other peer via the broker. role:"host" is
+// REQUIRED by the broker: host and viewer share the same trust identity ("owner"), so the broker
+// cannot infer relay direction from identity and needs the explicit role (omitting it errors 400).
 func (s *Signaling) sendSDP(ctx context.Context, sessionID string, sdp any) error {
-	return s.post(ctx, map[string]any{"type": "sdp", "session_id": sessionID, "sdp": sdp})
+	return s.post(ctx, map[string]any{"type": "sdp", "session_id": sessionID, "role": "host", "sdp": sdp})
 }
 
-// sendICE relays a local ICE candidate to the other peer via the broker.
+// sendICE relays a local ICE candidate to the other peer via the broker. role:"host" is required
+// (see sendSDP).
 func (s *Signaling) sendICE(ctx context.Context, sessionID string, candidate any) error {
-	return s.post(ctx, map[string]any{"type": "ice", "session_id": sessionID, "candidate": candidate})
+	return s.post(ctx, map[string]any{"type": "ice", "session_id": sessionID, "role": "host", "candidate": candidate})
 }
 
 // sendBye asks the broker to tear a session down on both peers.
