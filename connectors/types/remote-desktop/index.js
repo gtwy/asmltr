@@ -68,13 +68,28 @@ async function start(ctx) {
   const push = (map, id, obj) => { const d = map.get(id); if (!d) return false; try { d.res.write(`data: ${JSON.stringify(obj)}\n\n`); return true; } catch (_) { return false; } };
 
   // Trust: view + control are SEPARATE grants, resolved against the caller's trust identity (default-deny).
-  // ctx.trust.resolve returns the tier/bypass for a (channel,sender); we gate control on a full-trust grant.
+  // The connector SDK exposes trust resolution as ctx.core.resolve(envelope) → POST /trust/resolve, which
+  // returns { user_key, display_name, trust_tier, permissions, bypass_moderation, is_default, revoked, ... }.
+  // We resolve the keys.json identity on THIS connector's own surface ('remote-desktop') so grants can be
+  // scoped to remote-desktop specifically. Rules (default-deny for unknown/revoked):
+  //   view    = a KNOWN, non-revoked principal at trust_tier >= 1 (or full trust).
+  //   control = FULL TRUST only (bypass_moderation) — remote keyboard/mouse is the highest-power capability.
   async function grants(identity) {
     try {
-      const r = await ctx.trust.resolve({ channel: 'remote-desktop', sender: { raw_id: identity } });
-      const tier = (r && (r.tier ?? r.trust_tier)) || 0;
-      return { view: tier >= 1 || !!(r && r.bypass), control: !!(r && r.bypass) || tier >= 2 };
-    } catch (_) { return { view: !requireToken, control: false }; } // fail closed on control
+      const r = await ctx.core.resolve({ channel: 'remote-desktop', sender: { raw_id: identity } });
+      const tier = Number(r && r.trust_tier) || 0;
+      const bypass = !!(r && r.bypass_moderation);
+      const known = !!(r && !r.is_default && !r.revoked); // is_default = no matching principal
+      return {
+        view: known && (bypass || tier >= 1),
+        control: bypass, // full-trust identity ONLY
+        tier,
+        user_key: (r && r.user_key) || identity,
+        display_name: (r && r.display_name) || identity,
+      };
+    } catch (_) {
+      return { view: false, control: false, tier: 0, user_key: identity, display_name: identity }; // fail closed
+    }
   }
 
   const app = express();
