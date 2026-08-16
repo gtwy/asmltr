@@ -5,6 +5,7 @@ import { fileURLToPath, URL } from 'node:url'
 const COLLECTOR = 'http://127.0.0.1:3017'
 const MANAGER = 'http://127.0.0.1:3024'
 const TRUST = 'http://127.0.0.1:3023'
+const RD_BROKER = 'http://127.0.0.1:3028'
 
 export default defineConfig({
   plugins: [vue()],
@@ -41,6 +42,14 @@ export default defineConfig({
       // the root on the core, so no prefix to strip. Open on localhost in dev.
       '/v2': {
         target: TRUST,
+        changeOrigin: true
+      },
+      // remote-desktop signaling broker (a connector, host :3028). Same-origin /rd so the RD view can
+      // call POST /rd/msg (host registry) and POST /rd/cast (cast-to-device). The broker is TOKEN-gated
+      // per route (view/control trust grants); the dashboard sends a device-local RD token in the body,
+      // so — unlike the collector/manager — nothing is injected here.
+      '/rd': {
+        target: RD_BROKER,
         changeOrigin: true
       },
       '/socket.io': {
