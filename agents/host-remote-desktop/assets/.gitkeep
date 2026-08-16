@@ -1,0 +1,2 @@
+# ffmpeg.exe is fetched here at build time by scripts/fetch-ffmpeg.sh and embedded via go:embed
+# (build with -tags embed_ffmpeg). It is intentionally NOT committed — see .gitignore.
