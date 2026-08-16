@@ -14,6 +14,18 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Fixed
 
+## [0.13.0] - 2026-08-16
+
+Custom WebRTC remote desktop — view and drive a host machine's screen from the app, over a self-owned signaling + NAT-hole-punching transport (no external overlay).
+
+### Added
+- **Remote desktop (custom WebRTC).** New `remote-desktop` connector = a signaling broker (SDP/ICE relay + own STUN + per-host view/control trust grants, default-deny). A native Windows host agent (`agents/host-remote-desktop/` — Go + Pion, self-contained bundled ffmpeg) captures the desktop and publishes H.264 over WebRTC. The assistant app is the viewer + controller (touch→mouse, on-screen keyboard, PiP). **Media flows peer-to-peer via ICE hole punching — asmltr negotiates but never relays** (optional TURN fallback is off by default; symmetric-NAT-on-both-ends only).
+- **Cast to device.** The dashboard (and the assistant) can push an `open-remote-desktop` directive to a device so it opens a host's live stream; the same channel carries screenshots/streams to a device in-session.
+- Design: `docs/REMOTE-DESKTOP.md`.
+
+### Notes
+- The Windows host agent must run in the **interactive console session** (a scheduled task with an Interactive principal) — screen capture can't reach the desktop from a service/SSH session. Default capture backend is **gdigrab** (captures a static/idle screen); **ddagrab** (GPU) is opt-in and only emits frames when the screen changes.
+
 ## [0.12.3] - 2026-08-13
 
 ### Fixed
