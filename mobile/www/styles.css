@@ -205,3 +205,55 @@ body.overlay.native .log { flex: 0 1 auto; }
 .sys-earlier { align-self: center; margin: 4px auto 8px; padding: 5px 12px; border-radius: 999px; font-size: 12px;
   color: var(--muted); background: #ffffff0c; border: 1px solid #ffffff14; cursor: pointer; }
 .sys-earlier:active { background: #ffffff18; }
+
+/* ============ REMOTE DESKTOP (viewer + controller) ============ */
+/* Host discovery list */
+.rd-list { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.rd-hosts { display: flex; flex-direction: column; gap: 10px; }
+.rd-host { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px;
+  background: var(--panel2); border: 1px solid #ffffff12; }
+.rd-host-info { flex: 1; min-width: 0; }
+.rd-host-name { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-host-caps { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-top: 2px; }
+.rd-host-btns { display: flex; gap: 8px; flex: none; }
+.rd-btn { padding: 8px 16px; border: none; border-radius: 10px; font-size: 13px; font-weight: 700; }
+
+/* Live session stage: full-viewport black canvas with the video + overlays on top */
+.rd-stage { position: fixed; inset: 0; z-index: 50; background: #000; overflow: hidden; }
+.rd-stage.hidden { display: none; }
+.rd-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+/* Transparent gesture layer — only intercepts touches while control is granted (.active). View-only =
+   pointer-events off, so the video is just watched. */
+.rd-control { position: absolute; inset: 0; touch-action: none; pointer-events: none; }
+.rd-control.active { pointer-events: auto; cursor: crosshair; }
+.rd-ctl-badge { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; z-index: 3;
+  font-size: 10px; font-weight: 800; letter-spacing: .6px; padding: 3px 8px; border-radius: 999px;
+  background: rgb(var(--accent2)/.9); color: #fff; }
+.rd-ctl-badge.hidden { display: none; }
+
+/* Floating toolbar */
+.rd-toolbar { position: absolute; z-index: 4; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; padding-bottom: max(10px, env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, rgba(0,0,0,0.65)); }
+.rd-stage-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #fff; font-size: 13px; font-weight: 600; text-shadow: 0 1px 3px #000a; }
+.rd-tools { display: flex; align-items: center; gap: 6px; }
+.rd-tool { width: 40px; height: 40px; border: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.14); color: #fff; backdrop-filter: blur(6px); }
+.rd-tool:active { background: rgba(255,255,255,0.28); }
+.rd-tool.on { background: rgb(var(--accent)/.85); }
+.rd-tool.danger:active { background: #ef4444; }
+.rd-tool.hidden { display: none; }
+
+/* Minimized → shrink the whole stage into a floating draggable-looking tile (tap to restore) */
+.rd-stage.min { inset: auto; right: 14px; bottom: max(20px, env(safe-area-inset-bottom));
+  width: 168px; height: 96px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.25);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 60; }
+.rd-stage.min .rd-toolbar, .rd-stage.min .rd-ctl-badge { display: none; }
+.rd-stage.min .rd-control { pointer-events: none; }
+
+/* Off-screen input that pulls up the soft keyboard; its keystrokes are relayed over the data channel */
+.rd-kb-input { position: absolute; left: -9999px; top: 0; opacity: 0; height: 0; width: 0; }
+.rd-kb-input.hidden { display: none; }
+
+body.rd { background: var(--bg); }
