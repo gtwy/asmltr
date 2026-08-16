@@ -959,6 +959,7 @@ function init() {
   if ($('cfgNotifSave')) $('cfgNotifSave').addEventListener('click', saveNotifSettings);
   if ($('cfgNotifAccess')) $('cfgNotifAccess').addEventListener('click', () => { const n = NC(); if (n && n.openNotificationAccessSettings) n.openNotificationAccessSettings(); });
   if ($('cfgNewSession')) $('cfgNewSession').addEventListener('click', newSession);
+  if ($('cfgRemoteDesktop')) $('cfgRemoteDesktop').addEventListener('click', () => { location.href = 'remote-desktop.html'; });
   $('cfgTest').addEventListener('click', testConn);
   $('cfgSave').addEventListener('click', () => {
     cfg.baseUrl = $('cfgUrl').value.trim().replace(/\/+$/, ''); cfg.token = $('cfgToken').value.trim(); cfg.name = $('cfgName').value.trim() || 'My device'; saveCfg(cfg);
