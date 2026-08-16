@@ -25,7 +25,7 @@ type Config struct {
 	Control bool `json:"control"` // accept the control data channel (mouse/keyboard injection)
 
 	// Capture / encode tuning
-	CaptureBackend string `json:"capture_backend"` // "ddagrab" (DXGI, default) or "gdigrab" (fallback)
+	CaptureBackend string `json:"capture_backend"` // "gdigrab" (default; GDI BitBlt — captures every frame incl. a static/idle screen) or "ddagrab" (DXGI GPU; lower CPU but only emits frames when the screen CHANGES, so an idle desktop streams nothing)
 	OutputIndex    int    `json:"output_index"`    // monitor index for ddagrab (0 = primary)
 	Framerate      int    `json:"framerate"`       // target capture framerate
 	VideoBitrate   string `json:"video_bitrate"`   // e.g. "8M"
@@ -42,7 +42,7 @@ type Config struct {
 
 func defaultConfig() Config {
 	return Config{
-		CaptureBackend: "ddagrab",
+		CaptureBackend: "gdigrab",
 		OutputIndex:    0,
 		Framerate:      30,
 		VideoBitrate:   "8M",
@@ -215,7 +215,7 @@ func LoadConfig(args []string) (Config, error) {
 		cfg.Framerate = 30
 	}
 	if cfg.CaptureBackend == "" {
-		cfg.CaptureBackend = "ddagrab"
+		cfg.CaptureBackend = "gdigrab"
 	}
 
 	return cfg, cfg.validate()
