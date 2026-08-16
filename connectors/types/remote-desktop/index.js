@@ -165,10 +165,26 @@ async function start(ctx) {
       if (type === 'sdp' || type === 'ice') {
         const s = sessions.get(String(b.session_id || ''));
         if (!s) return res.status(404).json({ ok: false, error: 'unknown session' });
-        // Relay to the OTHER peer of this session only. Host messages → viewer; viewer messages → host.
-        const fromHost = hosts.get(s.host_id) && hosts.get(s.host_id).identity === who.identity;
+        // Relay to the OTHER peer of this session only. Direction is decided by the sender's declared
+        // `role` ('host' | 'viewer') — NOT by trust identity, because a host agent and the owner's phone
+        // legitimately share ONE identity ('owner'), which made identity-based direction misroute. role is
+        // authoritative; it can't escalate anything (both peers are inside one already-authorized session).
+        const role = String(b.role || '');
+        let target = null; // 'viewer' | 'host'  (the OTHER peer)
+        if (role === 'host') target = 'viewer';
+        else if (role === 'viewer') target = 'host';
+        else {
+          // Fallback for a role-less sender: infer only when identities are unambiguous.
+          const hostIdent = hosts.get(s.host_id) && hosts.get(s.host_id).identity;
+          const viewerIdent = viewers.get(s.client_id) && viewers.get(s.client_id).identity;
+          if (hostIdent && viewerIdent && hostIdent !== viewerIdent) {
+            target = who.identity === hostIdent ? 'viewer' : 'host';
+          } else {
+            return res.status(400).json({ ok: false, error: "sdp/ice requires role: 'host' | 'viewer'" });
+          }
+        }
         const frame = { type, session_id: b.session_id, sdp: b.sdp, candidate: b.candidate };
-        const delivered = fromHost ? push(viewers, s.client_id, frame) : push(hosts, s.host_id, frame);
+        const delivered = target === 'viewer' ? push(viewers, s.client_id, frame) : push(hosts, s.host_id, frame);
         return res.json({ ok: delivered });
       }
       if (type === 'bye') {
