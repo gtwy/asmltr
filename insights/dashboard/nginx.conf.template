@@ -94,6 +94,21 @@ server {
         proxy_set_header Host $host;
     }
 
+    # Remote-desktop signaling broker (a connector, host :3028). Fully TOKEN-gated on EVERY route
+    # (view/control trust grants), and its real clients are host agents + phone viewers presenting an RD
+    # token — NOT a browser session cookie — so it is deliberately NOT behind the session auth_request
+    # (that would 401 the actual RD peers). The dashboard's RD view sends a device-local RD token in the
+    # request body. SSE (/rd/stream) needs buffering off so signaling frames flush immediately; no prefix
+    # to strip (the broker serves /rd/… at the root).
+    location /rd/ {
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3028;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+
     # socket.io (websocket upgrade)
     location /socket.io/ {
         auth_request /_asmltr_authz;

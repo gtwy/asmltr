@@ -430,6 +430,49 @@ export const stt = {
   }
 }
 
+// Remote Desktop — the WebRTC signaling broker (a connector, same-origin /rd via the proxy). The broker
+// authenticates the caller by an RD token → trust identity (default-deny): `list` needs a view grant,
+// `cast` needs full trust (control). Unlike the collector/manager, the token isn't injected by nginx —
+// the broker's clients are agents/phones presenting a token, so we keep it DEVICE-LOCAL (localStorage,
+// like the mobile RD viewer) and send it in the message body.
+const RD_TOKEN_KEY = 'asmltr.rd.token'
+export const rd = {
+  getToken() { try { return localStorage.getItem(RD_TOKEN_KEY) || '' } catch { return '' } },
+  setToken(t) { try { localStorage.setItem(RD_TOKEN_KEY, t || '') } catch { /* ignore */ } },
+  async msg(body) {
+    const res = await fetch('/rd/msg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token: rd.getToken(), ...body })
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || json.ok === false) throw new Error(json.error || `POST /rd/msg -> ${res.status} ${res.statusText}`)
+    return json
+  },
+  // The registry: all registered hosts + their caps/online state.
+  list: () => rd.msg({ type: 'list' }),
+  // Cast-to-device: push an open-remote-desktop directive to a target device (''/undefined = all my
+  // connected devices). `control` opens the stream with input control (clamped by grants on the broker).
+  async cast(device, host_id, control) {
+    const res = await fetch('/rd/cast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token: rd.getToken(), device: device || '', host_id, control: !!control })
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || json.ok === false) throw new Error(json.error || `POST /rd/cast -> ${res.status} ${res.statusText}`)
+    return json
+  },
+  // Castable android devices (for the target picker) + whether this caller may cast (full trust).
+  async devices() {
+    const res = await fetch(`/rd/devices?token=${encodeURIComponent(rd.getToken())}`, { headers: { Accept: 'application/json' } })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || json.ok === false) throw new Error(json.error || `GET /rd/devices -> ${res.status} ${res.statusText}`)
+    return json
+  },
+  async health() { const res = await fetch('/rd/health'); return res.json() }
+}
+
 // payload arrives as a JSON *string* over REST. Be defensive.
 export function parsePayload(payload) {
   if (payload == null) return null
