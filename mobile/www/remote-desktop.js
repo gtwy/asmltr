@@ -150,7 +150,9 @@ async function onRemoteSdp(desc, gen) {
     if (gen !== rdGen) return;
     await sess.pc.setLocalDescription(answer);
     if (gen !== rdGen) return;
-    await rdMsg({ type: 'sdp', session_id: sess.id, sdp: { type: answer.type, sdp: answer.sdp } });
+    // role is REQUIRED: host + phone share the "owner" trust identity, so the broker can't infer the
+    // relay direction from the token — we must tell it we're the viewer.
+    await rdMsg({ type: 'sdp', session_id: sess.id, role: 'viewer', sdp: { type: answer.type, sdp: answer.sdp } });
   } catch (e) { if (gen === rdGen) setStatus('sdp error: ' + e.message, 'warn'); }
 }
 async function onRemoteIce(cand, gen) {
@@ -190,7 +192,7 @@ async function connectHost(host, wantControl) {
 function wirePeer(pc, sessionId, gen, control) {
   pc.onicecandidate = (e) => {
     if (e.candidate && gen === rdGen) {
-      rdMsg({ type: 'ice', session_id: sessionId, candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }).catch(() => {});
+      rdMsg({ type: 'ice', session_id: sessionId, role: 'viewer', candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }).catch(() => {});
     }
   };
   pc.ontrack = (e) => {
