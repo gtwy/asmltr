@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const _sqliteKeep = require('./sqlite-stmt-keep');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
 /**
@@ -38,8 +39,9 @@ const { EventEmitter } = require('events');
 const { randomUUID } = require('crypto');
 
 const env = require('./envelope');
-const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
+// Load openai (moderation) BEFORE any better-sqlite3 module so Node 24 GC during that import cannot collect Statements.
 const moderation = require('./moderation');
+const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
@@ -142,7 +144,7 @@ function toolResultText(content) {
 const NAME = process.env.ASSISTANT_NAME || 'the assistant';
 const CHANNEL_LABELS = {
   discord: 'Discord', telegram: 'Telegram', github: 'GitHub (issue thread)',
-  mcp: 'an MCP client', core: 'a direct API call',
+  mcp: 'an MCP client', core: 'a direct API call', cli: 'the local asmltr CLI',
   'assistant-web': 'a web assistant app', 'assistant-native': 'a mobile assistant app',
   'eve-assistant-web': 'a web assistant app', 'eve-assistant-native': 'a mobile assistant app', // legacy ids
 };
@@ -227,7 +229,10 @@ function drainObserved(key) {
  */
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
-  const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
+  // Finite idle (default 15 min). Was hardcoded infinite for BOTH sync and async —
+  // that left grok/ivy sessions open forever. Policy is 'idle:<minutes>' | 'infinite'
+  // (see sessions.parseIdlePolicy). Override with ASMLTR_IDLE_MS (ms) or ASMLTR_IDLE_POLICY.
+  const idlePolicy = sessions.idlePolicyFromEnv();
 
   const _cc = e.channel_context || {};
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'inbound',
@@ -405,10 +410,12 @@ async function handle(envelope, opts = {}) {
   }
 
   // 3) session resolution + run
-  const isNew = !sessions.get(e.conversation_key)?.engine_session_id;
+  // resume = stored Grok/engine UUID (engine_session_id). grok.js turns that into `-r <uuid>`.
+  // resolveForTurn CLEARS a stale UUID after idle:<minutes>, so isNew must be computed AFTER.
   const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined);
   const sessionRow = sessions.get(e.conversation_key);
-  const cwd = sessionRow?.working_dir || undefined; // spawn/resume cwd (neutral /root by default)
+  const cwd = sessionRow?.working_dir || undefined; // spawn/resume cwd (neutral home by default)
+  const isNew = !resume;
 
   // INJECT-ONCE: which engine runs this turn, and can it skip re-sending the stable block? Only on a
   // history-retaining engine (codex — its resume replays prior turns), when the stable hash is unchanged
@@ -850,7 +857,7 @@ app.delete('/v2/vault/secrets/:name', async (req, res) => {
   try { await vault.deleteSecret(req.params.name); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
-// Reasoning engines — the pluggable agentic backends (claude/gemini/codex). Registry + default + per-engine
+// Reasoning engines — the pluggable agentic backends (claude/gemini/codex/grok). Registry + default + per-engine
 // config (shared/engines.js). Changing the default re-points the `<agent-name>` terminal alias.
 const engines = require('../../shared/engines');
 app.get('/v2/engines', (req, res) => res.json({ engines: engines.list(), default: engines.getDefault() }));
@@ -890,13 +897,14 @@ app.delete('/v2/engines/:id/apikey', async (req, res) => { try { res.json({ ok: 
 // Custom (self-hosted / alternate-provider) OpenAI-compatible endpoint for a base_url-capable engine.
 app.post('/v2/engines/:id/base-url', (req, res) => { try { res.json({ ok: true, baseUrl: engines.setBaseUrl(req.params.id, (req.body || {}).url) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 
-// MCP registry — declare once, provisioned into every engine (Claude SDK / Codex -c / Gemini config).
+// MCP registry — declare once, provisioned into every engine (Claude SDK / Codex -c / Gemini config / Grok mcp add).
 const mcpReg = require('../../shared/mcp-registry');
 function resyncGeminiMcp() { try { const b = engines.resolveBin('gemini'); if (b) mcpReg.syncGemini(b); } catch (_) {} }
+function resyncGrokMcp() { try { const b = engines.resolveBin('grok'); if (b) mcpReg.syncGrok(b); } catch (_) {} }
 app.get('/v2/mcp', (req, res) => res.json({ servers: mcpReg.list() }));
-app.post('/v2/mcp', (req, res) => { try { const l = mcpReg.add((req.body || {}).name, req.body || {}); resyncGeminiMcp(); res.status(201).json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/mcp', (req, res) => { try { const l = mcpReg.add((req.body || {}).name, req.body || {}); resyncGeminiMcp(); resyncGrokMcp(); res.status(201).json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.delete('/v2/mcp/:name', (req, res) => { try { res.json({ ok: true, servers: mcpReg.remove(req.params.name) }); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.post('/v2/mcp/:name/toggle', (req, res) => { try { const l = mcpReg.setDisabled(req.params.name, !!(req.body && req.body.disabled)); resyncGeminiMcp(); res.json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/mcp/:name/toggle', (req, res) => { try { const l = mcpReg.setDisabled(req.params.name, !!(req.body && req.body.disabled)); resyncGeminiMcp(); resyncGrokMcp(); res.json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
 
 // Data silos — the file-explorer surface over shared/silo.js (`:id` = silo id; `self`/omitted → the Self silo).
 // Read verbs (list/overview/ls/tree/find/file) + safe writes (mkdir/put/mv/rm/new). Paths are silo-relative.
@@ -1050,12 +1058,17 @@ app.post('/v2/backups/import', express.raw({ type: 'application/octet-stream', l
 
 // The dashboard is a browser CONNECTOR: it posts `assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
-// from config or the reverse proxy's resolved user, so the same build works anywhere.
-// The browser sends a placeholder sender; we overwrite raw_id with the real owner here.
+// from ASMLTR_WEB_OWNER_ID or the reverse proxy's X-Remote-User. Seed that same value as
+// an assistant-web identifier (ivy: owner) or web chat is default-deny.
+function webOwnerId(req) {
+  return process.env.ASMLTR_WEB_OWNER_ID
+    || (req && req.get && req.get('X-Remote-User')) || null;
+}
+
 function normalizeWebSender(req) {
   const b = req.body;
   if (!b || (b.channel !== 'assistant-web' && b.channel !== 'eve-assistant-web')) return; // accept legacy id
-  const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User');
+  const owner = webOwnerId(req);
   if (owner) b.sender = { ...(b.sender || {}), raw_id: String(owner), raw_username: (b.sender && b.sender.raw_username) || 'dashboard' };
 }
 
@@ -1069,7 +1082,7 @@ app.post('/v2/upload', (req, res) => {
     if (!data_base64 || typeof data_base64 !== 'string') return res.status(400).json({ error: 'data_base64 required' });
     const buffer = Buffer.from(data_base64, 'base64');
     if (!buffer.length) return res.status(400).json({ error: 'empty file' });
-    const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User') || 'dashboard';
+    const owner = webOwnerId(req) || 'dashboard';
     const rec = require('../../shared/uploads').save({
       channel: 'assistant-web', buffer, filename, mime,
       sender: 'dashboard', senderId: String(owner), conversationKey: conversation_key || null,
@@ -1551,6 +1564,7 @@ app.post('/v2/drafts/:id/discard', (req, res) => {
 
 app.post('/v2/handle', async (req, res) => {
   try {
+    normalizeWebSender(req);
     const actions = await dispatch(req.body);
     res.json({ actions });
   } catch (err) {
@@ -1820,7 +1834,7 @@ app.post('/v2/inject', (req, res) => {
 
   withKeyLock(key, async () => {
     record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
-    const { resume } = sessions.resolveForTurn(key, row.channel);
+    const { resume } = sessions.resolveForTurn(key, row.channel, sessions.idlePolicyFromEnv());
     // Mid-task steer → frame the text so the model continues its current work with this guidance
     // rather than answering it in isolation. Idle session → deliver it as a normal message.
     const steerer = meshSteer ? `Peer session "${by.slice(5)}"` : 'Operator';
@@ -1906,8 +1920,10 @@ app.delete('/trust/engagement/:id', (req, res) => res.json({ ok: trust.engagemen
 
 if (require.main === module) {
   const server = app.listen(PORT, HOST, () => {
+    _sqliteKeep.disarm();
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
-    console.log('substrate: local Agent SDK on Max subscription (NO ANTHROPIC_API_KEY path)');
+    console.log(`idle_policy=${sessions.idlePolicyFromEnv()} assistant=${process.env.ASSISTANT_NAME || 'the assistant'} engine=${require('../../shared/engines').getDefault()}`);
+    console.log('substrate: configured reasoning engine (grok = subscription CLI; no XAI_API_KEY)');
   });
   // Agent turns (research, tool loops) can run many minutes. Node's default 5-min
   // server.requestTimeout would cut the connector→core call mid-turn (surfacing as
