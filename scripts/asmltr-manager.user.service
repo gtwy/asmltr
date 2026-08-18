@@ -1,0 +1,18 @@
+[Unit]
+Description=asmltr-connector-manager (127.0.0.1:3024)
+After=network-online.target asmltr-core.service
+# User-level. No channel tokens. Do not start Discord/Telegram/email/GitHub instances.
+
+[Service]
+Type=simple
+WorkingDirectory=/home/adjutant/src/asmltr/connectors/manager
+EnvironmentFile=-/home/adjutant/src/asmltr/.env
+Environment=HOME=/home/adjutant
+Environment=PATH=/home/adjutant/.local/bin:/home/adjutant/.grok/bin:/usr/bin:/bin
+Environment=ASMLTR_MANAGER_PORT=3024
+ExecStart=/home/adjutant/.local/bin/node server.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
