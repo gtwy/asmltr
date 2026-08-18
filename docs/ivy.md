@@ -1,35 +1,37 @@
 # Ivy
 
-This branch is Ivy/Grok on the **gtwy/asmltr** fork. We never push to jarethmt/asmltr.
+`ivy` is Grok/Ivy on the `gtwy/asmltr` fork. We never push to `jarethmt/asmltr`. Eve: pull `ivy` into your `main` if you want pieces.
 
-Eve: pull `ivy` into your `main` if you want pieces. Merge FROM `gtwy/asmltr` `ivy` INTO `jarethmt/asmltr` `main` — pick what you take.
+## Take for every asmltr install
 
-## Take these if you want them
+Engine-agnostic. Worth taking even if you never run Grok.
 
-Upstream-worthy, engine-agnostic:
+- Per-turn Self silo write + last-topics inject on a fresh session (not a session-close flush).
+- SSE leftover flush when the reader closes, so a `done` frame without trailing newlines still fires `onDone`.
+- Dashboard nginx `/v2/`: `proxy_buffering off`, `proxy_cache off`, `gzip off`, HTTP/1.1. SSE + gzip stalls.
+- SessionDetail: autoscroll the inner transcript pane (FloatingWindow), not the modal or the page.
+- `applySegment` must match stored outbound (replace growing snapshots; append only real deltas; do not trim).
+- Engines help: put CLI login commands on their own line so they do not wrap mid-flag.
 
-- **Per-turn silo write + last-topics inject on a fresh session.** Not a session-close flush.
-- **SSE leftover flush when the reader closes.** A done frame without trailing newlines still fires `onDone`.
-- **Dashboard nginx `/v2/`:** `proxy_buffering off`, `proxy_cache off`, `gzip off`, HTTP/1.1. SSE + gzip stalls without this.
-- **Engine text tokens as live deltas without trim.** Grok or any engine. Trim, or treat snapshots as appends, and words mash together.
-- **SessionDetail: autoscroll the inner transcript pane**, not the modal/page. `applySegment` must match stored outbound.
-- **Engines help:** put CLI login commands on their own line so they do not wrap mid-flag.
+## Take if you want Grok as an engine — not Ivy-only
 
-## Ivy-specific, skip unless you want Grok
+Helps any site that runs the Grok CLI.
 
-- `grok.js` engine
-- `--effort high` / auto-xhigh on code
-- idle default 30 minutes
-- `env.ivy.example`, `seed.ivy.example`
-- osiris user systemd units (core / collector / manager)
+- `core/src/engines/grok.js` adapter
+- Grok text tokens as live deltas without trim (mashed words if you trim or treat snapshots as appends)
+- `--effort high` and auto-xhigh on code
+- Engines copy: `grok login --device-auth` on its own line
+- Finite idle as a grok-session feature (we default 30 minutes; the idea is reusable)
+
+## Our box only, skip
+
+Do not merge these.
+
+- `ASSISTANT_NAME=ivy`
 - ivy stream slug
-- `grok login --device-auth` copy
-
-## Do not take
-
-- live `.env`
-- tokens / `ASMLTR_AUTH_SECRET` / insights token
-- `vault.pass`
+- `env.ivy.example` / `seed.ivy.example` branding
+- osiris user systemd units (`asmltr-core` / `asmltr-collector` / `asmltr-manager`)
+- `ivy.gtwy.net` and host nginx site files
+- live `.env`, tokens, `ASMLTR_AUTH_SECRET`, insights token, `vault.pass`
 - `docker-compose.local.yml`
-- host nginx / ivy.gtwy.net site files
-- Authelia leftover notes (Authelia was removed; built-in `ASMLTR_AUTH` is live-only)
+- Authelia leftover notes (Authelia was removed)
