@@ -74,6 +74,17 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   as "unknown upload", an oversized chunk returns JSON rather than an Express stack trace, and a
   sweep that fails on every directory no longer looks identical to a sweep with nothing to do.
 
+## [0.13.1] - 2026-08-18
+
+Dashboard chat now renders assistant replies as sanitized Markdown (bold, lists, code, links) instead of raw asterisks. Streaming turns stay plain and format on completion.
+
+### Added
+- **Rendered Markdown in the dashboard chat.** Assistant replies now render Markdown — bold, lists, code, headings, links — instead of showing raw `**asterisks**`. Output is sanitized with DOMPurify before insertion. A streaming turn stays plain text (partial tokens make half-open markdown flicker) and formats once the turn completes.
+
+### Changed
+
+### Fixed
+
 ## [0.13.0] - 2026-08-16
 
 Custom WebRTC remote desktop — view and drive a host machine's screen from the app, over a self-owned signaling + NAT-hole-punching transport (no external overlay).
