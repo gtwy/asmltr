@@ -9,6 +9,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.13.1] - 2026-08-18
+
+Dashboard chat now renders assistant replies as sanitized Markdown (bold, lists, code, links) instead of raw asterisks. Streaming turns stay plain and format on completion.
+
+### Added
 - **Rendered Markdown in the dashboard chat.** Assistant replies now render Markdown — bold, lists, code, headings, links — instead of showing raw `**asterisks**`. Output is sanitized with DOMPurify before insertion. A streaming turn stays plain text (partial tokens make half-open markdown flicker) and formats once the turn completes.
 
 ### Changed
