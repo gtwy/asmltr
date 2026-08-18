@@ -1,0 +1,21 @@
+{
+  "broker_url": "https://asmltr.eve.thoughtspacedesigns.com",
+  "token": "REPLACE_WITH_DEVICE_TOKEN_FROM_BROKER_keys.json",
+  "host_id": "windows-desk-1",
+  "name": "Office Windows PC",
+
+  "audio": false,
+  "control": true,
+
+  "capture_backend": "ddagrab",
+  "output_index": 0,
+  "framerate": 30,
+  "video_bitrate": "8M",
+
+  "audio_device": "",
+  "audio_bitrate": "96k",
+
+  "app_dir": "",
+  "ffmpeg_path": "",
+  "verbose": false
+}

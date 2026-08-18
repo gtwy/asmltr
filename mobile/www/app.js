@@ -116,7 +116,8 @@ const voiceOrb = (() => {
     let open = 23, rad = 9, happy = false;
     if (vs === 'listening') { open = 25; rad = 10; } else if (vs === 'thinking') { open = 20; rad = 8; } else if (vs === 'speaking') { happy = amp > 0.72; open = happy ? 19 : 23; }
     const eh = Math.max(2, open * (1 - blink));
-    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 5px 5px 11px 11px' : rad + 'px'; }
+    const bright = vs === 'listening'; // listening → noticeably whiter/brighter eyes (see .eye.bright)
+    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 5px 5px 11px 11px' : rad + 'px'; e.classList.toggle('bright', bright); }
     if (eyes) eyes.style.transform = `translate(${look.x}px,${look.y}px) scale(${1 + amp * 0.025})`;
     const dr = 1.5 + amp * 9; // drift barely moves at rest, swims when the orb is active
     if (glowA) glowA.style.transform = `translate(${Math.sin(t / 150) * dr}px,${Math.cos(t / 185) * dr * 0.7}px) scale(${1 + amp * 0.36})`;
@@ -161,6 +162,48 @@ function bubble(role, text) {
   const b = document.createElement('div'); b.className = 'bubble'; b.textContent = text || '';
   el.appendChild(b); $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight; return b;
 }
+// Full-viewport image viewer: tap an inline image → fills the app window over the chat, with a close
+// button, tap-the-backdrop-to-dismiss, Escape, and hardware-back (a pushed history entry the back gesture
+// pops) — so it never traps you with no way back to the chat.
+let _lightboxClose = null;
+function closeLightbox() { if (_lightboxClose) { const fn = _lightboxClose; _lightboxClose = null; fn(); } }
+function openLightbox(src, cap) {
+  closeLightbox();
+  const lb = document.createElement('div'); lb.className = 'lightbox';
+  const img = document.createElement('img'); img.className = 'lightbox-img'; img.src = src; img.alt = cap || 'image';
+  const close = document.createElement('button'); close.className = 'lightbox-close'; close.setAttribute('aria-label', 'Close'); close.textContent = '✕';
+  const onKey = (e) => { if (e.key === 'Escape') closeLightbox(); };
+  const onPop = () => { _lightboxClose = null; lb.remove(); document.removeEventListener('keydown', onKey); };
+  _lightboxClose = () => { lb.remove(); document.removeEventListener('keydown', onKey); window.removeEventListener('popstate', onPop); try { if (history.state && history.state.lightbox) history.back(); } catch (_) {} };
+  lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });   // tap backdrop
+  close.addEventListener('click', (e) => { e.stopPropagation(); closeLightbox(); });
+  document.addEventListener('keydown', onKey);
+  try { history.pushState({ lightbox: 1 }, ''); window.addEventListener('popstate', onPop, { once: true }); } catch (_) {} // hardware-back closes the viewer, not the overlay
+  if (cap) { const c = document.createElement('div'); c.className = 'lightbox-cap'; c.textContent = cap; lb.appendChild(c); }
+  lb.appendChild(img); lb.appendChild(close); document.body.appendChild(lb);
+}
+// Inline attachment bubble (a `media` frame or a `media` history item): {url, mime, name, caption}.
+// Image mimes render inline (tap to open full); anything else is a tappable file chip. The url is a
+// gateway path (/gw/file?…) — prefix baseUrl, and ensure a device token rides along (history omits it).
+function mediaBubble(role, m) {
+  const el = document.createElement('div'); el.className = 'msg-row ' + (role || 'assistant');
+  const b = document.createElement('div'); b.className = 'bubble media';
+  let src = m && m.url ? String(m.url) : '';
+  if (src && !/^https?:/i.test(src)) src = cfg.baseUrl + src;
+  if (src && cfg.token && !/[?&]token=/.test(src)) src += (src.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(cfg.token);
+  if (String(m.mime || '').startsWith('image/')) {
+    const img = document.createElement('img'); img.className = 'media-img'; img.loading = 'lazy';
+    img.alt = m.caption || m.name || 'image'; img.src = src;
+    img.addEventListener('click', () => { if (src) openLightbox(src, m.caption || m.name || ''); });
+    b.appendChild(img);
+  } else {
+    const a = document.createElement('a'); a.className = 'media-file'; a.href = src; a.target = '_blank';
+    a.rel = 'noopener'; a.textContent = '📎 ' + (m.name || 'file');
+    b.appendChild(a);
+  }
+  if (m.caption) { const c = document.createElement('div'); c.className = 'media-cap'; c.textContent = m.caption; b.appendChild(c); }
+  el.appendChild(b); $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight; return b;
+}
 function fmt(v) { try { return typeof v === 'string' ? v : JSON.stringify(v, null, 2); } catch (_) { return String(v); } }
 // Each thinking/tool row is appended to the log IN ORDER, and closes the current text bubble (curBubble=null)
 // so streamed reply text threads chronologically around the tools instead of stacking into one bubble.
@@ -196,6 +239,37 @@ function addToolResult(output, isErr) {
   if (isErr) lastTool.wrap.classList.add('tool-err');
   lastTool = null;
 }
+// Sub-agent panel: a live "sub-agents for this turn" section. A `subagent` frame (Claude only —
+// Codex/Gemini never emit them, so this panel simply never appears there = the capability gate) opens
+// the panel on the first running agent and updates each agent's row in place (running ● → stopped ✓).
+// View-only: sub-agents die with the turn and the SDK exposes no per-sub-agent kill.
+let subPanel = null, subRows = {};
+function resetSubPanel() { subPanel = null; subRows = {}; }
+function addSubagent(s) {
+  if (!s || !s.id) return;
+  curBubble = null;
+  if (!subPanel) {
+    subPanel = document.createElement('div'); subPanel.className = 'subpanel';
+    const h = document.createElement('div'); h.className = 'subpanel-head'; h.textContent = '🤖 sub-agents';
+    subPanel.appendChild(h); $('log').appendChild(subPanel); subRows = {};
+  }
+  let row = subRows[s.id];
+  if (!row) {
+    row = document.createElement('div'); row.className = 'subrow';
+    const dot = document.createElement('span'); dot.className = 'subdot';
+    const nm = document.createElement('span'); nm.className = 'subname';
+    const sm = document.createElement('span'); sm.className = 'subsum';
+    row.appendChild(dot); row.appendChild(nm); row.appendChild(sm);
+    subPanel.appendChild(row); subRows[s.id] = row;
+    row._dot = dot; row._nm = nm; row._sm = sm;
+  }
+  const stopped = s.status === 'stopped';
+  row.classList.toggle('done', stopped);
+  row._dot.textContent = stopped ? '✓' : '●';
+  row._nm.textContent = s.name || 'sub-agent';
+  if (s.summary) row._sm.textContent = s.summary;
+  $('log').scrollTop = $('log').scrollHeight;
+}
 function setState(s) {
   state = s;
   const t = $('talk'), l = $('talkLabel');
@@ -218,25 +292,52 @@ function connect() {
   es = new EventSource(url);
   es.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
-    if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) convKey = m.conversation_key; if (!activeTarget && !hydrated && $('log').children.length === 0) hydrateOwn(convKey); maybeAssistLaunch(); }
-    else if (m.type === 'thinking') addThinking(m.text);
-    else if (m.type === 'tool') addTool(m.name, m.input);
-    else if (m.type === 'tool_result') addToolResult(m.output, m.is_error);
-    else if (m.type === 'delta') { stopDrone(); if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text; feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; }
-    else if (m.type === 'done') { stopDrone(); curBubble = null; stepsEl = null; flushTTS(); }
-    else if (m.type === 'inject') { stepsEl = null; bubble('assistant', m.text); if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } }
-    else if (m.type === 'speak') { // asmltr notify (Part A): read a proactive message aloud, not a chat turn
-      stepsEl = null;
-      bubble('sys', '🔔 ' + (m.title ? (m.title + ' — ' + m.text) : m.text));
-      if (m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.title ? (m.title + '. ' + m.text) : m.text); flushTTS(); }
+    if (m.type === 'ready') { setStatus('connected', 'pill-on'); if (m.conversation_key) { convKey = m.conversation_key; if (ownTab) ownTab.key = convKey; } if (!activeTarget && !hydrated && $('log').children.length === 0) hydrateOwn(convKey); maybeAssistLaunch(); return; }
+    if (m.type === 'device_rpc') { runDeviceRPC(m); return; }   // #77: act on this phone (device-level, tab-agnostic)
+    if (m.type === 'open-remote-desktop') { openRemoteDesktop(m); return; } // cast-to-device: open a live host stream here (tab-agnostic)
+    // Multi-tab demultiplex: frames carry `key` (their conversation). A frame for a BACKGROUND tab is
+    // buffered (keeps accumulating, never speaks) and replayed when that tab is activated; a frame for
+    // the ACTIVE tab (or a keyless push like inject/speak) renders live and drives TTS.
+    const tab = frameTab(m);
+    if (tab && tab !== activeTab) {
+      tab.pending.push(m); if (tab.pending.length > 2000) tab.pending.splice(0, tab.pending.length - 2000); // guard runaway buffers
+      if ((m.type === 'delta' || m.type === 'done') && !tab.dirty) { tab.dirty = true; updateTabStrip(); } // flag activity once
+      return;
     }
-    else if (m.type === 'device_rpc') runDeviceRPC(m);   // #77: the assistant wants to act on this phone
-    else if (m.type === 'error') { stopDrone(); bubble('sys', '⚠ ' + m.error); resetTTS(); setState('idle'); }
+    renderFrame(m, true);
   };
   es.onerror = () => { setStatus('reconnecting…', 'pill-warn'); if (es) { es.close(); es = null; } clearTimeout(reconnectT); reconnectT = setTimeout(connect, 2500); };
 }
 function minimized() { return document.body.classList.contains('minimized'); }
 function afterReply() { if (continuous && !suppressRestart && !minimized() && state === 'idle') setTimeout(() => { if (continuous && !suppressRestart && !minimized() && state === 'idle') startRec(); }, 350); }
+
+// Render ONE stream frame into the (already-active) log. `live` = this is the active tab's real-time
+// turn → drive TTS + drone + mic restart; false = a catch-up replay of buffered background frames
+// (paint the DOM only, never speak). All render helpers target $('log') = the active tab's node.
+function renderFrame(m, live) {
+  switch (m.type) {
+    case 'thinking': addThinking(m.text); break;
+    case 'tool': addTool(m.name, m.input); break;
+    case 'tool_result': addToolResult(m.output, m.is_error); break;
+    case 'subagent': addSubagent(m); break;                     // live sub-agent panel (Claude only)
+    case 'delta':
+      if (live) stopDrone();
+      if (!curBubble) curBubble = bubble('assistant', ''); curBubble.textContent += m.text;
+      if (live) feedTTS(m.text); $('log').scrollTop = $('log').scrollHeight; break;
+    case 'done':
+      curBubble = null; stepsEl = null; if (live) { stopDrone(); flushTTS(); } break;
+    case 'inject':
+      stepsEl = null; bubble('assistant', m.text);
+      if (live && m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.text); flushTTS(); } break;
+    case 'speak':                                               // asmltr notify (Part A): read aloud, not a turn
+      stepsEl = null; bubble('sys', '🔔 ' + (m.title ? (m.title + ' — ' + m.text) : m.text));
+      if (live && m.text && m.text.trim() && !muted) { resetTTS(); feedTTS(m.title ? (m.title + '. ' + m.text) : m.text); flushTTS(); } break;
+    case 'media': stepsEl = null; curBubble = null; mediaBubble('assistant', m); break; // inline image/file
+    case 'error':
+      if (live) stopDrone(); bubble('sys', '⚠ ' + m.error); if (live) { resetTTS(); setState('idle'); } break;
+    default: break;
+  }
+}
 
 // ---------- streaming TTS ----------
 function feedTTS(text) {
@@ -310,7 +411,7 @@ async function apiGet(path, params) {
 }
 async function sendTurn(text) {
   if (state === 'busy') return;
-  suppressRestart = false; resetTTS(); lastTool = null;
+  suppressRestart = false; resetTTS(); lastTool = null; resetSubPanel();
   bubble('user', text); setState('busy');
   if (!muted) { chime(); startDrone(); }
   // If a session is selected in the switcher, direct the turn at it (else this device's own session).
@@ -321,9 +422,13 @@ async function sendTurn(text) {
 
 // ---------- STOP ----------
 function stopEverything() {
-  suppressRestart = true; stopDrone(); stopAudio(); resetTTS();
+  suppressRestart = true; stopDrone(); stopAudio(); resetTTS(); stopRealtimeSTT(); clearLiveCaption();
   try { api('/gw/abort', {}).catch(() => {}); } catch (_) {}
   curBubble = null; stepsEl = null; lastTool = null; setState('idle');
+  // Distinct "turn killed" feedback: a low descending double-tone (NOT the listen/stop mic cues), a
+  // visible system bubble, and the orb back to idle (already via setState) — so a hands-free / screen-off
+  // user recognises the kill by ear, and the chat shows the turn was dropped.
+  killCue(); bubble('sys', '⏹ turn stopped');
 }
 
 // ---------- audio ----------
@@ -357,6 +462,7 @@ function beepPair(f1, f2) {
 }
 function listenCue() { beepPair(440, 660); } // ascending — "now listening"
 function stopCue() { beepPair(660, 440); }   // descending — "stopped, mic off"
+function killCue() { beepPair(330, 220); }   // low descending "thunk" — turn KILLED (distinct from the mic cues)
 function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'); drone.loop = true; drone.volume = 0.45; } drone.currentTime = 0; drone.play().catch(() => {}); } catch (_) {} }
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 
@@ -403,42 +509,74 @@ async function startRec(skipCue) {
     chunks = []; heardSpeech = false;
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     recorder.onstop = onRecStop; recorder.start(); setState('rec'); startVAD(stream);
+    if (sttRealtimeOn()) startRealtimeSTT(stream); // live captions while speaking (batch stays the fallback)
   } catch (e) { bubble('sys', '⚠ mic: ' + e.message); setState('idle'); }
 }
 function stopRec() { stopVAD(); try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }
 async function onRecStop() {
-  stopVAD(); try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+  stopVAD();
+  // Capture the streaming transcript (if any) BEFORE tearing the session down, then close it + drop the caption.
+  const rtUsed = rtActive, rtText = realtimeFinalText(); stopRealtimeSTT(); clearLiveCaption();
+  try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
   if (!heardSpeech) { setState('idle'); return; }   // tapped off without speaking → nothing
   const blob = new Blob(chunks, { type: (recorder && recorder.mimeType) || 'audio/webm' });
-  if (blob.size < 1200) { setState('idle'); return; }
+  if (!rtText && blob.size < 1200) { setState('idle'); return; }
   setState('busy');
   try {
-    const b64 = await blobB64(blob);
-    const { text } = await api('/gw/transcribe', { audio_base64: b64, mime: (recorder && recorder.mimeType) || 'audio/webm' });
+    // Prefer the live streaming transcript; fall back to batch /gw/transcribe when realtime was off/failed.
+    let text;
+    if (rtUsed && rtText) text = rtText;
+    else { const b64 = await blobB64(blob); text = (await api('/gw/transcribe', { audio_base64: b64, mime: (recorder && recorder.mimeType) || 'audio/webm' })).text; }
     if (text && isStopPhrase(text)) { // hands-free stop — drop the turn, don't send to the LLM, end listening
       suppressRestart = true; stopDrone(); setState('idle'); stopCue(); bubble('sys', '✓ stopped listening');
     } else if (text && text.trim()) { setState('idle'); await sendTurn(text.trim()); } else setState('idle');
   } catch (e) { bubble('sys', '⚠ ' + e.message); setState('idle'); }
 }
+// End-of-speech detection. Design bias: WAIT TOO LONG rather than cut early. Key fixes over the old
+// loop (which froze the noise floor after the 350ms prime and then clipped people mid-sentence):
+//   • the floor keeps SLOWLY adapting during silence (tracks drifting room tone, never ratchets up on
+//     the speaker's own voice), so the threshold doesn't go stale.
+//   • a min-utterance guard: we can't endpoint within the first ~1s of detected speech (a slow starter
+//     or a mid-thought pause won't drop the turn).
+//   • the hangover honours the user's relaxed endpoint_ms from /gw/theme, floored + padded so it's
+//     never trigger-happy, and requires SUSTAINED sub-threshold silence (any speech frame resets it).
 function startVAD(mediaStream) {
   try {
     vadCtx = new (window.AudioContext || window.webkitAudioContext)();
     const src = vadCtx.createMediaStreamSource(mediaStream);
     const an = vadCtx.createAnalyser(); an.fftSize = 1024; src.connect(an);
     const buf = new Uint8Array(an.fftSize);
-    const t0 = Date.now(); let floor = 0.01, floorN = 0, quietSince = 0;
+    const t0 = Date.now(); let floor = 0.01, floorN = 0, quietSince = 0, speechStart = 0;
     // sensitivity 0..100 → threshold scale 1.5 (needs louder) .. 0.5 (more sensitive); 50 = neutral.
     const f = 1.5 - (Math.max(0, Math.min(100, vadCfg.sensitivity)) / 100);
-    const endpointMs = vadCfg.endpoint_ms || 1600, startMs = vadCfg.start_ms || 8000;
+    // Honour the user's relaxed endpoint_ms, but never endpoint faster than a floor (people pause), and
+    // add a hangover so it leans toward "waits too long" over "cuts early".
+    const endpointMs = Math.max(900, vadCfg.endpoint_ms || 1600) + 400;
+    const startMs = vadCfg.start_ms || 8000;
+    const MIN_UTTER_MS = 1000; // can't endpoint in the first ~1s of detected speech (min-utterance guard)
     const rms = () => { an.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; } return Math.sqrt(s / buf.length); };
+    const thresh = () => f * Math.max(0.03, floor * 2.2 + 0.012);
     const tick = () => {
       const level = rms(); const now = Date.now(); const dt = now - t0;
       try { if (state === 'rec') voiceOrb.setAmp(Math.min(1, level * 6)); } catch (_) {} // orb ripples with your voice
+      // prime the floor from the opening (pre-speech) window
       if (dt < 350) { floor = (floor * floorN + level) / (floorN + 1); floorN++; vadRAF = requestAnimationFrame(tick); return; }
-      const speaking = level > f * Math.max(0.03, floor * 2.2 + 0.012);
-      if (speaking) { heardSpeech = true; quietSince = 0; }
-      else if (heardSpeech) { if (!quietSince) quietSince = now; else if (now - quietSince > endpointMs) { stopRec(); return; } }
-      else if (dt > startMs) { stopRec(); return; }
+      const speaking = level > thresh();
+      if (speaking) {
+        heardSpeech = true; if (!speechStart) speechStart = now; quietSince = 0;
+      } else {
+        // slowly track ambient drift during genuine near-silence only (never while a voice is active),
+        // so the threshold stays honest without creeping up on the speaker.
+        if (level < floor * 1.5) floor += (level - floor) * 0.02;
+        if (heardSpeech) {
+          // min-utterance guard: hold off endpointing until the utterance has run ~1s.
+          if (speechStart && now - speechStart < MIN_UTTER_MS) { vadRAF = requestAnimationFrame(tick); return; }
+          // require SUSTAINED silence: a single speech frame above resets quietSince, so a flicker
+          // (a between-words dip) can't trip the endpoint — only continuous silence for the hangover.
+          if (!quietSince) quietSince = now;
+          else if (now - quietSince > endpointMs) { stopRec(); return; }
+        } else if (dt > startMs) { stopRec(); return; } // never spoke → give up after start window
+      }
       vadRAF = requestAnimationFrame(tick);
     };
     vadRAF = requestAnimationFrame(tick);
@@ -446,6 +584,83 @@ function startVAD(mediaStream) {
 }
 function stopVAD() { if (vadRAF) cancelAnimationFrame(vadRAF); vadRAF = 0; try { if (vadCtx) { vadCtx.close(); vadCtx = null; } } catch (_) {} }
 function blobB64(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); }); }
+
+// ---------- live (streaming) STT ----------
+// OPTIONAL streaming transcription: reuse the live mic track and open a WebRTC session DIRECTLY to
+// OpenAI realtime transcription using an ephemeral secret minted by the connector (/gw/realtime-token —
+// the real key stays on the host). Partial deltas paint a live caption bubble while you speak; the final
+// transcript is used on endpoint. Batch /gw/transcribe stays the fallback (off, no token, or any error).
+// Gated by the device-local "Live transcription" setting. NOTE: the exact OpenAI realtime WebRTC URL +
+// event names can shift; on ANY failure we degrade silently to batch, so the feature is safe-by-default.
+let rtPC = null, rtDC = null, rtActive = false, rtFinal = '', rtPartial = '', rtCapEl = null, rtGen = 0;
+function sttRealtimeOn() { try { return localStorage.getItem('asmltr.sttmode') === 'realtime'; } catch (_) { return false; } }
+function setSttRealtime(on) { try { localStorage.setItem('asmltr.sttmode', on ? 'realtime' : 'batch'); } catch (_) {} }
+function realtimeFinalText() { return (rtFinal + ' ' + rtPartial).replace(/\s+/g, ' ').trim(); }
+function liveCaption(text) {
+  if (!rtCapEl) { rtCapEl = bubble('user', ''); if (rtCapEl.parentElement) rtCapEl.parentElement.classList.add('live'); }
+  rtCapEl.textContent = text || '…'; $('log').scrollTop = $('log').scrollHeight;
+}
+function clearLiveCaption() { try { if (rtCapEl && rtCapEl.parentElement) rtCapEl.parentElement.remove(); } catch (_) {} rtCapEl = null; }
+async function startRealtimeSTT(micStream) {
+  // Setup is async (token mint + SDP round-trip). A short utterance can end BEFORE it finishes, so guard
+  // with a generation token: stopRealtimeSTT() bumps rtGen, and any awaited step here that finds its gen
+  // stale closes its own half-built peer and bails — otherwise the connection would open AFTER we stopped
+  // (transcribing with the mic off = token burn) and the next listen would stack a 2nd stream (the doubling).
+  stopRealtimeSTT();                 // tear down any prior/in-flight session first
+  const gen = ++rtGen;
+  rtActive = false; rtFinal = ''; rtPartial = '';
+  try {
+    if (!window.RTCPeerConnection || !micStream) return;
+    const tok = await api('/gw/realtime-token', {});
+    if (gen !== rtGen || !tok || !tok.value) return; // superseded/stopped during token mint
+    const pc = new RTCPeerConnection(); rtPC = pc;
+    for (const tr of micStream.getAudioTracks()) pc.addTrack(tr, micStream);
+    const dc = pc.createDataChannel('oai-events'); rtDC = dc;
+    // The transcription session (model, turn detection, etc.) is baked into the ephemeral secret when the
+    // connector mints it via /v1/realtime/client_secrets — the client sends NO session.update; it just
+    // receives transcription events on this data channel.
+    dc.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
+      const type = String(m.type || '');
+      if (/input_audio_transcription\.delta/.test(type) && m.delta != null) {
+        rtPartial += m.delta; liveCaption(realtimeFinalText());
+      } else if (/input_audio_transcription\.completed/.test(type)) {
+        const seg = (m.transcript != null ? m.transcript : rtPartial) || '';
+        rtFinal = (rtFinal + ' ' + seg).replace(/\s+/g, ' ').trim(); rtPartial = ''; liveCaption(rtFinal);
+      } else if (type === 'error' && sttRealtimeOn()) {
+        // Surface OpenAI's own error so a schema/model mismatch is diagnosable instead of silently falling back.
+        const em = (m.error && (m.error.message || m.error.code)) || JSON.stringify(m).slice(0, 200);
+        bubble('sys', '⚠ live STT: ' + em);
+      }
+    };
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped while wiring the peer
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped during offer
+    // GA WebRTC SDP exchange endpoint. The old beta `/v1/realtime?intent=transcription` was retired
+    // ("the realtime beta API is no longer supported"); the session type/model ride in the ephemeral secret.
+    const r = await fetch('https://api.openai.com/v1/realtime/calls', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + tok.value, 'Content-Type': 'application/sdp' }, body: offer.sdp,
+    });
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped during the SDP round-trip
+    if (!r.ok) throw new Error('realtime sdp ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 160));
+    await pc.setRemoteDescription({ type: 'answer', sdp: await r.text() });
+    if (gen !== rtGen) { try { pc.close(); } catch (_) {} return; } // stopped before it went live
+    rtActive = true;
+  } catch (e) {
+    // Surface the reason when the user explicitly enabled live STT (else stay quiet); batch still covers the turn.
+    if (gen === rtGen && sttRealtimeOn()) { try { bubble('sys', '⚠ live STT unavailable: ' + (e && e.message ? e.message : e)); } catch (_) {} }
+    if (gen === rtGen) stopRealtimeSTT();
+  }
+}
+// Idempotent + race-proof: bumping rtGen invalidates any in-flight startRealtimeSTT so it can't publish a
+// live connection after we've stopped. Called on every listen-end path (onRecStop / stopEverything).
+function stopRealtimeSTT() {
+  rtGen++;
+  rtActive = false;
+  try { if (rtDC) rtDC.close(); } catch (_) {}
+  try { if (rtPC) rtPC.close(); } catch (_) {}
+  rtDC = null; rtPC = null;
+}
 
 // ---------- #77 device control ----------
 // The assistant emits a device_rpc frame; we run it against this phone via the native AsmltrDevice
@@ -465,8 +680,37 @@ async function runDeviceRPC(m) {
   try { await api('/gw/rpc-result', { id, result }); } catch (_) {}
 }
 
+// ---------- cast-to-device: open a live remote-desktop stream on this phone ----------
+// A trusted caster (the dashboard's "Cast to my phone" / the assistant) pushed an open-remote-desktop
+// frame over this device's SSE. Navigate to the RD viewer with the host (and control flag) as query
+// params; remote-desktop.js auto-connects to it. Tab-agnostic, like device_rpc — this is the primitive
+// by which a live host stream is projected onto a device (sibling of the inline `media` screenshot).
+function openRemoteDesktop(m) {
+  if (!m || !m.host_id) return;
+  const q = new URLSearchParams({ host: String(m.host_id) });
+  if (m.control) q.set('control', '1');
+  try { location.href = 'remote-desktop.html?' + q.toString(); } catch (_) {}
+}
+
 // ---------- assist launch + native overlay controls ----------
-function maybeAssistLaunch() { const a = OVERLAY || location.hash.indexOf('assist') >= 0 || window.__ASMLTR_ASSIST === true; if (a && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); } }
+// Auto-listen-on-open (default OFF): a plain overlay open must NOT grab the mic. An ASSIST-GESTURE
+// launch (opened via the digital-assistant gesture / wake) always auto-listens — that's the "opened a
+// certain way" intent. The toggle only affects a plain open. Persisted device-local (localStorage +
+// best-effort NativeConfig), read from the native cfg blob when present.
+const AUTOLISTEN_KEY = 'asmltr.autolisten';
+function autoListenOnOpen() {
+  try { const nc = window.__ASMLTR_NATIVE_CFG || {}; if (typeof nc.autoListen === 'boolean') return nc.autoListen; } catch (_) {}
+  try { return localStorage.getItem(AUTOLISTEN_KEY) === '1'; } catch (_) { return false; }
+}
+function setAutoListen(on) {
+  try { localStorage.setItem(AUTOLISTEN_KEY, on ? '1' : '0'); } catch (_) {}
+  try { if (window.AsmltrNative && window.AsmltrNative.setAutoListen) window.AsmltrNative.setAutoListen(!!on); } catch (_) {}
+}
+function maybeAssistLaunch() {
+  const assistGesture = location.hash.indexOf('assist') >= 0 || window.__ASMLTR_ASSIST === true;
+  const auto = assistGesture || (OVERLAY && autoListenOnOpen());
+  if (auto && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); }
+}
 window.asmltrStartListening = (skipCue) => { if (state === 'idle') startRec(skipCue); };
 // Called by OverlayService when the card should collapse/expand; also usable from the min button.
 window.asmltrMinimize = () => { document.body.classList.add('minimized'); if (state === 'rec') stopRec(); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(true); } catch (_) {} };
@@ -514,7 +758,7 @@ function initOverlayChrome() {
 }
 
 // ---------- settings ----------
-function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; try { loadNotifSettings(); } catch (_) {} $('sheet').classList.remove('hidden'); reportPanelHeight(); }
+function openSheet(msg) { $('cfgUrl').value = cfg.baseUrl; $('cfgToken').value = cfg.token; $('cfgName').value = cfg.name; $('cfgDevice').value = cfg.deviceId; $('cfgMsg').textContent = msg || ''; if ($('cfgSession')) $('cfgSession').value = (activeTarget && activeTarget.key) || convKey || '(not connected yet)'; if ($('sessMsg')) $('sessMsg').textContent = ''; if ($('cfgAutoListen')) $('cfgAutoListen').checked = autoListenOnOpen(); if ($('cfgSttRt')) $('cfgSttRt').checked = sttRealtimeOn(); if ($('cfgWake')) $('cfgWake').checked = !!wakeCfg.enabled; if ($('cfgWakePhrase')) $('cfgWakePhrase').value = wakeCfg.phrase || ''; if ($('voiceMsg')) $('voiceMsg').textContent = ''; try { loadNotifSettings(); } catch (_) {} $('sheet').classList.remove('hidden'); reportPanelHeight(); }
 async function saveVoice() {
   const m = $('voiceMsg'); if (m) m.textContent = 'saving…';
   const enabled = $('cfgWake').checked, phrase = $('cfgWakePhrase').value.trim();
@@ -565,13 +809,77 @@ async function newSession() {
   stopEverything();
   try { const r = await api('/gw/forget', {}); if (m) m.textContent = r && r.existed ? '✓ context cleared — fresh session' : '✓ fresh session'; }
   catch (e) { if (m) m.textContent = '✗ ' + e.message; return; }
-  activeTarget = null; updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; resetTTS(); hydrated = true; // fresh session — nothing to rehydrate
+  if (ownTab && activeTab !== ownTab) switchTab(ownTab); // "new session" always clears the OWN device session
+  $('log').innerHTML = ''; curBubble = null; resetSubPanel(); stepsEl = null; lastTool = null; resetTTS(); hydrated = true; // fresh session — nothing to rehydrate
   bubble('sys', 'New session started.');
 }
 
-// ---------- session switcher (browse/attach any asmltr session, like the web GUI) ----------
-let activeTarget = null; // {key, surface, title} when driving another session; null = this device's own
+// ---------- multi-session tabs (hold several live sessions at once) ----------
+// The device holds ONE gateway SSE; the connector tags every frame with its conversation `key`, so we
+// demultiplex that single stream into per-session TABS. Each tab owns its own <main class="log"> DOM
+// node (detached when backgrounded, remounted on switch) + its own working state (curBubble/lastTool/
+// sub-agent panel/hydrated). The ACTIVE tab renders live and drives TTS; background tabs buffer their
+// frames (`pending`) and keep accumulating, replaying silently when activated — so nothing is lost on
+// switch and only the active tab ever speaks. Tab 0 is this device's own session.
+let tabs = [], activeTab = null, ownTab = null, tabSeq = 0;
+let activeTarget = null; // mirrors the active tab: {key,surface,title} for an attached session, null for own
+function makeTab(o) {
+  const logEl = document.createElement('main'); logEl.className = 'log'; logEl.setAttribute('aria-live', 'polite');
+  return { id: 't' + (++tabSeq), own: !!o.own, key: o.key || '', surface: o.surface || '', title: o.title || '',
+    logEl, curBubble: null, lastTool: null, stepsEl: null, subPanel: null, subRows: {}, hydrated: false,
+    pending: [], dirty: false, needsHistory: false };
+}
+function initTabs() {
+  // Adopt the static #log as the own tab's node so existing markup/sizing carries over.
+  ownTab = makeTab({ own: true, title: 'Me' }); ownTab.logEl = document.getElementById('log');
+  tabs = [ownTab]; activeTab = ownTab; activeTarget = null;
+}
+// Persist / restore the working globals that belong to whichever tab is currently mounted.
+function saveTabState(t) { if (!t) return; t.curBubble = curBubble; t.lastTool = lastTool; t.stepsEl = stepsEl; t.subPanel = subPanel; t.subRows = subRows; t.hydrated = hydrated; }
+function restoreTabState(t) { curBubble = t.curBubble; lastTool = t.lastTool; stepsEl = t.stepsEl; subPanel = t.subPanel; subRows = t.subRows; hydrated = t.hydrated; }
+// Which tab does a frame belong to? Match on its `key`; keyless pushes (inject/speak/media from /out)
+// land on the active tab. A key with no open tab also falls back to the active tab (render live).
+function frameTab(m) { if (m && m.key) { const t = tabs.find((x) => x.key === m.key); if (t) return t; } return activeTab; }
+function switchTab(tab) {
+  if (!tab || tab === activeTab) { if (tab) { tab.dirty = false; updateTabStrip(); } return; }
+  // leaving the current tab: stop its mic/readout (TTS follows the active tab only) and stash its state
+  if (state === 'rec') stopRec();
+  suppressRestart = true; stopDrone(); stopAudio(); resetTTS();
+  saveTabState(activeTab);
+  const oldEl = activeTab.logEl;
+  tab.logEl.id = 'log'; if (nativeOverlay() && oldEl.style.maxHeight) tab.logEl.style.maxHeight = oldEl.style.maxHeight;
+  oldEl.removeAttribute('id'); oldEl.replaceWith(tab.logEl); // swap the mounted node
+  activeTab = tab; restoreTabState(tab);
+  activeTarget = tab.own ? null : { key: tab.key, surface: tab.surface, title: tab.title };
+  suppressRestart = false; setState('idle');
+  // catch-up: replay everything that streamed in while this tab was backgrounded (no TTS)
+  const pend = tab.pending; tab.pending = []; tab.dirty = false;
+  for (const fr of pend) renderFrame(fr, false);
+  updateTabStrip(); updateTargetBar();
+  $('log').scrollTop = $('log').scrollHeight; reportPanelHeight();
+}
+function closeTab(tab) {
+  if (!tab || tab.own) return;                 // the own session tab is permanent
+  const wasActive = tab === activeTab;
+  const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1);
+  if (wasActive) switchTab(tabs[Math.max(0, i - 1)] || ownTab);
+  else updateTabStrip();
+}
+function updateTabStrip() {
+  const strip = $('tabstrip'); if (!strip) return;
+  strip.classList.toggle('hidden', tabs.length <= 1);
+  strip.innerHTML = '';
+  for (const t of tabs) {
+    const b = document.createElement('button'); b.className = 'tab' + (t === activeTab ? ' active' : '') + (t.dirty && t !== activeTab ? ' dirty' : '');
+    b.setAttribute('role', 'tab');
+    const label = t.own ? 'Me' : (t.title || t.key);
+    const nm = document.createElement('span'); nm.className = 'tab-name'; nm.textContent = label; b.appendChild(nm);
+    b.addEventListener('click', () => switchTab(t));
+    if (!t.own) { const x = document.createElement('span'); x.className = 'tab-x'; x.textContent = '✕'; x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(t); }); b.appendChild(x); }
+    strip.appendChild(b);
+  }
+  reportPanelHeight();
+}
 function updateTargetBar() {
   const bar = $('targetBar'); if (!bar) return;
   if (activeTarget) { bar.classList.remove('hidden'); $('targetLabel').textContent = '▸ [' + activeTarget.surface + '] ' + (activeTarget.title || activeTarget.key); }
@@ -588,7 +896,7 @@ async function openSessions() {
 function renderSessions(list) {
   const el = $('sessList'); if (!el) return; el.innerHTML = '';
   for (const s of list) {
-    const row = document.createElement('div'); row.className = 'sessrow' + (activeTarget && activeTarget.key === s.key ? ' active' : '');
+    const row = document.createElement('div'); row.className = 'sessrow' + (tabs.some((t) => t.key === s.key) ? ' active' : '');
     const head = document.createElement('div'); head.className = 'st';
     const badge = document.createElement('span'); badge.className = 'sess-badge'; badge.textContent = s.surface;
     const title = document.createElement('span'); title.className = 'sess-title'; title.textContent = s.title || s.key;
@@ -607,18 +915,23 @@ function renderHistoryItems(items) {
     else if (it.kind === 'thinking') addThinking(it.text);
     else if (it.kind === 'tool') addTool(it.name, it.input);
     else if (it.kind === 'tool_result') addToolResult(it.output, it.is_error);
+    else if (it.kind === 'subagent') addSubagent(it);
+    else if (it.kind === 'media') mediaBubble('assistant', it);
   }
   curBubble = null; // a live delta must start a fresh bubble, not append onto a historical one
   $('log').scrollTop = $('log').scrollHeight;
 }
+// Selecting a session OPENS it as a tab (or focuses its existing tab) — sessions stay live side-by-side
+// instead of swapping the single view. First open lazily loads its history into the new tab.
 async function selectSession(s) {
-  activeTarget = { key: s.key, surface: s.surface, title: s.title || s.key };
   $('sessions').classList.add('hidden');
-  updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null; hydrated = true; // target view owns its history
+  const existing = tabs.find((t) => t.key === s.key);
+  if (existing) { switchTab(existing); reportPanelHeight(); return; }
+  const tab = makeTab({ key: s.key, surface: s.surface, title: s.title || s.key });
+  tabs.push(tab); switchTab(tab); tab.hydrated = true; hydrated = true; // this tab owns its own history
   bubble('sys', 'Loaded [' + s.surface + '] ' + (s.title || s.key) + ' — your next message goes here.');
-  try { const r = await apiGet('/gw/history', { key: s.key, limit: '80' }); renderHistoryItems(r.items); }
-  catch (e) { bubble('sys', '⚠ history: ' + e.message); }
+  try { const r = await apiGet('/gw/history', { key: s.key, limit: '80' }); if (activeTab === tab) renderHistoryItems(r.items); }
+  catch (e) { if (activeTab === tab) bubble('sys', '⚠ history: ' + e.message); }
   reportPanelHeight();
 }
 // Rehydrate THIS device's own conversation on (re)open — the core session persists even though the WebView
@@ -629,21 +942,19 @@ async function hydrateOwn(key, limit) {
   try {
     const r = await apiGet('/gw/history', { key, limit: String(limit) });
     const items = r.items || [];
-    $('log').innerHTML = ''; curBubble = null; lastTool = null;
+    $('log').innerHTML = ''; curBubble = null; resetSubPanel(); lastTool = null;
     if (items.length >= limit) { const e = document.createElement('div'); e.className = 'sys-earlier'; e.textContent = '↑ load earlier messages'; e.addEventListener('click', () => hydrateOwn(key, limit + 200)); $('log').appendChild(e); }
     renderHistoryItems(items);
   } catch (_) {}
   reportPanelHeight();
 }
-function leaveTarget() {
-  activeTarget = null; updateTargetBar();
-  $('log').innerHTML = ''; curBubble = null; stepsEl = null; lastTool = null;
-  hydrated = false; if (convKey) hydrateOwn(convKey); else bubble('sys', 'Back to your own session.');
-}
+// The targetBar "close tab" button closes the current attached tab (returns to whatever's behind it).
+function leaveTarget() { if (activeTab && !activeTab.own) closeTab(activeTab); }
 async function testConn() { const base = $('cfgUrl').value.trim().replace(/\/+$/, ''); $('cfgMsg').textContent = 'testing…'; try { const r = await fetch(base + '/health'); const j = await r.json(); $('cfgMsg').textContent = j.status === 'ok' ? '✓ reachable' : 'unexpected'; } catch (e) { $('cfgMsg').textContent = '✗ ' + e.message; } }
 
 // ---------- wire up ----------
 function init() {
+  initTabs(); // the own-device session tab (tab 0) must exist before any frame/hydrate lands
   if (OVERLAY) { document.documentElement.style.background = 'transparent'; document.body.classList.add('overlay'); if (NATIVE) document.body.classList.add('native'); initOverlayChrome(); }
   $('agentName').textContent = cfg.agentName || 'assistant';
   try { voiceOrb.start(); } catch (_) {}   // the reactive orb-face replaces the old mic icon
@@ -655,10 +966,13 @@ function init() {
   if ($('sessRefresh')) $('sessRefresh').addEventListener('click', openSessions);
   if ($('targetLeave')) $('targetLeave').addEventListener('click', leaveTarget);
   if ($('sessions')) $('sessions').addEventListener('click', (e) => { if (e.target === $('sessions')) { $('sessions').classList.add('hidden'); reportPanelHeight(); } });
+  if ($('cfgAutoListen')) $('cfgAutoListen').addEventListener('change', (e) => setAutoListen(e.target.checked)); // device-local, persists immediately
+  if ($('cfgSttRt')) $('cfgSttRt').addEventListener('change', (e) => setSttRealtime(e.target.checked)); // device-local streaming-STT toggle
   if ($('cfgVoiceSave')) $('cfgVoiceSave').addEventListener('click', saveVoice);
   if ($('cfgNotifSave')) $('cfgNotifSave').addEventListener('click', saveNotifSettings);
   if ($('cfgNotifAccess')) $('cfgNotifAccess').addEventListener('click', () => { const n = NC(); if (n && n.openNotificationAccessSettings) n.openNotificationAccessSettings(); });
   if ($('cfgNewSession')) $('cfgNewSession').addEventListener('click', newSession);
+  if ($('cfgRemoteDesktop')) $('cfgRemoteDesktop').addEventListener('click', () => { location.href = 'remote-desktop.html'; });
   $('cfgTest').addEventListener('click', testConn);
   $('cfgSave').addEventListener('click', () => {
     cfg.baseUrl = $('cfgUrl').value.trim().replace(/\/+$/, ''); cfg.token = $('cfgToken').value.trim(); cfg.name = $('cfgName').value.trim() || 'My device'; saveCfg(cfg);

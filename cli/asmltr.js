@@ -328,8 +328,9 @@ async function cmdAnnounce(rest) {
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target}  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
 }
-// asmltr notify "<text>" [--title T] [--force] [--silent]  — proactive read-aloud / delivery ladder (Part A).
-// The morning-brief prompt (and any session) calls this to REACH the user (android read-aloud → push → text).
+// asmltr notify "<text>" [--title T] [--force] [--silent] [--file <path>]  — proactive read-aloud /
+// delivery ladder (Part A). Any session/schedule calls this to REACH the user (android read-aloud → push
+// → text). --file attaches a file (android → inline media; text fallback → sent as a channel attachment).
 async function cmdNotify(rest) {
   const opts = { force: false }; const words = [];
   for (let i = 0; i < rest.length; i++) {
@@ -337,10 +338,11 @@ async function cmdNotify(rest) {
     if (t === '--title') opts.title = rest[++i];
     else if (t === '--force') opts.force = true;             // ignore quiet hours
     else if (t === '--silent' || t === '--no-speak') opts.speak = false; // skip the spoken step (text only)
+    else if (t === '--file') opts.file = rest[++i];          // attach a file alongside the notification
     else words.push(t);
   }
   const text = words.join(' ');
-  if (!text) throw new Error('usage: asmltr notify "<text>" [--title <t>] [--force] [--silent]');
+  if (!text && !opts.file) throw new Error('usage: asmltr notify "<text>" [--title <t>] [--force] [--silent] [--file <path>]');
   const r = await fetch(CORE_BASE + '/v2/notify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, ...opts }) })
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   if (r && r.delivered) console.log(A.grn(`✓ notified via ${r.via}`));
@@ -380,6 +382,41 @@ async function cmdUploads(rest) {
     console.log(`     ${A.dim(`id ${r.id} · from ${r.sender || '?'} · ${r.path}`)}`);
   }
 }
+// Topic/project event streams (roadmap §A). `asmltr streams` [·show·recall·new·rm]. Sessions check the
+// list before starting longer-running work and create a stream when a task deserves its own thread.
+async function cmdStreams(rest) {
+  const sub = rest[0];
+  if (sub === 'new' || sub === 'create') {
+    const name = rest[1]; if (!name) { console.error(A.red('usage: asmltr streams new <name> ["description"]')); return process.exit(1); }
+    const s = await coreApi('/v2/streams', 'POST', { name, description: rest.slice(2).join(' ') });
+    if (s.error) { console.error(A.red('✗ ' + s.error)); return process.exit(1); }
+    return void console.log(A.grn('✓ created stream ') + A.bold(s.slug) + A.dim('  ' + s.id));
+  }
+  if (sub === 'show' || sub === 'events') {
+    const s = await coreApi('/v2/streams/' + encodeURIComponent(rest[1] || ''));
+    if (s.error) { console.error(A.red('✗ ' + s.error)); return process.exit(1); }
+    console.log(A.bold(s.name) + A.dim('  (' + s.slug + ')') + (s.description ? '\n' + A.dim(s.description) : ''));
+    for (const e of (s.events || [])) console.log(A.dim(new Date(e.ts).toLocaleString() + ' [' + (e.kind || '') + '] ' + (e.source || '')) + '  ' + (e.text || ''));
+    return;
+  }
+  if (sub === 'recall' || sub === 'search') {
+    const r = await coreApi('/v2/streams/' + encodeURIComponent(rest[1] || '') + '/recall?q=' + encodeURIComponent(rest.slice(2).join(' ')));
+    if (r.error) { console.error(A.red('✗ ' + r.error)); return process.exit(1); }
+    if (!r.results || !r.results.length) return void console.log(A.dim('(no matches)'));
+    for (const e of r.results) console.log(A.dim('[' + (e.kind || '') + '] ' + (e.source || '')) + '  ' + (e.text || ''));
+    return;
+  }
+  if (sub === 'rm' || sub === 'delete') { await coreApi('/v2/streams/' + encodeURIComponent(rest[1] || ''), 'DELETE'); return void console.log(A.grn('✓ removed ' + rest[1])); }
+  const { streams: list } = await coreApi('/v2/streams');
+  if (!list || !list.length) return void console.log(A.dim('No streams yet. Create one: ') + 'asmltr streams new <name> ["description"]');
+  for (const s of list) {
+    const last = s.last_ts ? new Date(s.last_ts).toLocaleString() : '—';
+    const active = (s.active_sessions || []).length;
+    console.log(A.bold(s.slug.padEnd(22)) + A.dim(String(s.event_count).padStart(5) + ' events · last ' + last + (active ? '  · ' + active + ' active' : '')));
+    if (s.description) console.log('  ' + A.dim(s.description));
+  }
+}
+
 async function cmdSteer(rest) {
   // asmltr steer <conversation_key> "<guidance>" [--from <label>] [--interrupt]
   // COERCIVE: pushes guidance into another session's LIVE turn. Off unless ASMLTR_MESH_STEER=on.
@@ -801,6 +838,7 @@ async function cmdVault(rest, f) {
       case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();
       case 'uploads': return await cmdUploads(rest);
+      case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
       case 'steer': return await cmdSteer(rest);

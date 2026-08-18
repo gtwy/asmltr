@@ -101,6 +101,44 @@ export const silosApi = {
   rm: (id = 'self', path) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`)
 }
 
+// Recordings (roadmap §B1/§B3, issues #94/#96) — the recording app's backend, served on the core.
+export const recordingsApi = {
+  list: () => getCore('/v2/recordings'),
+  get: (id) => getCore(`/v2/recordings/${encodeURIComponent(id)}`),
+  enrich: (id) => postCore(`/v2/recordings/${encodeURIComponent(id)}/enrich`, {}),
+  diarize: (id) => postCore(`/v2/recordings/${encodeURIComponent(id)}/diarize`, {}),
+  patch: (id, body) => reqCore('PATCH', `/v2/recordings/${encodeURIComponent(id)}`, body),
+  toStream: (id, body) => postCore(`/v2/recordings/${encodeURIComponent(id)}/to-stream`, body),
+  remove: (id) => reqCore('DELETE', `/v2/recordings/${encodeURIComponent(id)}`),
+  audioUrl: (id) => `/v2/recordings/${encodeURIComponent(id)}/audio`,
+  // Raw-bytes upload (octet-stream) — dodges the base64-in-JSON size cap. `file` is a browser File/Blob.
+  async upload(file, { source = 'upload', title } = {}) {
+    const res = await fetch(`/v2/recordings${q({ source, title })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', Accept: 'application/json' },
+      body: file
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.error || `upload -> ${res.status} ${res.statusText}`)
+    return json
+  }
+}
+
+// Voice engines (epic #113) — the pluggable role/capability voice layer.
+export const voiceEnginesApi = {
+  get: () => getCore('/v2/voice/engines'),
+  bind: (role, engine) => postCore('/v2/voice/engines/bind', { role, engine })
+}
+
+// Streams (roadmap §A, issue #93) — topic/project event streams: list, create, read, recall (FTS search).
+export const streamsApi = {
+  list: () => getCore('/v2/streams'),
+  get: (id) => getCore(`/v2/streams/${encodeURIComponent(id)}`),
+  create: (name, description) => postCore('/v2/streams', { name, description }),
+  recall: (id, q) => getCore(`/v2/streams/${encodeURIComponent(id)}/recall${q ? '?q=' + encodeURIComponent(q) : ''}`),
+  remove: (id) => reqCore('DELETE', `/v2/streams/${encodeURIComponent(id)}`)
+}
+
 // Auth — session gate (roadmap P1). status/setup/login/logout are public; the session cookie is httpOnly.
 export const authApi = {
   status: () => getCore('/v2/auth/status'),
@@ -490,6 +528,49 @@ export const stt = {
     })
     return postCore('/v2/transcribe', { data_base64, mime: blob.type || 'audio/webm', model, language })
   }
+}
+
+// Remote Desktop — the WebRTC signaling broker (a connector, same-origin /rd via the proxy). The broker
+// authenticates the caller by an RD token → trust identity (default-deny): `list` needs a view grant,
+// `cast` needs full trust (control). Unlike the collector/manager, the token isn't injected by nginx —
+// the broker's clients are agents/phones presenting a token, so we keep it DEVICE-LOCAL (localStorage,
+// like the mobile RD viewer) and send it in the message body.
+const RD_TOKEN_KEY = 'asmltr.rd.token'
+export const rd = {
+  getToken() { try { return localStorage.getItem(RD_TOKEN_KEY) || '' } catch { return '' } },
+  setToken(t) { try { localStorage.setItem(RD_TOKEN_KEY, t || '') } catch { /* ignore */ } },
+  async msg(body) {
+    const res = await fetch('/rd/msg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token: rd.getToken(), ...body })
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || json.ok === false) throw new Error(json.error || `POST /rd/msg -> ${res.status} ${res.statusText}`)
+    return json
+  },
+  // The registry: all registered hosts + their caps/online state.
+  list: () => rd.msg({ type: 'list' }),
+  // Cast-to-device: push an open-remote-desktop directive to a target device (''/undefined = all my
+  // connected devices). `control` opens the stream with input control (clamped by grants on the broker).
+  async cast(device, host_id, control) {
+    const res = await fetch('/rd/cast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token: rd.getToken(), device: device || '', host_id, control: !!control })
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || json.ok === false) throw new Error(json.error || `POST /rd/cast -> ${res.status} ${res.statusText}`)
+    return json
+  },
+  // Castable android devices (for the target picker) + whether this caller may cast (full trust).
+  async devices() {
+    const res = await fetch(`/rd/devices?token=${encodeURIComponent(rd.getToken())}`, { headers: { Accept: 'application/json' } })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || json.ok === false) throw new Error(json.error || `GET /rd/devices -> ${res.status} ${res.statusText}`)
+    return json
+  },
+  async health() { const res = await fetch('/rd/health'); return res.json() }
 }
 
 // payload arrives as a JSON *string* over REST. Be defensive.

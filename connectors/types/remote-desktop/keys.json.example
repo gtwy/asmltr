@@ -1,0 +1,8 @@
+{
+  "_comment": "Device tokens for the remote-desktop signaling broker. Copy to keys.json (gitignored). Each token maps a peer (a HOST agent machine or a VIEWER client) to a TRUST IDENTITY string. That identity is resolved on the 'remote-desktop' surface via the trust framework (POST /trust/resolve): view requires a known principal at trust_tier >= 1, CONTROL requires a full-trust (bypass_moderation) identity. The token is the ONLY gate at the HTTP layer (no dashboard auth on /rd/*); trust is enforced per-message on list/connect. Mint a long random token per device. For an identity to carry a grant, add a matching trust identifier: POST /trust/principals/<pid>/identifiers { surface: 'remote-desktop', value: '<identity>' }.",
+  "keys": [
+    { "key": "REPLACE_WITH_A_LONG_RANDOM_HOST_TOKEN", "identity": "owner", "username": "Windows host agent", "note": "the host machine; registers role=host and publishes its screen" },
+    { "key": "REPLACE_WITH_A_LONG_RANDOM_VIEWER_TOKEN", "identity": "owner", "username": "My phone (viewer)", "note": "full-trust identity -> view + control" },
+    { "key": "REPLACE_WITH_A_LONG_RANDOM_VIEWONLY_TOKEN", "identity": "rd-viewer-demo", "username": "View-only guest", "note": "tier-1 identity -> view only, control refused" }
+  ]
+}
