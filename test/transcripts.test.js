@@ -63,3 +63,25 @@ test('appendTurn appends a second turn and keeps newest topic first', () => {
   assert.ok(lines[0].includes('Caol Ila'));
   assert.ok(lines.some((l) => l.includes('Laphroaig')));
 });
+
+test('recallForInject returns last-topics plus recent turns for a conversation', () => {
+  const block = transcripts.recallForInject({ conversationKey: 'assistant-web:local:owner' });
+  assert.ok(block.includes('LAST TOPICS'));
+  assert.ok(block.includes('Caol Ila'));
+  assert.ok(block.includes('Laphroaig 10'));
+  assert.ok(block.includes('RECENT TURNS FROM THIS CONVERSATION'));
+  assert.ok(block.includes('**user:**'));
+});
+
+test('recallForInject is empty when the silo has no transcript for that key', () => {
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-transcripts-empty-'));
+  const prev = process.env.ASMLTR_SILOS_ROOT;
+  process.env.ASMLTR_SILOS_ROOT = other;
+  delete require.cache[require.resolve('../shared/silo')];
+  delete require.cache[require.resolve('../shared/transcripts')];
+  const fresh = require('../shared/transcripts');
+  const block = fresh.recallForInject({ conversationKey: 'no-such-key' });
+  process.env.ASMLTR_SILOS_ROOT = prev;
+  try { fs.rmSync(other, { recursive: true, force: true }); } catch (_) {}
+  assert.equal(block, '');
+});
