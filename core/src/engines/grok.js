@@ -23,6 +23,9 @@
  */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const engines = require('../../../shared/engines');
 const { composePrompt } = require('../../../shared/prompt-compose');
 
@@ -43,6 +46,104 @@ function maxTurns() {
   const n = Number(process.env.ASMLTR_GROK_MAX_TURNS);
   if (Number.isFinite(n) && n > 0) return Math.min(Math.floor(n), MAX_TURNS_CAP);
   return DEFAULT_MAX_TURNS;
+}
+
+// Reasoning effort:
+//   Always pass `--effort <level>` (CLI alias of --reasoning-effort). Default high.
+//   ASMLTR_GROK_EFFORT=high|xhigh|medium|low is the baseline (xhigh is NOT the default).
+//   Auto-xhigh when the user prompt has implement|fix|refactor|debug (word-boundary,
+//   case-insensitive) OR the session working_dir is a git repo that is not $HOME.
+//   HOME is never treated as a project, even if it has a .git — asmltr ask sessions
+//   spawn in DEFAULT_CWD / HOME. Never use process.cwd() (the CLI often runs from
+//   the asmltr clone, which IS a git repo, and would xhigh every ask).
+//   Ivy one-shot escalate: write ~/.asmltr/next-effort (one line: high|xhigh|medium|low).
+//   Consumed once at the start of the next grok -p spawn, then drop back to high/auto.
+//   Cannot change mid-grok-p. sessions.next_effort is the same one-shot, per conversation_key.
+const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
+const CODE_RE = /\b(implement|fix|refactor|debug)\b/i;
+const LAST_EFFORT_FILE = '/tmp/asmltr-last-effort';
+
+function nextEffortFile() {
+  return process.env.ASMLTR_GROK_NEXT_EFFORT_FILE || path.join(os.homedir(), '.asmltr', 'next-effort');
+}
+
+function normalizeEffort(v) {
+  const s = String(v || '').trim().toLowerCase();
+  return VALID_EFFORTS.includes(s) ? s : null;
+}
+
+function looksLikeCode(prompt) {
+  return CODE_RE.test(String(prompt || ''));
+}
+
+function isProjectGitRepo(cwd) {
+  if (!cwd || typeof cwd !== 'string') return false;
+  let resolved;
+  try { resolved = path.resolve(cwd); } catch (_) { return false; }
+  let home = '';
+  try { home = path.resolve(os.homedir()); } catch (_) {}
+  // HOME is not a project even if it has .git.
+  if (home && resolved === home) return false;
+  try { return fs.existsSync(path.join(resolved, '.git')); } catch (_) { return false; }
+}
+
+function envEffort() {
+  return normalizeEffort(process.env.ASMLTR_GROK_EFFORT) || 'high';
+}
+
+/** Consume ~/.asmltr/next-effort once (deleted even if invalid). */
+function consumeNextEffortFile() {
+  const p = nextEffortFile();
+  try {
+    if (!fs.existsSync(p)) return null;
+    const raw = fs.readFileSync(p, 'utf8');
+    try { fs.unlinkSync(p); } catch (_) {}
+    return normalizeEffort(raw.split(/\r?\n/)[0]);
+  } catch (_) { return null; }
+}
+
+function consumeSessionNextEffort(conversationKey) {
+  if (!conversationKey) return null;
+  try { return require('../sessions').consumeNextEffort(conversationKey); } catch (_) { return null; }
+}
+
+/** File wins over session column. Both are one-shot. */
+function takeNextEffort(conversationKey) {
+  return consumeNextEffortFile() || consumeSessionNextEffort(conversationKey);
+}
+
+/**
+ * Choose effort for this argv. Does NOT consume the next-effort file.
+ * Priority: nextEffort / opts.effort → auto-xhigh (code prompt or project git cwd) → env → high.
+ * complete() skips auto-xhigh (cheap title/status calls).
+ */
+function chooseEffort(opts) {
+  opts = opts || {};
+  const oneshot = normalizeEffort(opts.nextEffort) || normalizeEffort(opts.effort);
+  if (oneshot) return oneshot;
+  if (!opts.complete && (looksLikeCode(opts.prompt) || isProjectGitRepo(opts.cwd))) return 'xhigh';
+  return envEffort();
+}
+
+/** Spawn-time: consume one-shot then choose. */
+function effortForTurn(opts) {
+  opts = opts || {};
+  const nextEffort = opts.nextEffort !== undefined ? normalizeEffort(opts.nextEffort) : takeNextEffort(opts.conversationKey);
+  return chooseEffort(Object.assign({}, opts, { nextEffort }));
+}
+
+function recordLastEffort(effort, meta) {
+  try {
+    const m = meta || {};
+    const line = [
+      String(effort),
+      'cwd=' + (m.cwd || ''),
+      'next=' + (m.nextEffort || ''),
+      'code=' + (looksLikeCode(m.prompt) ? '1' : '0'),
+      'git=' + (isProjectGitRepo(m.cwd) ? '1' : '0'),
+    ].join(' ');
+    fs.writeFileSync(LAST_EFFORT_FILE, line + '\n');
+  } catch (_) {}
 }
 
 function isUuid(s) {
@@ -78,6 +179,7 @@ function buildArgs(opts) {
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
   args.push('--max-turns', String(maxTurns()));
+  args.push('--effort', chooseEffort(opts));
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
   if (mdl) args.push('-m', mdl);
@@ -184,11 +286,15 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId });
+  const nextEffort = takeNextEffort(conversationKey);
+  const effort = chooseEffort({ prompt, cwd, nextEffort });
+  recordLastEffort(effort, { cwd, nextEffort, prompt });
+  try { process.stderr.write('[grok] --effort ' + effort + '\n'); } catch (_) {}
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
@@ -254,4 +360,6 @@ module.exports = {
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
   extractText, extractUsage, newState, timeoutMs, maxTurns,
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS,
+  normalizeEffort, looksLikeCode, isProjectGitRepo, chooseEffort, effortForTurn,
+  takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };

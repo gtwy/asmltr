@@ -505,6 +505,7 @@ async function handle(envelope, opts = {}) {
       engine: engineId,
       resume,
       cwd,
+      conversationKey: e.conversation_key,
       abortController,
       images,
       onDelta: opts.onText ? _pushDelta : undefined,
@@ -1901,7 +1902,7 @@ app.post('/v2/inject', (req, res) => {
       : text;
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
-    const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, abortController: ac,
+    const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
