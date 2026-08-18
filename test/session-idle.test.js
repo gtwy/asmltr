@@ -27,12 +27,12 @@ test('parseIdlePolicy matches existing idle:<minutes> | infinite', () => {
   assert.equal(sessions.parseIdlePolicy('nope'), null);
 });
 
-test('idlePolicyFromEnv defaults to idle:45 and honors ASMLTR_IDLE_MS / POLICY', () => {
+test('idlePolicyFromEnv defaults to idle:30 and honors ASMLTR_IDLE_MS / POLICY', () => {
   const prevP = process.env.ASMLTR_IDLE_POLICY;
   const prevM = process.env.ASMLTR_IDLE_MS;
   delete process.env.ASMLTR_IDLE_POLICY;
   delete process.env.ASMLTR_IDLE_MS;
-  assert.equal(sessions.idlePolicyFromEnv(), 'idle:45');
+  assert.equal(sessions.idlePolicyFromEnv(), 'idle:30');
   process.env.ASMLTR_IDLE_MS = '900000';
   assert.equal(sessions.idlePolicyFromEnv(), 'idle:15');
   process.env.ASMLTR_IDLE_MS = '1800000';
