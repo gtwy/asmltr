@@ -61,6 +61,7 @@ const identity = require('../../shared/identity'); // Self identity anchor (Like
 const vault = require('../../shared/vault'); // TRUST vault (credential broker + KMS) — hard dependency
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
+const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path (ask/grok turns)
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 let SELF_SILO_DIR = null;
 try { SELF_SILO_DIR = silo.ensureSelf(identity.name()).dir; } catch (_) { /* non-fatal */ }
@@ -227,6 +228,37 @@ function drainObserved(key) {
 /**
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
+
+/** Write a completed ask/grok turn into the Self silo (memory/transcripts + last-topics)
+ *  and the ivy stream so a fresh session after idle can rehydrate without grepping
+ *  events-*.jsonl. Best-effort: never fail the turn. */
+function persistAskTurn(e, result, assistantText) {
+  if (!e || !result || result.isError) return;
+  const userText = String((e.content && e.content.text) || '');
+  const text = assistantText != null ? String(assistantText) : String(result.text || '');
+  if (!userText && !text) return;
+  try {
+    transcripts.appendTurn({
+      conversationKey: e.conversation_key,
+      channel: e.channel,
+      userText,
+      assistantText: text,
+    });
+  } catch (_) {}
+  try {
+    let st = streams.get('ivy');
+    if (!st) st = streams.create({ name: 'ivy', description: 'Ivy local ask / grok turns (auto-written)' });
+    if (e.conversation_key) streams.attach(st.id, e.conversation_key);
+    streams.append(st.id, {
+      source: 'ask',
+      session_key: e.conversation_key || null,
+      kind: 'turn',
+      text: 'user: ' + userText + '\nassistant: ' + text,
+      meta: { channel: e.channel, engine_session_id: result.engineSessionId || null },
+    });
+  } catch (_) {}
+}
+
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
   // Finite idle (default 15 min). Was hardcoded infinite for BOTH sync and async —
@@ -339,7 +371,8 @@ async function handle(envelope, opts = {}) {
         'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). Browse/recall it with the Bash tool:\n' +
         '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
         '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
-        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).';
+        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).\n' +
+        'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the grok UUID, recover prior chat from those files (`asmltr silo get memory/last-topics.md`, then `asmltr silo find <hint> --content --in memory/transcripts`) or `asmltr streams show ivy` / `asmltr streams recall ivy "…"`. Do NOT grep events-*.jsonl or ~/.grok/sessions for prior conversation.';
     }
     if (VAULT_LOCKED) {
       pToolbelt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
@@ -428,10 +461,12 @@ async function handle(envelope, opts = {}) {
   let canInjectOnce = process.env.ASMLTR_INJECT_ONCE !== 'off';
   try { canInjectOnce = canInjectOnce && !!require('./engines').resolve(engineId).historyReplaysSystemPrompt; } catch (_) { canInjectOnce = false; }
   const reuseStable = promptParts.shouldReuseStable({ canInjectOnce, isNew, row: sessionRow, engineId, stableHash });
-  const effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
+  let effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
+    // Fresh grok UUID (first turn or idle expiry): point at the silo/stream, not events jsonl.
+    effectiveSystemPrompt += '\n\nPRIOR CONTEXT — this is a FRESH engine session (the previous grok UUID expired, or this is the first turn). Earlier conversation is NOT in this session\'s history. Recover it from the Self silo, not from event logs: run `asmltr silo get memory/last-topics.md` first, then `asmltr silo ls memory/transcripts` / `asmltr silo get` the matching file, or `asmltr streams show ivy`. Do NOT grep events-*.jsonl or ~/.grok/sessions.';
   }
 
   // Remember where an out-of-band operator inject should reply (via the manager's /send):
@@ -614,6 +649,10 @@ async function handle(envelope, opts = {}) {
     if (masked) record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'redacted', count: masked, public: !!e.public } });
   }
+
+  // Self silo + ivy stream: persist the (possibly redacted) user+assistant turn for rehydrate.
+  const replyText = (actions.find((a) => a && a.type === 'reply') || {}).text;
+  persistAskTurn(e, result, replyText);
 
   // --- DRAFT / APPROVAL GATE ---------------------------------------------------
   // If the connector attached an approval policy and it says HOLD for this recipient, divert the
