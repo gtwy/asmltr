@@ -15,7 +15,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   `DELETE /v2/upload/:id`, backed by `beginChunked` / `putChunk` / `chunkStatus` / `finishChunked` /
   `abortChunked` / `sweepPartials` in `shared/uploads.js`. The wire unit is a chunk instead of the
   file, so upload size is no longer bounded by a body limit anywhere on the path. Chunks stage under
-  `<uploads>/.partial/<id>/` and are assembled one at a time, so the server holds one chunk rather
+  `<staging>/<id>/` and are assembled one at a time, so the server holds one chunk rather
   than the whole file; nothing is written to the manifest until `finish` verifies the assembled
   length against both the declared size and the bytes that actually reached the disk, so `list()` can
   never hand the agent a path to a half-written file. Content is verified per chunk via
