@@ -276,8 +276,9 @@ Determine: is there a **reverse proxy** (Traefik / nginx / Caddy / none) and an 
 Authentik / oauth2-proxy / Cloudflare Access / nginx basic-auth / none)?
 
 **2. ⛏ ASK USER** for the **domain/subdomain** (e.g. `asmltr.example.com`) and **which identity** should be
-allowed in. If there is **no reverse proxy or no auth layer**, ask whether they want you to **install and
-configure one** (Traefik + Authelia is a common pairing), or to **fall back to local-only (Option A)**.
+allowed in. asmltr's **[built-in auth](docs/AUTH.md) gates access itself** (login + TOTP), so you only need a
+**reverse proxy for TLS** — an external auth layer is optional. If there is **no reverse proxy**, ask whether
+they want you to **install one** (Traefik is a common choice), or to **fall back to local-only (Option A)**.
 Follow their choice — do not expose it publicly without auth.
 
 **3. DNS.** Point the hostname at this server's public IP (`curl -s https://api.ipify.org`). If you hold
@@ -302,11 +303,16 @@ set `ASMLTR_INSIGHTS_HOST`). If you chose host-network, or use a different proxy
 run the container your way and add a **proxy route** by hand instead.
 
 **6. Auth — restrict to the user.**
-   - **Authelia:** add its forward-auth middleware to the router, and an `access_control` rule allowing
-     only the user's `subject` (with `two_factor`) **plus a deny for that domain otherwise**, placed
-     **above** any broad catch-all so it matches first. Validate (`authelia validate-config`) and restart.
-   - **oauth2-proxy / Authentik / Cloudflare Access / nginx basic-auth:** use that tool's allow-list for
-     the single user. The requirement is the same: unauthenticated and other users must be denied.
+   - **Built-in auth (recommended — no external authenticator):** set `ASMLTR_AUTH=on` and a persistent
+     `ASMLTR_AUTH_SECRET` on the core and restart it; open the dashboard, complete the **first-run** screen
+     to create the admin account, then enroll **TOTP** under Settings → Security. Its nginx `auth_request` →
+     `/v2/auth/verify` denies everyone who isn't signed in. See `docs/AUTH.md`.
+   - **External authenticator (optional — SSO / hardware FIDO2):** only when you need something the built-in
+     doesn't do yet. Make it the **single front door**, not a second parallel gate: either let people sign
+     into the built-in login *through* the external IdP (asmltr's OIDC-client login), **or** set
+     `ASMLTR_AUTH=off` and let the authenticator's forward-auth be the sole gate — Authelia `access_control`
+     with `two_factor` **above** any broad catch-all, or an oauth2-proxy / Authentik / Cloudflare Access /
+     nginx basic-auth allow-list. The requirement is the same: unauthenticated and other users must be denied.
 
 **7. TLS.** Let the proxy issue the cert (Traefik `certresolver`, Caddy auto-HTTPS, Certbot for nginx).
 
