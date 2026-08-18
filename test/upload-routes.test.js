@@ -11,7 +11,9 @@ const express = require(require.resolve('express', { paths: [path.join(__dirname
 
 // Isolate the upload area BEFORE anything reads it.
 const TMP = path.join(os.tmpdir(), `asmltr-uploadroutes-test-${process.pid}`);
+const STAGING = path.join(os.tmpdir(), `asmltr-uploadroutes-test-staging-${process.pid}`);
 process.env.ASMLTR_UPLOADS_DIR = TMP;
+process.env.ASMLTR_UPLOAD_STAGING_DIR = STAGING;
 process.env.ASMLTR_UPLOAD_CHUNK_SIZE = '1024';        // 1 KiB chunks so a small fixture is multi-chunk
 const { mountUploadRoutes } = require('../core/src/upload-routes');
 
@@ -23,7 +25,10 @@ let base;
 const srv = app.listen(0, '127.0.0.1');
 test.before(() => new Promise((r) => (srv.listening ? r() : srv.once('listening', r)))
   .then(() => { base = `http://127.0.0.1:${srv.address().port}`; }));
-test.after(() => { srv.close(); try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {} });
+test.after(() => {
+  srv.close();
+  for (const d of [TMP, STAGING]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch (_) {} }
+});
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 const json = (p, body, method = 'POST') => fetch(base + p, {
@@ -224,11 +229,11 @@ test('the chunk error handler does not claim the legacy one-shot route', async (
 
 test('a server-side fault is a 500 that does not leak host paths', async () => {
   const init = await (await json('/v2/upload/init', { filename: 'broken.bin', size: 4096 })).json();
-  fs.writeFileSync(path.join(TMP, '.partial', init.upload_id, 'meta.json'), '{truncated');
+  fs.writeFileSync(path.join(STAGING, init.upload_id, 'meta.json'), '{truncated');
   const res = await putChunk(init.upload_id, 0, Buffer.from('x'));
   assert.equal(res.status, 500, 'a corrupt upload is our fault, not an unknown upload');
   const body = await res.json();
-  assert.ok(!/\/home\/|\/root\/|\.partial/.test(body.error), `error must not carry host paths: ${body.error}`);
+  assert.ok(!/\/home\/|\/root\/|uploads-partial|\/tmp\//.test(body.error), `error must not carry host paths: ${body.error}`);
 });
 
 test('a chunk larger than the JSON body limit is accepted, which is the whole point', async () => {
