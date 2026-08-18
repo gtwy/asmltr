@@ -20,7 +20,7 @@
  * IDLE POLICY:
  *   Stored as 'infinite' | 'idle:<minutes>' (integer minutes — see
  *   parseIdlePolicy / idlePolicyFromEnv). Core used to hardcode infinite
- *   for every turn (token-burn). Ivy/grok default is idle:15, overridable
+ *   for every turn (token-burn). Ivy/grok default is idle:45, overridable
  *   by ASMLTR_IDLE_MS (milliseconds) or ASMLTR_IDLE_POLICY.
  */
 
@@ -112,7 +112,7 @@ function nowMs() { return Date.now(); }
 // Canonical on-disk values: 'infinite' | 'idle:<minutes>'. Accept a few human
 // aliases at the env boundary ('15m', '15', 'off') and always persist the
 // canonical form so resolveForTurn's /^idle:(\d+)$/ keeps working.
-const DEFAULT_IDLE_MINUTES = 15;
+const DEFAULT_IDLE_MINUTES = 45;
 
 function parseIdlePolicy(raw) {
   if (raw == null) return null;
@@ -130,7 +130,7 @@ function parseIdlePolicy(raw) {
   return null;
 }
 
-/** Default idle for ivy/grok: 15 minutes. ASMLTR_IDLE_POLICY wins; else ASMLTR_IDLE_MS; else idle:15. */
+/** Default idle for ivy/grok: 45 minutes. ASMLTR_IDLE_POLICY wins; else ASMLTR_IDLE_MS; else idle:45. */
 function idlePolicyFromEnv() {
   const named = parseIdlePolicy(process.env.ASMLTR_IDLE_POLICY);
   if (named) return named;
