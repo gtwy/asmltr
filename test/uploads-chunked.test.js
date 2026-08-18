@@ -8,11 +8,18 @@ const crypto = require('crypto');
 
 // Isolate the upload area BEFORE requiring the module (baseDir() reads the env at call time).
 const TMP = path.join(os.tmpdir(), `asmltr-uploads-test-${process.pid}`);
+// Staging is a separate tree from the upload area on purpose (it must not sit inside the Self silo),
+// so the test isolates both. Pointing them at the same tmpdir would hide a regression that puts
+// partials back under baseDir().
+const STAGING = path.join(os.tmpdir(), `asmltr-uploads-test-staging-${process.pid}`);
 process.env.ASMLTR_UPLOADS_DIR = TMP;
+process.env.ASMLTR_UPLOAD_STAGING_DIR = STAGING;
 process.env.ASMLTR_UPLOAD_CHUNK_SIZE = '64';   // tiny chunks so tests exercise real multi-chunk paths
 const uploads = require('../shared/uploads');
 
-test.after(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {} });
+test.after(() => {
+  for (const d of [TMP, STAGING]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch (_) {} }
+});
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 // Split a buffer the way a client would: file.slice(i*chunk, (i+1)*chunk).
@@ -140,7 +147,7 @@ test('sweepPartials removes stale staging dirs and keeps fresh ones', () => {
   const fresh = uploads.beginChunked({ channel: 'assistant-web', filename: 'fresh.bin', size: 200 });
   // Age the stale one by backdating its staging directory.
   const old = Date.now() - 48 * 3600 * 1000;
-  fs.utimesSync(path.join(TMP, '.partial', stale.upload_id), old / 1000, old / 1000);
+  fs.utimesSync(path.join(STAGING, stale.upload_id), old / 1000, old / 1000);
 
   assert.deepEqual(uploads.sweepPartials(24 * 3600 * 1000), { removed: 1, failed: 0 });
   assert.equal(uploads.chunkStatus(stale.upload_id), null);
@@ -187,7 +194,7 @@ test('an unreadable staging dir is an error, not an upload with zero chunks rece
   const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'locked.bin', size: 200 });
   const cs = chunksOf(crypto.randomBytes(200), s.chunk_size);
   cs.forEach((c, i) => uploads.putChunk(s.upload_id, i, c));
-  const dir = path.join(TMP, '.partial', s.upload_id);
+  const dir = path.join(STAGING, s.upload_id);
   fs.chmodSync(dir, 0o000);
   try {
     assert.throws(() => uploads.chunkStatus(s.upload_id), /staged chunks|permission/i);
@@ -199,7 +206,7 @@ test('an unreadable staging dir is an error, not an upload with zero chunks rece
 
 test('a corrupt meta.json is reported as a broken upload, not an unknown one', () => {
   const s = uploads.beginChunked({ channel: 'assistant-web', filename: 'corruptmeta.bin', size: 200 });
-  fs.writeFileSync(path.join(TMP, '.partial', s.upload_id, 'meta.json'), '{not json');
+  fs.writeFileSync(path.join(STAGING, s.upload_id, 'meta.json'), '{not json');
   const err = (() => { try { uploads.putChunk(s.upload_id, 0, Buffer.from('x')); } catch (e) { return e; } })();
   assert.equal(err.code, 'BROKEN_UPLOAD', 'a truncated meta.json must not masquerade as "unknown upload"');
   uploads.abortChunked(s.upload_id);
@@ -225,4 +232,21 @@ test('saveFrom registers a file already on disk without ever holding it as a Buf
   assert.deepEqual(fs.readFileSync(rec.path), data);
   assert.ok(!fs.existsSync(src), 'the source is moved, not copied');
   assert.ok(uploads.list({ limit: 0 }).some((r) => r.id === rec.id));
+});
+
+test('staging never sits inside the upload area', () => {
+  // Regression guard for the reason staging moved: baseDir() resolves to the Self silo, which
+  // scripts/backup.js copies wholesale, so a partial staged under it rides into every snapshot taken
+  // before the 24h sweep — and shows up in the Silos GUI as a half-written blob. Checked against the
+  // DEFAULT staging path, not the one this file overrides, since the default is what installs use.
+  const saved = process.env.ASMLTR_UPLOAD_STAGING_DIR;
+  delete process.env.ASMLTR_UPLOAD_STAGING_DIR;
+  try {
+    const base = uploads.baseDir();
+    const staging = uploads.stagingDir();
+    assert.notEqual(staging, base);
+    assert.equal(staging.startsWith(base + path.sep), false, `staging ${staging} must not live under ${base}`);
+  } finally {
+    process.env.ASMLTR_UPLOAD_STAGING_DIR = saved;
+  }
 });

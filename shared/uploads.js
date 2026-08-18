@@ -114,7 +114,9 @@ function saveFrom(a) {
     fs.renameSync(a.tempPath, slot.abs);          // atomic within one filesystem: no half-written file is ever visible
   } catch (e) {
     if (e.code !== 'EXDEV') throw e;
-    fs.copyFileSync(a.tempPath, slot.abs); fs.unlinkSync(a.tempPath);   // staging lives on another filesystem
+    // Staging lives on another filesystem. Load-bearing, not defensive: baseDir() is the Self silo and
+    // stagingDir() is outside it, so an operator who relocates either one puts a mount boundary here.
+    fs.copyFileSync(a.tempPath, slot.abs); fs.unlinkSync(a.tempPath);
   }
   return register(slot, a, size, a.sha256);
 }
@@ -168,9 +170,16 @@ function recentSummary(n = 8) {
  * resumes from the chunks already received instead of restarting at zero.
  *
  * Lifecycle: beginChunked → putChunk × N (any order, retries are idempotent) → finishChunked.
- * Chunks stage under <uploads>/.partial/<upload_id>/ and are assembled one chunk at a time, so peak
+ * Chunks stage under stagingDir()/<upload_id>/ and are assembled one chunk at a time, so peak
  * memory is one chunk regardless of file size. Nothing reaches the manifest until finish succeeds,
  * so `list()` never hands the agent a path to a half-written file.
+ *
+ * Storage-driver constraint (tracked follow-up, NOT solved here): baseDir() resolves to the Self silo
+ * via silo.selfSub(), and that function's own comment says writers should go through the driver
+ * (Silo.put) rather than the raw path once a silo is encrypted or backed by a remote driver. Chunked
+ * uploads reach the silo through exactly one raw-path write — saveFrom()'s rename/copy of the finished
+ * file — because staging deliberately sits outside the silo. Whoever converts artifacts to the driver
+ * has one call site to change here, not one per chunk.
  */
 
 const ID_RE = /^[a-z0-9]+-[0-9a-f]{6}$/;   // server-minted ids only; anything else can't name a directory
@@ -180,8 +189,22 @@ function chunkSize() { return Number(process.env.ASMLTR_UPLOAD_CHUNK_SIZE) || 8 
 // `size: Number.MAX_SAFE_INTEGER` plans 1.07e9 chunks and finishChunked walks every index looking for
 // what is missing, pinning the event loop for the whole core with zero bytes uploaded.
 function maxSize() { return Number(process.env.ASMLTR_UPLOAD_MAX_SIZE) || 128 * 1024 * 1024 * 1024; }
-function partialDir() { return path.join(baseDir(), '.partial'); }
-function sessionDir(id) { return path.join(partialDir(), id); }
+/*
+ * Where in-flight chunks live. Deliberately NOT under baseDir(): baseDir() resolves to the Self silo,
+ * which is both the artifact store a user browses in the Silos GUI and a directory scripts/backup.js
+ * copies wholesale into every snapshot. A half-written upload is neither an artifact nor worth
+ * archiving — staged under the silo, an abandoned partial rides into every backup taken before
+ * sweepPartials() reaps it, up to 24h later, at full file size.
+ *
+ * Keep this on the SAME filesystem as baseDir(). finishChunked() hands the assembled file to
+ * saveFrom(), which renames it into place; across a mount boundary that rename degrades to a full
+ * copy (correct, via the EXDEV branch, just no longer free). That is what the override is for: point
+ * ASMLTR_UPLOAD_STAGING_DIR at the same volume as ASMLTR_UPLOADS_DIR when uploads are relocated.
+ */
+function stagingDir() {
+  return process.env.ASMLTR_UPLOAD_STAGING_DIR || path.join(os.homedir(), '.asmltr', 'uploads-partial');
+}
+function sessionDir(id) { return path.join(stagingDir(), id); }
 
 /** Errors carry a stable `code` so HTTP callers switch on that instead of matching message prose. */
 function uploadError(code, message) { return Object.assign(new Error(message), { code }); }
@@ -371,7 +394,7 @@ function abortChunked(uploadId) {
  */
 function sweepPartials(maxAgeMs = 24 * 3600 * 1000) {
   let names;
-  try { names = fs.readdirSync(partialDir()); }
+  try { names = fs.readdirSync(stagingDir()); }
   catch (e) {
     if (e.code !== 'ENOENT') console.error('[uploads] cannot read the partial-upload dir:', e.message);
     return { removed: 0, failed: 0 };
@@ -379,7 +402,7 @@ function sweepPartials(maxAgeMs = 24 * 3600 * 1000) {
   const cutoff = Date.now() - maxAgeMs;
   let removed = 0, failed = 0;
   for (const n of names) {
-    const p = path.join(partialDir(), n);
+    const p = path.join(stagingDir(), n);
     try {
       if (fs.statSync(p).mtimeMs >= cutoff) continue;
       fs.rmSync(p, { recursive: true, force: true });
@@ -391,5 +414,5 @@ function sweepPartials(maxAgeMs = 24 * 3600 * 1000) {
 
 module.exports = {
   save, saveFrom, list, get, recentSummary, readManifest, baseDir, manifestPath, humanSize,
-  beginChunked, putChunk, chunkStatus, finishChunked, abortChunked, sweepPartials, chunkSize,
+  beginChunked, putChunk, chunkStatus, finishChunked, abortChunked, sweepPartials, chunkSize, stagingDir,
 };
