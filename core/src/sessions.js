@@ -92,6 +92,8 @@ const _insert = db.prepare(`
 // session was born in (that's how `claude --resume` locates it), so it's per-session.
 const DEFAULT_CWD = process.env.ASMLTR_SESSION_CWD || os.homedir();
 const _setEngineId = db.prepare('UPDATE sessions SET engine_session_id = ?, last_activity_at = ? WHERE conversation_key = ?');
+// Drop a dead engine session (pruned/expired upstream) without touching the conversation itself.
+const _clearEngineId = db.prepare('UPDATE sessions SET engine_session_id = NULL, last_stable_hash = NULL, last_stable_engine = NULL, last_activity_at = ? WHERE conversation_key = ?');
 const _touch = db.prepare('UPDATE sessions SET last_activity_at = ?, turn_count = turn_count + 1 WHERE conversation_key = ?');
 const _setClaim = db.prepare('UPDATE sessions SET claim_state = ?, claimed_by = ? WHERE conversation_key = ?');
 const _setRoute = db.prepare('UPDATE sessions SET outbound_instance_id = ?, outbound_target = ? WHERE conversation_key = ?');
@@ -190,6 +192,22 @@ function recordEngineId(conversation_key, engine_session_id) {
   _setEngineId.run(engine_session_id, nowMs(), conversation_key);
 }
 
+/**
+ * Forget only the ENGINE session, keeping the conversation row. Used when the engine reports that the
+ * id we asked it to resume no longer exists (Claude Code prunes transcripts after its retention
+ * window), so the next turn starts a fresh engine session instead of failing forever on a dead id.
+ *
+ * The stable-block marker goes with it: a fresh session has never been sent the stable prompt, so
+ * leaving the marker would make inject-once skip it on a history-retaining engine.
+ *
+ * Deliberately NOT `remove()` — working_dir, idle policy, outbound route and turn count all describe
+ * the CONVERSATION, not the engine session, and the conversation is still very much alive.
+ * @returns {boolean} true if a row was updated
+ */
+function clearEngineId(conversation_key) {
+  return _clearEngineId.run(nowMs(), conversation_key).changes > 0;
+}
+
 /** Bump activity + turn count after a completed turn. */
 function touch(conversation_key) {
   _touch.run(nowMs(), conversation_key);
@@ -282,4 +300,4 @@ function consumeNextEffort(conversation_key) {
   return ['low', 'medium', 'high', 'xhigh'].includes(v) ? v : null;
 }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, parseIdlePolicy, idlePolicyFromEnv, DEFAULT_IDLE_MINUTES, DB_PATH, setNextEffort, consumeNextEffort };
+module.exports = { db, ensure, resolveForTurn, recordEngineId, clearEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, parseIdlePolicy, idlePolicyFromEnv, DEFAULT_IDLE_MINUTES, DB_PATH, setNextEffort, consumeNextEffort };

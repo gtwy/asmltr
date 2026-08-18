@@ -27,4 +27,21 @@ function get(id) {
 /** The engine a turn should run on: explicit override → the configured default. */
 function resolve(engineId) { return get(engineId || registry.getDefault()); }
 
-module.exports = { get, resolve };
+// A resumed session can VANISH under us. Claude Code prunes its transcript files after a retention
+// window (~/.claude/projects/<slug>/<uuid>.jsonl), and codex expires threads server-side — but the
+// core stores engine_session_id forever under the default idle_policy 'infinite'. Resuming a pruned
+// id fails the turn, and since ids are only persisted on SUCCESS the dead id is never cleared, so the
+// conversation is wedged permanently. Each engine words it differently:
+//   claude → "Claude Code returned an error result: No conversation found with session ID: <uuid>"
+//   codex  → "thread not found: <id>"
+//   gemini → n/a (it mints its own resume id, so it has no dead-resume failure mode)
+// Match narrowly: a false positive silently restarts a live conversation from scratch.
+const MISSING_SESSION = /(no conversation found with session id|(?:thread|session|conversation)\s+not\s+found|no such (?:thread|session|conversation))/i;
+
+/** True when `err` means "the session you asked me to resume does not exist" (→ retry fresh). */
+function isMissingSessionError(err) {
+  if (!err) return false;
+  return MISSING_SESSION.test(typeof err === 'string' ? err : String(err.message || ''));
+}
+
+module.exports = { get, resolve, isMissingSessionError };

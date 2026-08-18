@@ -520,7 +520,7 @@ async function handle(envelope, opts = {}) {
     // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2)
     // observed-but-not-replied activity from others. Both buffers are drained + cleared each turn.
     const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
-    result = await runTurn({
+    const turnOpts = {
       prompt: catchUp + e.content.text,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
@@ -552,7 +552,24 @@ async function handle(envelope, opts = {}) {
           }
         }
       },
-    });
+    };
+    try {
+      result = await runTurn(turnOpts);
+    } catch (turnErr) {
+      // The engine session we asked to resume is GONE (Claude Code prunes transcripts after its
+      // retention window; codex expires threads). Since ids are only persisted on success, the dead
+      // id would otherwise sit in the row forever and fail every future turn on this conversation —
+      // i.e. one idle month permanently bricks a channel. Drop it and rerun as a FRESH session.
+      // The engine-side history is already gone, so there is nothing left to preserve by failing.
+      if (!resume || abortController.signal.aborted || !require('./engines').isMissingSessionError(turnErr)) throw turnErr;
+      sessions.clearEngineId(e.conversation_key);
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+        identity: resolved.user_key, source: 'core',
+        payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
+      // A fresh session has never received the stable block, so send the FULL prompt regardless of
+      // what inject-once decided for the resumed one.
+      result = await runTurn({ ...turnOpts, resume: null, systemPrompt });
+    }
   } catch (err) {
     // If the operator stopped or steered this turn (Stop button / a steer with interrupt),
     // its AbortController fires and the SDK throws. That's not a failure — stay SILENT so the
@@ -1888,8 +1905,7 @@ app.post('/v2/inject', (req, res) => {
       : text;
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
-    try {
-      result = await runTurn({ prompt, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
+    const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
@@ -1898,7 +1914,19 @@ app.post('/v2/inject', (req, res) => {
           } else if (sdkEvt.type === 'user') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_result') record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } });
           }
-        } });
+        } };
+    try {
+      try {
+        result = await runTurn(injectOpts);
+      } catch (turnErr) {
+        // Same vanished-session recovery as the inbound pipeline: an inject into a conversation whose
+        // engine session was pruned must not 500 forever — drop the dead id and deliver it fresh.
+        if (!resume || ac.signal.aborted || !require('./engines').isMissingSessionError(turnErr)) throw turnErr;
+        sessions.clearEngineId(key);
+        record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core',
+          payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
+        result = await runTurn({ ...injectOpts, resume: null });
+      }
     } finally { inFlight.delete(key); }
     if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
     sessions.touch(key);

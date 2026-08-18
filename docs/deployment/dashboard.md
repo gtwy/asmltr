@@ -13,8 +13,8 @@ It ships as a **static Vite build served by nginx**. That nginx also reverse-pro
 
 Each service bearer is injected **server-side by nginx** (via `envsubst` at container start), and the authenticator-resolved user is forwarded as `X-Remote-User` for audit. Reference: [`insights/docker-compose.yml`](https://github.com/jarethmt/asmltr/blob/main/insights/docker-compose.yml) and `insights/dashboard/nginx.conf.template`.
 
-!!! danger "Never expose it publicly without authentication in front"
-    Because nginx proxies the **control plane** — the connector manager (`/manager`) and the core trust/Access API (`/trust`) — exposing the dashboard to the internet without an authenticator hands anyone your control plane. **If it is reachable publicly, it MUST sit behind an authenticator that restricts access to the specific user(s).** If you can't set that up, deploy local-only (over an SSH tunnel) instead.
+!!! danger "Never expose it publicly without authentication"
+    Because nginx proxies the **control plane** — the connector manager (`/manager`) and the core trust/Access API (`/trust`) — exposing the dashboard to the internet without authentication hands anyone your control plane. **If it is reachable publicly, access MUST be gated to the specific user(s)** — turn on asmltr's **built-in auth** (`ASMLTR_AUTH=on`; see **Option B** below), or put an external authenticator in front. If you can't set that up, deploy local-only (over an SSH tunnel) instead.
 
 ## Build the SPA
 
@@ -55,21 +55,34 @@ ssh -L 8091:127.0.0.1:8091 <server>
 # open http://localhost:8091
 ```
 
-## Option B — public, behind Traefik + Authelia
+## Option B — public, behind a reverse proxy (built-in auth)
 
-The shipped `insights/docker-compose.yml` already carries **Traefik docker-provider labels** and an `authelia@docker` forward-auth middleware. The general pattern:
+Expose the dashboard on a hostname with a reverse proxy for TLS, and let **asmltr's [built-in auth](../AUTH.md)** gate access — **no external authenticator required**. This is the recommended way to run it publicly.
 
-1. **Reverse proxy + authenticator.** A reverse proxy (Traefik) terminates TLS and routes the hostname to the dashboard container; an authenticator (Authelia) sits in front as forward-auth. Any equivalent pairing works — Caddy/nginx for the proxy, oauth2-proxy / Authentik / Cloudflare Access / basic-auth for the authenticator — the requirement is only that **unauthenticated and other users are denied**.
+The dashboard's own nginx already enforces this: with `ASMLTR_AUTH=on`, every proxied backend call (`/api`, `/v2`, `/manager`, `/trust`, `/socket.io`) runs an `auth_request` subrequest to the core's `GET /v2/auth/verify`, so an unauthenticated browser gets asmltr's login / first-run screen instead of the control plane. The session-resolved user is forwarded as `X-Remote-User` for audit. Login supports a password plus **TOTP two-factor** and one-time recovery codes.
 
-2. **DNS.** Point your hostname (e.g. `insights.example.com`) at the server's public IP. If DNS is behind a proxying CDN, use DNS-only or an origin cert so the ACME/TLS challenge can complete.
+1. **Reverse proxy for TLS + routing.** A reverse proxy (Traefik, Caddy, or nginx) terminates TLS and routes the hostname to the dashboard container. No forward-auth middleware is needed — the auth gate lives *inside* the dashboard's nginx. The shipped `insights/docker-compose.yml` carries **Traefik docker-provider labels** (and an `authelia@docker` middleware you can leave off).
 
-3. **Set the hostname.** Set `ASMLTR_INSIGHTS_HOST` (or edit the router's `Host(...)` rule in the compose labels).
+2. **Turn on built-in auth.** Set `ASMLTR_AUTH=on` and a persistent `ASMLTR_AUTH_SECRET` on the core, restart it, then open the dashboard and complete the **first-run** screen to create the admin account. Enroll TOTP under **Settings → Security** for two-factor. See [AUTH.md](../AUTH.md) for all knobs.
 
-4. **Restrict to the user.** In Authelia, add its forward-auth middleware to the router and an `access_control` rule allowing only the user's `subject` (with `two_factor`), placed **above** any broad catch-all so it matches first, plus a deny for that domain otherwise. Validate (`authelia validate-config`) and restart. Other authenticators: use that tool's allow-list for the single user.
+3. **DNS.** Point your hostname (e.g. `insights.example.com`) at the server's public IP. If DNS is behind a proxying CDN, use DNS-only or an origin cert so the ACME/TLS challenge can complete.
+
+4. **Set the hostname.** Set `ASMLTR_INSIGHTS_HOST` (or edit the router's `Host(...)` rule in the compose labels).
 
 5. **TLS.** Let the proxy issue the cert (Traefik `certresolver`, Caddy auto-HTTPS, Certbot for nginx).
 
-6. **Verify.** `dig +short <host>` resolves; `curl -sI https://<host>` **redirects to the login portal** (not the app) when unauthenticated; after logging in as the allowed user you reach the dashboard; any other/no user is denied.
+6. **Verify.** `dig +short <host>` resolves; `curl -sI https://<host>/api/health` **401s** (not the data) when unauthenticated, and the SPA shows the login / first-run screen; after logging in as the admin (with 2FA) you reach the dashboard.
+
+### Optional — front it with an external authenticator (SSO / hardware keys)
+
+The built-in auth covers password + TOTP. Reach for an external authenticator (Authelia, oauth2-proxy, Authentik, Cloudflare Access) only when you need something the built-in doesn't do **yet** — the common case is **hardware FIDO2 / YubiKey / WebAuthn**, or folding the dashboard into an existing SSO estate.
+
+If you do, make the external authenticator the **single front door** — don't stack two independent logins, or the user authenticates twice. Pick one:
+
+- **External IdP as identity source (recommended for SSO).** Keep asmltr's built-in login as the gate, but let people sign into it *through* the external provider using asmltr's [OIDC-client login](../AUTH.md) (`ASMLTR_OIDC_<PROVIDER>_ID`/`_SECRET`; an existing Authelia works as the provider). One login, external identities, built-in auth still owns the session and `Remote-User`.
+- **External authenticator as the sole edge gate.** Put the authenticator's forward-auth on the router and set `ASMLTR_AUTH=off` so the built-in gate stands down (break-glass) and nginx forwards the edge's `X-Remote-User`. Restrict access to the single user in that tool's allow-list (e.g. an Authelia `access_control` rule with `two_factor`, above any catch-all).
+
+Either way, **don't** run an external forward-auth gate *and* `ASMLTR_AUTH=on` as two parallel gates.
 
 ### The network reachability gotcha
 
@@ -93,7 +106,7 @@ When the dashboard is deployed, rebuild it after pulling a new asmltr version so
 docker compose -f insights/docker-compose.yml up -d --build   # + any -f override / env vars you deployed with
 ```
 
-If it's public, confirm afterward that an unauthenticated request still redirects to the login portal — that auth didn't regress.
+If it's public, confirm afterward that an unauthenticated request still hits the login screen (backend paths still `401`) — that auth didn't regress.
 
 ### Let the updater rebuild the local-only dashboard
 

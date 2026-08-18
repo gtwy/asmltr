@@ -18,6 +18,15 @@ import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
 import { eventRow } from '@/lib/transcript'
 import { applySegment } from '@/lib/segment'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+// Render finished assistant replies as sanitized Markdown. A streaming turn stays plain
+// text (partial tokens make half-open markdown flicker); the completed turn renders formatted.
+marked.setOptions({ gfm: true, breaks: true })
+function renderMarkdown(text) {
+  return DOMPurify.sanitize(marked.parse(text || '', { async: false }))
+}
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -441,7 +450,8 @@ const placeholder = computed(() => {
         <div v-else-if="r.kind === 'assistant'" class="flex justify-start">
           <div class="max-w-[82%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm border border-white/10 bg-white/[0.05] px-3 py-2 text-[13px] leading-snug"
                :class="r.error ? 'text-rose-300' : 'text-slate-100'">
-            <span>{{ r.text }}</span>
+            <span v-if="r.streaming">{{ r.text }}</span>
+            <div v-else-if="r.text" class="asmltr-md whitespace-normal [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-black/30 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[12px] [&_pre]:my-1.5 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-black/40 [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_a]:text-violet-300 [&_a]:underline [&_h1]:my-1 [&_h1]:font-semibold [&_h2]:my-1 [&_h2]:font-semibold [&_h3]:my-1 [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-2 [&_blockquote]:text-slate-300" v-html="renderMarkdown(r.text)"></div>
             <span v-if="r.streaming" class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse-dot rounded-sm bg-brand-violet/80 align-middle"></span>
             <span v-if="r.streaming && !r.text" class="text-slate-500">thinking…</span>
             <span v-if="r.error" class="block text-[11px] text-rose-400/80"><AppIcon glyph="⚠" /> {{ r.error }}</span>
