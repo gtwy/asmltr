@@ -3,7 +3,8 @@
  * Self-silo conversation transcripts — the write path for memory/transcripts (seeded by the
  * `self` template, previously unwired). Every local ask/grok turn appends here so a fresh
  * engine session after idle can rehydrate via `asmltr silo get` / `silo find` without
- * grepping events-*.jsonl or ~/.grok/sessions.
+ * grepping events-*.jsonl or ~/.grok/sessions. recallForInject() is the read
+ * path: core injects that block into a fresh session prompt after idle.
  *
  * Layout (silo-relative):
  *   memory/transcripts/<conversation-key>.md   append-only user+assistant turns
@@ -19,6 +20,8 @@ const LAST_TOPICS_KEEP = 20;
 const USER_CLIP = 16000;
 const ASSISTANT_CLIP = 32000;
 const TOPIC_CLIP = 160;
+const INJECT_TURNS = 6;
+const INJECT_CHARS = 8000;
 
 function clip(s, n) {
   s = String(s == null ? '' : s);
@@ -85,7 +88,27 @@ function appendTurn({ conversationKey, channel, userText, assistantText, ts } = 
   };
 }
 
+/**
+ * Read durable memory for a fresh engine session and return a block to inject
+ * into the system prompt. Empty string if nothing has been written yet.
+ * This is the retrieve path: write-only is a fail.
+ */
+function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = INJECT_CHARS } = {}) {
+  let topics = '';
+  try { topics = fs.readFileSync(lastTopicsPath(), 'utf8'); } catch (_) {}
+  let transcript = '';
+  try { transcript = fs.readFileSync(transcriptAbs(conversationKey || 'unknown'), 'utf8'); } catch (_) {}
+  const chunks = transcript.split(/^## /m).filter(Boolean);
+  const recent = chunks.slice(-maxTurns).map((c) => '## ' + c).join('');
+  let body = '';
+  if (topics.trim()) body += 'LAST TOPICS (newest first):\n' + topics.trim() + '\n\n';
+  if (recent.trim()) body += 'RECENT TURNS FROM THIS CONVERSATION:\n' + recent.trim() + '\n';
+  body = body.trim();
+  if (body.length > maxChars) body = '…\n' + body.slice(body.length - maxChars);
+  return body;
+}
+
 module.exports = {
-  appendTurn, formatTurn, safeKey, lastTopicsPath, transcriptAbs,
-  LAST_TOPICS_REL, TRANSCRIPTS_REL, LAST_TOPICS_KEEP,
+  appendTurn, formatTurn, safeKey, lastTopicsPath, transcriptAbs, recallForInject,
+  LAST_TOPICS_REL, TRANSCRIPTS_REL, LAST_TOPICS_KEEP, INJECT_TURNS, INJECT_CHARS,
 };

@@ -465,8 +465,13 @@ async function handle(envelope, opts = {}) {
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
-    // Fresh grok UUID (first turn or idle expiry): point at the silo/stream, not events jsonl.
-    effectiveSystemPrompt += '\n\nPRIOR CONTEXT — this is a FRESH engine session (the previous grok UUID expired, or this is the first turn). Earlier conversation is NOT in this session\'s history. Recover it from the Self silo, not from event logs: run `asmltr silo get memory/last-topics.md` first, then `asmltr silo ls memory/transcripts` / `asmltr silo get` the matching file, or `asmltr streams show ivy`. Do NOT grep events-*.jsonl or ~/.grok/sessions.';
+    // Fresh grok UUID (first turn or idle expiry): inject durable silo memory. Write-only is a fail.
+    const recalled = transcripts.recallForInject({ conversationKey: e.conversation_key });
+    if (recalled) {
+      effectiveSystemPrompt += '\n\nPRIOR CONVERSATION (from Self silo; this is a FRESH engine session after idle or first turn). Use this as your memory of earlier chat. Do NOT grep events-*.jsonl or ~/.grok/sessions.\n\n' + recalled;
+    } else {
+      effectiveSystemPrompt += '\n\nPRIOR CONTEXT — this is a FRESH engine session and the Self silo has no prior turns yet. Do NOT grep events-*.jsonl or ~/.grok/sessions.';
+    }
   }
 
   // Remember where an out-of-band operator inject should reply (via the manager's /send):
