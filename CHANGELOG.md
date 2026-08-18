@@ -36,6 +36,20 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   chunk with backoff instead of failing the whole file. Each file in a multi-file pick gets its own
   progress row; previously one shared `notice` meant five files with three failures showed a single
   message about the last one.
+- **Chunks stage outside the Self silo.** `ASMLTR_UPLOAD_STAGING_DIR`, default
+  `~/.asmltr/uploads-partial`, replaces the old `<uploads>/.partial`. Since uploads moved into the Self
+  silo, staging under the upload area put in-flight partials inside the tree `scripts/backup.js` copies
+  wholesale, so an upload abandoned mid-transfer rode into every snapshot taken before the 24 hour
+  sweep reaped it, at full file size, and showed up in the Silos GUI as a half-written blob. Backups
+  now skip the staging directory as well as `backups/`. Staging belongs on the same filesystem as the
+  upload area: `finish` renames the assembled file into place, and across a mount boundary `saveFrom()`
+  falls back to copy-then-unlink. Second effect: the silo now sees exactly one raw-path write per
+  upload (the move-in) rather than one per chunk, which is the whole surface the artifacts-via-driver
+  follow-up has to convert to `Silo.put`.
+- **`/rd/` keeps its own 1 MiB body limit.** The remote-desktop signaling broker is deliberately not
+  behind the session `auth_request`, and it would otherwise inherit the server-level `1024m` this
+  release adds, handing an unauthenticated route a 1 GiB body budget as a side effect of an upload
+  change. Pinned to the limit it already ran under. Signaling frames are SDP and ICE candidates.
 
 ### Fixed
 
