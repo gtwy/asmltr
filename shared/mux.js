@@ -41,8 +41,14 @@ const tmux = {
 };
 
 const KEY = { Escape: '\x1b', Enter: '\r', Tab: '\t' }; // literal sequences for screen's `stuff`
+// screen 4.x mangles SGR mouse-report passthrough, so an app's mouse mode leaks into the session as
+// text (e.g. "54;19M..."; issue #89). Disable the claude engine's mouse under screen, which also lets
+// the terminal's native wheel-scrollback work (the reason to prefer screen). Default to '1' but honor an
+// explicit CLAUDE_CODE_DISABLE_MOUSE already in the env; harmless to engines that don't read it.
+function screenEnv(base) { return { CLAUDE_CODE_DISABLE_MOUSE: '1', ...base }; }
+
 const screen = {
-  spawnDetached: (name, cwd, argv) => spawnSync('screen', ['-dmS', name, ...argv], { cwd, stdio: 'inherit' }).status === 0,
+  spawnDetached: (name, cwd, argv) => spawnSync('screen', ['-dmS', name, ...argv], { cwd, env: screenEnv(process.env), stdio: 'inherit' }).status === 0,
   attach: (name) => spawnSync('screen', ['-x', name], { stdio: 'inherit' }),
   alive: (name) => { const r = spawnSync('screen', ['-ls', name], { encoding: 'utf8' }); return new RegExp('\\d+\\.' + esc(name) + '\\b').test(r.stdout || ''); },
   pid: (name) => { const r = spawnSync('screen', ['-ls', name], { encoding: 'utf8' }); const m = (r.stdout || '').match(new RegExp('(\\d+)\\.' + esc(name) + '\\b')); return m ? Number(m[1]) : null; },
@@ -55,4 +61,4 @@ const screen = {
 const providers = { tmux, screen };
 function provider(name) { return providers[name] || tmux; }
 
-module.exports = { current, preferred, available, provider, tmux, screen };
+module.exports = { current, preferred, available, provider, tmux, screen, screenEnv };

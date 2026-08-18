@@ -18,7 +18,7 @@ import {
   faCircleArrowUp, faCircleCheck, faCircleXmark, faCoins, faSitemap,
   faBolt, faLock, faTrashCan, faBan, faFolderOpen, faHeadphones, faScrewdriverWrench,
   faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
-  faDatabase, faRightFromBracket,
+  faDatabase, faRightFromBracket, faLayerGroup,
 } from '@fortawesome/free-solid-svg-icons'
 import { faDiscord, faTelegram, faGithub } from '@fortawesome/free-brands-svg-icons'
 
@@ -31,7 +31,7 @@ library.add(
   faCircleArrowUp, faCircleCheck, faCircleXmark, faCoins, faSitemap,
   faBolt, faLock, faTrashCan, faBan, faFolderOpen, faHeadphones, faScrewdriverWrench,
   faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
-  faDatabase, faRightFromBracket,
+  faDatabase, faRightFromBracket, faLayerGroup,
   faDiscord, faTelegram, faGithub,
 )
 
@@ -50,6 +50,7 @@ const GLYPH_TO_FA = {
   '🔌': ['fas', 'plug'],             // Connectors / mcp
   '🧩': ['fas', 'puzzle-piece'],     // Integrations (third-party services)
   '🗄': ['fas', 'database'],          // Silos (data silos / file explorer)
+  '🌊': ['fas', 'layer-group'],       // Streams (topic event streams)
   '⎋': ['fas', 'right-from-bracket'], // Sign out
   '🔑': ['fas', 'key'],              // Access
   '⚙': ['fas', 'gear'],             // Settings / control

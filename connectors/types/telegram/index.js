@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
+const { isImage } = require('../../../shared/mimeguess');
 
 const meta = {
   type: 'telegram',
@@ -26,8 +27,9 @@ const meta = {
   capabilities: { max_message_chars: 4000, supports_markdown: true, supports_code_blocks: true, supports_attachments_out: true },
   credentialKeys: ['bot_token_bws_key'],
   identifierFormats: [{ surface: 'telegram', label: 'Telegram username', placeholder: 'username' }],
-  // Unified outbound capability (manager /send → this instance /out).
-  outbound: { kinds: ['text', 'photo', 'document'], target: { required: false, label: 'Chat id (default: configured chat)' } },
+  // Unified outbound capability (manager /send → this instance /out). 'file' is the standard attachment
+  // kind (routed by MIME to sendPhoto/sendDocument); 'photo'/'document' kept for explicit callers.
+  outbound: { kinds: ['text', 'file', 'photo', 'document'], target: { required: false, label: 'Chat id (default: configured chat)' } },
   configSchema: {
     type: 'object',
     required: ['bot_token_bws_key'],
@@ -186,7 +188,14 @@ async function start(ctx) {
       const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
       const to = tg || target();
       let m;
-      if (kind === 'photo') m = await bot.sendPhoto(to, filePath, { caption: caption || '' });
+      // 'file' is the standard attachment kind: route by MIME — an image/* goes as a Telegram photo
+      // (inline preview), anything else as a document. Previously 'file' fell through to sendMessage
+      // with an undefined body → "message text is empty". 'photo'/'document' force a specific send.
+      if (kind === 'file') {
+        m = isImage(filePath)
+          ? await bot.sendPhoto(to, filePath, { caption: caption || '' })
+          : await bot.sendDocument(to, filePath, { caption: caption || '' });
+      } else if (kind === 'photo') m = await bot.sendPhoto(to, filePath, { caption: caption || '' });
       else if (kind === 'document') m = await bot.sendDocument(to, filePath, { caption: caption || '' });
       else m = await bot.sendMessage(to, text);
       // Report the destination conversation_key (matches an inbound from the same chat) so a

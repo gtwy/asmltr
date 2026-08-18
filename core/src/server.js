@@ -48,6 +48,11 @@ const { createSpeaker } = require('../../shared/speech/speaker'); // core speech
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
 const tts = require('../../shared/speech/tts'); // TTS config (voice/model), persisted + GUI/TUI-settable
 const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
+const recordings = require('../../shared/recordings'); // recording records store (roadmap §B1, issue #94)
+const streams = require('./streams'); // topic/project event streams — shared recall + freshness (roadmap §A, #93)
+const { transcribeLong, transcribeLongDiarized } = require('../../shared/speech/transcribe-long'); // long-audio chunked transcription (+ diarized)
+const voiceEngines = require('../../shared/speech/voice-engines'); // pluggable voice engines: roles + capability manifest (#113)
+const secrets = require('../../shared/secrets'); // secret presence checks (voice-engine availability)
 const { auxUsage, estimateAudioSeconds } = require('../../shared/usage'); // priced token-usage events for metered aux surfaces (tts/stt/moderation)
 const runtime = require('../../shared/runtime'); // agent runtime: SDK version, model selection, auto-update
 const identity = require('../../shared/identity'); // Self identity anchor (Likeness plane) — injected into every turn
@@ -66,7 +71,7 @@ async function refreshVaultLocked() {
 }
 refreshVaultLocked();
 const _vaultTimer = setInterval(refreshVaultLocked, 30000); if (_vaultTimer.unref) _vaultTimer.unref();
-const { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, getLastModel } = require('./runner');
+const { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, generateRecordingSummary, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
 
@@ -306,6 +311,7 @@ async function handle(envelope, opts = {}) {
     pToolbelt = 'ASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
       'You have an `asmltr` CLI (run `asmltr help` for everything). Key cross-session ops (use the Bash tool):\n' +
       '• `asmltr ls` (active sessions) · `asmltr map` (grouped by working dir) · `asmltr who <path>` (who recently touched a file/dir) — check these before duplicating work another session is already doing (also exposed as the `asmltr_map` / `asmltr_who` toolbelt tools for engines that prefer MCP over the shell).\n' +
+      '• `asmltr streams` — persistent per-TOPIC event streams that several sessions share as a common memory for a project. When you begin substantial, LONGER-RUNNING work on a project or topic (something that will likely span multiple sessions, or accrue decisions/notes worth recalling later — NOT a quick one-off), FIRST run `asmltr streams` to see if one already exists; if a matching one does, use `asmltr streams recall <name> "<what you need>"` to catch up on prior context before proceeding. If none fits and the task genuinely deserves its own durable thread, create one with `asmltr streams new <name> ["description"]`. Don\'t spin up a stream for throwaway tasks. (`asmltr streams show <name>` reads the recent tail.)\n' +
       '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
       'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here. ' +
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n' +
@@ -467,7 +473,7 @@ async function handle(envelope, opts = {}) {
     // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2)
     // observed-but-not-replied activity from others. Both buffers are drained + cleared each turn.
     const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
-    result = await runTurn({
+    const turnOpts = {
       prompt: catchUp + e.content.text,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
@@ -479,6 +485,11 @@ async function handle(envelope, opts = {}) {
       onSegment: opts.onSegment ? _pushSegment : undefined,
       onTool: opts.onTool ? ((t) => { try { opts.onTool(t); } catch (_) {} }) : undefined,
       onThinking: opts.onThinking ? _pushThinking : undefined,
+      // Sub-agent (Task) lifecycle → record for history replay + forward live to a step consumer.
+      onSubagent: (s) => {
+        try { record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core', event_type: 'subagent', payload: { id: s.id, name: s.name, status: s.status, summary: truncate(s.summary, 500) } }); } catch (_) {}
+        if (opts.onSubagent) { try { opts.onSubagent(s); } catch (_) {} }
+      },
       onEvent: (sdkEvt) => {
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
@@ -493,7 +504,24 @@ async function handle(envelope, opts = {}) {
           }
         }
       },
-    });
+    };
+    try {
+      result = await runTurn(turnOpts);
+    } catch (turnErr) {
+      // The engine session we asked to resume is GONE (Claude Code prunes transcripts after its
+      // retention window; codex expires threads). Since ids are only persisted on success, the dead
+      // id would otherwise sit in the row forever and fail every future turn on this conversation —
+      // i.e. one idle month permanently bricks a channel. Drop it and rerun as a FRESH session.
+      // The engine-side history is already gone, so there is nothing left to preserve by failing.
+      if (!resume || abortController.signal.aborted || !require('./engines').isMissingSessionError(turnErr)) throw turnErr;
+      sessions.clearEngineId(e.conversation_key);
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+        identity: resolved.user_key, source: 'core',
+        payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
+      // A fresh session has never received the stable block, so send the FULL prompt regardless of
+      // what inject-once decided for the resumed one.
+      result = await runTurn({ ...turnOpts, resume: null, systemPrompt });
+    }
   } catch (err) {
     // If the operator stopped or steered this turn (Stop button / a steer with interrupt),
     // its AbortController fires and the SDK throws. That's not a failure — stay SILENT so the
@@ -1094,6 +1122,7 @@ app.post('/v2/stream', async (req, res) => {
       onToolCall: (t) => { if (t && t.name) frame({ type: 'tool', name: t.name, input: t.input }); }, // a tool call + its args
       onToolResult: (r) => { if (r) frame({ type: 'tool_result', output: r.output, is_error: !!r.is_error }); }, // its result
       onThinking: (text) => { if (text) frame({ type: 'thinking', text }); },      // a completed thinking block
+      onSubagent: (s) => { if (s && s.id) frame({ type: 'subagent', id: s.id, name: s.name, status: s.status, summary: s.summary }); }, // sub-agent (Task) start/stop
     });
     frame({ type: 'done', actions });
   } catch (err) {
@@ -1173,6 +1202,32 @@ app.get('/v2/voice/config', (req, res) => {
   const { keyName: _t, ...ttsCfg } = tts.config();
   const { keyName: _s, ...sttCfg } = stt.config();
   res.json({ tts: ttsCfg, stt: sttCfg });
+});
+// Voice ENGINES (#113): the pluggable role/capability layer. GET returns roles, the engine catalog with
+// availability (key present?), current bindings, and the resolved engine+capabilities per role — surfaces
+// gate features on these. POST /bind sets a role → engine.
+app.get('/v2/voice/engines', async (req, res) => {
+  const c = voiceEngines.catalog();
+  let avail = {};
+  try { avail = await voiceEngines.availability(async (n) => { try { return !!(await secrets.get(n)); } catch (_) { return false; } }); } catch (_) {}
+  const resolved = {}; for (const role of c.roles) resolved[role] = voiceEngines.resolve(role);
+  const status = {}; for (const id of Object.keys(c.engines)) status[id] = voiceEngines.statusOf(id, avail[id]);
+  res.json({ roles: c.roles, engines: c.engines, availability: avail, status, bindings: c.bindings, resolved });
+});
+app.post('/v2/voice/engines/bind', (req, res) => {
+  const b = req.body || {};
+  try {
+    const bindings = voiceEngines.bind(String(b.role || ''), b.engine || null);
+    // Propagate the engine choice into the LIVE voice config so every surface that reads it — stt/tts,
+    // the realtime token, the recorder, the Discord voice bridge, and the Android app's /gw/transcribe &
+    // /gw/tts proxies — follows automatically, no matter who set the binding (GUI, CLI, or API). Only for
+    // engines whose adapter is actually wired (`ready`); a `planned` engine records the binding but doesn't
+    // touch the live config until its adapter lands.
+    const e = b.engine && voiceEngines.IMPLEMENTED.has(b.engine) ? voiceEngines.ENGINES[b.engine] : null;
+    if (e && b.role === 'synthesize') tts.setConfig({ provider: e.provider, model: e.model });
+    else if (e && b.role === 'transcribe') stt.setConfig({ model: e.model });
+    res.json({ ok: true, bindings });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/v2/voice/config', (req, res) => {
   const b = req.body || {};
@@ -1268,6 +1323,171 @@ app.post('/v2/transcribe', async (req, res) => {
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// --- Recordings (roadmap §B1, issue #94) — the recording app's backend ----------------------------
+// Kick transcription (and later enrichment) in the background so upload returns immediately. Status on
+// the record moves uploaded → transcribing → transcribed (→ enriched once §B3 lands) → error.
+async function processRecording(id) {
+  const audio = recordings.audioPath(id);
+  if (!audio) { recordings.update(id, { status: 'error', error: 'audio missing' }); return; }
+  recordings.update(id, { status: 'transcribing' });
+  try {
+    const out = await transcribeLong(audio, {});
+    recordings.setTranscript(id, out.text);
+    recordings.update(id, { status: 'transcribed', duration_sec: out.duration_sec });
+    // Attribute the STT spend (whole-file) to the recorder surface.
+    record(auxUsage({ surface: 'recorder', feature: 'stt', provider: 'openai', model: process.env.ASMLTR_STT_MODEL || 'gpt-4o-transcribe', seconds: out.duration_sec || 0 }));
+    await enrichRecording(id, out.text); // §B3 — AI title/summary/action items
+  } catch (e) {
+    recordings.update(id, { status: 'error', error: e.message });
+    console.error('[core] recording transcribe failed:', id, e.message);
+  }
+}
+
+// §B3 — enrich a recording from its transcript: semantic title, ≤500-word summary, action items,
+// highlights, participants. Respects user-locked fields (title/description edited in the UI).
+async function enrichRecording(id, transcriptText) {
+  const text = transcriptText != null ? transcriptText : recordings.transcript(id);
+  if (!text || !text.trim()) return null;
+  const sum = await generateRecordingSummary(text);
+  const locked = (recordings.get(id) || {}).ai_locked || {};
+  const patch = { status: 'enriched', action_items: sum.action_items, highlights: sum.highlights };
+  if (!locked.title && sum.title) patch.title = sum.title;
+  if (!locked.description) patch.description = sum.description;
+  if (sum.participants && sum.participants.length) patch.people = sum.participants.map((name) => ({ name }));
+  return recordings.update(id, patch);
+}
+
+// Upload raw audio bytes (octet-stream — avoids the base64-in-JSON 10MB cap, see #91). Query: source, title.
+app.post('/v2/recordings', express.raw({ type: () => true, limit: '1024mb' }), (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  if (!buf || !buf.length) return res.status(400).json({ error: 'no audio body (send raw bytes)' });
+  const mime = req.get('Content-Type') || 'application/octet-stream';
+  const rec = recordings.create({ audio: buf, mime, source: req.query.source || 'upload', title: req.query.title || null, created: new Date().toISOString() });
+  res.json({ ok: true, id: rec.id, status: rec.status });
+  processRecording(rec.id); // fire-and-forget
+});
+app.get('/v2/recordings', (req, res) => res.json({ recordings: recordings.list() }));
+app.get('/v2/recordings/:id', (req, res) => {
+  const m = recordings.get(req.params.id); if (!m) return res.status(404).json({ error: 'not found' });
+  res.json({ ...m, transcript: recordings.transcript(req.params.id) });
+});
+app.get('/v2/recordings/:id/audio', (req, res) => {
+  const p = recordings.audioPath(req.params.id); if (!p) return res.status(404).json({ error: 'no audio' });
+  const m = recordings.get(req.params.id);
+  res.set('Content-Type', m.mime || 'application/octet-stream');
+  require('fs').createReadStream(p).pipe(res);
+});
+app.delete('/v2/recordings/:id', (req, res) => res.json({ ok: recordings.remove(req.params.id) }));
+// Patch editable recording fields (title/description → lock from AI overwrite) + capture markers (the
+// in-recording timestamp/tag button). Markers: [{ t_sec, label? }].
+app.patch('/v2/recordings/:id', (req, res) => {
+  if (!recordings.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  const b = req.body || {}, patch = {}, lock = {};
+  if (typeof b.title === 'string') { patch.title = b.title; lock.title = true; }
+  if (typeof b.description === 'string') { patch.description = b.description; lock.description = true; }
+  if (Array.isArray(b.markers)) patch.markers = b.markers.map((m) => ({ t_sec: +m.t_sec || 0, label: String(m.label || '').slice(0, 120) })).slice(0, 500);
+  if (Object.keys(lock).length) patch.ai_locked = lock;
+  res.json(recordings.update(req.params.id, patch));
+});
+// Re-run AI enrichment from the stored transcript (e.g. after the user edits the transcript).
+app.post('/v2/recordings/:id/enrich', async (req, res) => {
+  if (!recordings.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  try { const m = await enrichRecording(req.params.id, null); res.json(m || { ok: false, error: 'no transcript' }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// B5 (#98): file a recording into a topic STREAM — append its summary + action items as a lightweight,
+// searchable 'recording' event that REFERENCES the audio (which stays in the silo). Optionally fire a
+// prompt about it into a session. Connects the recorder to streams (the meeting's "save to a stream").
+// Diarized (speaker-labeled) re-transcription of a recording (epic #113 / #111). Runs the audio through
+// gpt-4o-transcribe-diarize → stores speaker segments + speaker list on the record. Async: returns immediately.
+app.post('/v2/recordings/:id/diarize', (req, res) => {
+  const rec = recordings.get(req.params.id); if (!rec) return res.status(404).json({ error: 'not found' });
+  const audio = recordings.audioPath(rec.id); if (!audio) return res.status(400).json({ error: 'no audio' });
+  res.json({ ok: true, id: rec.id, status: 'diarizing' });
+  (async () => {
+    recordings.update(rec.id, { status: 'diarizing', error: null }); // clear any stale error from a prior run
+    try {
+      const out = await transcribeLongDiarized(audio, {
+        onProgress: (p) => console.log(`[core] diarize ${rec.id} chunk ${p.index}/${p.total}` + (p.error ? ` FAILED: ${p.error}` : ` (${p.segments} segs)`)),
+      });
+      const speakers = [...new Set(out.segments.map((s) => s.speaker).filter(Boolean))];
+      recordings.setTranscript(rec.id, out.text);
+      recordings.update(rec.id, { status: 'enriched', segments: out.segments, speakers, diarized: true,
+        duration_sec: out.duration_sec, diarize_failed_chunks: (out.failed_chunks || []).length || undefined });
+      record(auxUsage({ surface: 'recorder', feature: 'stt', provider: 'openai', model: 'gpt-4o-transcribe-diarize', seconds: out.duration_sec || 0 }));
+      console.log(`[core] diarize ${rec.id} done: ${out.segments.length} segs, ${speakers.length} speakers` + (out.failed_chunks && out.failed_chunks.length ? `, ${out.failed_chunks.length} chunk(s) skipped` : ''));
+    } catch (e) { recordings.update(rec.id, { status: 'error', error: 'diarize: ' + e.message }); console.error('[core] diarize failed:', rec.id, e.message); }
+  })();
+});
+app.post('/v2/recordings/:id/to-stream', async (req, res) => {
+  const rec = recordings.get(req.params.id); if (!rec) return res.status(404).json({ error: 'recording not found' });
+  const b = req.body || {};
+  const s = streams.get(String(b.stream_id || b.stream || '')); if (!s) return res.status(404).json({ error: 'unknown stream' });
+  const parts = ['Recording: ' + (rec.title || 'Untitled')];
+  if (rec.description) parts.push(rec.description);
+  if (rec.action_items && rec.action_items.length) parts.push('Action items:\n- ' + rec.action_items.join('\n- '));
+  const transcript = recordings.transcript(rec.id);
+  if (transcript) parts.push('Transcript:\n' + transcript); // full text so stream recall (FTS) can search it
+  const eid = streams.append(s.id, {
+    source: 'recorder', kind: 'recording', text: parts.join('\n\n'),
+    meta: { recording_id: rec.id, title: rec.title, audio: recordings.audioPath(rec.id), duration_sec: rec.duration_sec, people: rec.people },
+  });
+  recordings.update(rec.id, { stream_id: s.id, stream_slug: s.slug }); // link back
+  // Optional: fire a prompt about this recording into a fresh session on the stream's channel.
+  let fired = null;
+  if (b.prompt && String(b.prompt).trim()) {
+    try {
+      const key = `stream:${s.slug}:${Date.now()}`;
+      streams.attach(s.id, key);
+      const prompt = `${b.prompt}\n\n[Recording "${rec.title}" was just filed into stream "${s.slug}". Its transcript + summary are in the stream — use \`asmltr streams recall ${s.slug} "…"\` if you need detail.]`;
+      handle({ channel: 'core', conversation_key: key, message_id: String(Date.now()), sender: { raw_id: 'recorder', raw_username: 'recorder' }, content: { text: prompt }, delivery: 'async', public: false }).catch(() => {});
+      fired = key;
+    } catch (_) {}
+  }
+  res.json({ ok: true, stream: s.slug, event_id: eid, fired_session: fired });
+});
+
+// --- Streams (roadmap §A, issue #93) — topic/project event streams: shared, on-demand recall + freshness.
+app.get('/v2/streams', (req, res) => res.json({ streams: streams.list() }));
+app.post('/v2/streams', (req, res) => {
+  const b = req.body || {};
+  if (!b.name) return res.status(400).json({ error: 'name required' });
+  res.json(streams.create({ name: b.name, description: b.description }));
+});
+// Freshness watermark for a session (MUST precede /:id so "freshness" isn't captured as an id). Per
+// attached stream, how many events from OTHER sources since the session was last told. `ack=1` advances
+// the cursor (call after the nudge is shown). Edge-triggered.
+app.get('/v2/streams/freshness', (req, res) => {
+  const key = String(req.query.session || '');
+  if (!key) return res.status(400).json({ error: 'session required' });
+  const fresh = streams.freshness(key);
+  if (req.query.ack === '1') for (const f of fresh) streams.markAnnounced(key, f.stream_id, f.total_external);
+  res.json({ streams: fresh, fresh: fresh.filter((f) => f.new > 0) });
+});
+app.get('/v2/streams/:id', (req, res) => {
+  const s = streams.get(req.params.id); if (!s) return res.status(404).json({ error: 'not found' });
+  res.json({ ...s, events: streams.recent(s.id, Math.min(parseInt(req.query.n, 10) || 50, 500)) });
+});
+app.delete('/v2/streams/:id', (req, res) => res.json({ ok: streams.remove(req.params.id) }));
+// Append an event to a stream (a note, a filed asset, a session turn — the turn hook uses this).
+app.post('/v2/streams/:id/events', (req, res) => {
+  const b = req.body || {};
+  const id = streams.append(req.params.id, { source: b.source, session_key: b.session_key, kind: b.kind, text: b.text, meta: b.meta, ts: b.ts });
+  if (id == null) return res.status(404).json({ error: 'unknown stream' });
+  res.json({ ok: true, event_id: id });
+});
+// Recall: FTS5/BM25 search within a stream (q), or the recent tail if no query. This is the on-demand pull.
+app.get('/v2/streams/:id/recall', (req, res) => {
+  const s = streams.get(req.params.id); if (!s) return res.status(404).json({ error: 'not found' });
+  const n = Math.min(parseInt(req.query.n, 10) || 20, 200);
+  res.json({ stream: s.slug, results: req.query.q ? streams.search(s.id, req.query.q, n) : streams.recent(s.id, n) });
+});
+app.post('/v2/streams/:id/attach', (req, res) => {
+  const s = streams.attach(req.params.id, String((req.body || {}).session_key || '')); if (!s) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, stream: s.slug });
+});
+app.post('/v2/streams/:id/detach', (req, res) => { streams.detach(req.params.id, String((req.body || {}).session_key || '')); res.json({ ok: true }); });
 
 // Agent runtime settings — the SDK version (installed vs latest-on-npm) that gates model availability,
 // the model selection (applies next turn, no restart), the last-resolved model id, and SDK auto-update.
@@ -1451,9 +1671,9 @@ app.get('/v2/notify/config', (req, res) => res.json(notifyLib.getConfig()));
 app.post('/v2/notify/config', (req, res) => { try { res.json(notifyLib.setConfig(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/notify', async (req, res) => {
   const b = req.body || {};
-  if (!b.text) return res.status(400).json({ error: 'need text' });
+  if (!b.text && !b.file) return res.status(400).json({ error: 'need text or file' });
   try {
-    const r = await notifyLib.notify({ text: b.text, title: b.title, force: !!b.force, speak: b.speak });
+    const r = await notifyLib.notify({ text: b.text, title: b.title, force: !!b.force, speak: b.speak, file: b.file });
     record({ surface: 'notify', session_id: 'notify', event_type: 'outbound', identity: 'notify', source: 'core',
       payload: { via: r.via, delivered: r.delivered, text: truncate(b.text, 300) } });
     res.json({ ok: true, ...r });
@@ -1634,8 +1854,7 @@ app.post('/v2/inject', (req, res) => {
       : text;
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
-    try {
-      result = await runTurn({ prompt, resume, cwd: row.working_dir || undefined, abortController: ac,
+    const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, abortController: ac,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
@@ -1644,7 +1863,19 @@ app.post('/v2/inject', (req, res) => {
           } else if (sdkEvt.type === 'user') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_result') record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } });
           }
-        } });
+        } };
+    try {
+      try {
+        result = await runTurn(injectOpts);
+      } catch (turnErr) {
+        // Same vanished-session recovery as the inbound pipeline: an inject into a conversation whose
+        // engine session was pruned must not 500 forever — drop the dead id and deliver it fresh.
+        if (!resume || ac.signal.aborted || !require('./engines').isMissingSessionError(turnErr)) throw turnErr;
+        sessions.clearEngineId(key);
+        record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core',
+          payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
+        result = await runTurn({ ...injectOpts, resume: null });
+      }
     } finally { inFlight.delete(key); }
     if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
     sessions.touch(key);

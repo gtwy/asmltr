@@ -45,15 +45,29 @@ function human(n) {
   if (n < 1048576) return Math.round(n / 1024) + ' KB'
   return (n / 1048576).toFixed(1) + ' MB'
 }
+const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i
+function isImage(name) { return IMG_EXT.test(name || '') }
 const url = files.downloadUrl
 </script>
 
 <template>
-  <div v-if="artifacts.length" class="mt-1.5 flex flex-wrap gap-1.5">
-    <a
-      v-for="a in artifacts" :key="a.path"
-      :href="url(a.path)" :download="a.name" :title="'Download ' + a.path"
-      class="inline-flex items-center gap-1 rounded-md border border-brand-violet/30 bg-brand-violet/10 px-2 py-1 text-[11px] text-violet-200 transition-colors hover:bg-brand-violet/20"
-    ><AppIcon glyph="⬇" /> {{ a.name }} <span class="text-slate-400">· {{ human(a.size) }}</span></a>
+  <div v-if="artifacts.length" class="mt-1.5 flex flex-col gap-1.5">
+    <template v-for="a in artifacts" :key="a.path">
+      <!-- image artifacts render inline; tap opens the full-size file -->
+      <a
+        v-if="isImage(a.name)"
+        :href="url(a.path)" target="_blank" rel="noopener" :title="a.path" class="block w-fit"
+      >
+        <img :src="url(a.path)" :alt="a.name" loading="lazy"
+          class="max-h-[60vh] max-w-full rounded-lg border border-brand-violet/20" />
+        <span class="mt-0.5 block text-[11px] text-slate-400">{{ a.name }} · {{ human(a.size) }}</span>
+      </a>
+      <!-- everything else stays a download chip -->
+      <a
+        v-else
+        :href="url(a.path)" :download="a.name" :title="'Download ' + a.path"
+        class="inline-flex w-fit items-center gap-1 rounded-md border border-brand-violet/30 bg-brand-violet/10 px-2 py-1 text-[11px] text-violet-200 transition-colors hover:bg-brand-violet/20"
+      ><AppIcon glyph="⬇" /> {{ a.name }} <span class="text-slate-400">· {{ human(a.size) }}</span></a>
+    </template>
   </div>
 </template>

@@ -24,7 +24,10 @@ const os = require('os');
 const crypto = require('crypto');
 
 function baseDir() {
-  return process.env.ASMLTR_UPLOADS_DIR || path.join(os.homedir(), '.asmltr', 'uploads');
+  if (process.env.ASMLTR_UPLOADS_DIR) return process.env.ASMLTR_UPLOADS_DIR;
+  // Default home is the Self silo (so uploads are managed + backed up, not scattered in a random folder)
+  // — fall back to the legacy path only if the silo can't be resolved.
+  try { return require('./silo').selfSub('uploads'); } catch (_) { return path.join(os.homedir(), '.asmltr', 'uploads'); }
 }
 function manifestPath() { return path.join(baseDir(), 'manifest.jsonl'); }
 

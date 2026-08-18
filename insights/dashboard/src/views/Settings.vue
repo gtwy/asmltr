@@ -6,6 +6,7 @@
 import { ref, onMounted, onBeforeUnmount, computed, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
+import VoiceEngines from '@/components/VoiceEngines.vue'
 import { api, runtime, voice, identity, update, backupApi, integrations as integrationsApi, authApi, oidcApi, enginesApi, mcpApi, notifyApi } from '@/services/api'
 import QRCode from 'qrcode'
 import { startRegistration } from '@simplewebauthn/browser'
@@ -787,6 +788,8 @@ onMounted(async () => {
           <h3 class="mb-1 text-sm font-semibold text-slate-200">Voice</h3>
           <p class="mb-5 text-[12px] text-slate-500">{{ section('voice').desc }}</p>
 
+          <VoiceEngines @changed="loadVoiceCfg" />
+
           <template v-if="vcfg">
             <div class="space-y-7">
               <!-- ══ Read-aloud (text-to-speech) ══════════════════════════════════ -->
@@ -807,8 +810,8 @@ onMounted(async () => {
                   </button>
                 </label>
 
-                <!-- TTS provider -->
-                <div>
+                <!-- TTS provider — now chosen in the Voice engines panel above (synthesize role) -->
+                <div v-if="false">
                   <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_provider').label }}
                     <span class="normal-case text-slate-600">— {{ field('voice','tts_provider').desc }}</span>
                   </div>
@@ -876,8 +879,8 @@ onMounted(async () => {
                   <span class="font-medium normal-case tracking-normal text-slate-500">· how your speech is transcribed</span>
                 </h4>
 
-                <!-- STT model -->
-                <div>
+                <!-- STT model — now chosen in the Voice engines panel above (transcribe role) -->
+                <div v-if="false">
                   <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','stt_model').label }}
                     <span class="normal-case text-slate-600">— {{ field('voice','stt_model').desc }}</span>
                   </div>

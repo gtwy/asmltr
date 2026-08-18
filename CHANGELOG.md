@@ -60,6 +60,118 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   as "unknown upload", an oversized chunk returns JSON rather than an Express stack trace, and a
   sweep that fails on every directory no longer looks identical to a sweep with nothing to do.
 
+## [0.13.0] - 2026-08-16
+
+Custom WebRTC remote desktop — view and drive a host machine's screen from the app, over a self-owned signaling + NAT-hole-punching transport (no external overlay).
+
+### Added
+- **Remote desktop (custom WebRTC).** New `remote-desktop` connector = a signaling broker (SDP/ICE relay + own STUN + per-host view/control trust grants, default-deny). A native Windows host agent (`agents/host-remote-desktop/` — Go + Pion, self-contained bundled ffmpeg) captures the desktop and publishes H.264 over WebRTC. The assistant app is the viewer + controller (touch→mouse, on-screen keyboard, PiP). **Media flows peer-to-peer via ICE hole punching — asmltr negotiates but never relays** (optional TURN fallback is off by default; symmetric-NAT-on-both-ends only).
+- **Cast to device.** The dashboard (and the assistant) can push an `open-remote-desktop` directive to a device so it opens a host's live stream; the same channel carries screenshots/streams to a device in-session.
+- Design: `docs/REMOTE-DESKTOP.md`.
+
+### Notes
+- The Windows host agent must run in the **interactive console session** (a scheduled task with an Interactive principal) — screen capture can't reach the desktop from a service/SSH session. Default capture backend is **gdigrab** (captures a static/idle screen); **ddagrab** (GPU) is opt-in and only emits frames when the screen changes.
+
+## [0.12.3] - 2026-08-13
+
+### Fixed
+- **Live transcription no longer double-transcribes or runs while the mic is off.** `startRealtimeSTT` is
+  async (token mint + SDP round-trip); a short utterance could end before setup finished, so the connection
+  opened *after* stop — transcribing with the mic off (token burn) and stacking a second stream on the next
+  listen (the "everything comes back twice" doubling). A generation guard now closes any superseded/in-flight
+  session and tears the peer down on every listen-end path, so there is never a live realtime session unless
+  listening is active.
+
+## [0.12.2] - 2026-08-13
+
+### Fixed
+- **Live transcription now connects (GA endpoint) with the right model.** The SDP exchange used OpenAI's
+  retired beta endpoint (`/v1/realtime?intent=transcription` → HTTP 400 "beta API is no longer supported");
+  it now posts to the GA `/v1/realtime/calls`. The realtime role also mints **gpt-live-transcribe** (the
+  streaming model, no server_vad) instead of the batch gpt-4o-transcribe, aligning with the voice-engine
+  role split (epic #113). The client no longer sends a redundant session.update — the session is configured
+  in the minted ephemeral secret.
+
+## [0.12.1] - 2026-08-13
+
+### Fixed
+- **Live transcription now actually transcribes.** The WebRTC transcription session was never sent its
+  `session.update` config over the data channel, so it connected but emitted nothing (the "enabled but no
+  caption" bug). It now configures the session (model + server_vad) on data-channel open, and surfaces
+  OpenAI's error events + SDP failures visibly (instead of silently falling back) when live STT is enabled.
+
+## [0.12.0] - 2026-08-13
+
+Assistant-app overlay overhaul: multi-session tabs, sub-agent visibility, live streaming transcription, and a batch of voice-UX fixes.
+
+### Added
+- **Multi-session tabs in the assistant app.** The overlay can hold several live sessions at once — a tab
+  strip switches between them without closing any. The device holds one gateway SSE; the connector now tags
+  every frame with its conversation key and the app demultiplexes that stream into per-session tabs. The
+  active tab renders live and drives TTS; background tabs keep streaming and buffer their frames (replayed
+  silently on activation), so no in-flight state is lost on switch and only the active tab speaks.
+- **Sub-agent visibility panel.** The Claude engine detects Task sub-agent start/stop from the SDK stream
+  and surfaces it via a new `onSubagent` callback; the core records a `subagent` event + streams a frame,
+  and the app renders a live per-turn panel (running ● → stopped ✓). Capability-gated — only engines with a
+  sub-agent concept emit it, so Codex/Gemini never show the panel. View-only (the SDK exposes no per-sub-agent kill).
+- **Live streaming transcription in the overlay.** A device-gated `/gw/realtime-token` mints an ephemeral
+  OpenAI realtime-transcription secret (the real key never leaves the host); the overlay opens a WebRTC
+  transcription session and paints a live caption as you speak, finalizing on endpoint. Falls back silently
+  to batch transcription when disabled or unavailable.
+- **Setting: "Auto-listen when the overlay opens" (default off).** A plain overlay open no longer forces the
+  mic on — you can just type; an assist-gesture launch still opens straight into listening.
+- **Distinct stop-turn feedback.** Killing an in-flight turn now plays a recognizable cue and shows a
+  "⏹ turn stopped" line, matching the existing listen/stop-listening sounds.
+
+### Fixed
+- **VAD no longer cuts you off mid-sentence.** The noise floor keeps adapting during pauses, a minimum-utterance
+  guard prevents endpointing in the first second of speech, the relaxed sensitivity/endpoint settings are
+  honored, and endpointing requires sustained (not flickering) silence.
+- **Listening-mode eyes are noticeably whiter/brighter** so it's obvious the mic is hot.
+
+## [0.11.1] - 2026-08-13
+
+Follow-up fixes to the outbound-attachment feature, from on-device testing.
+
+### Fixed
+- **Assistant-app chat history now replays turn text.** Android turn events (user text, thinking, tool
+  steps, assistant reply) were emitted under the surface `android`, which isn't a valid event surface, so
+  they were dropped and never persisted — only attachments (emitted under `assistant-native`) survived, so
+  reopening the overlay restored images but not the conversation. Turn events now persist under
+  `assistant-native` and replay on reopen.
+- **`asmltr send android <identity>` reaches the device and reports honestly.** The file path matched only
+  by device id, so sending to an identity (e.g. `owner`) silently matched no live stream yet returned
+  success. It now resolves an identity to every connected device for that identity, and a zero live-delivery
+  reports `ok:false` (the record still replays on reconnect) instead of a false success.
+
+### Added
+- **Full-screen image viewer in the assistant app.** Tapping an inline image opens it over the chat with a
+  close button, tap-the-backdrop / Escape / hardware-back to dismiss — instead of opening trapped inside the
+  overlay with no way back.
+
+## [0.11.0] - 2026-08-13
+
+asmltr 0.11.0 — channel-agnostic outbound file/image attachments, rendered inline in the assistant app and the dashboard.
+
+### Added
+
+- **Channel-agnostic outbound file & image attachments.** `asmltr send <channel> <target> --file <path>`
+  and `asmltr notify --file <path>` now deliver images and files across every capable connector.
+  Outbound standardizes on a single `kind:'file'` send that each connector maps to its native transport
+  (Telegram photo/document, Discord attachment, email MIME) — the same symmetry inbound already had.
+- **The Android app receives attachments inline.** The `android` connector gained a token-gated
+  `GET /gw/file` endpoint (opaque id → allow-listed path, no traversal) plus a `media` SSE frame, and
+  declares `supports_attachments_out`. The assistant app renders images inline in the chat thread and
+  replays them from history; non-image files show as a tappable chip.
+- **The dashboard renders image artifacts inline** in the chat thread; other files keep the download chip.
+- **`notify --file`** delivers an image to a reachable device as inline media, and otherwise sends the
+  actual file through the text-fallback channel (falling back to text if that channel can't attach).
+
+### Fixed
+
+- **Telegram outbound files.** A `kind:'file'` send now routes by MIME to `sendPhoto`/`sendDocument`
+  instead of falling through to an empty text message (which Telegram rejected with "message text is empty").
+
 ## [0.10.1] - 2026-08-05
 
 ### Added
