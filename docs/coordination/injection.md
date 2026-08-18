@@ -165,16 +165,19 @@ flowchart LR
 
 - The **dashboard** is a static SPA; its nginx proxies `/v2/*` → core and `/api/control/*` → collector,
   injecting the right bearer server-side (see `insights/dashboard/nginx.conf.template`). Public access is
-  behind Authelia, so only the allowed operator can steer.
+  gated by asmltr's [built-in auth](../AUTH.md) — every proxied backend path runs an `auth_request` to the
+  core's `/v2/auth/verify`, so only a signed-in (login + 2FA) operator can steer. (An external
+  authenticator like Authelia is optional — see [dashboard deployment](../deployment/dashboard.md).)
 - The **TUI** calls the core (`ASMLTR_CORE_BASE`) and collector (`ASMLTR_COLLECTOR_BASE`) directly on
   localhost.
 
 ## Security notes
 
 - `/v2/*` and `/api/control/*` are **localhost-only**; nothing binds a public interface. The dashboard is
-  the only public door and it is Authelia-gated to specific users.
+  the only public door and it is gated by the built-in auth (`/v2/auth/verify`) to specific users.
 - Control routes take the stronger **control token** when one is set (`ASMLTR_INSIGHTS_CONTROL_TOKEN`);
-  the Authelia-forwarded `Remote-User` becomes the audit actor.
+  the authenticated principal forwarded as `Remote-User` (from the built-in auth, or an external
+  authenticator if one is in front) becomes the audit actor.
 - Injection bypasses moderation (trusted operator) but SDK replies are still **redacted** before they
   leave the box. tmux send-keys goes straight to the terminal — treat it like typing at the keyboard.
 
