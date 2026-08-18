@@ -97,6 +97,18 @@ export const silosApi = {
   find: (id = 'self', opts = {}) => getCore(`/v2/silos/${encodeURIComponent(id)}/find${q(opts)}`),
   file: (id = 'self', path) => getCore(`/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`),
   putFile: (id = 'self', payload) => postCore(`/v2/silos/${encodeURIComponent(id)}/file`, payload),
+  // Raw-bytes write for an actual file. putFile() base64s into a JSON body, which the core's
+  // express.json 10mb limit caps near 7.5 MiB of file; the bytes go up as the body instead.
+  async putFileRaw(id = 'self', path, file) {
+    const res = await fetch(`/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', Accept: 'application/json' },
+      body: file
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.error || `upload -> ${res.status} ${res.statusText}`)
+    return json
+  },
   mkdir: (id = 'self', path) => postCore(`/v2/silos/${encodeURIComponent(id)}/mkdir`, { path }),
   rm: (id = 'self', path) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`)
 }
@@ -419,14 +431,18 @@ export const stt = {
   // Mint an ephemeral token for a streaming realtime transcription session (server VAD). The browser
   // then connects to OpenAI directly over WebRTC with this token — the real key stays server-side.
   realtimeToken: () => postCore('/v2/realtime/transcribe-token', {}),
+  // The clip goes up as raw bytes. As base64 in a JSON body it was bounded by the core's 10mb JSON
+  // limit, which is roughly 40 minutes of webm opus and a hard stop rather than a graceful one.
   async transcribe(blob, { model, language } = {}) {
-    const data_base64 = await new Promise((resolve, reject) => {
-      const r = new FileReader()
-      r.onload = () => resolve(String(r.result).split(',')[1] || '')
-      r.onerror = () => reject(new Error('read failed'))
-      r.readAsDataURL(blob)
+    const mime = blob.type || 'audio/webm'
+    const res = await fetch(`/v2/transcribe${q({ mime, model, language })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': mime, Accept: 'application/json' },
+      body: blob
     })
-    return postCore('/v2/transcribe', { data_base64, mime: blob.type || 'audio/webm', model, language })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.error || `transcribe -> ${res.status} ${res.statusText}`)
+    return json
   }
 }
 
