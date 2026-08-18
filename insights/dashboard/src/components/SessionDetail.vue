@@ -17,7 +17,7 @@ import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
 import { eventRow } from '@/lib/transcript'
-import { applySegment, preferLastBlock } from '@/lib/segment'
+import { applySegment, preferLastBlock, joinText } from '@/lib/segment'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -328,7 +328,7 @@ function webSend() {
         // Discord: a tool (or a completed narration block) closes the pending
         // draft. Later tokens are a new block — do not glue status + answer.
         if (turn.blockClosed) { turn.reply = t || ''; turn.blockClosed = false }
-        else turn.reply += t
+        else turn.reply = joinText(turn.reply, t)
         bumpStream()
       },
       onTool: (name) => {

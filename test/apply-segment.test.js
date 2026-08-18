@@ -119,5 +119,9 @@ test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', a
   assert.equal(preferLastBlock(answer, liveMash + '\n\n' + fin), answer);
   assert.equal(preferLastBlock(liveMash + '\n\n' + fin, answer), answer);
   assert.equal(applySegment('time.', 'The'), 'time. The');
+  const { joinText } = await import(helperUrl);
+  assert.equal(joinText(draft, 'Yes'), 'TEST-DRAFT: the kettle is on. Yes');
+  assert.notEqual(joinText(draft, 'Yes'), 'TEST-DRAFT: the kettle is on.Yes');
+  assert.ok(!joinText(draft, 'Yes').includes('on.Yes'));
 });
 
