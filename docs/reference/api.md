@@ -58,9 +58,10 @@ public reply. See the [injection guide](../coordination/injection.md).
 
 ### File uploads
 
-Every inbound file lands in one shared, channel-agnostic area (`ASMLTR_UPLOADS_DIR`, default
-`~/.asmltr/uploads`) and gets a line in `manifest.jsonl`, so a file sent on Telegram is findable from
-a session running anywhere. Connectors call `shared/uploads` directly; the browser uses these routes.
+Every inbound file lands in one shared, channel-agnostic area (`ASMLTR_UPLOADS_DIR`, default the
+`uploads/` folder of the Self silo) and gets a line in `manifest.jsonl`, so a file sent on Telegram is
+findable from a session running anywhere. Connectors call `shared/uploads` directly; the browser uses
+these routes.
 
 **Chunked (what the dashboard uses).** The wire unit is a fixed-size chunk, so file size is not
 bounded by any body limit, an interrupted transfer resumes from what already landed, and the server
@@ -80,6 +81,21 @@ means the request itself is malformed, **413** means one chunk exceeded the serv
 limit. Nothing reaches the manifest until `finish` succeeds, so `list()` never returns a path to a
 half-written file. Staging dirs left by uploads that were never finished are swept hourly once they
 pass 24 hours old.
+
+**Where chunks stage.** In `ASMLTR_UPLOAD_STAGING_DIR`, default `~/.asmltr/uploads-partial` — outside
+the upload area on purpose. The upload area is the Self silo, which is what a user browses in the
+Silos GUI and what `scripts/backup.js` copies into every snapshot; a partial is neither an artifact
+nor state worth restoring, and one abandoned mid-transfer would otherwise ride into every backup taken
+during the 24 hour sweep window at full size. Backups skip the staging directory outright. Keep
+staging on the same filesystem as the upload area: `finish` renames the assembled file into place, and
+across a mount boundary that rename falls back to a full copy. Correct either way, free only on one.
+
+**Storage-driver constraint.** `shared/silo.js` notes that on an encrypted or remote-driver silo,
+writers should go through `Silo.put` rather than the raw filesystem path. Chunked uploads are one of
+the callers still writing raw. That is deliberate and unresolved here: the conversion is the tracked
+artifacts-via-driver follow-up. What this path does do is keep the surface to a single call site —
+because staging is outside the silo, the only raw write that touches it is `saveFrom()` moving the
+finished file in, not one write per chunk.
 
 **Integrity.** `finish` always checks the assembled length against the declared `size`, and against
 what actually reached the disk. Content is verified per chunk via `X-Chunk-Sha256`, which is how the
