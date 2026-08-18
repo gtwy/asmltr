@@ -10,7 +10,20 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **File routes take raw bytes, not only base64 in a JSON body.** `POST /v2/upload`,
+  `POST /v2/silos/:id/file` and `POST /v2/transcribe` now accept the file as the request body with
+  its metadata in the query string, the shape `POST /v2/recordings` and `POST /v2/backups/import`
+  already used. The JSON `data_base64` form still works, so no existing client breaks. New knob
+  `ASMLTR_RAW_BODY_LIMIT` (default `1024mb`) bounds a raw body, and a body over it returns JSON
+  naming the limit instead of an HTML stack trace.
+
 ### Changed
+
+- **The dashboard sends files as bytes.** The Silos browser's upload button and the voice
+  transcription path both posted base64 inside a JSON body, which `express.json({ limit: '10mb' })`
+  capped near 7.5 MiB of actual file: measured against that parser, 7,864,000 bytes is accepted and
+  7,900,000 is not. Uploading a 10 MB file into a silo failed with `413 Payload Too Large` and no
+  size named anywhere the user could see it. Both now send the file itself.
 
 ### Fixed
 
