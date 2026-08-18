@@ -156,4 +156,15 @@ function ensureSelf(name) {
   return create({ id: 'self', name: `${name || 'Assistant'} — Self`, type: 'self' });
 }
 
-module.exports = { create, open, list, remove, ensureSelf, Silo, silosRoot, TEMPLATES };
+// A canonical subdir INSIDE the Self silo — the DEFAULT home for any artifact the system produces or
+// ingests (uploads, recordings, …) so nothing scatters into random folders. Returns an absolute path
+// (created if absent). Local-first default; on an encrypted/remote-driver silo, writers should go through
+// the driver (Silo.put) instead of this raw path — see the artifacts-via-driver follow-up.
+function selfSub(category) {
+  const s = ensureSelf();
+  const p = category ? path.join(s.dir, category) : s.dir;
+  fs.mkdirSync(p, { recursive: true });
+  return p;
+}
+
+module.exports = { create, open, list, remove, ensureSelf, selfSub, Silo, silosRoot, TEMPLATES };
