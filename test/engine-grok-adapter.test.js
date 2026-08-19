@@ -123,13 +123,13 @@ test('streaming-json parser maps text / thought / tool_call / usage / sessionId 
   // assembly must match untrimmed state.text concat — trim() would mash.
   const liveState = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   let live = '';
-  for (const piece of ["Here", " is", " a", " summary"]) {
+  for (const piece of ["Here's", " a summary"]) {
     const r = grok.applyEvent({ type: 'text', data: piece }, liveState);
     assert.equal(r.kind, 'delta');
     assert.equal(r.text, piece);
     live += r.text;
   }
-  assert.equal(liveState.text, "Here is a summary");
+  assert.equal(liveState.text, "Here's a summary");
   assert.equal(live, liveState.text);
   assert.equal(grok.sessionIdFrom({ sessionId: sid }), sid);
 });
@@ -145,6 +145,9 @@ test('runTurn signature destructures systemPrompt (identity contract)', () => {
   assert.ok(params.includes('resume'));
   assert.ok(!src.includes('onSegment(r.text.trim())'), 'onSegment must not trim leading spaces');
   assert.ok(src.includes('onSegment(r.text)'));
+  assert.ok(src.includes("r.text != null && r.text !== '' && onDelta"), 'onDelta must fire for whitespace tokens');
+  assert.ok(src.includes('joined = prev + text'), 'incremental type:text data concatenates');
+  assert.ok(!src.includes('[.!?]'), 'no invent-space after .!?');
 });
 
 test('engines.get("grok") lazy-loads the grok adapter', () => {
@@ -270,14 +273,18 @@ test('applyEvent: James kettle snapshots last complete block wins', () => {
 });
 
 test('joinText: honest concat; URLs/IPs/query/versions unspaced; space token kept', () => {
-  assert.equal(['127.', '0', '.', '0', '.', '1'].reduce((a, b) => grok.joinText(a, b), ''), '127.0.0.1');
+  assert.equal(grok.joinText("Here's", ' a summary'), "Here's a summary");
+  assert.equal(grok.joinText('time.', ' The'), 'time. The');
+  assert.equal(grok.joinText('time.', 'The'), 'time.The');
+  assert.equal(['127.', '0.', '0.', '1'].reduce((a, b) => grok.joinText(a, b), ''), '127.0.0.1');
   assert.equal(grok.joinText('accounts.', 'google.com'), 'accounts.google.com');
   assert.equal(grok.joinText('auth?', 'response_type'), 'auth?response_type');
   assert.equal(grok.joinText('www.', 'googleapis.com'), 'www.googleapis.com');
   assert.equal(grok.joinText('file.', 'json'), 'file.json');
   assert.equal(grok.joinText('v1.', '2.3'), 'v1.2.3');
   assert.equal(grok.joinText(grok.joinText('time.', ' '), 'The'), 'time. The');
-  assert.equal(grok.joinText('time.', 'The'), 'time.The');
+  assert.equal(grok.extractText({ type: 'text', data: ' ' }), ' ');
+  assert.equal(grok.extractText({ type: 'text', data: ' a summary' }), ' a summary');
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   const r = grok.applyEvent({ type: 'text', data: ' ' }, state);
   assert.equal(r.kind, 'delta');

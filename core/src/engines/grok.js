@@ -442,7 +442,7 @@ function sessionIdFrom(obj) {
 function joinText(prev, next) {
   if (next == null || next === '') return prev || '';
   if (prev == null || prev === '') return next;
-  // Either side may already carry adjoining whitespace. Never invent a space.
+  if (/^\s/.test(next) || /\s$/.test(prev)) return prev + next;
   return prev + next;
 }
 
@@ -465,6 +465,7 @@ function extractText(obj) {
   if (!obj || typeof obj !== 'object') return '';
   const t = obj.type;
   if (t === 'thought' || t === 'thinking' || t === 'error') return '';
+  // Never trim data/delta/text — official grok CLI puts the leading space on the next token.
   if (typeof obj.delta === 'string') return obj.delta;
   if (typeof obj.text === 'string') return obj.text;
   // grok 1.0.5 streaming-json: {"type":"text","data":"..."}
@@ -533,7 +534,7 @@ function applyEvent(ev, state) {
     const prev = state.text || '';
     let joined;
     if (incremental) {
-      joined = joinText(prev, text);
+      joined = prev + text;
     } else if (text.startsWith(prev) && prev) {
       joined = text;
     } else if (isCompleteBlock(prev) && isCompleteBlock(text)) {
@@ -594,7 +595,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     if (r.kind === 'thinking' && r.thinking && onThinking) { try { onThinking(r.thinking); } catch (_) {} }
     else if (r.kind === 'tool' && r.tool && onTool) { try { onTool(r.tool); } catch (_) {} }
     else if (r.kind === 'error' && r.error && onSegment) { try { onSegment(`⚠️ grok: ${r.error}`); } catch (_) {} }
-    else if (r.kind === 'delta' && r.text && onDelta) { try { onDelta(r.text); } catch (_) {} }
+    else if (r.kind === 'delta' && r.text != null && r.text !== '' && onDelta) { try { onDelta(r.text); } catch (_) {} }
     else if (r.kind === 'text' && r.text && onSegment) { try { onSegment(r.text); } catch (_) {} }
   };
   child.stdout.on('data', (d) => { buf += d.toString(); let i; while ((i = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, i)); buf = buf.slice(i + 1); } });
