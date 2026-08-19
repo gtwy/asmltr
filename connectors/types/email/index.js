@@ -83,6 +83,28 @@ function defaultOpsAllowthroughPath() {
     || path.join(os.homedir(), '.asmltr', 'silos', 'self', 'memory', 'ops', 'allowthrough.json');
 }
 
+// Per-instance IMAP UID cursor. Survives worker restart so a hang-up does not skip the failed uid.
+// Override with ASMLTR_EMAIL_LASTUID_FILE (tests / single-file installs).
+function lastUidFile(instanceId) {
+  if (process.env.ASMLTR_EMAIL_LASTUID_FILE) return process.env.ASMLTR_EMAIL_LASTUID_FILE;
+  return path.join(os.homedir(), '.asmltr', `email-lastuid-${instanceId}.json`);
+}
+
+function readLastUid(instanceId) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(lastUidFile(instanceId), 'utf8'));
+    const n = Number(raw && raw.lastUid);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  } catch (_) {}
+  return null;
+}
+
+function persistLastUid(instanceId, uid) {
+  const f = lastUidFile(instanceId);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ lastUid: uid }) + '\n', { mode: 0o600 });
+}
+
 function loadMatchers(filePath) {
   const p = filePath || defaultOpsAllowthroughPath();
   try {
@@ -269,7 +291,8 @@ async function start(ctx) {
   // A UID high-water mark (not read/unread flags) decides what's "new": on first connect the
   // baseline is the mailbox tip, so we only react to mail that arrives AFTER we start watching
   // (unless process_backlog). The cursor survives reconnects, so mail during a blip isn't missed.
-  let imap = null, stopped = false, lastUid = -1, busy = false;
+  const persistedUid = readLastUid(ctx.instanceId);
+  let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false;
   async function fetchNew() {
     if (!imap || !imap.usable || busy) return;
     busy = true;
@@ -284,9 +307,18 @@ async function start(ctx) {
           if (result && result.handled) {
             try { await imap.messageFlagsAdd({ uid: msg.uid }, ['\\Seen'], { uid: true }); }
             catch (e) { ctx.log(`mark seen uid ${msg.uid}: ${e.message}`); }
+            // Advance + persist only on handled. Hang-up / parse failure must leave
+            // lastUid so the next start or exists re-fetches this uid.
+            if (msg.uid > lastUid) {
+              lastUid = msg.uid;
+              try { persistLastUid(ctx.instanceId, lastUid); }
+              catch (e) { ctx.log(`persist lastUid ${lastUid}: ${e.message}`); }
+            }
           }
-        } catch (e) { ctx.log(`process failed uid ${msg.uid}: ${e.message}`); }
-        lastUid = Math.max(lastUid, msg.uid);
+        } catch (e) {
+          ctx.log(`process failed uid ${msg.uid}: ${e.message}`);
+          break; // do not walk past a failed uid; retry it next fetch
+        }
       }
     } finally { lock.release(); busy = false; }
   }
@@ -422,4 +454,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches };
+module.exports = { meta, start, imapNoopProbe, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid };
