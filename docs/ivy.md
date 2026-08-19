@@ -16,6 +16,7 @@ Engine-agnostic. Worth taking even if you never run Grok.
 - Live list: past-idle no-pid web cards leave Live. `GET /api/sessions?active=1` excludes rows past `last_activity` + idle and flips those rows to `ended` on read. History stays. Do not show an Idle badge. Same session key can come back Active on a later message.
 - Engines help: put CLI login commands on their own line so they do not wrap mid-flag.
 - Dashboard nginx: `client_max_body_size 32m` (default 1m 413s Live attach). Live composer POSTs raw bytes to `/v2/upload` (same as recordings); core caps original files at 25MB. Host 80g is not enough if the container nginx is still 1m.
+- Email now marks messages as read after Ivy reads them (IMAP `\Seen` after handle; mail reads mark seen by default). Noreply/self stay unread.
 
 ## Take if you want Grok as an engine — not Ivy-only
 
