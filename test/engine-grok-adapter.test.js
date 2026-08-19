@@ -269,3 +269,10 @@ test('applyEvent: James kettle snapshots last complete block wins', () => {
   assert.ok(!state.text.includes('kettle'));
 });
 
+test('joinText: sentence boundary spaced; URLs/IPs/query unspaced', () => {
+  assert.equal(grok.joinText('time.', 'The'), 'time. The');
+  assert.equal(['127.', '0', '.', '0', '.', '1'].reduce((a, b) => grok.joinText(a, b), ''), '127.0.0.1');
+  assert.equal(grok.joinText('accounts.', 'google.com'), 'accounts.google.com');
+  assert.equal(grok.joinText('auth?', 'response_type'), 'auth?response_type');
+  assert.equal(grok.joinText('www.', 'googleapis'), 'www.googleapis');
+});

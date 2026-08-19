@@ -443,7 +443,7 @@ function joinText(prev, next) {
   if (next == null || next === '') return prev || '';
   if (prev == null || prev === '') return next;
   if (/^\s/.test(next) || /\s$/.test(prev)) return prev + next;
-  if (/[.!?]["')\]]*$/.test(prev) && /^[A-Za-z0-9“"'(]/.test(next)) return prev + ' ' + next;
+  if (/[.!?]["')\]]*$/.test(prev) && /^[A-Z]/.test(next)) return prev + ' ' + next;
   return prev + next;
 }
 
@@ -526,7 +526,8 @@ function applyEvent(ev, state) {
   const text = extractText(ev);
   // Keep space-only pieces (" ") — do not treat whitespace as empty. When Grok
   // starts the next sentence without a leading space, joinText inserts one so
-  // stored outbound matches live ("time. The", not "time.The").
+  // stored outbound matches live ("time. The", not "time.The"). Only before
+  // an uppercase letter (sentence boundary) — not lowercase/digit (URLs/IPs).
   if (text != null && text !== '') {
     // grok 1.0.5 streaming-json tokens are {type:"text", data:"..."}. Those are
     // incremental — treat as delta so /v2/stream keeps writing until real done.
