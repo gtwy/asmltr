@@ -15,6 +15,8 @@
  *
  * Credentials come from the secret store (never a file): user_bws_key + pass_bws_key.
  */
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -72,6 +74,47 @@ function root32(refs, inReplyTo, messageId) {
   return r || inReplyTo || messageId || ('m' + crypto.randomBytes(8).toString('hex'));
 }
 
+function isAutomatedSender(addr) {
+  return /(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(String(addr || ''));
+}
+
+function defaultOpsAllowthroughPath() {
+  return process.env.ASMLTR_OPS_ALLOWTHROUGH
+    || path.join(os.homedir(), '.asmltr', 'silos', 'self', 'memory', 'ops', 'allowthrough.json');
+}
+
+function loadMatchers(filePath) {
+  const p = filePath || defaultOpsAllowthroughPath();
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const list = Array.isArray(raw) ? raw : (raw && raw.matchers);
+    return Array.isArray(list) ? list : [];
+  } catch (_) { return []; }
+}
+
+function domainMatches(addr, domain) {
+  const a = String(addr || '').toLowerCase();
+  const d = String(domain || '').toLowerCase().replace(/^@/, '');
+  if (!a || !d) return false;
+  return a.endsWith('@' + d) || a.endsWith('.' + d);
+}
+
+function matchOpsAllowThrough(fromAddr, subject, body, matchers) {
+  const list = Array.isArray(matchers) ? matchers : loadMatchers();
+  const addr = String(fromAddr || '').toLowerCase();
+  const blob = `${subject || ''}\n${body || ''}`;
+  const blobLc = blob.toLowerCase();
+  for (const m of list) {
+    if (!m || m.enabled === false) continue;
+    const domains = m.from_domains || [];
+    const domainOk = !domains.length || domains.some((d) => domainMatches(addr, d));
+    const allKw = m.all_keywords || [];
+    const keysOk = allKw.every((k) => blobLc.includes(String(k).toLowerCase()));
+    if (domainOk && keysOk) return m;
+  }
+  return null;
+}
+
 async function start(ctx) {
   const cfg = ctx.config || {};
   const PORT = cfg.http_port || 3026;
@@ -109,16 +152,17 @@ async function start(ctx) {
   const threads = new Map();
   const selfAddr = String(address).toLowerCase();
 
-  async function sendMail({ to, subject, text, inReplyTo, references, attachments }) {
+  async function sendMail({ to, cc, subject, text, inReplyTo, references, attachments }) {
     const info = await smtp.sendMail({
       from: `"${fromName}" <${address}>`, to,
+      cc: cc || undefined,
       subject: subject || `Message from ${fromName}`,
       text: (text || '') + signature,
       inReplyTo: inReplyTo || undefined,
       references: references && references.length ? references.join(' ') : undefined,
       attachments: attachments || undefined,
     });
-    ctx.emit({ event_type: 'outbound', session_id: `email:${ctx.instanceId}:to:${to}`, identity: address, payload: { to, subject } });
+    ctx.emit({ event_type: 'outbound', session_id: `email:${ctx.instanceId}:to:${to}`, identity: address, payload: { to, cc: cc || undefined, subject } });
     return info;
   }
 
@@ -127,12 +171,17 @@ async function start(ctx) {
     const fromAddr = String(fromRaw).trim().toLowerCase();
     const fromName2 = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].name) || fromAddr;
     if (!fromAddr) return { handled: false };
-    // Loop / automation guards — never answer ourselves or noreply/daemon senders.
+    // Loop / automation guards — never answer ourselves or noreply/daemon senders,
+    // unless an ops-desk matcher (Self silo memory/ops/allowthrough.json) says this
+    // alert is allowed through (e.g. Microsoft Entra sync noreply).
     if (fromAddr === selfAddr) return { handled: false };
-    if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(fromAddr)) { ctx.log(`skip automated sender ${fromAddr}`); return { handled: false }; }
-
     const subject = parsed.subject || '(no subject)';
     const body = (parsed.text || parsed.html || '').toString().trim();
+    const opsHit = matchOpsAllowThrough(fromAddr, subject, body);
+    if (isAutomatedSender(fromAddr) && !(opsHit && opsHit.noreply_ok !== false)) {
+      ctx.log(`skip automated sender ${fromAddr}`);
+      return { handled: false };
+    }
     const messageId = parsed.messageId || null;
     const refs = parsed.references ? (Array.isArray(parsed.references) ? parsed.references : [parsed.references]) : [];
     const inReplyTo = parsed.inReplyTo || null;
@@ -165,7 +214,8 @@ async function start(ctx) {
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
     // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
-    if (!known) {
+    // Ops-desk allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
+    if (!known && !opsHit) {
       if (ownerForward && ownerForward !== fromAddr) {
         const fwd = `Ivy forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
         await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd });
@@ -177,6 +227,15 @@ async function start(ctx) {
     }
 
     const sendPolicy = 'always_send';
+    const suppressReply = isAutomatedSender(fromAddr) || !!(opsHit && opsHit.reply_to_sender === false);
+    let extra =
+      `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
+      `Sign off as ${fromName} — NEVER sign as the operator/owner or impersonate a human. A signature is appended automatically. ` +
+      `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
+      `Ops desk: inbound Tech Direct alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type.`;
+    if (opsHit) {
+      extra += ` This message matched ops matcher '${opsHit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
+    }
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,
@@ -186,12 +245,9 @@ async function start(ctx) {
       delivery: 'sync',
       capabilities: meta.capabilities,
       public: false, // 1:1 mail; redaction still applies unless the sender is full-trust
-      channel_context: { from: fromAddr, subject },
+      channel_context: { from: fromAddr, subject, ops_matcher: opsHit ? (opsHit.id || true) : undefined },
       approval: { policy: sendPolicy, recipient: fromAddr, subject: replySubject },
-      system_prompt_extra:
-        `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
-        `Sign off as ${fromName} — NEVER sign as the operator/owner or impersonate a human. A signature is appended automatically. ` +
-        `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]].`,
+      system_prompt_extra: extra,
     });
 
     for (const a of actions || []) {
@@ -200,6 +256,7 @@ async function start(ctx) {
         // a stray {reply} here is a core early-return (e.g. access-revoked / moderation notice), which
         // we must NOT email out in shadow. Under a sending policy, deliver it.
         if (sendPolicy === 'always_draft') { ctx.log(`shadow: suppressed inline reply to ${fromAddr}`); continue; }
+        if (suppressReply) { ctx.log(`suppressed reply to automated/ops sender ${fromAddr}`); continue; }
         const tc = threads.get(convKey) || {};
         await sendMail({ to: fromAddr, subject: replySubject, text: a.text, inReplyTo: messageId, references: tc.references });
         ctx.log(`replied to ${fromAddr} (${replySubject})`);
@@ -338,12 +395,12 @@ async function start(ctx) {
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
   app.post('/out', async (req, res) => {
     try {
-      const { kind = 'text', target, text, subject, ref, path: filePath, caption } = req.body || {};
+      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
       const tc = (ref && threads.get(ref)) || {};
       const subj = subject || tc.subject || `Message from ${fromName}`;
       const attachments = kind === 'file' && filePath ? [{ path: filePath, filename: path.basename(filePath) }] : undefined;
-      await sendMail({ to: target, subject: subj, text: text || caption || '', inReplyTo: tc.messageId, references: tc.references, attachments });
+      await sendMail({ to: target, cc, subject: subj, text: text || caption || '', inReplyTo: tc.messageId, references: tc.references, attachments });
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
@@ -365,4 +422,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe };
+module.exports = { meta, start, imapNoopProbe, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches };

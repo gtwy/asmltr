@@ -17,6 +17,7 @@ Engine-agnostic. Worth taking even if you never run Grok.
 - Engines help: put CLI login commands on their own line so they do not wrap mid-flag.
 - Dashboard nginx: `client_max_body_size 32m` (default 1m 413s Live attach). Live composer POSTs raw bytes to `/v2/upload` (same as recordings); core caps original files at 25MB. Host 80g is not enough if the container nginx is still 1m.
 - Email: the IMAP watcher tracks a UID cursor and never set `\Seen`, so Gmail still looked unread after Ivy handled mail. After a message is actually handled (watch path), set `\Seen`. `asmltr mail read` marks seen by default (`--keep-unread` to peek). Skip self / noreply / bounce so security-alert mail can stay unread.
+- Email: `asmltr send email … --cc "<addr>"` (comma-separated ok). Manager `/send` and the email connector `/out` pass `cc` through to SMTP.
 - Moderation: default OpenAI classifier (`gpt-5-nano`) is a reasoning model. Uncapped it added ~2–3.5s of synchronous dead time on every inbound that is not bypassed. Cap `reasoning_effort: 'minimal'` on gpt-5-family models only (`ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Logs include `duration_ms`.
 
 ## Take if you want Grok as an engine — not Ivy-only
@@ -52,6 +53,7 @@ Do not merge these.
 - `docker-compose.local.yml`
 - Authelia leftover notes (Authelia was removed)
 - Email local policy (not the `\Seen` fix): `owner_forward_to` for unknown senders; known people on the trust store auto-send (`always_send` on that path). Do not take this as the upstream default — upstream stays `approval_policy`.
+- Ops desk (19 Aug 2026): inbox-alert tickets in Self silo `memory/ops/`. Microsoft Entra / Synchronization noreply is allowed through via `memory/ops/allowthrough.json` (connector otherwise skips noreply). Automated senders still never get a reply. Tim Cao + Joey Kapolka are trust-store principals so their mail is a live turn. Weekday 07:00 ET schedule `ops-desk-morning-sweep` sends the one allowed follow-up. Do not handle a new alert *type* until James and Ivy add a workflow file.
 - `extras/ivy-local/` — Corona / Rolodex / OneNote stdio MCP wrappers for this host. Eve: skip. Register with `extras/ivy-local/register.sh` (`~/.asmltr/mcp.json` + `grok mcp add`).
 - Corona: localhost `127.0.0.1:12701` only. Tools `corona_health`, `corona_recipe`, `corona_cigars`, `corona_cooking`. No `/say`.
 - Cigar writeup: kektech `#cigars` first (who, when America/New_York 24-hour, what they said). Then a section headed exactly `Additional notes from the web`.
