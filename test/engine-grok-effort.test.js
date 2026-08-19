@@ -468,3 +468,42 @@ test('+xh / +h override is one turn and does not persist nextEffort', () => {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
+
+test('owner-from email owner@example.com is 4h; other inbound email stays 1h', () => {
+  const H = 60 * 60 * 1000;
+  const owner = { channel: 'email', sender: { raw_id: 'owner@example.com', raw_username: 'Example Owner' } };
+  assert.equal(grok.timeoutMsForEffort('xhigh', owner), 4 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'JAMES@TECHDIRECT.IO' } }), 4 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'Example Owner <owner@example.com>' } }), 4 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { from: 'Example Owner <owner@example.com>' } }), 4 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { email: 'owner@example.com' } }), 4 * H);
+  assert.equal(grok.parseEmailAddress('Example Owner <owner@example.com>'), 'owner@example.com');
+  assert.equal(grok.parseEmailAddress('owner@example.com'), 'owner@example.com');
+  assert.equal(grok.parseEmailAddress('Example Owner'), '');
+  assert.equal(grok.isOwnerFromEmail(owner), true);
+  assert.equal(grok.maxTurnsForEffort('xhigh', owner), 100);
+  assert.equal(grok.chooseEffort({ prompt: 'Thanks for the update', cwd: noGit, channel: 'email', sender: owner.sender }), 'xhigh');
+
+  const other = { channel: 'email', sender: { raw_id: 'other@example.com', raw_username: 'Other' } };
+  assert.equal(grok.timeoutMsForEffort('xhigh', other), 1 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'alex@example.com' } }), 1 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'owner@other.com' } }), 1 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_username: 'Example Owner' } }), 1 * H);
+  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 1 * H);
+  assert.equal(grok.isOwnerFromEmail(other), false);
+  assert.equal(grok.TIMEOUT_CAP_MS, 4 * H);
+  assert.equal(grok.OWNER_EMAIL_TIMEOUT_MS, 4 * H);
+  assert.equal(grok.EMAIL_TIMEOUT_MS, 1 * H);
+});
+
+test('discord / mcp / dashboard stay 5 / 10 / 15 after owner-email 4h cap', () => {
+  for (const channel of ['discord', 'assistant-web', 'assistant-native', 'mcp']) {
+    assert.equal(grok.timeoutMsForEffort('medium', { channel }), 5 * 60 * 1000, channel);
+    assert.equal(grok.timeoutMsForEffort('high', { channel }), 10 * 60 * 1000, channel);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel }), 15 * 60 * 1000, channel);
+    assert.equal(grok.timeoutMsForEffort('xhigh', {
+      channel,
+      sender: { raw_id: 'owner@example.com' },
+    }), 15 * 60 * 1000, channel + ' owner email must not 4h interactive');
+  }
+});
