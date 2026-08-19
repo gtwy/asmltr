@@ -52,8 +52,10 @@ const TURNS_FOR_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
 const TIMEOUT_SCALE = { low: 1, medium: 1, high: 2, xhigh: 3 };
 
 /** medium 20 / high 40 / xhigh 60. Cap 100. Env MAX_TURNS is the complete() baseline, not a flatten. */
-function maxTurnsForEffort(effort) {
+function maxTurnsForEffort(effort, opts) {
   const e = normalizeEffort(effort) || 'medium';
+  const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
+  if (isEmailChannel(channel) && e === 'xhigh') return MAX_TURNS_CAP;
   return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
 }
 
@@ -300,7 +302,7 @@ function buildArgs(opts) {
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
   const classified = classifyEffort(opts);
-  const turns = opts.complete ? maxTurns() : maxTurnsForEffort(classified.effort);
+  const turns = opts.complete ? maxTurns() : maxTurnsForEffort(classified.effort, opts);
   args.push('--max-turns', String(turns));
   args.push('--effort', classified.effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
