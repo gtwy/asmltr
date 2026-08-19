@@ -28,6 +28,9 @@ Helps any site that runs the Grok CLI.
 - Engines copy: `grok login --device-auth` on its own line
 - Finite idle as a grok-session feature (we default 30 minutes; the idea is reusable)
 - Node 24 + better-sqlite3 11 ABRT: ObjectWrap dtor → RemoveEnvironmentCleanupHook when env is nullptr. keep-until-listen was insufficient — post-listen GC during grok heap growth still ABRTs. Keep+reuse Statements (SQL-keyed Map) for the process lifetime. Do not disarm after listen.
+- Grok 4.6 context is 500k with no text output limit. The adapter must omit context and max-output flags.
+- Take `ASMLTR_GROK_MAX_TURNS=20` and `ASMLTR_GROK_TIMEOUT_MS=600000`.
+- Do not port `ASMLTR_MAX_THINKING_TOKENS=4000`, opus, haiku, or `ASMLTR_MODEL`. Inherited Claude leftovers (engines fallback `claude`, runtime getModel opus, thinking 4000) are Claude-engine only.
 
 ## Our box only, skip
 
