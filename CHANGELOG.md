@@ -99,6 +99,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
+- **Moderation no longer spends 2–3.5s reasoning on every inbound.** Default classifier `gpt-5-nano` is a reasoning model; the OpenAI call now sets `reasoning_effort: 'minimal'` on gpt-5-family models only (override `ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Decision logs include `duration_ms`. A model that rejects the field is retried without it.
 - **Voice speaker identity (#148).** In a multi-person voice call Eve addressed everyone as one person and applied the wrong trust tier, because the voice path passed the speaker's display name as `sender.raw_id` (matches no identity mapping → resolved `default`/tier 0). The speaker's immutable Discord user ID now rides through to `sender.raw_id` (same key the text path uses), so each turn resolves the correct principal + trust — the person who said her name. Verified: user ID → the real principal (tier 1); display name → default (tier 0).
 - **"Eve, stop" now actually halts an in-flight realtime reply (#149).** Stop/barge-in fired and aborted, but the reply still spoke ~10s later when the LLM turn finished after the abort. `speak()` now requires a live speech session, and a per-guild reply generation (bumped on stop) makes the in-flight reply bail before synthesizing/speaking/posting even if generation completes after the abort.
 
