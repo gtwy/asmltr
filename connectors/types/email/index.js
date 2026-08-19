@@ -252,9 +252,10 @@ async function start(ctx) {
     const suppressReply = isAutomatedSender(fromAddr) || !!(opsHit && opsHit.reply_to_sender === false);
     let extra =
       `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
-      `Sign off as ${fromName} — NEVER sign as the operator/owner or impersonate a human. A signature is appended automatically. ` +
+      `Do not type a name or signature block — "${fromName}" and the rest of the signature are appended automatically. NEVER sign as the operator/owner or impersonate a human. ` +
+      `When the company name is used, write "Tech Direct Services" in full — never "Tech Direct" alone. ` +
       `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
-      `Ops desk: inbound Tech Direct alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type.`;
+      `Ops desk: inbound Tech Direct Services alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type.`;
     if (opsHit) {
       extra += ` This message matched ops matcher '${opsHit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
     }
@@ -427,12 +428,18 @@ async function start(ctx) {
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
   app.post('/out', async (req, res) => {
     try {
-      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc } = req.body || {};
+      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
       const tc = (ref && threads.get(ref)) || {};
       const subj = subject || tc.subject || `Message from ${fromName}`;
       const attachments = kind === 'file' && filePath ? [{ path: filePath, filename: path.basename(filePath) }] : undefined;
-      await sendMail({ to: target, cc, subject: subj, text: text || caption || '', inReplyTo: tc.messageId, references: tc.references, attachments });
+      const refsIn = references == null ? null : (Array.isArray(references) ? references : String(references).split(/\s+/).filter(Boolean));
+      await sendMail({
+        to: target, cc, subject: subj, text: text || caption || '',
+        inReplyTo: inReplyTo || tc.messageId,
+        references: refsIn || tc.references,
+        attachments,
+      });
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
