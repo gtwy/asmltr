@@ -236,18 +236,17 @@ test('max-turns-for-effort: medium 20, high 40, xhigh 60 (cap 100)', () => {
   }
 });
 
-test('timeout scales modestly with effort; generic xhigh is 15m', () => {
+test('interactive watchdog is 5 / 10 / 15 even if env baseline is 10m', () => {
   delete process.env.ASMLTR_GROK_TIMEOUT_MS;
-  assert.equal(grok.timeoutMsForEffort('medium'), grok.DEFAULT_TIMEOUT_MS);
-  assert.equal(grok.timeoutMsForEffort('high'), grok.DEFAULT_TIMEOUT_MS);
-  assert.equal(grok.timeoutMsForEffort('xhigh'), Math.floor(grok.DEFAULT_TIMEOUT_MS * 1.5));
+  assert.equal(grok.timeoutMsForEffort('medium'), 5 * 60 * 1000);
+  assert.equal(grok.timeoutMsForEffort('high'), 10 * 60 * 1000);
+  assert.equal(grok.timeoutMsForEffort('xhigh'), 15 * 60 * 1000);
   assert.ok(grok.timeoutMsForEffort('xhigh') <= grok.TIMEOUT_CAP_MS);
   process.env.ASMLTR_GROK_TIMEOUT_MS = '600000';
   try {
-    assert.equal(grok.timeoutMsForEffort('medium'), 600000);
-    assert.equal(grok.timeoutMsForEffort('high'), 600000);
-    assert.equal(grok.timeoutMsForEffort('xhigh'), 900000);
-    assert.ok(grok.timeoutMsForEffort('xhigh') <= 15 * 60 * 1000);
+    assert.equal(grok.timeoutMsForEffort('medium'), 5 * 60 * 1000);
+    assert.equal(grok.timeoutMsForEffort('high'), 10 * 60 * 1000);
+    assert.equal(grok.timeoutMsForEffort('xhigh'), 15 * 60 * 1000);
   } finally {
     delete process.env.ASMLTR_GROK_TIMEOUT_MS;
   }
@@ -277,7 +276,7 @@ test('email channel forces xhigh + 100 turns + 60m even without code words', () 
       assert.equal(grok.timeoutMsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), { channel: 'email' }), grok.EMAIL_TIMEOUT_MS);
     }
     // generic xhigh (no channel) is 15m
-    assert.equal(grok.timeoutMsForEffort('xhigh'), Math.floor(grok.DEFAULT_TIMEOUT_MS * 1.5));
+    assert.equal(grok.timeoutMsForEffort('xhigh'), 15 * 60 * 1000);
     assert.ok(grok.EMAIL_TIMEOUT_MS <= grok.TIMEOUT_CAP_MS);
     assert.equal(grok.isEmailChannel('email'), true);
     assert.equal(grok.isEmailChannel('discord'), false);
@@ -286,7 +285,7 @@ test('email channel forces xhigh + 100 turns + 60m even without code words', () 
   }
 });
 
-test('discord ok thanks stays medium 20 / 10m', () => {
+test('discord ok thanks stays medium 20 / 5m', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const opts = { prompt: 'ok thanks', cwd: noGit, channel: 'discord' };
@@ -294,9 +293,9 @@ test('discord ok thanks stays medium 20 / 10m', () => {
     assert.equal(effortOf(grok.buildArgs(opts)), 'medium');
     assert.equal(maxTurnsOf(grok.buildArgs(opts)), 20);
     assert.equal(grok.maxTurnsForEffort('medium'), 20);
-    assert.equal(grok.timeoutMsForEffort('medium', { channel: 'discord' }), 10 * 60 * 1000);
+    assert.equal(grok.timeoutMsForEffort('medium', { channel: 'discord' }), 5 * 60 * 1000);
     assert.equal(grok.timeoutMsForEffort('high', { channel: 'discord' }), 10 * 60 * 1000);
-    assert.equal(grok.timeoutMsForEffort(grok.chooseEffort(opts), opts), grok.DEFAULT_TIMEOUT_MS);
+    assert.equal(grok.timeoutMsForEffort(grok.chooseEffort(opts), opts), 5 * 60 * 1000);
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
@@ -308,13 +307,21 @@ test('Discord xhigh stays 60 turns / 15m; email xhigh is 100 / 60m', () => {
     const impl = { prompt: 'Please implement a helper', cwd: noGit, channel: 'discord' };
     assert.equal(grok.chooseEffort(impl), 'xhigh');
     assert.equal(maxTurnsOf(grok.buildArgs(impl)), 60);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'discord' }), Math.floor(grok.DEFAULT_TIMEOUT_MS * 1.5));
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'discord' }), 15 * 60 * 1000);
     const mail = { prompt: 'Thanks for the update, see you Monday', cwd: noGit, channel: 'email' };
     assert.equal(grok.chooseEffort(mail), 'xhigh');
     assert.equal(maxTurnsOf(grok.buildArgs(mail)), 100);
     assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 60 * 60 * 1000);
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('assistant-web, assistant-native, and mcp match discord 5 / 10 / 15', () => {
+  for (const channel of ['assistant-web', 'assistant-native', 'discord', 'mcp']) {
+    assert.equal(grok.timeoutMsForEffort('medium', { channel }), 5 * 60 * 1000, channel);
+    assert.equal(grok.timeoutMsForEffort('high', { channel }), 10 * 60 * 1000, channel);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel }), 15 * 60 * 1000, channel);
   }
 });
 
