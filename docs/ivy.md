@@ -26,12 +26,12 @@ Helps any site that runs the Grok CLI.
 - `core/src/engines/grok.js` adapter
 - Grok text tokens as live deltas without trim (mashed words if you trim or treat snapshots as appends)
 - Keep period-space when joining grok narration blocks. Space-only tokens were dropped as empty; later sentences arrived without a leading space (`time.The`).
-- `--effort high` and auto-xhigh on code
+- Always pass `--effort`. Baseline `ASMLTR_GROK_EFFORT` (Ivy: `medium`; unset still defaults `high` for other installs). Auto-`high` on lookup/research/Corona/Rolodex/troubleshooting. Auto-`xhigh` on git/code/deep-dive (implement, refactor, write/patch code, commit, PR, "deep dive"). HOME cwd is never a project. Never `process.cwd()`. Score the current user message only (`effortPrompt`) — not drainObserved/catch-up. One-shot next-effort still wins; `complete()` skips auto-raise. Tight: do not treat bare "fix" as xhigh. Do not port last-effort inherit or `XHIGH_CHANNELS`.
 - Engines copy: `grok login --device-auth` on its own line
 - Finite idle as a grok-session feature (we default 30 minutes; the idea is reusable)
 - Node 24 + better-sqlite3 11 ABRT: ObjectWrap dtor → RemoveEnvironmentCleanupHook when env is nullptr. keep-until-listen was insufficient — post-listen GC during grok heap growth still ABRTs. Keep+reuse Statements (SQL-keyed Map) for the process lifetime. Do not disarm after listen.
 - Grok 4.6 context is 500k with no text output limit. The adapter must omit context and max-output flags.
-- Take `ASMLTR_GROK_MAX_TURNS=20` and `ASMLTR_GROK_TIMEOUT_MS=600000`.
+- max-turns by effort: medium 20, high 40, xhigh 60 (cap 100). Timeout scales from the 10-minute baseline so 40/60 can finish (cap 30m). Not infinite. Take `ASMLTR_GROK_TIMEOUT_MS=600000` as that baseline.
 - Do not port `ASMLTR_MAX_THINKING_TOKENS=4000`, opus, haiku, or `ASMLTR_MODEL`. Inherited Claude leftovers (engines fallback `claude`, runtime getModel opus, thinking 4000) are Claude-engine only.
 
 ## Our box only, skip

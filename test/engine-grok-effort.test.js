@@ -10,6 +10,8 @@ const nextFile = path.join(tmp, 'next-effort');
 process.env.ASMLTR_GROK_NEXT_EFFORT_FILE = nextFile;
 process.env.ASMLTR_CORE_DB = path.join(tmp, 'sess.db');
 delete process.env.ASMLTR_GROK_EFFORT;
+delete process.env.ASMLTR_GROK_MAX_TURNS;
+delete process.env.ASMLTR_GROK_TIMEOUT_MS;
 
 const grok = require('../core/src/engines/grok');
 const sessions = require('../core/src/sessions');
@@ -24,12 +26,20 @@ after(() => {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
   delete process.env.ASMLTR_GROK_EFFORT;
   delete process.env.ASMLTR_GROK_NEXT_EFFORT_FILE;
+  delete process.env.ASMLTR_GROK_MAX_TURNS;
+  delete process.env.ASMLTR_GROK_TIMEOUT_MS;
 });
 
 function effortOf(args) {
   const i = args.indexOf('--effort');
   assert.ok(i >= 0, 'buildArgs must include --effort');
   return args[i + 1];
+}
+
+function maxTurnsOf(args) {
+  const i = args.indexOf('--max-turns');
+  assert.ok(i >= 0, 'buildArgs must include --max-turns');
+  return Number(args[i + 1]);
 }
 
 test('buildArgs includes --effort high by default', () => {
@@ -52,22 +62,93 @@ test('ASMLTR_GROK_EFFORT overrides baseline', () => {
   }
 });
 
-test('auto-xhigh on implement/fix/refactor/debug prompts (word-boundary)', () => {
-  delete process.env.ASMLTR_GROK_EFFORT;
-  for (const p of [
-    'Please implement a helper',
-    'Can you fix the typo',
-    'Refactor this module',
-    'debug the crash',
-    'IMPLEMENT the feature',
-    'please Fix it',
-  ]) {
-    assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit })), 'xhigh', p);
+test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(grok.chooseEffort({ prompt: 'ok thanks', cwd: noGit }), 'medium');
+    assert.equal(grok.chooseEffort({ prompt: "what's up", cwd: noGit }), 'medium');
+    assert.equal(grok.chooseEffort({ prompt: 'gm', cwd: noGit }), 'medium');
+
+    for (const p of [
+      'look up the Padron 1964 in Corona',
+      'pull the cigar writeup from Corona',
+      'what is the recipe',
+      'check the rolodex for Jess',
+      'search my contacts for Steve',
+      'why is nginx slow tonight',
+      'troubleshoot the alerts',
+      'can you diagnose this hang',
+      'research the send policy',
+      'look it up',
+    ]) {
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'high', p);
+    }
+
+    for (const p of [
+      'Please implement a helper',
+      'Refactor this module',
+      'debug the crash',
+      'IMPLEMENT the feature',
+      'deep dive the mailbox',
+      'open a PR for the adapter',
+      'git commit this',
+      'write some code for the picker',
+      'patch the code in grok.js',
+    ]) {
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+    }
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
   }
-  // not word-boundary matches
-  assert.equal(effortOf(grok.buildArgs({ prompt: 'prefix the title', cwd: noGit })), 'high');
-  assert.equal(effortOf(grok.buildArgs({ prompt: 'the fixture is ready', cwd: noGit })), 'high');
-  assert.equal(effortOf(grok.buildArgs({ prompt: 'debugging notes only?', cwd: noGit })), 'high');
+});
+
+test('bare fix is not xhigh (Proposed Fix / quick fix)', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    for (const p of [
+      'Proposed Fix',
+      'quick fix',
+      'Can you fix the typo',
+      'please Fix it',
+      'prefix the title',
+      'the fixture is ready',
+    ]) {
+      assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'medium', p);
+    }
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('score effortPrompt (current user message), not catch-up glue', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    const catchUp = '[Channel activity since you last replied]\n- Eve: Proposed Fix for the crash\n[End of catch-up]\n\n';
+    assert.equal(grok.chooseEffort({
+      prompt: catchUp + 'ok thanks',
+      effortPrompt: 'ok thanks',
+      cwd: noGit,
+    }), 'medium');
+    assert.equal(grok.chooseEffort({
+      prompt: catchUp + 'implement the picker',
+      effortPrompt: 'implement the picker',
+      cwd: noGit,
+    }), 'xhigh');
+    assert.equal(grok.chooseEffort({
+      prompt: catchUp + 'look up the cigar in Corona',
+      effortPrompt: 'look up the cigar in Corona',
+      cwd: noGit,
+    }), 'high');
+    // glued catch-up must not raise a chat ping
+    assert.equal(grok.chooseEffort({
+      prompt: catchUp + 'ok thanks',
+      effortPrompt: 'ok thanks',
+      cwd: noGit,
+    }), 'medium');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
 });
 
 test('auto-xhigh when cwd is a git repo (temp dir with .git)', () => {
@@ -85,12 +166,17 @@ test('NOT xhigh for a simple question when cwd is not a git repo', () => {
 });
 
 test('HOME is never treated as a project git repo', () => {
-  delete process.env.ASMLTR_GROK_EFFORT;
-  assert.equal(grok.isProjectGitRepo(os.homedir()), false);
-  assert.equal(effortOf(grok.buildArgs({ prompt: 'hello', cwd: os.homedir() })), 'high');
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(grok.isProjectGitRepo(os.homedir()), false);
+    assert.equal(effortOf(grok.buildArgs({ prompt: 'hello', cwd: os.homedir() })), 'medium');
+    assert.equal(grok.chooseEffort({ prompt: 'ok thanks', cwd: os.homedir() }), 'medium');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
 });
 
-test('next-turn file: xhigh once then reset to high', () => {
+test('next-turn file: xhigh once then reset to baseline', () => {
   delete process.env.ASMLTR_GROK_EFFORT;
   fs.writeFileSync(nextFile, 'xhigh\n');
   assert.equal(grok.effortForTurn({ prompt: 'What is 2+2?', cwd: noGit }), 'xhigh');
@@ -98,7 +184,7 @@ test('next-turn file: xhigh once then reset to high', () => {
   assert.equal(grok.effortForTurn({ prompt: 'What is 2+2?', cwd: noGit }), 'high');
 });
 
-test('next-turn session flag: xhigh once then reset to high', () => {
+test('next-turn session flag: xhigh once then reset to baseline', () => {
   delete process.env.ASMLTR_GROK_EFFORT;
   const key = 'assistant-web:local:effort-test';
   sessions.ensure(key, 'assistant-web', 'idle:45', noGit);
@@ -111,8 +197,67 @@ test('next-turn session flag: xhigh once then reset to high', () => {
   sessions.remove(key);
 });
 
-test('complete() skips auto-xhigh', () => {
+test('one-shot next-effort still wins over keywords', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(grok.chooseEffort({ prompt: 'ok thanks', cwd: noGit, nextEffort: 'xhigh' }), 'xhigh');
+    assert.equal(grok.chooseEffort({ prompt: 'implement the picker', cwd: noGit, nextEffort: 'medium' }), 'medium');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('complete() skips auto-raise', () => {
   delete process.env.ASMLTR_GROK_EFFORT;
   const args = grok.buildArgs({ prompt: 'implement a title', complete: true, cwd: gitCwd });
   assert.equal(effortOf(args), 'high');
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(effortOf(grok.buildArgs({ prompt: 'deep dive the mailbox', complete: true, cwd: noGit })), 'medium');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('max-turns-for-effort: medium 20, high 40, xhigh 60 (cap 100)', () => {
+  assert.equal(grok.maxTurnsForEffort('medium'), 20);
+  assert.equal(grok.maxTurnsForEffort('high'), 40);
+  assert.equal(grok.maxTurnsForEffort('xhigh'), 60);
+  assert.equal(grok.maxTurnsForEffort('low'), 20);
+  assert.ok(grok.maxTurnsForEffort('xhigh') <= grok.MAX_TURNS_CAP);
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(maxTurnsOf(grok.buildArgs({ prompt: 'ok thanks', cwd: noGit })), 20);
+    assert.equal(maxTurnsOf(grok.buildArgs({ prompt: 'look up the cigar in Corona', cwd: noGit })), 40);
+    assert.equal(maxTurnsOf(grok.buildArgs({ prompt: 'implement the picker', cwd: noGit })), 60);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('timeout scales modestly with effort and caps at 30m', () => {
+  delete process.env.ASMLTR_GROK_TIMEOUT_MS;
+  assert.equal(grok.timeoutMsForEffort('medium'), grok.DEFAULT_TIMEOUT_MS);
+  assert.equal(grok.timeoutMsForEffort('high'), grok.DEFAULT_TIMEOUT_MS * 2);
+  assert.equal(grok.timeoutMsForEffort('xhigh'), grok.DEFAULT_TIMEOUT_MS * 3);
+  assert.ok(grok.timeoutMsForEffort('xhigh') <= grok.TIMEOUT_CAP_MS);
+  process.env.ASMLTR_GROK_TIMEOUT_MS = '600000';
+  try {
+    assert.equal(grok.timeoutMsForEffort('medium'), 600000);
+    assert.equal(grok.timeoutMsForEffort('high'), 1200000);
+    assert.equal(grok.timeoutMsForEffort('xhigh'), 1800000);
+    assert.ok(grok.timeoutMsForEffort('xhigh') <= 30 * 60 * 1000);
+  } finally {
+    delete process.env.ASMLTR_GROK_TIMEOUT_MS;
+  }
+});
+
+test('zip code / lastEffort inherit are not xhigh', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(grok.chooseEffort({ prompt: 'what is the zip code', cwd: noGit }), 'medium');
+    assert.equal(grok.chooseEffort({ prompt: 'ok thanks', cwd: noGit, lastEffort: 'xhigh' }), 'medium');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
 });

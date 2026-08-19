@@ -48,19 +48,77 @@ function maxTurns() {
   return DEFAULT_MAX_TURNS;
 }
 
-// Reasoning effort:
-//   Always pass `--effort <level>` (CLI alias of --reasoning-effort). Default high.
-//   ASMLTR_GROK_EFFORT=high|xhigh|medium|low is the baseline (xhigh is NOT the default).
-//   Auto-xhigh when the user prompt has implement|fix|refactor|debug (word-boundary,
-//   case-insensitive) OR the session working_dir is a git repo that is not $HOME.
-//   HOME is never treated as a project, even if it has a .git — asmltr ask sessions
-//   spawn in DEFAULT_CWD / HOME. Never use process.cwd() (the CLI often runs from
-//   the asmltr clone, which IS a git repo, and would xhigh every ask).
-//   Ivy one-shot escalate: write ~/.asmltr/next-effort (one line: high|xhigh|medium|low).
-//   Consumed once at the start of the next grok -p spawn, then drop back to high/auto.
-//   Cannot change mid-grok-p. sessions.next_effort is the same one-shot, per conversation_key.
+const TURNS_FOR_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
+const TIMEOUT_SCALE = { low: 1, medium: 1, high: 2, xhigh: 3 };
+
+/** medium 20 / high 40 / xhigh 60. Cap 100. Env MAX_TURNS is the complete() baseline, not a flatten. */
+function maxTurnsForEffort(effort) {
+  const e = normalizeEffort(effort) || 'medium';
+  return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
+}
+
+/** Scale the 10-minute baseline so 40/60-turn turns can finish. Cap 30 minutes. Not infinite. */
+function timeoutMsForEffort(effort) {
+  const e = normalizeEffort(effort) || 'medium';
+  const scale = TIMEOUT_SCALE[e] || 1;
+  return Math.min(Math.floor(timeoutMs() * scale), TIMEOUT_CAP_MS);
+}
+
+// Reasoning effort — three tiers (James / Adjutant, 19 Aug 2026):
+//   Always pass `--effort <level>` (CLI alias of --reasoning-effort).
+//   Baseline is ASMLTR_GROK_EFFORT (Ivy live: medium). envEffort() if unset still
+//   || 'high' so other installs keep the old default. xhigh is NOT the default.
+//   medium  normal conversation
+//   high    lookup/research, Corona (recipe/cigar/cooking), Rolodex/contacts,
+//           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
+//           Not a coding session.
+//   xhigh   git or code, or a deep dive (implement, refactor, write/patch code,
+//           commit, PR, "deep dive"). Project git cwd that is not $HOME.
+//   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
+//   repo and would xhigh every ask). Use the session/turn cwd if provided.
+//   Score opts.effortPrompt when set (current user message only) — NOT
+//   drainObserved/catch-up glued onto prompt in server.js.
+//   Tight: do not treat bare "fix" as xhigh (Eve "Proposed Fix", "quick fix").
+//   One-shot next-effort still wins. complete() skips auto-raise.
+//   Do not inherit last effort. Do not use XHIGH_CHANNELS.
+//   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
+//   next grok -p spawn. sessions.next_effort is the same one-shot per key.
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
-const CODE_RE = /\b(implement|fix|refactor|debug)\b/i;
+// xhigh: code / git / deep dive. No bare \bfix\b.
+const XHIGH_PARTS = [
+  'implement(?:ing|ation)?',
+  'refactor(?:ing)?',
+  'debug(?:ging)?',
+  'deep\\s*div(?:e|ing)',
+  'pull[\\s-]?requests?',
+  'prs?',
+  'git',
+  'coding',
+  'codebase',
+  'write(?:ing)?\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:code|patch|function|module|helper|adapter)',
+  'patch(?:ing)?\\s+(?:the\\s+|this\\s+|some\\s+|a\\s+)?(?:code|file|module|function|repo|branch)',
+  'commit',
+];
+const XHIGH_RE = new RegExp('\\b(?:' + XHIGH_PARTS.join('|') + ')\\b', 'i');
+const CODE_WORD_RE = /\bcode\b/i;
+const CODE_WORD_EXCLUDE_RE = /\b(?:zip|area|dress|door|promo(?:tional)?|country|postal|access|error|status|exit|http)\s+codes?\b|\bcode of conduct\b/i;
+// high: find / read / recall. Not a coding session.
+const HIGH_PARTS = [
+  'look(?:ing)?\\s+(?:it\\s+)?up',
+  'look(?:ing)?\\s+into',
+  'research(?:ing)?',
+  'corona',
+  'recipes?',
+  'cigars?',
+  'cooking',
+  'rolodex',
+  'contacts',
+  'troubleshoot(?:ing)?',
+  'diagnos(?:e|is|ing)',
+  'search(?:ing)?',
+];
+const HIGH_RE = new RegExp('\\b(?:' + HIGH_PARTS.join('|') + ')\\b', 'i');
+const WHY_SLOW_RE = /\bwhy\s+is\b[\s\S]{0,60}?\bslow\b/i;
 const LAST_EFFORT_FILE = '/tmp/asmltr-last-effort';
 
 function nextEffortFile() {
@@ -72,8 +130,41 @@ function normalizeEffort(v) {
   return VALID_EFFORTS.includes(s) ? s : null;
 }
 
+/** Current user message only when opts.effortPrompt is set (skip catch-up glue). */
+function scoringPrompt(opts) {
+  opts = opts || {};
+  if (opts.effortPrompt != null) return String(opts.effortPrompt);
+  return String(opts.prompt || '');
+}
+
+function matchToken(re, text) {
+  const m = String(text || '').match(re);
+  if (!m) return '';
+  return String(m[0]).toLowerCase().replace(/\s+/g, ' ').slice(0, 32);
+}
+
+function xhighReason(prompt) {
+  const s = String(prompt || '');
+  const m = matchToken(XHIGH_RE, s);
+  if (m) return m;
+  if (CODE_WORD_RE.test(s) && !CODE_WORD_EXCLUDE_RE.test(s)) return 'code';
+  return '';
+}
+
+function highReason(prompt) {
+  const s = String(prompt || '');
+  const m = matchToken(HIGH_RE, s);
+  if (m) return m;
+  if (WHY_SLOW_RE.test(s)) return 'why-slow';
+  return '';
+}
+
 function looksLikeCode(prompt) {
-  return CODE_RE.test(String(prompt || ''));
+  return !!xhighReason(prompt);
+}
+
+function looksLikeLookup(prompt) {
+  return !!highReason(prompt);
 }
 
 function isProjectGitRepo(cwd) {
@@ -113,16 +204,28 @@ function takeNextEffort(conversationKey) {
 }
 
 /**
- * Choose effort for this argv. Does NOT consume the next-effort file.
- * Priority: nextEffort / opts.effort → auto-xhigh (code prompt or project git cwd) → env → high.
- * complete() skips auto-xhigh (cheap title/status calls).
+ * Classify effort for this argv. Does NOT consume the next-effort file.
+ * Priority: nextEffort / opts.effort → auto xhigh/high (current message or project git cwd) → env.
+ * complete() skips auto-raise (cheap title/status calls).
  */
-function chooseEffort(opts) {
+function classifyEffort(opts) {
   opts = opts || {};
-  const oneshot = normalizeEffort(opts.nextEffort) || normalizeEffort(opts.effort);
-  if (oneshot) return oneshot;
-  if (!opts.complete && (looksLikeCode(opts.prompt) || isProjectGitRepo(opts.cwd))) return 'xhigh';
-  return envEffort();
+  const oneshotNext = normalizeEffort(opts.nextEffort);
+  if (oneshotNext) return { effort: oneshotNext, reason: 'oneshot' };
+  const oneshotExplicit = normalizeEffort(opts.effort);
+  if (oneshotExplicit) return { effort: oneshotExplicit, reason: 'explicit' };
+  if (opts.complete) return { effort: envEffort(), reason: 'complete' };
+  const scored = scoringPrompt(opts);
+  const codeTok = xhighReason(scored);
+  const git = isProjectGitRepo(opts.cwd);
+  if (codeTok || git) return { effort: 'xhigh', reason: codeTok ? 'code:' + codeTok : 'git-cwd' };
+  const lookTok = highReason(scored);
+  if (lookTok) return { effort: 'high', reason: 'lookup:' + lookTok };
+  return { effort: envEffort(), reason: 'baseline' };
+}
+
+function chooseEffort(opts) {
+  return classifyEffort(opts).effort;
 }
 
 /** Spawn-time: consume one-shot then choose. */
@@ -135,12 +238,14 @@ function effortForTurn(opts) {
 function recordLastEffort(effort, meta) {
   try {
     const m = meta || {};
+    const scored = scoringPrompt(m);
     const line = [
       String(effort),
       'cwd=' + (m.cwd || ''),
       'next=' + (m.nextEffort || ''),
-      'code=' + (looksLikeCode(m.prompt) ? '1' : '0'),
+      'code=' + (looksLikeCode(scored) ? '1' : '0'),
       'git=' + (isProjectGitRepo(m.cwd) ? '1' : '0'),
+      'reason=' + String(m.reason || ''),
     ].join(' ');
     fs.writeFileSync(LAST_EFFORT_FILE, line + '\n');
   } catch (_) {}
@@ -178,8 +283,10 @@ function buildArgs(opts) {
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
-  args.push('--max-turns', String(maxTurns()));
-  args.push('--effort', chooseEffort(opts));
+  const classified = classifyEffort(opts);
+  const turns = opts.complete ? maxTurns() : maxTurnsForEffort(classified.effort);
+  args.push('--max-turns', String(turns));
+  args.push('--effort', classified.effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
   if (mdl) args.push('-m', mdl);
@@ -337,20 +444,22 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
   const nextEffort = takeNextEffort(conversationKey);
-  const effort = chooseEffort({ prompt, cwd, nextEffort });
-  recordLastEffort(effort, { cwd, nextEffort, prompt });
-  try { process.stderr.write('[grok] --effort ' + effort + '\n'); } catch (_) {}
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort });
+  const effortOpts = { prompt, cwd, nextEffort, effortPrompt };
+  const classified = classifyEffort(effortOpts);
+  const effort = classified.effort;
+  recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
+  try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + ')\n'); } catch (_) {}
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
   if (abortController) abortController.signal.addEventListener('abort', kill);
-  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMs());
+  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMsForEffort(effort));
   if (watchdog.unref) watchdog.unref();
 
   const state = newState(sessionId);
@@ -412,7 +521,9 @@ module.exports = {
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
   extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
+  timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS,
-  normalizeEffort, looksLikeCode, isProjectGitRepo, chooseEffort, effortForTurn,
+  normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
+  classifyEffort, chooseEffort, effortForTurn,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };
