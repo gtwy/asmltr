@@ -71,3 +71,4 @@ fi
 echo "== talk to ivy =="
 echo "  $NODE24 $REPO/cli/asmltr.js ask \"Reply with exactly the word pong and nothing else.\""
 echo "DONE. Do not start connector-manager. Do not git push. Do not install pm2."
+echo "James-only Corona/Rolodex/OneNote layout: bash $REPO/extras/ivy-local/register.sh"
