@@ -544,6 +544,9 @@ async function handle(envelope, opts = {}) {
       prompt: catchUp + userText,
       effortPrompt: userText,
       channel: e.channel,
+      senderId: e.sender && e.sender.raw_id,
+      owner: !!(resolved.bypass_moderation || resolved.user_key === 'owner'),
+      user_key: resolved.user_key,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
       resume,
@@ -1962,6 +1965,7 @@ app.post('/v2/inject', (req, res) => {
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
     const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
+        senderId: by || 'operator', owner: true,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {

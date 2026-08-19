@@ -106,6 +106,13 @@ function timeoutMsForEffort(effort, opts) {
 //   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
 //   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
+//   Whole-word +xh / +h (whitespace-split, start/end/standalone) override to
+//   xhigh / high for this turn only when the sender is owner/bypass or their
+//   raw Discord id is in ASMLTR_GROK_EFFORT_ELEVATE_IDS. Honored token is
+//   stripped from effortPrompt and the grok user prompt. Unknown senders keep
+//   the token and stay on the picker. After one-shot / explicit; wins over
+//   three-tier and email. Do not persist nextEffort from the token. No
+//   owner snowflake in git.
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 // xhigh: code / git / deep dive. No bare \bfix\b.
 const XHIGH_PARTS = [
@@ -159,6 +166,39 @@ function scoringPrompt(opts) {
   opts = opts || {};
   if (opts.effortPrompt != null) return String(opts.effortPrompt);
   return String(opts.prompt || '');
+}
+
+function elevateIdSet() {
+  const raw = process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS || '';
+  return new Set(raw.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean));
+}
+
+/** Owner / bypass identity, or raw sender id in ASMLTR_GROK_EFFORT_ELEVATE_IDS. */
+function canElevateEffort(opts) {
+  opts = opts || {};
+  if (opts.owner === true || opts.bypass === true || opts.bypass_moderation === true) return true;
+  if (String(opts.user_key || '') === 'owner') return true;
+  const sid = String(opts.senderId != null ? opts.senderId : (opts.sender || '')).trim();
+  if (sid === 'owner') return true;
+  if (!sid) return false;
+  return elevateIdSet().has(sid);
+}
+
+/** Whole-word +xh / +h only. +xh wins if both present. */
+function detectElevateToken(text) {
+  const toks = String(text || '').split(/\s+/).filter(Boolean);
+  if (toks.some((t) => t.toLowerCase() === '+xh')) return '+xh';
+  if (toks.some((t) => t.toLowerCase() === '+h')) return '+h';
+  return null;
+}
+
+function stripElevateToken(text, token) {
+  if (!token || text == null) return text;
+  const escaped = String(token).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(text)
+    .replace(new RegExp('(^|\\s)' + escaped + '(?=\\s|$)', 'gi'), '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/^\s+|\s+$/g, '');
 }
 
 function matchToken(re, text) {
@@ -239,6 +279,10 @@ function classifyEffort(opts) {
   const oneshotExplicit = normalizeEffort(opts.effort);
   if (oneshotExplicit) return { effort: oneshotExplicit, reason: 'explicit' };
   if (opts.complete) return { effort: envEffort(), reason: 'complete' };
+  const token = detectElevateToken(scoringPrompt(opts));
+  if (token && canElevateEffort(opts)) {
+    return { effort: token === '+xh' ? 'xhigh' : 'high', reason: 'token:' + token, stripToken: token };
+  }
   // After one-shot: inbound email is always xhigh. Discord/others keep the three-tier score.
   if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
   const scored = scoringPrompt(opts);
@@ -305,11 +349,14 @@ function launchEnv(base) {
  * @param {{ prompt: string, systemPrompt?: string, resume?: string|null, cwd?: string, model?: string, complete?: boolean, sessionId?: string }} opts
  */
 function buildArgs(opts) {
-  const prompt = composePrompt(opts.systemPrompt, opts.prompt);
+  const classified = classifyEffort(opts);
+  const userPrompt = classified.stripToken
+    ? stripElevateToken(opts.prompt, classified.stripToken)
+    : opts.prompt;
+  const prompt = composePrompt(opts.systemPrompt, userPrompt);
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
-  const classified = classifyEffort(opts);
   const turns = opts.complete ? maxTurns() : maxTurnsForEffort(classified.effort, opts);
   args.push('--max-turns', String(turns));
   args.push('--effort', classified.effort);
@@ -470,17 +517,17 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
   const nextEffort = takeNextEffort(conversationKey);
-  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel };
+  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key };
   const classified = classifyEffort(effortOpts);
   const effort = classified.effort;
   recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
   try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + ')\n'); } catch (_) {}
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel });
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
@@ -551,5 +598,6 @@ module.exports = {
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
+  canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };

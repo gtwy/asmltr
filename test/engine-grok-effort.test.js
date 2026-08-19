@@ -12,6 +12,7 @@ process.env.ASMLTR_CORE_DB = path.join(tmp, 'sess.db');
 delete process.env.ASMLTR_GROK_EFFORT;
 delete process.env.ASMLTR_GROK_MAX_TURNS;
 delete process.env.ASMLTR_GROK_TIMEOUT_MS;
+delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
 
 const grok = require('../core/src/engines/grok');
 const sessions = require('../core/src/sessions');
@@ -28,6 +29,7 @@ after(() => {
   delete process.env.ASMLTR_GROK_NEXT_EFFORT_FILE;
   delete process.env.ASMLTR_GROK_MAX_TURNS;
   delete process.env.ASMLTR_GROK_TIMEOUT_MS;
+  delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
 });
 
 function effortOf(args) {
@@ -346,6 +348,122 @@ test('one-shot next-effort still wins over email xhigh', () => {
       channel: 'email',
       nextEffort: 'medium',
     })), 20);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+function promptOf(args) {
+  const i = args.indexOf('-p');
+  assert.ok(i >= 0, 'buildArgs must include -p');
+  return args[i + 1];
+}
+
+test('owner +xh → xhigh and token stripped', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
+  try {
+    for (const prompt of ['hello +xh', '+xh hello', 'please +xh look this up']) {
+      const opts = { prompt, cwd: noGit, owner: true };
+      assert.equal(grok.chooseEffort(opts), 'xhigh', prompt);
+      assert.equal(grok.classifyEffort(opts).reason, 'token:+xh', prompt);
+      const args = grok.buildArgs(opts);
+      assert.equal(effortOf(args), 'xhigh', prompt);
+      const p = promptOf(args);
+      assert.equal(p.includes('+xh'), false, 'stripped: ' + prompt);
+      assert.ok(p.includes('hello') || p.includes('please') || p.includes('look'), p);
+    }
+    const bypass = grok.buildArgs({ prompt: 'ping +xh', cwd: noGit, bypass_moderation: true });
+    assert.equal(effortOf(bypass), 'xhigh');
+    assert.equal(promptOf(bypass).includes('+xh'), false);
+    const byKey = grok.buildArgs({ prompt: 'ping +xh', cwd: noGit, user_key: 'owner' });
+    assert.equal(effortOf(byKey), 'xhigh');
+    assert.equal(promptOf(byKey).includes('+xh'), false);
+    // wins over three-tier picker (lookup would be high)
+    assert.equal(grok.chooseEffort({ prompt: 'look up Corona +xh', cwd: noGit, owner: true }), 'xhigh');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('unknown user +xh stays picker and token remains', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
+  try {
+    const opts = { prompt: 'hello +xh', cwd: noGit, senderId: '999000111222333444' };
+    assert.equal(grok.chooseEffort(opts), 'medium');
+    assert.equal(grok.classifyEffort(opts).reason, 'baseline');
+    const args = grok.buildArgs(opts);
+    assert.equal(effortOf(args), 'medium');
+    assert.ok(promptOf(args).includes('+xh'), 'token remains for unknown');
+    // picker still applies
+    const impl = { prompt: 'implement the picker +xh', cwd: noGit, senderId: '999000111222333444' };
+    assert.equal(grok.chooseEffort(impl), 'xhigh');
+    assert.ok(promptOf(grok.buildArgs(impl)).includes('+xh'));
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('owner +h → high and token stripped', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
+  try {
+    const opts = { prompt: 'hello +h', cwd: noGit, owner: true };
+    assert.equal(grok.chooseEffort(opts), 'high');
+    assert.equal(grok.classifyEffort(opts).reason, 'token:+h');
+    const args = grok.buildArgs(opts);
+    assert.equal(effortOf(args), 'high');
+    assert.equal(promptOf(args).includes('+h'), false);
+    assert.ok(promptOf(args).includes('hello'));
+    // wins over xhigh picker
+    assert.equal(grok.chooseEffort({ prompt: 'implement the picker +h', cwd: noGit, owner: true }), 'high');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('+xh inside a word is ignored', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
+  try {
+    for (const prompt of ['foo+xh bar', 'pre+xh', 'xx+xh', 'please +xhigh now']) {
+      const opts = { prompt, cwd: noGit, owner: true };
+      assert.equal(grok.chooseEffort(opts), 'medium', prompt);
+      const args = grok.buildArgs(opts);
+      assert.equal(effortOf(args), 'medium', prompt);
+      assert.equal(promptOf(args), prompt);
+    }
+    assert.equal(grok.detectElevateToken('foo+xh bar'), null);
+    assert.equal(grok.detectElevateToken('hello +xh'), '+xh');
+    assert.equal(grok.detectElevateToken('hello +h'), '+h');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('allowlisted senderId may +xh; off-list may not', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS = '111,222,333';
+  try {
+    const yes = { prompt: 'hello +xh', cwd: noGit, senderId: '222' };
+    assert.equal(grok.chooseEffort(yes), 'xhigh');
+    assert.equal(promptOf(grok.buildArgs(yes)).includes('+xh'), false);
+    const no = { prompt: 'hello +xh', cwd: noGit, senderId: '444' };
+    assert.equal(grok.chooseEffort(no), 'medium');
+    assert.ok(promptOf(grok.buildArgs(no)).includes('+xh'));
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+    delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
+  }
+});
+
+test('+xh / +h override is one turn and does not persist nextEffort', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(grok.effortForTurn({ prompt: 'hello +xh', cwd: noGit, owner: true }), 'xhigh');
+    assert.equal(fs.existsSync(nextFile), false);
+    assert.equal(grok.effortForTurn({ prompt: 'hello', cwd: noGit, owner: true }), 'medium');
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
