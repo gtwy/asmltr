@@ -34,7 +34,7 @@ const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — finite, never infinite
 const DEFAULT_MAX_TURNS = 20;
-const TIMEOUT_CAP_MS = 30 * 60 * 1000;
+const TIMEOUT_CAP_MS = 60 * 60 * 1000;
 const MAX_TURNS_CAP = 100;
 
 function timeoutMs() {
@@ -49,7 +49,7 @@ function maxTurns() {
 }
 
 const TURNS_FOR_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
-const TIMEOUT_SCALE = { low: 1, medium: 1, high: 2, xhigh: 3 };
+const TIMEOUT_SCALE = { low: 1, medium: 1, high: 1, xhigh: 1.5 };
 
 /** medium 20 / high 40 / xhigh 60. Cap 100. Env MAX_TURNS is the complete() baseline, not a flatten. */
 function maxTurnsForEffort(effort, opts) {
@@ -59,15 +59,15 @@ function maxTurnsForEffort(effort, opts) {
   return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
 }
 
-const EMAIL_TIMEOUT_MS = 25 * 60 * 1000; // email xhigh — not the generic xhigh 30m
+const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // email xhigh — not the generic xhigh 15m
 
 function isEmailChannel(channel) {
   return String(channel || '').trim().toLowerCase() === 'email';
 }
 
-/** Scale the 10-minute baseline so 40/60-turn turns can finish. Cap 30 minutes. Not infinite.
- *  Email xhigh is 25 minutes (channel `email`). Generic xhigh stays 30. Second arg is
- *  opts `{ channel }` or a channel string. */
+/** Scale the 10-minute baseline. Cap 60 minutes. Not infinite.
+ *  Discord/generic: medium 10, high 10, xhigh 15 (scale 1 / 1 / 1.5).
+ *  Email xhigh is 60 minutes. Second arg is opts `{ channel }` or a channel string. */
 function timeoutMsForEffort(effort, opts) {
   const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
   const e = normalizeEffort(effort) || 'medium';
@@ -94,7 +94,7 @@ function timeoutMsForEffort(effort, opts) {
 //   One-shot next-effort still wins. complete() skips auto-raise.
 //   Email channel (`email`) forces xhigh AFTER one-shot (a chatty mail body
 //   with no code words is still xhigh). Discord and others stay three-tier.
-//   Email xhigh timeout is 25 minutes; generic xhigh stays 30 (cap 30).
+//   Email xhigh timeout is 60 minutes; Discord/generic: 10 / 10 / 15 (cap 60).
 //   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
 //   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
