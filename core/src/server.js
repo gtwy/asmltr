@@ -1080,7 +1080,7 @@ app.get('/v2/backups/schedule', (req, res) => res.json(backup.getSchedule()));
 app.put('/v2/backups/schedule', (req, res) => {
   const b = req.body || {};
   const clean = {};
-  for (const k of ['enabled', 'every_hours', 'destination', 'max_count', 'max_age_days']) if (k in b) clean[k] = b[k];
+  for (const k of ['enabled', 'every_hours', 'destination', 'max_count', 'max_age_days', 'hour', 'minute', 'timezone']) if (k in b) clean[k] = b[k];
   try { res.json(backup.setSchedule(clean)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // In-process scheduler — fires runScheduled() when the interval elapses (needs a configured passphrase).
