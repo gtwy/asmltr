@@ -13,6 +13,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
+- **Moderation no longer spends 2–3.5s reasoning on every inbound.** Default classifier `gpt-5-nano` is a reasoning model; the OpenAI call now sets `reasoning_effort: 'minimal'` on gpt-5-family models only (override `ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Decision logs include `duration_ms`. A model that rejects the field is retried without it.
 - **Live chat attach no longer 413s on a ~1.5MB photo.** Dashboard nginx defaulted to 1m; Live sent JSON base64 (~2MB on the wire). Nginx is now 32m; Live POSTs raw bytes like recordings; core caps original files at 25MB.
 
 ## [0.13.1] - 2026-08-18
