@@ -16,6 +16,7 @@ Engine-agnostic. Worth taking even if you never run Grok.
 - Live list: past-idle no-pid web cards leave Live. `GET /api/sessions?active=1` excludes rows past `last_activity` + idle and flips those rows to `ended` on read. History stays. Do not show an Idle badge. Same session key can come back Active on a later message.
 - Engines help: put CLI login commands on their own line so they do not wrap mid-flag.
 - Dashboard nginx: `client_max_body_size 32m` (default 1m 413s Live attach). Live composer POSTs raw bytes to `/v2/upload` (same as recordings); core caps original files at 25MB. Host 80g is not enough if the container nginx is still 1m.
+- Email: the IMAP watcher tracks a UID cursor and never set `\Seen`, so Gmail still looked unread after Ivy handled mail. After a message is actually handled (watch path), set `\Seen`. `asmltr mail read` marks seen by default (`--keep-unread` to peek). Skip self / noreply / bounce so security-alert mail can stay unread.
 
 ## Take if you want Grok as an engine — not Ivy-only
 
@@ -44,3 +45,4 @@ Do not merge these.
 - live `.env`, tokens, `ASMLTR_AUTH_SECRET`, insights token, `vault.pass`
 - `docker-compose.local.yml`
 - Authelia leftover notes (Authelia was removed)
+- Email local policy (not the `\Seen` fix): `owner_forward_to` for unknown senders; known people on the trust store auto-send (`always_send` on that path). Do not take this as the upstream default — upstream stays `approval_policy`.
