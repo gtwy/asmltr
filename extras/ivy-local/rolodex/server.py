@@ -580,6 +580,33 @@ def rolodex_add_phone(
     return _lookup_payload(body)
 
 
+@mcp.tool()
+def rolodex_add_email(
+    email: str,
+    name: str | None = None,
+    resourceName: str | None = None,
+    emailType: str | None = None,
+) -> str:
+    """Add an email to an existing Google contact. Writes through to Google, then the cache."""
+    mail = (email or "").strip()
+    if not mail:
+        return "Error: provide email"
+    payload = {
+        "email": mail,
+        "emailType": (emailType or "").strip(),
+        "name": (name or "").strip(),
+        "resourceName": (resourceName or "").strip(),
+    }
+    if not payload["name"] and not payload["resourceName"]:
+        return "Error: provide name or resourceName"
+    _snapshot_today()
+    body, status = _api_post("/add-email", payload)
+    if status != 200:
+        return _dumps({"ok": False, "status": status, **body})
+    _upsert_cache(body)
+    return _lookup_payload(body)
+
+
 def _drop_cache(resource: str) -> None:
     contacts = _load_contacts()
     if isinstance(contacts, str) or not resource:
