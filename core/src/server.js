@@ -526,6 +526,7 @@ async function handle(envelope, opts = {}) {
       effortPrompt: userText,
       channel: e.channel,
       senderId: e.sender && e.sender.raw_id,
+      sender: e.sender || null,
       owner: !!(resolved.bypass_moderation || resolved.user_key === 'owner'),
       user_key: resolved.user_key,
       systemPrompt: effectiveSystemPrompt,

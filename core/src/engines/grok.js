@@ -34,7 +34,7 @@ const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — finite, never infinite
 const DEFAULT_MAX_TURNS = 20;
-const TIMEOUT_CAP_MS = 60 * 60 * 1000;
+const TIMEOUT_CAP_MS = 4 * 60 * 60 * 1000;
 const MAX_TURNS_CAP = 100;
 
 function timeoutMs() {
@@ -59,7 +59,9 @@ function maxTurnsForEffort(effort, opts) {
   return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
 }
 
-const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // email xhigh
+const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // inbound email xhigh (everyone except owner-from)
+const OWNER_FROM_EMAIL = 'james@techdirect.io';
+const OWNER_EMAIL_TIMEOUT_MS = 4 * 60 * 60 * 1000; // From james@techdirect.io only
 
 // Discord / assistant-web / assistant-native / mcp (and generic non-email). Absolute, not scale-from-env.
 const INTERACTIVE_TIMEOUT_MS = {
@@ -73,13 +75,54 @@ function isEmailChannel(channel) {
   return String(channel || '').trim().toLowerCase() === 'email';
 }
 
-/** Watchdog by channel. Cap 60 minutes. Not infinite.
+/** Bare addr from `Name <addr@host>` or `addr@host`. Display-name-only → empty. */
+function parseEmailAddress(value) {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  const angled = s.match(/<\s*([^<>@\s]+@[^<>@\s]+)\s*>/);
+  if (angled) return angled[1].toLowerCase();
+  const bare = s.match(/^([^<>@\s]+@[^<>@\s]+)$/);
+  if (bare) return bare[1].toLowerCase();
+  return '';
+}
+
+/** From/sender email on the turn. Email connector puts the bare From in sender.raw_id. */
+function extractSenderEmail(opts) {
+  if (opts == null) return '';
+  if (typeof opts === 'string') return parseEmailAddress(opts);
+  const bags = [];
+  const sender = opts.sender;
+  if (sender && typeof sender === 'object') bags.push(sender);
+  else if (typeof sender === 'string') bags.push({ raw_id: sender });
+  bags.push(opts);
+  const keys = ['email', 'from', 'address', 'raw_id', 'raw_username', 'senderEmail'];
+  for (const bag of bags) {
+    for (const k of keys) {
+      if (bag[k] == null) continue;
+      const addr = parseEmailAddress(bag[k]);
+      if (addr) return addr;
+    }
+  }
+  return '';
+}
+
+function isOwnerFromEmail(opts) {
+  return extractSenderEmail(opts) === OWNER_FROM_EMAIL;
+}
+
+/** Watchdog by channel. Cap 4 hours so owner-from email can use it. Not infinite.
  *  Interactive (discord, assistant-web, assistant-native, mcp, generic): 5 / 10 / 15.
- *  Email xhigh is 60 minutes / 100 turns. Second arg is opts `{ channel }` or a string. */
+ *  Email xhigh is 60 minutes / 100 turns, except From james@techdirect.io → 4 hours
+ *  (case-insensitive; display-name wrapping ignored; that exact address only).
+ *  Second arg is opts `{ channel, sender }` or a channel string. */
 function timeoutMsForEffort(effort, opts) {
+  const o = (opts && typeof opts === 'object') ? opts : { channel: opts };
   const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
   const e = normalizeEffort(effort) || 'medium';
-  if (isEmailChannel(channel) && e === 'xhigh') return Math.min(EMAIL_TIMEOUT_MS, TIMEOUT_CAP_MS);
+  if (isEmailChannel(channel) && e === 'xhigh') {
+    const ms = isOwnerFromEmail(o) ? OWNER_EMAIL_TIMEOUT_MS : EMAIL_TIMEOUT_MS;
+    return Math.min(ms, TIMEOUT_CAP_MS);
+  }
   const ms = INTERACTIVE_TIMEOUT_MS[e] || INTERACTIVE_TIMEOUT_MS.medium;
   return Math.min(ms, TIMEOUT_CAP_MS);
 }
@@ -102,7 +145,11 @@ function timeoutMsForEffort(effort, opts) {
 //   One-shot next-effort still wins. complete() skips auto-raise.
 //   Email channel (`email`) forces xhigh AFTER one-shot (a chatty mail body
 //   with no code words is still xhigh). Discord and others stay three-tier.
-//   Email xhigh timeout is 60 minutes; interactive 5 / 10 / 15 (cap 60).
+//   Email xhigh timeout is 60 minutes, or 4 hours only when From is
+//   james@techdirect.io (case-insensitive, display-name wrapping ignored;
+//   that exact address — not the domain, not other james@). Interactive
+//   5 / 10 / 15 (cap 4h so the owner-from path can use it; interactive
+//   stays absolute 5/10/15).
 //   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
 //   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
@@ -178,7 +225,10 @@ function canElevateEffort(opts) {
   opts = opts || {};
   if (opts.owner === true || opts.bypass === true || opts.bypass_moderation === true) return true;
   if (String(opts.user_key || '') === 'owner') return true;
-  const sid = String(opts.senderId != null ? opts.senderId : (opts.sender || '')).trim();
+  let sid = opts.senderId;
+  if (sid == null && opts.sender && typeof opts.sender === 'object') sid = opts.sender.raw_id;
+  else if (sid == null) sid = opts.sender;
+  sid = String(sid || '').trim();
   if (sid === 'owner') return true;
   if (!sid) return false;
   return elevateIdSet().has(sid);
@@ -517,22 +567,22 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
   const nextEffort = takeNextEffort(conversationKey);
-  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key };
+  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender };
   const classified = classifyEffort(effortOpts);
   const effort = classified.effort;
   recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
   try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + ')\n'); } catch (_) {}
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key });
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
   if (abortController) abortController.signal.addEventListener('abort', kill);
-  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMsForEffort(effort, { channel }));
+  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMsForEffort(effort, { channel, sender }));
   if (watchdog.unref) watchdog.unref();
 
   const state = newState(sessionId);
@@ -596,6 +646,7 @@ module.exports = {
   extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
   timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel,
+  OWNER_FROM_EMAIL, OWNER_EMAIL_TIMEOUT_MS, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
   canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet,
