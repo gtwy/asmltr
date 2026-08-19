@@ -62,6 +62,7 @@ const meta = {
       approval_policy: { type: 'string', title: 'Send policy', default: 'always_draft', enum: ['always_draft', 'auto_send_full_trust', 'always_send', 'trust_tier:1', 'trust_tier:2', 'trust_tier:3'] },
       signature: { type: 'string', title: 'Signature (blank = auto from from_name)', default: '' },
       process_backlog: { type: 'boolean', title: 'On first connect, process existing unread mail (off = only react to NEW arrivals)', default: false },
+      owner_forward_to: { type: 'string', title: 'Forward unknown senders here (blank = do not forward)', default: '' },
     },
   },
 };
@@ -78,7 +79,19 @@ async function start(ctx) {
   const MAILBOX = cfg.mailbox || 'INBOX';
   const fromName = cfg.from_name || NAME;
   const policy = cfg.approval_policy || 'always_draft';
+  const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
   const signature = cfg.signature || `\n\n—\n${fromName}`;
+  const coreBase = String(process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle\/?$/i, '');
+
+  async function resolveSender(addr, name) {
+    try {
+      const r = await fetch(coreBase + '/trust/resolve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'email', sender: { raw_id: addr, raw_username: name } }),
+      });
+      return await r.json();
+    } catch (e) { ctx.log('trust resolve failed: ' + e.message); return { is_default: true }; }
+  }
 
   const address = cfg.email_address || (await ctx.secrets.get(cfg.user_bws_key));
   const password = await ctx.secrets.get(cfg.pass_bws_key);
@@ -110,12 +123,13 @@ async function start(ctx) {
   }
 
   async function processMessage(parsed) {
-    const fromAddr = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '';
+    const fromRaw = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '';
+    const fromAddr = String(fromRaw).trim().toLowerCase();
     const fromName2 = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].name) || fromAddr;
-    if (!fromAddr) return;
+    if (!fromAddr) return { handled: false };
     // Loop / automation guards — never answer ourselves or noreply/daemon senders.
-    if (fromAddr.toLowerCase() === selfAddr) return;
-    if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(fromAddr)) { ctx.log(`skip automated sender ${fromAddr}`); return; }
+    if (fromAddr === selfAddr) return { handled: false };
+    if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(fromAddr)) { ctx.log(`skip automated sender ${fromAddr}`); return { handled: false }; }
 
     const subject = parsed.subject || '(no subject)';
     const body = (parsed.text || parsed.html || '').toString().trim();
@@ -148,6 +162,21 @@ async function start(ctx) {
 
     ctx.emit({ event_type: 'inbound', session_id: convKey, identity: fromAddr, payload: { text: `${subject} — ${body.slice(0, 160)}` } });
 
+    const resolved = await resolveSender(fromAddr, fromName2);
+    const known = !!(resolved && !resolved.is_default && !resolved.revoked);
+    // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
+    if (!known) {
+      if (ownerForward && ownerForward !== fromAddr) {
+        const fwd = `Ivy forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
+        await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd });
+        ctx.log(`forwarded unknown ${fromAddr} → ${ownerForward}`);
+      } else {
+        ctx.log(`unknown sender ${fromAddr} — no owner_forward_to, skipped`);
+      }
+      return { handled: true };
+    }
+
+    const sendPolicy = 'always_send';
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,
@@ -158,7 +187,7 @@ async function start(ctx) {
       capabilities: meta.capabilities,
       public: false, // 1:1 mail; redaction still applies unless the sender is full-trust
       channel_context: { from: fromAddr, subject },
-      approval: { policy, recipient: fromAddr, subject: replySubject }, // → draft gate in the core
+      approval: { policy: sendPolicy, recipient: fromAddr, subject: replySubject },
       system_prompt_extra:
         `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
         `Sign off as ${fromName} — NEVER sign as the operator/owner or impersonate a human. A signature is appended automatically. ` +
@@ -170,12 +199,13 @@ async function start(ctx) {
         // Shadow mode (always_draft) = ZERO outbound. Legit replies already come back as {drafted};
         // a stray {reply} here is a core early-return (e.g. access-revoked / moderation notice), which
         // we must NOT email out in shadow. Under a sending policy, deliver it.
-        if (policy === 'always_draft') { ctx.log(`shadow: suppressed inline reply to ${fromAddr}`); continue; }
+        if (sendPolicy === 'always_draft') { ctx.log(`shadow: suppressed inline reply to ${fromAddr}`); continue; }
         const tc = threads.get(convKey) || {};
         await sendMail({ to: fromAddr, subject: replySubject, text: a.text, inReplyTo: messageId, references: tc.references });
         ctx.log(`replied to ${fromAddr} (${replySubject})`);
       } // 'drafted' → held for approval (dashboard); 'status'/others → nothing to mail
     }
+    return { handled: true };
   }
 
   // --- IMAP watch (IDLE) -----------------------------------------------------
@@ -190,8 +220,15 @@ async function start(ctx) {
     try {
       for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
         if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
-        try { await processMessage(await simpleParser(msg.source)); }
-        catch (e) { ctx.log(`process failed uid ${msg.uid}: ${e.message}`); }
+        try {
+          const result = await processMessage(await simpleParser(msg.source));
+          // Gmail/IMAP unread is \Seen, not our UID cursor. Mark mail we actually handled
+          // so the inbox matches what Ivy has already seen. Skip noreply/self.
+          if (result && result.handled) {
+            try { await imap.messageFlagsAdd({ uid: msg.uid }, ['\\Seen'], { uid: true }); }
+            catch (e) { ctx.log(`mark seen uid ${msg.uid}: ${e.message}`); }
+          }
+        } catch (e) { ctx.log(`process failed uid ${msg.uid}: ${e.message}`); }
         lastUid = Math.max(lastUid, msg.uid);
       }
     } finally { lock.release(); busy = false; }
@@ -286,7 +323,7 @@ async function start(ctx) {
           attachments.push({ name: rec.filename, path: rec.path, mime: rec.mime, size: rec.size });
         } catch (_) {}
       }
-      if (markSeen) { try { await c.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }); } catch (_) {} }
+      if (markSeen !== false) { try { await c.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }); } catch (_) {} }
       return {
         uid, from: parsed.from && parsed.from.text, to: parsed.to && parsed.to.text,
         subject: parsed.subject || '(no subject)', date: parsed.date || null, messageId: parsed.messageId || null,
