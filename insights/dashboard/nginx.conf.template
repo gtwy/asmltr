@@ -17,9 +17,9 @@ server {
     index index.html;
 
     # Live attach + recordings go through this server. Default is 1m and 413s a
-    # phone photo (~1.5MB original -> ~2MB JSON). 16m covers a 10MB original on
-    # the raw path and the older base64-JSON path (~13.3MB + wrapper).
-    client_max_body_size 16m;
+    # phone photo (~1.5MB original -> ~2MB JSON). 32m covers a 25MB original on
+    # the raw path and the older base64-JSON path (~33MB + wrapper needs the host).
+    client_max_body_size 32m;
 
     # Forward-auth subrequest target (internal — only reachable from auth_request).
     location = /_asmltr_authz {

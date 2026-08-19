@@ -308,11 +308,11 @@ export const webChat = {
     return ac
   },
 
-  // Attach a file: POST raw bytes (same as recordingsApi.upload) so a 10MB original
+  // Attach a file: POST raw bytes (same as recordingsApi.upload) so a 25MB original
   // fits. Core stores it in the shared upload area and returns the on-disk path.
   async upload(file, conversation_key) {
-    const max = 10 * 1024 * 1024
-    if (file.size > max) throw new Error('file too large (max 10MB)')
+    const max = 25 * 1024 * 1024
+    if (file.size > max) throw new Error('file too large (max 25MB)')
     const res = await fetch(`/v2/upload${q({ filename: file.name, mime: file.type, conversation_key })}`, {
       method: 'POST',
       headers: { 'Content-Type': file.type || 'application/octet-stream', Accept: 'application/json' },

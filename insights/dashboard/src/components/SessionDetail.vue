@@ -582,7 +582,7 @@ const placeholder = computed(() => {
             v-if="isWeb"
             type="button"
             :disabled="uploading"
-            title="Attach a file (max 10MB) — saved to the shared upload area and referenced so the agent can read it"
+            title="Attach a file (max 25MB) — saved to the shared upload area and referenced so the agent can read it"
             class="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/10 disabled:opacity-40"
             @click="pickFile"
           ><AppIcon glyph="📎" /></button>

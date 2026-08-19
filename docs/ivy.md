@@ -15,7 +15,7 @@ Engine-agnostic. Worth taking even if you never run Grok.
 - Live deltas: `onDelta` uses the same `joinText` as persist (period-space), not raw `+=`. Raw append glues `on.Yes`.
 - Live list: past-idle no-pid web cards leave Live. `GET /api/sessions?active=1` excludes rows past `last_activity` + idle and flips those rows to `ended` on read. History stays. Do not show an Idle badge. Same session key can come back Active on a later message.
 - Engines help: put CLI login commands on their own line so they do not wrap mid-flag.
-- Dashboard nginx: `client_max_body_size 16m` (default 1m 413s Live attach). Live composer POSTs raw bytes to `/v2/upload` (same as recordings); core caps original files at 10MB. Host 80g is not enough if the container nginx is still 1m.
+- Dashboard nginx: `client_max_body_size 32m` (default 1m 413s Live attach). Live composer POSTs raw bytes to `/v2/upload` (same as recordings); core caps original files at 25MB. Host 80g is not enough if the container nginx is still 1m.
 
 ## Take if you want Grok as an engine — not Ivy-only
 

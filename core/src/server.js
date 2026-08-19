@@ -1147,16 +1147,16 @@ function normalizeWebSender(req) {
 }
 
 // Attach a browser-uploaded file to the shared upload surface (Phase B of the web chat).
-// Live composer POSTs raw bytes (same as /v2/recordings) so a 10MB original file fits.
+// Live composer POSTs raw bytes (same as /v2/recordings) so a 25MB original file fits.
 // JSON { filename, mime, conversation_key?, data_base64 } still works for older clients
 // (capped by express.json). Returns the manifest record incl. absolute path, which the
 // chat composer then references in the next message so the agent can Read it.
-const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 app.post('/v2/upload', (req, res, next) => {
   const ct = req.headers['content-type'] || '';
   if (ct.includes('application/json')) return next();
   express.raw({ type: () => true, limit: UPLOAD_MAX_BYTES })(req, res, (err) => {
-    if (err) return res.status(413).json({ error: 'file too large (max 10MB)' });
+    if (err) return res.status(413).json({ error: 'file too large (max 25MB)' });
     next();
   });
 }, (req, res) => {
@@ -1177,7 +1177,7 @@ app.post('/v2/upload', (req, res, next) => {
       conversation_key = b.conversation_key || null;
     }
     if (!buffer.length) return res.status(400).json({ error: 'empty file' });
-    if (buffer.length > UPLOAD_MAX_BYTES) return res.status(413).json({ error: 'file too large (max 10MB)' });
+    if (buffer.length > UPLOAD_MAX_BYTES) return res.status(413).json({ error: 'file too large (max 25MB)' });
     const owner = webOwnerId(req) || 'dashboard';
     const rec = require('../../shared/uploads').save({
       channel: 'assistant-web', buffer, filename, mime,
