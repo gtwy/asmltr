@@ -19,6 +19,7 @@ Engine-agnostic. Worth taking even if you never run Grok.
 - Email: the IMAP watcher tracks a UID cursor and never set `\Seen`, so Gmail still looked unread after Ivy handled mail. After a message is actually handled (watch path), set `\Seen`. `asmltr mail read` marks seen by default (`--keep-unread` to peek). Skip self / noreply / bounce so security-alert mail can stay unread.
 - Email: `asmltr send email … --cc "<addr>"` (comma-separated ok). Manager `/send` and the email connector `/out` pass `cc` through to SMTP.
 - Moderation: default OpenAI classifier (`gpt-5-nano`) is a reasoning model. Uncapped it added ~2–3.5s of synchronous dead time on every inbound that is not bypassed. Cap `reasoning_effort: 'minimal'` on gpt-5-family models only (`ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Logs include `duration_ms`.
+- Backups must not open a second better-sqlite3 Database in the core process. Dashboard POST `/v2/backups` and the in-process scheduler spawn `node scripts/backup.js create` with `ASMLTR_BACKUP_CHILD=1` so sqlite runs in another isolate. CLI `node scripts/backup.js create` keeps the online-backup path.
 
 ## Take if you want Grok as an engine — not Ivy-only
 
@@ -31,6 +32,7 @@ Helps any site that runs the Grok CLI.
 - Engines copy: `grok login --device-auth` on its own line
 - Finite idle as a grok-session feature (we default 30 minutes; the idea is reusable)
 - Node 24 + better-sqlite3 11 ABRT: ObjectWrap dtor → RemoveEnvironmentCleanupHook when env is nullptr. keep-until-listen was insufficient — post-listen GC during grok heap growth still ABRTs. Keep+reuse Statements (SQL-keyed Map) for the process lifetime. Do not disarm after listen.
+- Skip scheduled backup while a grok child is running (`~/.grok/bin/grok`). Do not bump `last_run` so the next ~10 min tick retries. Manual dashboard POST still runs (child spawn already keeps sqlite out of core).
 - Grok 4.6 context is 500k with no text output limit. The adapter must omit context and max-output flags.
 - max-turns by effort: medium 20, high 40, xhigh 60 (cap 100). Inbound email xhigh is 100 turns and 60 minutes, or 4 hours when From is `james@techdirect.io`. Interactive (discord / assistant-web / assistant-native / mcp) watchdog: medium 5 min, high 10 min, xhigh 60 min. Watchdog cap 4h so owner-from email can use it; interactive stays 5/10/60. Not infinite. Idle stays 30 minutes.
 - Do not port `ASMLTR_MAX_THINKING_TOKENS=4000`, opus, haiku, or `ASMLTR_MODEL`. Inherited Claude leftovers (engines fallback `claude`, runtime getModel opus, thinking 4000) are Claude-engine only.
@@ -43,6 +45,7 @@ Do not merge these.
 - ivy stream slug
 - `env.ivy.example` / `seed.ivy.example` branding
 - osiris user systemd units (`asmltr-core` / `asmltr-collector` / `asmltr-manager`)
+- This install’s backup clock is 4:20 AM America/New_York (`hour=4` `minute=20` in `~/.asmltr/backup-schedule.json`). Due when local time is past 4:20 today and `last_run` is before today’s 4:20 — not a rolling `every_hours` catch-up on boot.
 - `ivy.gtwy.net` and host nginx site files
 - `mcp.ivy.gtwy.net` — public MCP connector so Adjutant can `ask` Ivy over HTTPS (no SSH).
   Instance `ivy-mcp`, bind `127.0.0.1:3018`, `base_url` https://mcp.ivy.gtwy.net.
