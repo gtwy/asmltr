@@ -168,15 +168,15 @@ test('applyEvent: space-only delta after period produces "time. The" not "time.T
   assert.notEqual(live, 'time.The');
 });
 
-test('applyEvent: next sentence without leading space still stores ". "', () => {
+test('applyEvent: next sentence without a space token stays honest time.The', () => {
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   let live = '';
   for (const piece of ['time.', 'The']) {
     const r = grok.applyEvent({ type: 'text', data: piece }, state);
     live += r.text;
   }
-  assert.equal(state.text, 'time. The');
-  assert.equal(live, 'time. The');
+  assert.equal(state.text, 'time.The');
+  assert.equal(live, 'time.The');
 });
 
 test('applyEvent: narration draft then restated answer stores one sentence, not both', () => {
@@ -219,12 +219,12 @@ test('applyEvent: tool call closes narration so later text is not glued', () => 
   assert.ok(!state.text.includes('stand-in'));
 });
 
-test('applyEvent: time. + The as complete-shaped events still get period-space, not replace', () => {
+test('applyEvent: time. + The as complete-shaped events stay honest, not replace', () => {
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   grok.applyEvent({ type: 'text', text: 'time.' }, state);
   const r = grok.applyEvent({ type: 'text', text: 'The' }, state);
-  assert.equal(state.text, 'time. The');
-  assert.equal(r.text, ' The');
+  assert.equal(state.text, 'time.The');
+  assert.equal(r.text, 'The');
   assert.deepEqual(state.segments, []);
 });
 
@@ -269,10 +269,18 @@ test('applyEvent: James kettle snapshots last complete block wins', () => {
   assert.ok(!state.text.includes('kettle'));
 });
 
-test('joinText: sentence boundary spaced; URLs/IPs/query unspaced', () => {
-  assert.equal(grok.joinText('time.', 'The'), 'time. The');
+test('joinText: honest concat; URLs/IPs/query/versions unspaced; space token kept', () => {
   assert.equal(['127.', '0', '.', '0', '.', '1'].reduce((a, b) => grok.joinText(a, b), ''), '127.0.0.1');
   assert.equal(grok.joinText('accounts.', 'google.com'), 'accounts.google.com');
   assert.equal(grok.joinText('auth?', 'response_type'), 'auth?response_type');
-  assert.equal(grok.joinText('www.', 'googleapis'), 'www.googleapis');
+  assert.equal(grok.joinText('www.', 'googleapis.com'), 'www.googleapis.com');
+  assert.equal(grok.joinText('file.', 'json'), 'file.json');
+  assert.equal(grok.joinText('v1.', '2.3'), 'v1.2.3');
+  assert.equal(grok.joinText(grok.joinText('time.', ' '), 'The'), 'time. The');
+  assert.equal(grok.joinText('time.', 'The'), 'time.The');
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const r = grok.applyEvent({ type: 'text', data: ' ' }, state);
+  assert.equal(r.kind, 'delta');
+  assert.equal(r.text, ' ');
+  assert.equal(state.text, ' ');
 });

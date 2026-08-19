@@ -442,8 +442,7 @@ function sessionIdFrom(obj) {
 function joinText(prev, next) {
   if (next == null || next === '') return prev || '';
   if (prev == null || prev === '') return next;
-  if (/^\s/.test(next) || /\s$/.test(prev)) return prev + next;
-  if (/[.!?]["')\]]*$/.test(prev) && /^[A-Z]/.test(next)) return prev + ' ' + next;
+  // Either side may already carry adjoining whitespace. Never invent a space.
   return prev + next;
 }
 
@@ -524,10 +523,9 @@ function applyEvent(ev, state) {
     return { kind: t || 'meta' };
   }
   const text = extractText(ev);
-  // Keep space-only pieces (" ") — do not treat whitespace as empty. When Grok
-  // starts the next sentence without a leading space, joinText inserts one so
-  // stored outbound matches live ("time. The", not "time.The"). Only before
-  // an uppercase letter (sentence boundary) — not lowercase/digit (URLs/IPs).
+  // Keep space-only pieces (" "). Do not treat whitespace as empty and do not
+  // invent a space after .!? — if grok omitted it, persist stays honest
+  // ("time."+"The" → "time.The"). "time."+" "+"The" → "time. The".
   if (text != null && text !== '') {
     // grok 1.0.5 streaming-json tokens are {type:"text", data:"..."}. Those are
     // incremental — treat as delta so /v2/stream keeps writing until real done.
@@ -540,7 +538,7 @@ function applyEvent(ev, state) {
       joined = text;
     } else if (isCompleteBlock(prev) && isCompleteBlock(text)) {
       // Status/narration then the real answer: last block wins (Discord split).
-      // Not the same as period-space glue ("time."+"The").
+      // Not the same as token glue ("time."+"The").
       closeTextBlock(state);
       joined = text;
     } else {
