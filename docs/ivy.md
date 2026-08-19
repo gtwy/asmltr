@@ -17,6 +17,7 @@ Engine-agnostic. Worth taking even if you never run Grok.
 - Engines help: put CLI login commands on their own line so they do not wrap mid-flag.
 - Dashboard nginx: `client_max_body_size 32m` (default 1m 413s Live attach). Live composer POSTs raw bytes to `/v2/upload` (same as recordings); core caps original files at 25MB. Host 80g is not enough if the container nginx is still 1m.
 - Email: the IMAP watcher tracks a UID cursor and never set `\Seen`, so Gmail still looked unread after Ivy handled mail. After a message is actually handled (watch path), set `\Seen`. `asmltr mail read` marks seen by default (`--keep-unread` to peek). Skip self / noreply / bounce so security-alert mail can stay unread.
+- Moderation: default OpenAI classifier (`gpt-5-nano`) is a reasoning model. Uncapped it added ~2–3.5s of synchronous dead time on every inbound that is not bypassed. Cap `reasoning_effort: 'minimal'` on gpt-5-family models only (`ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Logs include `duration_ms`.
 
 ## Take if you want Grok as an engine — not Ivy-only
 
