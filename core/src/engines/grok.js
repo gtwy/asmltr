@@ -49,7 +49,7 @@ function maxTurns() {
 }
 
 const TURNS_FOR_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
-const TIMEOUT_SCALE = { low: 1, medium: 1, high: 1, xhigh: 1.5 };
+const TIMEOUT_SCALE = { low: 1, medium: 1, high: 1, xhigh: 1.5 }; // unused for watchdog; interactive is absolute 5/10/15
 
 /** medium 20 / high 40 / xhigh 60. Cap 100. Env MAX_TURNS is the complete() baseline, not a flatten. */
 function maxTurnsForEffort(effort, opts) {
@@ -59,21 +59,29 @@ function maxTurnsForEffort(effort, opts) {
   return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
 }
 
-const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // email xhigh — not the generic xhigh 15m
+const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // email xhigh
+
+// Discord / assistant-web / assistant-native / mcp (and generic non-email). Absolute, not scale-from-env.
+const INTERACTIVE_TIMEOUT_MS = {
+  low: 5 * 60 * 1000,
+  medium: 5 * 60 * 1000,
+  high: 10 * 60 * 1000,
+  xhigh: 15 * 60 * 1000,
+};
 
 function isEmailChannel(channel) {
   return String(channel || '').trim().toLowerCase() === 'email';
 }
 
-/** Scale the 10-minute baseline. Cap 60 minutes. Not infinite.
- *  Discord/generic: medium 10, high 10, xhigh 15 (scale 1 / 1 / 1.5).
- *  Email xhigh is 60 minutes. Second arg is opts `{ channel }` or a channel string. */
+/** Watchdog by channel. Cap 60 minutes. Not infinite.
+ *  Interactive (discord, assistant-web, assistant-native, mcp, generic): 5 / 10 / 15.
+ *  Email xhigh is 60 minutes / 100 turns. Second arg is opts `{ channel }` or a string. */
 function timeoutMsForEffort(effort, opts) {
   const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
   const e = normalizeEffort(effort) || 'medium';
   if (isEmailChannel(channel) && e === 'xhigh') return Math.min(EMAIL_TIMEOUT_MS, TIMEOUT_CAP_MS);
-  const scale = TIMEOUT_SCALE[e] || 1;
-  return Math.min(Math.floor(timeoutMs() * scale), TIMEOUT_CAP_MS);
+  const ms = INTERACTIVE_TIMEOUT_MS[e] || INTERACTIVE_TIMEOUT_MS.medium;
+  return Math.min(ms, TIMEOUT_CAP_MS);
 }
 
 // Reasoning effort — three tiers (James / Adjutant, 19 Aug 2026):
@@ -94,7 +102,7 @@ function timeoutMsForEffort(effort, opts) {
 //   One-shot next-effort still wins. complete() skips auto-raise.
 //   Email channel (`email`) forces xhigh AFTER one-shot (a chatty mail body
 //   with no code words is still xhigh). Discord and others stay three-tier.
-//   Email xhigh timeout is 60 minutes; Discord/generic: 10 / 10 / 15 (cap 60).
+//   Email xhigh timeout is 60 minutes; interactive 5 / 10 / 15 (cap 60).
 //   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
 //   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
@@ -540,7 +548,7 @@ module.exports = {
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
   extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
   timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
-  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, isEmailChannel,
+  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
