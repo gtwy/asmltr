@@ -49,7 +49,7 @@ function maxTurns() {
 }
 
 const TURNS_FOR_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
-const TIMEOUT_SCALE = { low: 1, medium: 1, high: 1, xhigh: 1.5 }; // unused for watchdog; interactive is absolute 5/10/15
+const TIMEOUT_SCALE = { low: 1, medium: 1, high: 1, xhigh: 1.5 }; // unused for watchdog; interactive is absolute 5/10/60
 
 /** medium 20 / high 40 / xhigh 60. Cap 100. Env MAX_TURNS is the complete() baseline, not a flatten. */
 function maxTurnsForEffort(effort, opts) {
@@ -68,7 +68,7 @@ const INTERACTIVE_TIMEOUT_MS = {
   low: 5 * 60 * 1000,
   medium: 5 * 60 * 1000,
   high: 10 * 60 * 1000,
-  xhigh: 15 * 60 * 1000,
+  xhigh: 60 * 60 * 1000,
 };
 
 function isEmailChannel(channel) {
@@ -111,7 +111,7 @@ function isOwnerFromEmail(opts) {
 }
 
 /** Watchdog by channel. Cap 4 hours so owner-from email can use it. Not infinite.
- *  Interactive (discord, assistant-web, assistant-native, mcp, generic): 5 / 10 / 15.
+ *  Interactive (discord, assistant-web, assistant-native, mcp, generic): 5 / 10 / 60.
  *  Email xhigh is 60 minutes / 100 turns, except From owner@example.com → 4 hours
  *  (case-insensitive; display-name wrapping ignored; that exact address only).
  *  Second arg is opts `{ channel, sender }` or a channel string. */
@@ -148,8 +148,8 @@ function timeoutMsForEffort(effort, opts) {
 //   Email xhigh timeout is 60 minutes, or 4 hours only when From is
 //   owner@example.com (case-insensitive, display-name wrapping ignored;
 //   that exact address — not the domain, not other james@). Interactive
-//   5 / 10 / 15 (cap 4h so the owner-from path can use it; interactive
-//   stays absolute 5/10/15).
+//   5 / 10 / 60 (cap 4h so the owner-from path can use it; interactive
+//   stays absolute 5/10/60).
 //   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
 //   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
