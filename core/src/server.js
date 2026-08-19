@@ -538,9 +538,11 @@ async function handle(envelope, opts = {}) {
     // User-turn preamble, in channel-chronology framing the model trusts: (1) messages this session
     // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2)
     // observed-but-not-replied activity from others. Both buffers are drained + cleared each turn.
+    const userText = e.content.text;
     const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
     const turnOpts = {
-      prompt: catchUp + e.content.text,
+      prompt: catchUp + userText,
+      effortPrompt: userText,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
       resume,
@@ -1958,7 +1960,7 @@ app.post('/v2/inject', (req, res) => {
       : text;
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
-    const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
+    const injectOpts = { prompt, effortPrompt: text, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
