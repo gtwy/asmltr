@@ -46,9 +46,11 @@ Do not merge these.
 - `docker-compose.local.yml`
 - Authelia leftover notes (Authelia was removed)
 - Email local policy (not the `\Seen` fix): `owner_forward_to` for unknown senders; known people on the trust store auto-send (`always_send` on that path). Do not take this as the upstream default — upstream stays `approval_policy`.
-- `extras/ivy-local/` — osiris-only Corona / Rolodex / OneNote stdio MCP wrappers. Eve: skip. Localhost only (`127.0.0.1:12701` Corona, `127.0.0.1:12702` Rolodex). Register with `extras/ivy-local/register.sh` (`~/.asmltr/mcp.json` + `grok mcp add`). Not asmltr core. Do **not** enable Corona `/say` for Ivy.
-- Cigar writeup: lead with kektech `#cigars` (who, when in America/New_York 24-hour, what they said). Then a section headed exactly `Additional notes from the web`. Corona is keyword-dumb, newest-first.
-- Ivy Rolodex cache: `~/.asmltr/rolodex-cache/` (not `/home/adjutant/rolodex`, not Adjutant’s 08:00 box cache at `/home/box/rolodex-data`). Daily `systemd --user` `ivy-rolodex-sync.timer` at **07:30 America/New_York** (`OnCalendar` + `OnBootSec` + `Persistent=true`). Sync writes **only** `contacts.json` from `GET /export`. Never overwrite `aliases.json`.
-- Ivy aliases (seeded if missing, never clobbered): `mom` / `eileen` / `mother` → Eileen Watt (also Eileen Miller, `eileen@gtwy.net`); `wife` / `jess` → Jess Watt (`jk@gtwy.net`); `joey` → Joey Kapolka; `steve` → Steve Allison. Prefer the obvious display-name match.
-- OneNote (Ownership Notebook): `extras/ivy-local/onenote/` talks Graph if osiris-local creds exist at `~/.asmltr/onenote/{.client.json,token.json}` mode 600. Do not copy or invent tokens. Do not commit those files.
-- `~/.asmltr/mcp.json` corona / rolodex / onenote entries and user unit `ivy-rolodex-sync.timer` / `ivy-rolodex-sync.service`.
+- `extras/ivy-local/` — Corona / Rolodex / OneNote stdio MCP wrappers for this host. Eve: skip. Register with `extras/ivy-local/register.sh` (`~/.asmltr/mcp.json` + `grok mcp add`).
+- Corona: localhost `127.0.0.1:12701` only. Tools `corona_health`, `corona_recipe`, `corona_cigars`, `corona_cooking`. No `/say`.
+- Cigar writeup: kektech `#cigars` first (who, when America/New_York 24-hour, what they said). Then a section headed exactly `Additional notes from the web`.
+- Rolodex: Ivy chose the **two-file setup** (19 Aug 2026, localhost `asmltr ask`). `contacts.json` = daily Google dump. `aliases.json` = static nicknames the 07:30 sync must never overwrite. People cards stay relationship memory. Do not invent a third store.
+- Ivy Rolodex cache: `~/.asmltr/rolodex-cache` (not Adjutant 08:00 `/home/box/rolodex-data`, not `/home/adjutant/rolodex`). Timer `ivy-rolodex-sync.timer` at **07:30 America/New_York**, `OnBootSec=3min`, `Persistent=true`. Source `127.0.0.1:12702/export`.
+- Seeded aliases (case-insensitive; prefer alias hit): `jess` / `wife` → Jess Watt; `steve` → Steve Allison; `mom` / `eileen` / `mother` → Eileen Watt (also Eileen Miller); `joey` → Joey Kapolka. File mode 600, outside git (has resourceNames). A phone number is not permission to text. Voice/SMS parked.
+- OneNote: `~/.asmltr/onenote/{token.json,.client.json}` already on the host, mode 600. Do not print. Tools `onenote_health`, `onenote_login`, notebooks/sections/pages/get/create/update.
+- user unit `ivy-rolodex-sync.timer` / `ivy-rolodex-sync.service`

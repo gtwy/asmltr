@@ -119,10 +119,16 @@ def _prefs_for(resource: str, aliases: dict[str, dict[str, Any]]) -> dict[str, A
             keys.append(key)
             email = (rec.get("preferredEmail") or "").strip()
             phone = (rec.get("preferredPhone") or "").strip()
+            aka = (rec.get("alsoKnownAs") or "").strip()
+            notes = (rec.get("notes") or "").strip()
             if email and "preferredEmail" not in extra:
                 extra["preferredEmail"] = email
             if phone and "preferredPhone" not in extra:
                 extra["preferredPhone"] = phone
+            if aka and "alsoKnownAs" not in extra:
+                extra["alsoKnownAs"] = aka
+            if notes and "notes" not in extra:
+                extra["notes"] = notes
     if keys:
         extra["aliases"] = keys
     return extra
@@ -248,7 +254,7 @@ def rolodex_health() -> str:
 
 @mcp.tool()
 def rolodex_search(query: str) -> str:
-    """Search the Ivy contacts cache (name, email, phone, org). Exact alias keys resolve first."""
+    """Search Ivy contacts cache. Alias keys win. A phone hit is not permission to text. Voice/SMS parked."""
     q = (query or "").strip()
     if not q:
         return "Error: provide query"
@@ -261,6 +267,15 @@ def rolodex_search(query: str) -> str:
 
     key = q.casefold()
     rec = aliases.get(key)
+    if rec is None:
+        for alias_key, alias_rec in aliases.items():
+            names = [
+                (alias_rec.get("displayName") or "").casefold(),
+                (alias_rec.get("alsoKnownAs") or "").casefold(),
+            ]
+            if key in names or key == alias_key:
+                key, rec = alias_key, alias_rec
+                break
     if rec:
         resource = (rec.get("resourceName") or "").strip()
         row = _find_by_resource(contacts, resource) if resource else None
@@ -288,7 +303,7 @@ def rolodex_search(query: str) -> str:
 
 @mcp.tool()
 def rolodex_get(name: str | None = None, resourceName: str | None = None) -> str:
-    """Fetch one contact from the Ivy cache. Name may be an alias key."""
+    """Fetch one Ivy cache contact. Name may be an alias. Phone is not permission to text. Voice/SMS parked."""
     contacts = _load_contacts()
     if isinstance(contacts, str):
         return contacts
