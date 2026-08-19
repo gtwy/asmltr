@@ -61,11 +61,11 @@ test('applySegment: space-only chunk is not dropped as falsy', async () => {
   assert.equal(applySegment('time. ', 'The'), 'time. The');
 });
 
-test('applySegment: next sentence without leading space still gets ". "', async () => {
+test('applySegment: next sentence without a space token stays honest', async () => {
   const { applySegment } = await import(helperUrl);
-  assert.equal(applySegment('time.', 'The'), 'time. The');
-  assert.equal(applySegment('work.', "I'll"), "work. I'll");
-  assert.equal(applySegment('grow.', "I'll"), "grow. I'll");
+  assert.equal(applySegment('time.', 'The'), 'time.The');
+  assert.equal(applySegment('work.', "I'll"), "work.I'll");
+  assert.equal(applySegment('grow.', "I'll"), "grow.I'll");
 });
 
 test('applySegment: narration draft then restated answer is one sentence, not both', async () => {
@@ -89,11 +89,11 @@ test('applySegment: status block then restated answer keeps the answer only', as
   assert.ok(!reply.includes('Vim is in Preferences'));
 });
 
-test('applySegment: time. + The is still period-space, not a narration replace', async () => {
+test('applySegment: time. + The is honest concat, not a narration replace', async () => {
   const { applySegment, isCompleteBlock } = await import(helperUrl);
   assert.equal(isCompleteBlock('time.'), false);
   assert.equal(isCompleteBlock('The'), false);
-  assert.equal(applySegment('time.', 'The'), 'time. The');
+  assert.equal(applySegment('time.', 'The'), 'time.The');
 });
 
 test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', async () => {
@@ -118,10 +118,9 @@ test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', a
   assert.equal(liveMash, 'TEST-DRAFT: the kettle is on.Yes. I can do it on purpose, and I just did.');
   assert.equal(preferLastBlock(answer, liveMash + '\n\n' + fin), answer);
   assert.equal(preferLastBlock(liveMash + '\n\n' + fin, answer), answer);
-  assert.equal(applySegment('time.', 'The'), 'time. The');
+  assert.equal(applySegment('time.', 'The'), 'time.The');
   const { joinText } = await import(helperUrl);
-  assert.equal(joinText(draft, 'Yes'), 'TEST-DRAFT: the kettle is on. Yes');
-  assert.notEqual(joinText(draft, 'Yes'), 'TEST-DRAFT: the kettle is on.Yes');
-  assert.ok(!joinText(draft, 'Yes').includes('on.Yes'));
+  assert.equal(joinText(draft, 'Yes'), 'TEST-DRAFT: the kettle is on.Yes');
+  assert.ok(joinText(draft, 'Yes').includes('on.Yes'));
 });
 
