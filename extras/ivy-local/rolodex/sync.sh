@@ -3,15 +3,17 @@
 # Writes ONLY contacts.json. Never creates, reads, or overwrites aliases.json.
 set -euo pipefail
 
+DIR="$(cd "$(dirname "$0")" && pwd)"
 CACHE_DIR="${ROLODEX_CACHE:-$HOME/.asmltr/rolodex-cache}"
 DEST="${CACHE_DIR}/contacts.json"
 TMP="${DEST}.tmp.$$"
 EXPORT_URL="${ROLODEX_EXPORT_URL:-http://127.0.0.1:12702/export}"
 CURL_MAX_TIME="${ROLODEX_SYNC_TIMEOUT:-180}"
+BACKUP_PY="${DIR}/backup.py"
 
 umask 077
-mkdir -p "$CACHE_DIR"
-chmod 700 "$CACHE_DIR" || true
+mkdir -p "$CACHE_DIR/backups"
+chmod 700 "$CACHE_DIR" "$CACHE_DIR/backups" || true
 
 cleanup() {
   rm -f "$TMP"
@@ -60,3 +62,8 @@ chmod 600 "$TMP"
 mv -f "$TMP" "$DEST"
 trap - EXIT
 echo "synced ${COUNT} contacts -> ${DEST}"
+if [[ -f "$BACKUP_PY" ]]; then
+  if ! python3 "$BACKUP_PY" snapshot; then
+    echo "backup snapshot failed (contacts.json still updated)" >&2
+  fi
+fi

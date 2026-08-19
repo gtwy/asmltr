@@ -23,8 +23,8 @@ fi
 "$IVY/.venv/bin/python" -c "from mcp.server import MCPServer; print('mcp ok')"
 
 echo "== onenote creds (mode only, no print) =="
-mkdir -p "$ONENOTE_HOME" "$CACHE_DIR" "$HOME/.asmltr"
-chmod 700 "$ONENOTE_HOME" "$CACHE_DIR" "$HOME/.asmltr" || true
+mkdir -p "$ONENOTE_HOME" "$CACHE_DIR" "$CACHE_DIR/backups" "$HOME/.asmltr"
+chmod 700 "$ONENOTE_HOME" "$CACHE_DIR" "$CACHE_DIR/backups" "$HOME/.asmltr" || true
 if [[ -e "$ONENOTE_HOME/token.json" ]]; then
   chmod 600 "$ONENOTE_HOME/token.json"
   echo "onenote token.json present"
