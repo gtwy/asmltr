@@ -57,9 +57,19 @@ function maxTurnsForEffort(effort) {
   return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
 }
 
-/** Scale the 10-minute baseline so 40/60-turn turns can finish. Cap 30 minutes. Not infinite. */
-function timeoutMsForEffort(effort) {
+const EMAIL_TIMEOUT_MS = 25 * 60 * 1000; // email xhigh — not the generic xhigh 30m
+
+function isEmailChannel(channel) {
+  return String(channel || '').trim().toLowerCase() === 'email';
+}
+
+/** Scale the 10-minute baseline so 40/60-turn turns can finish. Cap 30 minutes. Not infinite.
+ *  Email xhigh is 25 minutes (channel `email`). Generic xhigh stays 30. Second arg is
+ *  opts `{ channel }` or a channel string. */
+function timeoutMsForEffort(effort, opts) {
+  const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
   const e = normalizeEffort(effort) || 'medium';
+  if (isEmailChannel(channel) && e === 'xhigh') return Math.min(EMAIL_TIMEOUT_MS, TIMEOUT_CAP_MS);
   const scale = TIMEOUT_SCALE[e] || 1;
   return Math.min(Math.floor(timeoutMs() * scale), TIMEOUT_CAP_MS);
 }
@@ -80,7 +90,10 @@ function timeoutMsForEffort(effort) {
 //   drainObserved/catch-up glued onto prompt in server.js.
 //   Tight: do not treat bare "fix" as xhigh (Eve "Proposed Fix", "quick fix").
 //   One-shot next-effort still wins. complete() skips auto-raise.
-//   Do not inherit last effort. Do not use XHIGH_CHANNELS.
+//   Email channel (`email`) forces xhigh AFTER one-shot (a chatty mail body
+//   with no code words is still xhigh). Discord and others stay three-tier.
+//   Email xhigh timeout is 25 minutes; generic xhigh stays 30 (cap 30).
+//   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
 //   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
@@ -216,6 +229,8 @@ function classifyEffort(opts) {
   const oneshotExplicit = normalizeEffort(opts.effort);
   if (oneshotExplicit) return { effort: oneshotExplicit, reason: 'explicit' };
   if (opts.complete) return { effort: envEffort(), reason: 'complete' };
+  // After one-shot: inbound email is always xhigh. Discord/others keep the three-tier score.
+  if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
   const scored = scoringPrompt(opts);
   const codeTok = xhighReason(scored);
   const git = isProjectGitRepo(opts.cwd);
@@ -445,22 +460,22 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
   const nextEffort = takeNextEffort(conversationKey);
-  const effortOpts = { prompt, cwd, nextEffort, effortPrompt };
+  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel };
   const classified = classifyEffort(effortOpts);
   const effort = classified.effort;
   recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
   try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + ')\n'); } catch (_) {}
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt });
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
   if (abortController) abortController.signal.addEventListener('abort', kill);
-  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMsForEffort(effort));
+  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMsForEffort(effort, { channel }));
   if (watchdog.unref) watchdog.unref();
 
   const state = newState(sessionId);
@@ -523,7 +538,7 @@ module.exports = {
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
   extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
   timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
-  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS,
+  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, isEmailChannel,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,

@@ -262,3 +262,67 @@ test('zip code / lastEffort inherit are not xhigh', () => {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
+
+test('email channel forces xhigh + 60 turns + 25m even without code words', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    const prompt = 'Thanks for the update, see you Monday';
+    const chatty = 'Hi Ivy,\n\nJust circling back on dinner Thursday and whether Jess is free. Nothing urgent — hope you had a quiet weekend.\n\nThanks for the update, see you Monday\n';
+    for (const p of [prompt, chatty]) {
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), 'xhigh', p.slice(0, 40));
+      assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 'xhigh');
+      assert.equal(maxTurnsOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 60);
+      assert.equal(grok.maxTurnsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' })), 60);
+      assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 25 * 60 * 1000);
+      assert.equal(grok.timeoutMsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), { channel: 'email' }), grok.EMAIL_TIMEOUT_MS);
+    }
+    // generic xhigh (no channel) stays 30m
+    assert.equal(grok.timeoutMsForEffort('xhigh'), grok.DEFAULT_TIMEOUT_MS * 3);
+    assert.ok(grok.EMAIL_TIMEOUT_MS < grok.TIMEOUT_CAP_MS);
+    assert.equal(grok.isEmailChannel('email'), true);
+    assert.equal(grok.isEmailChannel('discord'), false);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('discord ok thanks stays medium 20 / 10m', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    const opts = { prompt: 'ok thanks', cwd: noGit, channel: 'discord' };
+    assert.equal(grok.chooseEffort(opts), 'medium');
+    assert.equal(effortOf(grok.buildArgs(opts)), 'medium');
+    assert.equal(maxTurnsOf(grok.buildArgs(opts)), 20);
+    assert.equal(grok.maxTurnsForEffort('medium'), 20);
+    assert.equal(grok.timeoutMsForEffort('medium', { channel: 'discord' }), 10 * 60 * 1000);
+    assert.equal(grok.timeoutMsForEffort(grok.chooseEffort(opts), opts), grok.DEFAULT_TIMEOUT_MS);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('one-shot next-effort still wins over email xhigh', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(grok.chooseEffort({
+      prompt: 'Thanks for the update, see you Monday',
+      cwd: noGit,
+      channel: 'email',
+      nextEffort: 'medium',
+    }), 'medium');
+    assert.equal(effortOf(grok.buildArgs({
+      prompt: 'Thanks for the update, see you Monday',
+      cwd: noGit,
+      channel: 'email',
+      nextEffort: 'medium',
+    })), 'medium');
+    assert.equal(maxTurnsOf(grok.buildArgs({
+      prompt: 'Thanks for the update, see you Monday',
+      cwd: noGit,
+      channel: 'email',
+      nextEffort: 'medium',
+    })), 20);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
