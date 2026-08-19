@@ -263,7 +263,7 @@ test('zip code / lastEffort inherit are not xhigh', () => {
   }
 });
 
-test('email channel forces xhigh + 60 turns + 25m even without code words', () => {
+test('email channel forces xhigh + 100 turns + 25m even without code words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const prompt = 'Thanks for the update, see you Monday';
@@ -271,8 +271,8 @@ test('email channel forces xhigh + 60 turns + 25m even without code words', () =
     for (const p of [prompt, chatty]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), 'xhigh', p.slice(0, 40));
       assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 'xhigh');
-      assert.equal(maxTurnsOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 60);
-      assert.equal(grok.maxTurnsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' })), 60);
+      assert.equal(maxTurnsOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 100);
+      assert.equal(grok.maxTurnsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), { channel: 'email' }), 100);
       assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 25 * 60 * 1000);
       assert.equal(grok.timeoutMsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), { channel: 'email' }), grok.EMAIL_TIMEOUT_MS);
     }
@@ -296,6 +296,22 @@ test('discord ok thanks stays medium 20 / 10m', () => {
     assert.equal(grok.maxTurnsForEffort('medium'), 20);
     assert.equal(grok.timeoutMsForEffort('medium', { channel: 'discord' }), 10 * 60 * 1000);
     assert.equal(grok.timeoutMsForEffort(grok.chooseEffort(opts), opts), grok.DEFAULT_TIMEOUT_MS);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('Discord xhigh stays 60 turns / 30m; email xhigh is 100 / 25m', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    const impl = { prompt: 'Please implement a helper', cwd: noGit, channel: 'discord' };
+    assert.equal(grok.chooseEffort(impl), 'xhigh');
+    assert.equal(maxTurnsOf(grok.buildArgs(impl)), 60);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'discord' }), grok.DEFAULT_TIMEOUT_MS * 3);
+    const mail = { prompt: 'Thanks for the update, see you Monday', cwd: noGit, channel: 'email' };
+    assert.equal(grok.chooseEffort(mail), 'xhigh');
+    assert.equal(maxTurnsOf(grok.buildArgs(mail)), 100);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 25 * 60 * 1000);
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
