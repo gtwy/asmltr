@@ -46,3 +46,8 @@ Do not merge these.
 - `docker-compose.local.yml`
 - Authelia leftover notes (Authelia was removed)
 - Email local policy (not the `\Seen` fix): `owner_forward_to` for unknown senders; known people on the trust store auto-send (`always_send` on that path). Do not take this as the upstream default — upstream stays `approval_policy`.
+- `extras/ivy-local/` — Corona / Rolodex / OneNote stdio MCP wrappers for this host (`127.0.0.1:12701`, Ivy Rolodex cache, `~/.asmltr/onenote` creds). Eve: skip.
+- `~/.asmltr/mcp.json` corona / rolodex / onenote entries and `grok mcp add` of those servers
+- `~/.asmltr/rolodex-cache` (Ivy contacts cache + aliases; 07:30 ET `ivy-rolodex-sync.timer`)
+- `~/.asmltr/onenote/{token.json,.client.json}` (mode 600; already on the host)
+- user unit `ivy-rolodex-sync.timer` / `ivy-rolodex-sync.service`

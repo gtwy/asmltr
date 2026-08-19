@@ -1,0 +1,11 @@
+[Unit]
+Description=Ivy Rolodex cache refresh at 07:30 America/New_York
+
+[Timer]
+OnCalendar=*-*-* 07:30:00 America/New_York
+Persistent=true
+AccuracySec=1min
+Unit=ivy-rolodex-sync.service
+
+[Install]
+WantedBy=timers.target

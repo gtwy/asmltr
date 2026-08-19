@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh Ivy Rolodex cache from localhost :12702
+After=network-online.target rolodex.service
+
+[Service]
+Type=oneshot
+Environment=TZ=America/New_York
+ExecStart=/home/adjutant/src/asmltr/extras/ivy-local/rolodex/sync.sh
+Nice=10
