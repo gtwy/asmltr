@@ -42,6 +42,11 @@ Do not merge these.
 - `env.ivy.example` / `seed.ivy.example` branding
 - osiris user systemd units (`asmltr-core` / `asmltr-collector` / `asmltr-manager`)
 - `ivy.gtwy.net` and host nginx site files
+- `mcp.ivy.gtwy.net` — public MCP connector so Adjutant can `ask` Ivy over HTTPS (no SSH).
+  Instance `ivy-mcp`, bind `127.0.0.1:3018`, `base_url` https://mcp.ivy.gtwy.net.
+  Site file: `extras/ivy-local/nginx/mcp.ivy.gtwy.net` (copy also in `/home/adjutant/nginx-ivy/`).
+  Do not attach this host to `ivy.gtwy.net`. Dashboard keeps `/.well-known/oauth-*` on ivy.gtwy.net;
+  MCP has its own origin. Clients file is gitignored (not in this commit). James: DNS + certbot after. Eve: skip.
 - live `.env`, tokens, `ASMLTR_AUTH_SECRET`, insights token, `vault.pass`
 - `docker-compose.local.yml`
 - Authelia leftover notes (Authelia was removed)
