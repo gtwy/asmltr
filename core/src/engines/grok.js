@@ -106,6 +106,7 @@ const CODE_WORD_EXCLUDE_RE = /\b(?:zip|area|dress|door|promo(?:tional)?|country|
 const HIGH_PARTS = [
   'look(?:ing)?\\s+(?:it\\s+)?up',
   'look(?:ing)?\\s+into',
+  'lookup',
   'research(?:ing)?',
   'corona',
   'recipes?',

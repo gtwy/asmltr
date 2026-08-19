@@ -71,6 +71,7 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
 
     for (const p of [
       'look up the Padron 1964 in Corona',
+      'lookup the Corona cigar notes',
       'pull the cigar writeup from Corona',
       'what is the recipe',
       'check the rolodex for Jess',
