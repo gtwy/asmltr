@@ -26,6 +26,7 @@ Helps any site that runs the Grok CLI.
 - `--effort high` and auto-xhigh on code
 - Engines copy: `grok login --device-auth` on its own line
 - Finite idle as a grok-session feature (we default 30 minutes; the idea is reusable)
+- Node 24 + better-sqlite3 11 ABRT: ObjectWrap dtor → RemoveEnvironmentCleanupHook when env is nullptr. keep-until-listen was insufficient — post-listen GC during grok heap growth still ABRTs. Keep+reuse Statements (SQL-keyed Map) for the process lifetime. Do not disarm after listen.
 
 ## Our box only, skip
 

@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+require('../sqlite-stmt-keep');
 const Database = require('better-sqlite3');
 
 const DB_PATH = process.env.ASMLTR_TRUST_DB || path.join(__dirname, '..', '..', 'data', 'trust.db');

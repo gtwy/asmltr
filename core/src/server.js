@@ -769,7 +769,10 @@ if (oidc.enabled()) {
 
 app.use(express.json({ limit: '10mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core', active }));
+app.get('/health', (req, res) => res.json({
+  status: 'ok', service: 'asmltr-core', active,
+  sqlite_keep: { size: _sqliteKeep.keep.size, sql: [..._sqliteKeep.keep.keys()] },
+}));
 // Build identity — the code sha this process is running + when it started. An updater checks this
 // (not just /health, which returns 200 even on stale code) to confirm the restart actually landed.
 const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
@@ -2002,7 +2005,6 @@ app.delete('/trust/engagement/:id', (req, res) => res.json({ ok: trust.engagemen
 
 if (require.main === module) {
   const server = app.listen(PORT, HOST, () => {
-    _sqliteKeep.disarm();
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
     console.log(`idle_policy=${sessions.idlePolicyFromEnv()} assistant=${process.env.ASSISTANT_NAME || 'the assistant'} engine=${require('../../shared/engines').getDefault()}`);
     console.log('substrate: configured reasoning engine (grok = subscription CLI; no XAI_API_KEY)');
