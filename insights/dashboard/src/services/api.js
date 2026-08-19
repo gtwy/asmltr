@@ -308,16 +308,19 @@ export const webChat = {
     return ac
   },
 
-  // Attach a file: base64 it and POST to the core, which stores it in the shared upload area and
-  // returns the on-disk path. The next message references that path so the agent can Read it.
+  // Attach a file: POST raw bytes (same as recordingsApi.upload) so a 10MB original
+  // fits. Core stores it in the shared upload area and returns the on-disk path.
   async upload(file, conversation_key) {
-    const data_base64 = await new Promise((resolve, reject) => {
-      const r = new FileReader()
-      r.onload = () => resolve(String(r.result).split(',')[1] || '')
-      r.onerror = () => reject(new Error('read failed'))
-      r.readAsDataURL(file)
+    const max = 10 * 1024 * 1024
+    if (file.size > max) throw new Error('file too large (max 10MB)')
+    const res = await fetch(`/v2/upload${q({ filename: file.name, mime: file.type, conversation_key })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', Accept: 'application/json' },
+      body: file
     })
-    return postCore('/v2/upload', { filename: file.name, mime: file.type, conversation_key, data_base64 })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.error || `POST /v2/upload -> ${res.status} ${res.statusText}`)
+    return json
   }
 }
 
