@@ -46,8 +46,9 @@ Do not merge these.
 - `docker-compose.local.yml`
 - Authelia leftover notes (Authelia was removed)
 - Email local policy (not the `\Seen` fix): `owner_forward_to` for unknown senders; known people on the trust store auto-send (`always_send` on that path). Do not take this as the upstream default — upstream stays `approval_policy`.
-- `extras/ivy-local/` — Corona / Rolodex / OneNote stdio MCP wrappers for this host (`127.0.0.1:12701`, Ivy Rolodex cache, `~/.asmltr/onenote` creds). Eve: skip.
-- `~/.asmltr/mcp.json` corona / rolodex / onenote entries and `grok mcp add` of those servers
-- `~/.asmltr/rolodex-cache` (Ivy contacts cache + aliases; 07:30 ET `ivy-rolodex-sync.timer`)
-- `~/.asmltr/onenote/{token.json,.client.json}` (mode 600; already on the host)
-- user unit `ivy-rolodex-sync.timer` / `ivy-rolodex-sync.service`
+- `extras/ivy-local/` — osiris-only Corona / Rolodex / OneNote stdio MCP wrappers. Eve: skip. Localhost only (`127.0.0.1:12701` Corona, `127.0.0.1:12702` Rolodex). Register with `extras/ivy-local/register.sh` (`~/.asmltr/mcp.json` + `grok mcp add`). Not asmltr core. Do **not** enable Corona `/say` for Ivy.
+- Cigar writeup: lead with kektech `#cigars` (who, when in America/New_York 24-hour, what they said). Then a section headed exactly `Additional notes from the web`. Corona is keyword-dumb, newest-first.
+- Ivy Rolodex cache: `~/.asmltr/rolodex-cache/` (not `/home/adjutant/rolodex`, not Adjutant’s 08:00 box cache at `/home/box/rolodex-data`). Daily `systemd --user` `ivy-rolodex-sync.timer` at **07:30 America/New_York** (`OnCalendar` + `OnBootSec` + `Persistent=true`). Sync writes **only** `contacts.json` from `GET /export`. Never overwrite `aliases.json`.
+- Ivy aliases (seeded if missing, never clobbered): `mom` / `eileen` / `mother` → Eileen Watt (also Eileen Miller, `eileen@gtwy.net`); `wife` / `jess` → Jess Watt (`jk@gtwy.net`); `joey` → Joey Kapolka; `steve` → Steve Allison. Prefer the obvious display-name match.
+- OneNote (Ownership Notebook): `extras/ivy-local/onenote/` talks Graph if osiris-local creds exist at `~/.asmltr/onenote/{.client.json,token.json}` mode 600. Do not copy or invent tokens. Do not commit those files.
+- `~/.asmltr/mcp.json` corona / rolodex / onenote entries and user unit `ivy-rolodex-sync.timer` / `ivy-rolodex-sync.service`.

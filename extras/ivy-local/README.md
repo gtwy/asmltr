@@ -38,3 +38,15 @@ systemctl --user list-timers ivy-rolodex-sync.timer
 ```
 
 Do not commit `token.json`, `.client.json`, cache JSON, or `.venv`.
+
+## Cigar writeup
+
+Lead with kektech `#cigars` (who, when in America/New_York 24-hour, what they said).
+Then a section headed exactly `Additional notes from the web`. Corona is keyword-dumb, newest-first.
+No `/say` for Ivy.
+
+## Aliases
+
+`mom` / `eileen` / `mother` → Eileen Watt (Eileen Miller). `wife` / `jess` → Jess Watt.
+`joey` → Joey Kapolka. `steve` → Steve Allison. Sync never overwrites `aliases.json`.
+

@@ -82,7 +82,12 @@ def corona_recipe(query: str | None = None, thread_id: str | None = None) -> str
 
 @mcp.tool()
 def corona_cigars(query: str | None = None, message_id: str | None = None) -> str:
-    """Search Corona cigar notes. Provide query or message_id (one required)."""
+    """Search kektech #cigars via Corona. Provide query or message_id.
+
+    Corona is keyword-dumb and newest-first. When writing up cigars for James:
+    lead with kektech #cigars (who, when in America/New_York 24-hour, what they
+    said). Then a section headed exactly "Additional notes from the web".
+    """
     params = _require_one({"q": query, "message_id": message_id}, "query or message_id")
     if isinstance(params, str):
         return params
