@@ -92,10 +92,16 @@ function appendTurn({ conversationKey, channel, userText, assistantText, ts } = 
  * Read durable memory for a fresh engine session and return a block to inject
  * into the system prompt. Empty string if nothing has been written yet.
  * This is the retrieve path: write-only is a fail.
+ *
+ * `includeLastTopics` (default false): the global last-topics index is cross-principal.
+ * Only full-trust / owner sessions should pass true (cross-channel continuity for the
+ * operator). Everyone else gets this conversation_key's transcript only.
  */
-function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = INJECT_CHARS } = {}) {
+function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = INJECT_CHARS, includeLastTopics = false } = {}) {
   let topics = '';
-  try { topics = fs.readFileSync(lastTopicsPath(), 'utf8'); } catch (_) {}
+  if (includeLastTopics) {
+    try { topics = fs.readFileSync(lastTopicsPath(), 'utf8'); } catch (_) {}
+  }
   let transcript = '';
   try { transcript = fs.readFileSync(transcriptAbs(conversationKey || 'unknown'), 'utf8'); } catch (_) {}
   const chunks = transcript.split(/^## /m).filter(Boolean);

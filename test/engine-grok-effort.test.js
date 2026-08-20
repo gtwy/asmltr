@@ -357,6 +357,21 @@ test('zip code / lastEffort inherit are not xhigh', () => {
   }
 });
 
+test('ASMLTR_GROK_XHIGH_CHANNELS is ignored; email/mcp still force xhigh', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  process.env.ASMLTR_GROK_XHIGH_CHANNELS = 'discord,telegram';
+  try {
+    assert.equal(grok.chooseEffort({ prompt: 'hello', cwd: noGit, channel: 'discord' }), 'medium');
+    assert.equal(grok.chooseEffort({ prompt: 'hello', cwd: noGit, channel: 'telegram' }), 'medium');
+    assert.equal(grok.chooseEffort({ prompt: 'hello', cwd: noGit, channel: 'email' }), 'xhigh');
+    assert.equal(grok.classifyEffort({ prompt: 'hello', cwd: noGit, channel: 'email' }).reason, 'email');
+    assert.equal(grok.chooseEffort({ prompt: 'hello', cwd: noGit, channel: 'mcp' }), 'xhigh');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+    delete process.env.ASMLTR_GROK_XHIGH_CHANNELS;
+  }
+});
+
 test('email channel forces xhigh even without code words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {

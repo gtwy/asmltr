@@ -101,6 +101,86 @@ function isAutomatedSender(addr) {
   return /(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(String(addr || ''));
 }
 
+function ownerFromEmail() {
+  return String(process.env.ASMLTR_OWNER_FROM_EMAIL || '').trim().toLowerCase();
+}
+
+/** Flatten a mailparser header value to text. */
+function headerLine(parsed, name) {
+  if (!parsed) return '';
+  const key = String(name || '').toLowerCase();
+  let v;
+  if (parsed.headers && typeof parsed.headers.get === 'function') v = parsed.headers.get(key);
+  if (v == null && parsed.headers && typeof parsed.headers.get === 'function') v = parsed.headers.get(name);
+  if (v == null && parsed.headerLines && Array.isArray(parsed.headerLines)) {
+    const lines = parsed.headerLines
+      .filter((h) => h && String(h.key || '').toLowerCase() === key)
+      .map((h) => h.line || h.value)
+      .filter(Boolean);
+    if (lines.length) return lines.join('\n');
+  }
+  if (v == null) return '';
+  if (Array.isArray(v)) return v.map((x) => (x && x.value != null ? x.value : x)).filter(Boolean).join('\n');
+  if (typeof v === 'object' && v.value != null) return String(v.value);
+  return String(v);
+}
+
+/**
+ * Parse DKIM/SPF/DMARC from an Authentication-Results (or ARC) header.
+ * First token wins per method. Unknown methods ignored.
+ */
+function parseAuthResults(headerText) {
+  const out = { dkim: null, spf: null, dmarc: null };
+  const s = String(headerText || '');
+  if (!s.trim()) return out;
+  const re = /\b(dkim|spf|dmarc)\s*=\s*(pass|fail|softfail|neutral|none|temperror|permerror|bestguesspass|policy)/gi;
+  let m;
+  while ((m = re.exec(s))) {
+    const k = m[1].toLowerCase();
+    if (!out[k]) out[k] = m[2].toLowerCase();
+  }
+  return out;
+}
+
+function authHeaderText(parsed) {
+  return headerLine(parsed, 'authentication-results') || headerLine(parsed, 'arc-authentication-results');
+}
+
+/**
+ * Disposition of inbound auth headers. Missing header → present=false, failed=false
+ * (do not lock out mail from servers that omit the header).
+ * passed: DMARC pass, or DKIM+SPF both pass.
+ * failed: a fail/softfail and not passed (DMARC pass wins).
+ */
+function authDisposition(parsed) {
+  const raw = authHeaderText(parsed);
+  const results = parseAuthResults(raw);
+  const present = !!String(raw || '').trim();
+  const passed = results.dmarc === 'pass' || (results.dkim === 'pass' && results.spf === 'pass');
+  const anyFail = results.dmarc === 'fail'
+    || results.dkim === 'fail'
+    || results.spf === 'fail'
+    || results.spf === 'softfail';
+  const failed = present && !passed && anyFail;
+  return { present, results, passed, failed, raw: present ? raw : '' };
+}
+
+function formatAuthSummary(auth) {
+  if (!auth || !auth.present) {
+    return 'Inbound Authentication-Results: none on this message; identity is From-address only.';
+  }
+  const r = auth.results || {};
+  return `Inbound Authentication-Results: DKIM=${r.dkim || 'n/a'} SPF=${r.spf || 'n/a'} DMARC=${r.dmarc || 'n/a'}.`;
+}
+
+/** True when From claims to be ASMLTR_OWNER_FROM_EMAIL but DKIM/SPF/DMARC failed. */
+function ownerAuthRejected(fromAddr, auth) {
+  const owner = ownerFromEmail();
+  if (!owner) return false;
+  if (String(fromAddr || '').trim().toLowerCase() !== owner) return false;
+  return !!(auth && auth.failed);
+}
+
 function defaultOpsAllowthroughPath() {
   return process.env.ASMLTR_OPS_ALLOWTHROUGH
     || path.join(os.homedir(), '.asmltr', 'silos', 'self', 'memory', 'ops', 'allowthrough.json');
@@ -256,6 +336,18 @@ async function start(ctx) {
 
     ctx.emit({ event_type: 'inbound', session_id: convKey, identity: fromAddr, payload: { text: `${subject} — ${body.slice(0, 160)}` } });
 
+    const auth = authDisposition(parsed);
+    if (ownerAuthRejected(fromAddr, auth)) {
+      const warnTo = ownerForward || ownerFromEmail();
+      const summary = formatAuthSummary(auth);
+      ctx.log(`owner-from auth fail ${fromAddr} — ${summary} — no trusted turn`);
+      if (warnTo) {
+        const fwd = `Ivy did not treat this as you. From claims ${fromAddr} but inbound auth failed.\n${summary}\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
+        await sendMail({ to: warnTo, subject: `Fwd: [auth fail] ${subject}`, text: fwd });
+      }
+      return { handled: true };
+    }
+
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
     // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
@@ -278,7 +370,8 @@ async function start(ctx) {
       `Do not type a name or signature block — "${fromName}" and the rest of the signature are appended automatically. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
       `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
-      `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type.`;
+      `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
+      formatAuthSummary(auth);
     if (opsHit) {
       extra += ` This message matched ops matcher '${opsHit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
     }
@@ -291,7 +384,10 @@ async function start(ctx) {
       delivery: 'sync',
       capabilities: meta.capabilities,
       public: false, // 1:1 mail; redaction still applies unless the sender is full-trust
-      channel_context: { from: fromAddr, subject, ops_matcher: opsHit ? (opsHit.id || true) : undefined },
+      channel_context: {
+        from: fromAddr, subject, ops_matcher: opsHit ? (opsHit.id || true) : undefined,
+        auth: { present: auth.present, passed: auth.passed, failed: auth.failed, dkim: auth.results.dkim, spf: auth.results.spf, dmarc: auth.results.dmarc },
+      },
       approval: { policy: sendPolicy, recipient: fromAddr, subject: replySubject },
       system_prompt_extra: extra,
     });
@@ -525,4 +621,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, ownerAuthRejected, headerLine };
