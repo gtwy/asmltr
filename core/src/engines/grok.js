@@ -218,17 +218,17 @@ function matchToken(re, text) {
   return String(m[0]).toLowerCase().replace(/\s+/g, ' ').slice(0, 32);
 }
 
-/** True if one sentence contains both whole words commit and push. Bare commit is not xhigh. */
-function commitAndPushSameSentence(text) {
-  const chunks = String(text || '').split(/[.!?]+\s*|\n+/);
-  return chunks.some((sent) => /\bcommit\b/i.test(sent) && /\bpush\b/i.test(sent));
+/** True if this post contains both whole words commit and push. Bare commit is not xhigh. */
+function commitAndPushSamePost(text) {
+  const s = String(text || '');
+  return /\bcommit\b/i.test(s) && /\bpush\b/i.test(s);
 }
 
 function xhighReason(prompt) {
   const s = String(prompt || '');
   const m = matchToken(XHIGH_RE, s);
   if (m) return m;
-  if (commitAndPushSameSentence(s)) return 'commit-push';
+  if (commitAndPushSamePost(s)) return 'commit-push';
   if (CODE_WORD_RE.test(s) && !CODE_WORD_EXCLUDE_RE.test(s)) return 'code';
   return '';
 }
@@ -666,6 +666,6 @@ module.exports = {
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
-  canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet, commitAndPushSameSentence,
+  canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet, commitAndPushSamePost,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };
