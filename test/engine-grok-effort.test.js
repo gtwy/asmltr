@@ -451,7 +451,7 @@ test('mcp channel forces xhigh even without code words', () => {
   }
 });
 
-test('one-shot next-effort still wins over mcp xhigh', () => {
+test('mcp xhigh wins over one-shot next-effort', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     assert.equal(grok.chooseEffort({
@@ -459,21 +459,21 @@ test('one-shot next-effort still wins over mcp xhigh', () => {
       cwd: noGit,
       channel: 'mcp',
       nextEffort: 'medium',
-    }), 'medium');
+    }), 'xhigh');
     const args = grok.buildArgs({
       prompt: 'Thanks for the update, see you Monday',
       cwd: noGit,
       channel: 'mcp',
       nextEffort: 'medium',
     });
-    assert.equal(effortOf(args), 'medium');
+    assert.equal(effortOf(args), 'xhigh');
     assertNoMaxTurns(args);
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
 
-test('one-shot next-effort still wins over email xhigh', () => {
+test('email xhigh wins over one-shot next-effort', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     assert.equal(grok.chooseEffort({
@@ -481,14 +481,14 @@ test('one-shot next-effort still wins over email xhigh', () => {
       cwd: noGit,
       channel: 'email',
       nextEffort: 'medium',
-    }), 'medium');
+    }), 'xhigh');
     const args = grok.buildArgs({
       prompt: 'Thanks for the update, see you Monday',
       cwd: noGit,
       channel: 'email',
       nextEffort: 'medium',
     });
-    assert.equal(effortOf(args), 'medium');
+    assert.equal(effortOf(args), 'xhigh');
     assertNoMaxTurns(args);
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;

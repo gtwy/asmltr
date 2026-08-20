@@ -101,16 +101,16 @@ function isOwnerFromEmail(opts) {
 //           picture/image/graphic/cartoon/painting/drawing/photo/photograph/pic.
 //           Bare "code" is not xhigh.
 //           Project git cwd that is not $HOME.
-//           Email and MCP are always xhigh after one-shot.
+//           Email and MCP are always xhigh (even vs one-shot / +xh).
 //   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
 //   repo and would xhigh every ask). Use the session/turn cwd if provided.
 //   Score opts.effortPrompt when set (current user message only) — NOT
 //   drainObserved/catch-up glued onto prompt in server.js.
 //   Tight: do not treat bare "fix" as xhigh (Eve "Proposed Fix", "quick fix").
-//   One-shot next-effort still wins. complete() skips auto-raise.
+//   One-shot next-effort wins on Discord/web, not on email/mcp. complete() skips auto-raise.
 //   Web (assistant-web, assistant-native, eve-assistant-web, eve-assistant-native)
 //   is always high AFTER one-shot/explicit. No +h/+xh, no word picker.
-//   Email (`email`) and MCP (`mcp`) force xhigh AFTER one-shot (a chatty body
+//   Email (`email`) and MCP (`mcp`) force xhigh always (a chatty body
 //   with no code words is still xhigh). Discord keeps the three-tier picker
 //   (+h/+xh/word/git). Do not inherit last effort. Do not use a generic
 //   XHIGH_CHANNELS list. No spawn kill timer. No CLI turn cap. Do not apply
@@ -292,20 +292,21 @@ function takeNextEffort(conversationKey) {
  */
 function classifyEffort(opts) {
   opts = opts || {};
+  if (opts.complete) return { effort: envEffort(), reason: 'complete' };
+  // Email and MCP are always xhigh. Do not let one-shot / +xh / the word picker
+  // drop a mailbox turn to medium. Server must pass opts.channel or this is a no-op.
+  if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
+  if (isMcpChannel(opts.channel)) return { effort: 'xhigh', reason: 'mcp' };
   const oneshotNext = normalizeEffort(opts.nextEffort);
   if (oneshotNext) return { effort: oneshotNext, reason: 'oneshot' };
   const oneshotExplicit = normalizeEffort(opts.effort);
   if (oneshotExplicit) return { effort: oneshotExplicit, reason: 'explicit' };
-  if (opts.complete) return { effort: envEffort(), reason: 'complete' };
   // After one-shot/explicit: web is always high (no token, no word picker).
   if (isWebChannel(opts.channel)) return { effort: 'high', reason: 'web' };
   const token = detectElevateToken(scoringPrompt(opts));
   if (token && canElevateEffort(opts)) {
     return { effort: token === '+xh' ? 'xhigh' : 'high', reason: 'token:' + token, stripToken: token };
   }
-  // After one-shot: inbound email and mcp are always xhigh. Discord keeps the three-tier score.
-  if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
-  if (isMcpChannel(opts.channel)) return { effort: 'xhigh', reason: 'mcp' };
   const scored = scoringPrompt(opts);
   const codeTok = xhighReason(scored);
   const git = isProjectGitRepo(opts.cwd);
@@ -584,7 +585,8 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
-  const nextEffort = takeNextEffort(conversationKey);
+  // Do not consume ~/.asmltr/next-effort on email/mcp — those channels are always xhigh.
+  const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel)) ? null : takeNextEffort(conversationKey);
   const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender };
   const classified = classifyEffort(effortOpts);
   const effort = classified.effort;
