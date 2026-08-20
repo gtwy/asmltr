@@ -231,7 +231,7 @@ test('applyEvent: time. + The as complete-shaped events stay honest, not replace
   assert.deepEqual(state.segments, []);
 });
 
-test('applyEvent: James kettle incremental draft + tool + answer stores FINAL only', () => {
+test('applyEvent: owner kettle incremental draft + tool + answer stores FINAL only', () => {
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';
   const fin = 'TEST-FINAL: the tea is poured.';
@@ -256,7 +256,7 @@ test('applyEvent: James kettle incremental draft + tool + answer stores FINAL on
   assert.ok(!state.text.includes('on.Yes'));
 });
 
-test('applyEvent: James kettle snapshots last complete block wins', () => {
+test('applyEvent: owner kettle snapshots last complete block wins', () => {
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';
   const fin = 'TEST-FINAL: the tea is poured.';

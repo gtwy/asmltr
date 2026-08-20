@@ -96,7 +96,7 @@ test('applySegment: time. + The is honest concat, not a narration replace', asyn
   assert.equal(applySegment('time.', 'The'), 'time.The');
 });
 
-test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', async () => {
+test('applySegment: owner kettle draft then answer is FINAL only, not on.Yes', async () => {
   const { applySegment, preferLastBlock, isCompleteBlock } = await import(helperUrl);
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';

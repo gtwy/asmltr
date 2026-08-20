@@ -366,7 +366,7 @@ test('mcp channel forces xhigh + 60m even without code words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const prompt = 'Thanks for the update, see you Monday';
-    const chatty = 'Adjutant here, peer to peer. Can you take a look when you have a minute?';
+    const chatty = 'operator here, peer to peer. Can you take a look when you have a minute?';
     for (const p of [prompt, chatty]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'mcp' }), 'xhigh', p.slice(0, 40));
       assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'mcp' })), 'xhigh');
