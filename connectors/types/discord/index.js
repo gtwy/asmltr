@@ -88,7 +88,7 @@ const meta = {
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
       voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
-      stream_steps: { type: 'boolean', title: 'Post intermediary narration steps to the thread live as they land (only when directly addressed)', default: true },
+      stream_steps: { type: 'boolean', title: 'Post intermediary narration and thought summaries to the thread live as they land (only when directly addressed)', default: true },
       stream_tools: { type: 'boolean', title: 'Also post a subdued line for each tool call while streaming steps', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
@@ -500,6 +500,12 @@ RESPONSE RULES:
         const actions = await ctx.core.handleStream(envelope, {
           onSegment: (t) => { flushStep(); pending = t; },  // a new block ⇒ the prior one was intermediary
           onTool: (name) => { flushStep(); if (streamTools) enqueue(() => message.channel.send(`-# 🔧 \`${name}\``)); }, // a tool ⇒ post the block NOW
+          // grok.com-style thought summaries. Closed blocks, not tokens. Not the final answer.
+          onThinking: (t) => {
+            const clean = String(t || '').trim();
+            if (!clean || sawNoReply) return;
+            enqueue(() => message.channel.send(renderStep('💭 ' + clean)));
+          },
         });
         await chain; // all step messages posted before the final answer
         const reply = actions.find(a => a.type === 'reply');

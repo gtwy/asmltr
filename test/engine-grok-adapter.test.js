@@ -108,7 +108,8 @@ test('streaming-json parser maps text / thought / tool_call / usage / sessionId 
   assert.equal(state.text, 'Hi');
   assert.equal(grok.applyEvent(grok.parseLine(`{"type":"text","data":"pong"}`), state).kind, 'delta');
   assert.equal(state.text, 'Hipong');
-  assert.equal(grok.applyEvent({ type: 'thought', text: 'hmm' }, state).kind, 'thinking');
+  assert.equal(grok.applyEvent({ type: 'thought', text: 'hmm' }, state).kind, 'thinking-delta');
+  assert.equal(state.thinking, 'hmm');
   assert.equal(grok.applyEvent({ type: 'tool_call', name: 'shell', input: { cmd: 'ls' } }, state).kind, 'tool');
   assert.equal(state.tools[0].name, 'shell');
   assert.equal(grok.applyEvent({ type: 'usage', usage: { input_tokens: 10, output_tokens: 4 } }, state).kind, 'usage');
@@ -230,8 +231,27 @@ test('parseLine unwraps ACP agent_thought_chunk as thought', () => {
   assert.equal(ev.text, 'checking mail');
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   const r = grok.applyEvent(ev, state);
-  assert.equal(r.kind, 'thinking');
-  assert.equal(r.thinking, 'checking mail');
+  assert.equal(r.kind, 'thinking-delta');
+  assert.equal(state.thinking, 'checking mail');
+});
+
+test('applyEvent: thought chunks coalesce and flush on tool / text / end', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  assert.equal(grok.applyEvent({ type: 'thought', data: 'Checking' }, state).kind, 'thinking-delta');
+  assert.equal(grok.applyEvent({ type: 'thought', data: ' mail' }, state).kind, 'thinking-delta');
+  assert.equal(state.thinking, 'Checking mail');
+  const tool = grok.applyEvent({ type: 'tool_call', name: 'read_file', input: { path: '/tmp/x' } }, state);
+  assert.equal(tool.kind, 'tool');
+  assert.equal(tool.closedThinking, 'Checking mail');
+  assert.equal(state.thinking, '');
+  grok.applyEvent({ type: 'thought', text: 'Now answer' }, state);
+  const text = grok.applyEvent({ type: 'text', data: 'Hi' }, state);
+  assert.equal(text.kind, 'delta');
+  assert.equal(text.closedThinking, 'Now answer');
+  grok.applyEvent({ type: 'thought', data: 'Wrap up' }, state);
+  const end = grok.applyEvent({ type: 'end', sessionId: '11111111-2222-3333-4444-555555555555' }, state);
+  assert.equal(end.kind, 'end');
+  assert.equal(end.closedThinking, 'Wrap up');
 });
 
 test('applyEvent: tool call closes narration so later text is not glued', () => {

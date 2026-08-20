@@ -271,13 +271,23 @@ watch(key, () => { load(); nextTick(bindScrollerListeners) })
 // ---- chat rows (events → transcript) ----------------------------------------
 // eventRow (event → chat row) lives in @/lib/transcript so this chat and the Schedules last-run
 // transcript render identically. Local turns (web streaming) are appended below.
-const localTurns = ref([]) // web sessions: { user, reply, tools:[], streaming, error, ts }
+const localTurns = ref([]) // web sessions: { user, reply, tools:[], steps:[], streaming, error, ts }
 const rows = computed(() => {
   const out = history.value.map(eventRow)
   for (const t of localTurns.value) {
     out.push({ kind: 'user', text: t.user, ts: t.ts })
-    if (t.tools?.length) out.push({ kind: 'activity', icon: '🔧', label: `using ${t.tools.join(', ')}`, text: '', ts: t.ts + 1 })
-    out.push({ kind: 'assistant', text: t.reply, streaming: t.streaming, error: t.error, ts: t.ts + 2 })
+    let n = 1
+    if (t.steps?.length) {
+      for (const s of t.steps) {
+        if (s.kind === 'thinking') out.push({ kind: 'activity', icon: '💭', label: 'thinking', text: s.text, ts: t.ts + n })
+        else if (s.kind === 'tool') out.push({ kind: 'activity', icon: '🔧', label: s.name || 'tool', text: '', ts: t.ts + n })
+        n++
+      }
+    } else if (t.tools?.length) {
+      out.push({ kind: 'activity', icon: '🔧', label: `using ${t.tools.join(', ')}`, text: '', ts: t.ts + n })
+      n++
+    }
+    out.push({ kind: 'assistant', text: t.reply, streaming: t.streaming, error: t.error, ts: t.ts + n + 1 })
   }
   return out
 })
@@ -316,7 +326,7 @@ function webSend() {
   const files = attached.value.slice()
   let body = text
   if (files.length) body += '\n\n' + files.map((f) => `[Attached file: ${f.name} → ${f.path}]`).join('\n')
-  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now(), blockClosed: false })
+  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], steps: [], streaming: true, error: null, ts: Date.now(), blockClosed: false })
   localTurns.value = [...localTurns.value, turn]
   stickToBottom.value = true
   scrollToBottom(true)
@@ -333,7 +343,13 @@ function webSend() {
       },
       onTool: (name) => {
         if (name && !turn.tools.includes(name)) { turn.tools = [...turn.tools, name] }
+        if (name) turn.steps = [...turn.steps, { kind: 'tool', name }]
         turn.blockClosed = true
+        bumpStream()
+      },
+      onThinking: (t) => {
+        const s = String(t || '').trim()
+        if (s) turn.steps = [...turn.steps, { kind: 'thinking', text: s }]
         bumpStream()
       },
       onSegment: (t) => {
