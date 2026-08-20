@@ -38,11 +38,27 @@ async function imapNoopProbe(imap, timeoutMs = 15000) {
   await Promise.race([np, new Promise((_, rej) => setTimeout(() => rej(new Error('noop timeout')), timeoutMs))]);
 }
 
-// Mid-fetch / lock errors that mean the IMAP handle is dead even if 'close' never fired.
-// fetchNew close()s on these so the close handler reconnects. Exported for tests.
+// Connection-class IMAP errors: the handle is dead; close() so the close handler reconnects.
+// Exported for tests.
 function isImapConnectionError(err) {
-  const m = String((err && err.message) || err || '').toLowerCase();
-  return /connection not available|not connected|\bsocket\b|\bclosed\b|\btimeout\b|econnreset|econnrefused|epipe|enotconn|etimedout/.test(m);
+  const msg = String((err && err.message) || err || '').toLowerCase();
+  return /connection not available|not connected|socket|closed|timeout/.test(msg);
+}
+
+// True when the mailbox tip is ahead of lastUid (UIDs we have not fetched yet).
+function moreUidsWaiting(mailbox, lastUid) {
+  if (!mailbox) return false;
+  const uidNext = Number(mailbox.uidNext);
+  return Number.isFinite(uidNext) && uidNext > lastUid + 1;
+}
+
+// Extra fetchNew pass after busy=false. EXISTS-during-busy is pendingExists; also
+// refetch when the first pass advanced and uidNext still has more. Do not loop on a
+// failed uid (more UIDs but no progress and no pending EXISTS).
+function shouldExtraFetchPass({ stopped, usable, pendingExists, mailbox, lastUid, progressed }) {
+  if (stopped || !usable) return false;
+  if (pendingExists) return true;
+  return !!(progressed && moreUidsWaiting(mailbox, lastUid));
 }
 
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -300,95 +316,99 @@ async function start(ctx) {
   // baseline is the mailbox tip, so we only react to mail that arrives AFTER we start watching
   // (unless process_backlog). The cursor survives reconnects, so mail during a blip isn't missed.
   const persistedUid = readLastUid(ctx.instanceId);
-  let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false, connecting = false;
-  let reconnectTimer = null;
-  function scheduleConnectImap() {
+  let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false;
+  let connecting = false, pendingExists = false, reconnectTimer = null;
+  function scheduleReconnect() {
     if (stopped || connecting || reconnectTimer) return;
-    if (imap && imap.usable) return;
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (!stopped) connectImap();
-    }, 10000);
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectImap(); }, 10000);
+    if (reconnectTimer.unref) reconnectTimer.unref();
   }
   async function fetchNew() {
-    if (!imap || !imap.usable || busy) return;
+    if (!imap || !imap.usable) return;
+    if (busy) { pendingExists = true; return; } // EXISTS during busy — extra pass after we clear busy
     busy = true;
-    let lock;
+    let progressed = false;
+    let lock = null;
     try {
       lock = await imap.getMailboxLock(MAILBOX);
-      for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
-        if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
-        try {
-          const result = await processMessage(await simpleParser(msg.source));
-          // Gmail/IMAP unread is \Seen, not our UID cursor. Mark mail we actually handled
-          // so the inbox matches what Ivy has already seen. Skip noreply/self.
-          if (result && result.handled) {
-            try { await imap.messageFlagsAdd({ uid: msg.uid }, ['\\Seen'], { uid: true }); }
-            catch (e) { ctx.log(`mark seen uid ${msg.uid}: ${e.message}`); }
-            // Advance + persist only on handled. Hang-up / parse failure must leave
-            // lastUid so the next start or exists re-fetches this uid.
-            if (msg.uid > lastUid) {
-              lastUid = msg.uid;
-              try { persistLastUid(ctx.instanceId, lastUid); }
-              catch (e) { ctx.log(`persist lastUid ${lastUid}: ${e.message}`); }
+      try {
+        for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
+          if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
+          try {
+            const result = await processMessage(await simpleParser(msg.source));
+            // Gmail/IMAP unread is \Seen, not our UID cursor. Mark mail we actually handled
+            // so the inbox matches what Ivy has already seen. Skip noreply/self.
+            if (result && result.handled) {
+              try { await imap.messageFlagsAdd({ uid: msg.uid }, ['\\Seen'], { uid: true }); }
+              catch (e) { ctx.log(`mark seen uid ${msg.uid}: ${e.message}`); }
+              // Advance + persist only on handled. Hang-up / parse failure must leave
+              // lastUid so the next start or exists re-fetches this uid.
+              if (msg.uid > lastUid) {
+                lastUid = msg.uid;
+                progressed = true;
+                try { persistLastUid(ctx.instanceId, lastUid); }
+                catch (e) { ctx.log(`persist lastUid ${lastUid}: ${e.message}`); }
+              }
             }
+          } catch (e) {
+            ctx.log(`process failed uid ${msg.uid}: ${e.message}`);
+            break; // do not walk past a failed uid; retry it next fetch
           }
-        } catch (e) {
-          ctx.log(`process failed uid ${msg.uid}: ${e.message}`);
-          break; // do not walk past a failed uid; retry it next fetch
         }
-      }
+      } finally { lock.release(); }
     } catch (e) {
       ctx.log(`fetchNew: ${e.message}`);
       if (isImapConnectionError(e)) {
-        try { if (imap) imap.close(); } catch (_) {}
+        try { imap.close(); } catch (_) {}
       }
-    } finally {
-      try { if (lock) lock.release(); } catch (_) {}
-      busy = false;
-    }
+    } finally { busy = false; }
+    const again = shouldExtraFetchPass({
+      stopped, usable: !!(imap && imap.usable), pendingExists,
+      mailbox: imap && imap.mailbox, lastUid, progressed,
+    });
+    pendingExists = false;
+    if (again) return fetchNew();
   }
   async function connectImap() {
     if (stopped || connecting) return;
     connecting = true;
-    let failed = false;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    const prev = imap;
+    const client = new ImapFlow({ host: cfg.imap_host, port: cfg.imap_port || 993, secure: true, auth: { user: address, pass: password }, logger: false });
+    imap = client;
+    client.on('exists', () => fetchNew().catch((e) => ctx.log(`fetchNew: ${e.message}`)));
+    client.on('error', (e) => ctx.log(`imap error: ${e.message}`));
+    client.on('close', () => {
+      if (imap !== client) return; // stale handle after a newer connect
+      if (!stopped) { ctx.log('imap closed — reconnecting in 10s'); scheduleReconnect(); }
+    });
+    if (prev && prev !== client) { try { prev.close(); } catch (_) {} }
     try {
-      imap = new ImapFlow({ host: cfg.imap_host, port: cfg.imap_port || 993, secure: true, auth: { user: address, pass: password }, logger: false });
-      imap.on('exists', () => fetchNew().catch((e) => ctx.log(`fetchNew: ${e.message}`)));
-      imap.on('error', (e) => ctx.log(`imap error: ${e.message}`));
-      imap.on('close', () => { if (!stopped) { ctx.log('imap closed — reconnecting in 10s'); scheduleConnectImap(); } });
-      await imap.connect();
-      const mb = await imap.mailboxOpen(MAILBOX);
+      await client.connect();
+      const mb = await client.mailboxOpen(MAILBOX);
       if (lastUid < 0) lastUid = cfg.process_backlog ? 0 : ((mb.uidNext || 1) - 1); // baseline once, keep across reconnects
       ctx.log(`watching ${address} · ${MAILBOX} · policy=${policy} · from uid>${lastUid}`);
       try { ctx.heartbeat(); } catch (_) {} // connected + mailbox open → the watcher's I/O path is alive
       await fetchNew().catch((e) => ctx.log(`initial fetch: ${e.message}`));
     } catch (e) {
       ctx.log(`imap connect failed: ${e.message}`);
-      const dead = imap;
-      imap = null;
-      try { if (dead) dead.close(); } catch (_) {}
-      failed = true;
-    } finally {
-      connecting = false;
-    }
-    if (failed && !stopped) scheduleConnectImap();
+      try { if (imap === client) client.close(); } catch (_) {}
+      if (imap === client) imap = null;
+      if (!stopped) scheduleReconnect();
+    } finally { connecting = false; }
   }
   connectImap();
 
   // Liveness watchdog: IDLE can silently die (a half-open connection that never emits 'close'), leaving
   // the watcher deaf while the process stays up. A periodic NOOP proves the link end-to-end: success →
   // heartbeat (the manager sees it healthy); failure/stall → force a reconnect (close() → the 'close'
-  // handler above reconnects). If the handle is already gone (`!imap || !imap.usable`), schedule
-  // connectImap instead of returning as a no-op — otherwise a failed first connect stays deaf forever.
+  // handler above reconnects). If the handle is already gone (!imap / !usable), do not no-op — schedule
+  // connectImap (connecting flag + 10s backoff so retries do not stack). This closes the email half of #34.
   let probing = false;
   const probeTimer = setInterval(async () => {
-    if (stopped || probing) return;
-    if (!imap || !imap.usable) {
-      ctx.log('imap probe: handle dead — scheduling reconnect');
-      scheduleConnectImap();
-      return;
-    }
+    if (stopped) return;
+    if (!imap || !imap.usable) { connectImap(); return; } // dead handle → heal; do not return as a no-op
+    if (probing) return;
     probing = true;
     try { await imapNoopProbe(imap); ctx.heartbeat(); }
     catch (e) { ctx.log(`imap probe failed (${e.message}) — forcing reconnect`); try { imap.close(); } catch (_) {} }
@@ -505,4 +525,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid };
