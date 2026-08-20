@@ -495,6 +495,13 @@ function closeTextBlock(state) {
   return cur;
 }
 
+/** Finished thought summary (grok.com-style chips), not a streaming token. */
+function closeThinking(state) {
+  const cur = String((state && state.thinking) || '');
+  if (state) state.thinking = '';
+  return cur;
+}
+
 function extractText(obj) {
   if (!obj || typeof obj !== 'object') return '';
   const t = obj.type;
@@ -534,7 +541,7 @@ function applyEvent(ev, state) {
   const t = ev.type || ev.event || '';
   if (t === 'thought' || t === 'thinking') {
     const th = ev.text || ev.thought || ev.content || (typeof ev.data === 'string' ? ev.data : '') || '';
-    if (th) { state.thinking = (state.thinking || '') + String(th); return { kind: 'thinking', thinking: String(th) }; }
+    if (th) { state.thinking = (state.thinking || '') + String(th); return { kind: 'thinking-delta' }; }
     return { kind: 'ignore' };
   }
   if (t === 'tool_call' || t === 'tool_use' || t === 'function_call' || t === 'tool_call_update') {
@@ -544,18 +551,23 @@ function applyEvent(ev, state) {
     // Discord: a tool closes the pending narration block. Later text is a new
     // block — persistAskTurn must store the last block (the answer), not glue.
     let closed = '';
+    let closedThinking = '';
     if (t !== 'tool_call_update') {
+      closedThinking = closeThinking(state);
       closed = closeTextBlock(state);
       state.tools.push(tool);
     }
-    return { kind: 'tool', tool, closed };
+    return { kind: 'tool', tool, closed, closedThinking };
   }
   if (t === 'error' || ev.error) {
     state.isError = true;
     const msg = (ev.error && (ev.error.message || ev.error)) || ev.message || ev.text || 'grok error';
-    return { kind: 'error', error: String(msg) };
+    return { kind: 'error', error: String(msg), closedThinking: closeThinking(state) };
   }
-  if (t === 'usage' || t === 'end' || t === 'plan' || t === 'available_commands') {
+  if (t === 'end') {
+    return { kind: 'end', closedThinking: closeThinking(state) };
+  }
+  if (t === 'usage' || t === 'plan' || t === 'available_commands') {
     return { kind: t || 'meta' };
   }
   const text = extractText(ev);
@@ -569,6 +581,7 @@ function applyEvent(ev, state) {
     const prev = state.text || '';
     let joined;
     let closed = '';
+    const closedThinking = closeThinking(state);
     if (incremental) {
       joined = prev + text;
     } else if (text.startsWith(prev) && prev) {
@@ -584,7 +597,7 @@ function applyEvent(ev, state) {
     const replaced = !incremental && joined !== prev && !joined.startsWith(prev);
     const emitted = replaced ? joined : joined.slice(prev.length);
     state.text = joined;
-    return { kind: incremental ? 'delta' : 'text', text: emitted, closed };
+    return { kind: incremental ? 'delta' : 'text', text: emitted, closed, closedThinking };
   }
   return { kind: 'ignore' };
 }
@@ -628,12 +641,14 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     if (!ev) return;
     if (onEvent) { try { onEvent(ev); } catch (_) {} }
     const r = applyEvent(ev, state);
+    // Thought summaries (grok.com chips) close when a tool or answer starts.
+    // Emit the whole block once — not each streaming token.
+    if (r.closedThinking && onThinking) { try { onThinking(r.closedThinking); } catch (_) {} }
     // A tool (or a restated complete block) closes the live narration. Emit that
     // closed block as a segment so Discord/web can post it as an intermediary
     // step — incremental deltas never fire onSegment on their own.
     if (r.closed && onSegment) { try { onSegment(r.closed); } catch (_) {} }
-    if (r.kind === 'thinking' && r.thinking && onThinking) { try { onThinking(r.thinking); } catch (_) {} }
-    else if (r.kind === 'tool' && r.tool && onTool) { try { onTool(r.tool); } catch (_) {} }
+    if (r.kind === 'tool' && r.tool && onTool) { try { onTool(r.tool); } catch (_) {} }
     else if (r.kind === 'error' && r.error && onSegment) { try { onSegment(`⚠️ grok: ${r.error}`); } catch (_) {} }
     else if (r.kind === 'delta' && r.text != null && r.text !== '' && onDelta) { try { onDelta(r.text); } catch (_) {} }
     else if (r.kind === 'text' && r.text && onSegment) { try { onSegment(r.text); } catch (_) {} }
@@ -645,6 +660,10 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const code = await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
   clearTimeout(watchdog);
   if (buf.trim()) handleLine(buf);
+  if (state.thinking && onThinking) {
+    try { onThinking(state.thinking); } catch (_) {}
+    state.thinking = '';
+  }
   if (code !== 0 && !state.text) {
     state.isError = true;
     state.text = (stderr.trim().split('\n').slice(-1)[0] || `grok exited ${code}`);
@@ -683,7 +702,7 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
+  extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, timeoutMs, maxTurns,
   timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, MCP_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel, isMcpChannel,
   ownerFromEmail, OWNER_EMAIL_TIMEOUT_MS, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,

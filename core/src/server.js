@@ -562,8 +562,9 @@ async function handle(envelope, opts = {}) {
       // onToolCall (Claude SDK tool_use). Without this bridge the live
       // bubble never blockCloses and onDelta glues draft+answer (`on.Yes`).
       // Reset the token buffer so leftover flush cannot replay the draft.
-      // Always wire these so collector/dashboard get 💭/🔧 even when the
+      // Always wire tools so collector/dashboard get 🔧 even when the
       // connector is not streaming (email, or Discord with stream_steps off).
+      // Thinking is live-conversation only — never record or stream it on email.
       onTool: (t) => {
         _streamRaw = '';
         _emitted = 0;
@@ -577,6 +578,7 @@ async function handle(envelope, opts = {}) {
         try { if (opts.onToolCall) opts.onToolCall(t && typeof t === 'object' ? t : { name: t }); } catch (_) {}
       },
       onThinking: (t) => {
+        if (e.channel === 'email') return;
         try {
           record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core',
             event_type: 'thinking', payload: { text: truncate(t, 2000) } });
@@ -593,7 +595,7 @@ async function handle(envelope, opts = {}) {
         if (sdkEvt.type === 'assistant') {
           for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_use') { record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } }); if (opts.onToolCall) { try { opts.onToolCall({ name: c.name, input: c.input }); } catch (_) {} } }
-            else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
+            else if (c.type === 'thinking' && e.channel !== 'email') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
           }
         } else if (sdkEvt.type === 'user') {
           for (const c of sdkEvt.message?.content || []) {
@@ -1987,7 +1989,7 @@ app.post('/v2/inject', (req, res) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_use') record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } });
-            else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
+            else if (c.type === 'thinking' && row.channel !== 'email') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
           } else if (sdkEvt.type === 'user') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_result') record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } });
           }
