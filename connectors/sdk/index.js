@@ -46,6 +46,16 @@ function makeCoreClient(coreUrl) {
   // turns (which emit data) are unaffected; a genuinely silent turn beyond this is treated as dead.
   const REQ_TIMEOUT = Number(process.env.ASMLTR_CORE_TIMEOUT_MS || 15 * 60 * 1000);
   const guard = (req) => { req.setTimeout(REQ_TIMEOUT, () => req.destroy(new Error('core request timed out (connection dropped?)'))); };
+  // Premature close: the core dies AFTER response headers are sent (the common case — it restarts
+  // mid-turn). Node then emits ONLY 'aborted'/'error' on the RESPONSE: `req.on('error')` never fires,
+  // 'end' never fires, and nothing throws — so without this the promise never settles at all. The
+  // `guard` above can't cover it either: setTimeout timers live on the socket, and that socket is
+  // already destroyed. A never-settling turn strands the caller's per-channel lock and typing
+  // indicator forever (Discord "…is typing" with the channel deaf to every later message, 2026-08-20).
+  const watchClose = (res, fail) => {
+    res.on('aborted', () => fail(new Error('core closed the connection mid-response (core restarted?)')));
+    res.on('error', (e) => fail(e));
+  };
   return {
     handle(envelope) {
       return new Promise((resolve, reject) => {
@@ -59,6 +69,7 @@ function makeCoreClient(coreUrl) {
         }, (res) => {
           let data = '';
           res.setEncoding('utf8');
+          watchClose(res, reject);
           res.on('data', (c) => { data += c; });
           res.on('end', () => {
             let j = {};
@@ -90,7 +101,9 @@ function makeCoreClient(coreUrl) {
         }, (res) => {
           if (res.statusCode < 200 || res.statusCode >= 300) { res.resume(); return reject(new Error(`core ${res.statusCode}`)); }
           let buf = '', settled = false;
+          const fail = (e) => { if (!settled) { settled = true; reject(e); } };
           res.setEncoding('utf8');
+          watchClose(res, fail);
           res.on('data', (c) => {
             buf += c;
             let i;
@@ -130,6 +143,7 @@ function makeCoreClient(coreUrl) {
         }, (res) => {
           let data = '';
           res.setEncoding('utf8');
+          watchClose(res, reject);
           res.on('data', (c) => { data += c; });
           res.on('end', () => {
             let j = {};
@@ -157,7 +171,7 @@ function makeCoreClient(coreUrl) {
           path: '/v2/devices/auth', method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
         }, (res) => {
-          let data = ''; res.setEncoding('utf8'); res.on('data', (c) => { data += c; });
+          let data = ''; res.setEncoding('utf8'); watchClose(res, reject); res.on('data', (c) => { data += c; });
           res.on('end', () => {
             if (res.statusCode === 401) return resolve(null);
             let j = {}; try { j = data ? JSON.parse(data) : {}; } catch (_) {}
@@ -176,7 +190,7 @@ function makeCoreClient(coreUrl) {
           hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path, method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
         }, (res) => {
-          let data = ''; res.setEncoding('utf8'); res.on('data', (c) => { data += c; });
+          let data = ''; res.setEncoding('utf8'); watchClose(res, reject); res.on('data', (c) => { data += c; });
           res.on('end', () => { let j = {}; try { j = data ? JSON.parse(data) : {}; } catch (_) {}
             if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(j.error || `core ${res.statusCode}`));
             resolve(j); });
