@@ -138,8 +138,18 @@ else
 fi
 
 echo "== smoke (localhost APIs, no secrets) =="
-curl -sf --max-time 5 http://127.0.0.1:12701/health && echo || echo "WARN: Corona :12701 /health failed"
-curl -sf --max-time 5 http://127.0.0.1:12702/health && echo || echo "WARN: Rolodex :12702 /health failed"
+if [[ -f "$HOME/.asmltr/corona.env" ]]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.asmltr/corona.env"
+fi
+if [[ -f "$HOME/.asmltr/rolodex.env" ]]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.asmltr/rolodex.env"
+fi
+CORONA_SMOKE="${CORONA_URL:-http://127.0.0.1:8080}"
+ROLODEX_SMOKE="${ROLODEX_URL:-http://127.0.0.1:8081}"
+curl -sf --max-time 5 "${CORONA_SMOKE}/health" && echo || echo "WARN: Corona /health failed"
+curl -sf --max-time 5 "${ROLODEX_SMOKE}/health" && echo || echo "WARN: Rolodex /health failed"
 if [[ -e "$ONENOTE_HOME/token.json" && -e "$ONENOTE_HOME/.client.json" ]]; then
   echo "onenote creds files exist (not printed)"
 fi

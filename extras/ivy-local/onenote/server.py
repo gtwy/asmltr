@@ -39,12 +39,11 @@ CLIENT_PATH = ROOT / ".client.json"
 TOKEN_PATH = ROOT / "token.json"
 PENDING_PATH = ROOT / ".device-pending.json"
 GRAPH = "https://graph.microsoft.com/v1.0"
-OWNERSHIP_SITE = "techdirectsolutions.sharepoint.com,475f5bdb-af8c-47a3-8b26-b2e0c035f13b,8ac06445-363f-4254-9d90-609cd8b9a2ff"
 LOGIN_BASE = "https://login.microsoftonline.com"
 SCOPES = ("Notes.ReadWrite", "Notes.ReadWrite.All", "Files.ReadWrite.All", "Sites.ReadWrite.All", "User.Read", "offline_access")
 SCOPE_STR = " ".join(SCOPES)
 DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
-USER_AGENT = "Adjutant-OneNote-MCP/1.0"
+USER_AGENT = "OneNote-MCP/1.0"
 ET = ZoneInfo("America/New_York")
 LIST_CAP = 200
 REFRESH_SKEW = 120
@@ -132,7 +131,7 @@ def _load_client() -> dict[str, str] | str:
     if not client_id:
         return (
             "Error: .client.json has an empty client_id. "
-            "Register Entra app 'Adjutant Connector' and put the Application (client) ID in "
+            "Register an Entra app for this install and put the Application (client) ID in "
             f"{CLIENT_PATH} (mode 600)."
         )
     return {"client_id": client_id, "tenant": tenant}
@@ -415,8 +414,22 @@ def _enc_id(value: str) -> str:
     return urllib.parse.quote(value, safe="")
 
 
+def _ownership_site() -> str:
+    env = (os.environ.get("ONENOTE_OWNERSHIP_SITE") or "").strip()
+    if env:
+        return env
+    client = _load_client()
+    if isinstance(client, dict):
+        return str(client.get("ownership_site") or "").strip()
+    return ""
+
+
 def _onenote_roots() -> list[str]:
-    return ["/me/onenote", f"/sites/{_enc_id(OWNERSHIP_SITE)}/onenote"]
+    roots = ["/me/onenote"]
+    site = _ownership_site()
+    if site:
+        roots.append(f"/sites/{_enc_id(site)}/onenote")
+    return roots
 
 
 def _graph_onenote(method: str, rest: str, **kwargs: Any) -> Any:
