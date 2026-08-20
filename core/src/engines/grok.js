@@ -96,8 +96,8 @@ function isOwnerFromEmail(opts) {
 //           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
 //           Not a coding session. Web channels are always this after one-shot.
 //   xhigh   git or code, or a deep dive (implement, refactor, write/patch code,
-//           commit, PR, "deep dive"), or consecutive "generate (an) image" /
-//           "generate (a) photo" (word order matters). Project git cwd that is not $HOME.
+//           commit, PR, "deep dive"), or generate[+ing] [a/an/the/this/some]
+//           image/photo/picture/drawing/cartoon/…. Project git cwd that is not $HOME.
 //           Email and MCP are always xhigh after one-shot.
 //   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
 //   repo and would xhigh every ask). Use the session/turn cwd if provided.
@@ -136,8 +136,7 @@ const XHIGH_PARTS = [
   'write(?:ing)?\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:code|patch|function|module|helper|adapter)',
   'patch(?:ing)?\\s+(?:the\\s+|this\\s+|some\\s+|a\\s+)?(?:code|file|module|function|repo|branch)',
   'commit',
-  'generate(?:\\s+an)?\\s+image',
-  'generate(?:\\s+a)?\\s+photo',
+  'generat(?:e|ing)\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:images?|photos?|pictures?|drawings?|cartoons?|illustrations?|sketch(?:es)?|paintings?|renders?|artworks?|posters?)',
 ];
 const XHIGH_RE = new RegExp('\\b(?:' + XHIGH_PARTS.join('|') + ')\\b', 'i');
 const CODE_WORD_RE = /\bcode\b/i;

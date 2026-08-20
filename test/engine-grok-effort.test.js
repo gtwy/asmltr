@@ -97,6 +97,11 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
       'generate image',
       'generate a photo of the workspace',
       'generate photo',
+      'generate a picture',
+      'generate drawing',
+      'generating a cartoon',
+      'generate the illustration',
+      'generate this sketch',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
@@ -105,7 +110,7 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
   }
 });
 
-test('image/photo xhigh is consecutive phrases only, not bag-of-words', () => {
+test('visual generate xhigh is write-style verb+kind, not bag-of-words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     for (const p of [
@@ -113,6 +118,11 @@ test('image/photo xhigh is consecutive phrases only, not bag-of-words', () => {
       'GENERATE IMAGE',
       'can you generate a photo',
       'Generate Photo of the shop',
+      'generate the image',
+      'generate the photo',
+      'generate a picture of the bun',
+      'generate some drawings',
+      'generating this cartoon',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
@@ -126,8 +136,6 @@ test('image/photo xhigh is consecutive phrases only, not bag-of-words', () => {
       'a photo generate',
       'I attached an image, please generate a report',
       'here is a photo — generate a list',
-      'generate the image',
-      'generate the photo',
     ]) {
       assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
