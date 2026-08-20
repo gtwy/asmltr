@@ -1,7 +1,9 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine } = require('../shared/step-public');
+const {
+  looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
+} = require('../shared/step-public');
 
 test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
   assert.equal(looksLikePromptLeak('CURRENT SPEAKER — READ FIRST'), true);
@@ -29,8 +31,25 @@ test('human chips: start only, no paths or ACP type names', () => {
   assert.ok(!discordToolLine(false, { name: 'Read', input: { path: '/home/someone/x' } }).includes('/home'));
 });
 
-test('Discord thoughts are not a posted line', () => {
+test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 chip', () => {
+  assert.equal(discordThoughtLine('CURRENT SPEAKER — READ FIRST, TRUST THIS'), '');
+  assert.equal(discordThoughtLine('I should open identity.md next'), '');
+  assert.equal(discordThoughtLine('see CLAUDE.md'), '');
+  assert.equal(discordThoughtLine('email owner@example.com about this'), '');
+  assert.equal(discordThoughtLine('check /home/someone/.asmltr'), '');
+  assert.equal(discordThoughtLine(''), '');
+  const safe = discordThoughtLine('Checking the mailbox before I answer.');
+  assert.equal(safe, '-# 💭 Checking the mailbox before I answer.');
+  const long = 'x'.repeat(400);
+  const clamped = discordThoughtLine(long);
+  assert.ok(clamped.startsWith('-# 💭 '));
+  assert.ok(clamped.length <= '-# 💭 '.length + 280);
+  assert.ok(clamped.endsWith('…'));
+});
+
+test('Discord never renderSteps raw thought text', () => {
   const src = require('fs').readFileSync(require('path').join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
-  assert.equal(/onThinking:\s*\(/.test(src), false);
   assert.equal(src.includes("renderStep('💭 '"), false);
+  assert.match(src, /discordThoughtLine/);
+  assert.match(src, /onThinking:/);
 });

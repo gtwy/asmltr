@@ -32,7 +32,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
-const { looksLikePromptLeak, discordToolLine } = require('../../../shared/step-public');
+const { looksLikePromptLeak, discordToolLine, discordThoughtLine, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -94,7 +94,7 @@ const meta = {
       voice_barge_in: { type: 'boolean', title: 'Voice: barge-in — let someone interrupt a spoken reply by talking over it (off = quieter in noisy/cross-talk meetings)', default: true },
       voice_realtime: { type: 'boolean', title: 'Voice: realtime streaming transcription (server-VAD turn-taking + live captions) instead of batch-per-utterance', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
-      stream_steps: { type: 'boolean', title: 'Post short human tool-start chips to the thread live (only when directly addressed). Never posts Grok thoughts.', default: true },
+      stream_steps: { type: 'boolean', title: 'Post sanitized 💭 thought chips and human tool-start chips (only when directly addressed). Never raw Grok thoughts. Working / Still working if a bubble is dropped or grok is quiet.', default: true },
       stream_tools: { type: 'boolean', title: 'When true, post a sanitized tool title (-# 🔧 `Read`) on start instead of the human chip. Default off. Never args/paths/updates.', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
@@ -516,27 +516,50 @@ RESPONSE RULES:
         // boundary closes — either a tool call starts (the common case: post immediately, no lag)
         // or a new narration block begins. The block still open at `done` is the final answer.
         let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
+        let beatTimer = null;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
+        const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
+        const armBeat = () => {
+          stopBeat();
+          beatTimer = setTimeout(() => {
+            beatTimer = null;
+            if (sawNoReply) return;
+            lastChip = STILL_WORKING_LINE;
+            enqueue(() => message.channel.send(STILL_WORKING_LINE));
+            armBeat();
+          }, THINK_HEARTBEAT_MS);
+        };
+        const postChip = (line) => {
+          if (!line || line === lastChip) return false;
+          lastChip = line;
+          enqueue(() => message.channel.send(line));
+          armBeat();
+          return true;
+        };
         const holdAnswer = (t) => {
           const clean = String(t || '').trim();
           if (!clean) { pending = ''; return; }
-          if (isSilence(clean)) { sawNoReply = true; pending = ''; return; }
+          if (isSilence(clean)) { sawNoReply = true; pending = ''; stopBeat(); return; }
           if (looksLikePromptLeak(clean)) { pending = ''; return; }
           pending = t;
         };
         const actions = await ctx.core.handleStream(envelope, {
-          // Hold the latest block as the candidate answer. Do not post narration steps.
           onSegment: (t) => { holdAnswer(t); },
           onTool: (tool) => {
             pending = '';
             if (sawNoReply) return;
             const line = discordToolLine(streamTools, tool);
-            if (!line || line === lastChip) return;
-            lastChip = line;
-            enqueue(() => message.channel.send(line));
+            if (line) postChip(line);
           },
-          // Never post Grok thoughts to Discord. Live/web still get onThinking via /v2/stream.
+          onThinking: (t) => {
+            if (sawNoReply) return;
+            const line = discordThoughtLine(t);
+            if (line) { postChip(line); return; }
+            if (!lastChip) postChip(WORKING_LINE);
+            else if (!beatTimer) armBeat();
+          },
         });
+        stopBeat();
         await chain; // all step messages posted before the final answer
         const reply = actions.find(a => a.type === 'reply');
         replyText = ((pending && pending.trim()) || (reply ? reply.text.trim() : '')).trim();
