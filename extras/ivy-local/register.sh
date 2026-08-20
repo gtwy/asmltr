@@ -115,7 +115,7 @@ else
   echo "WARN: grok not at $GROK_BIN — skip grok mcp add"
 fi
 
-echo "== 07:30 ET rolodex timer =="
+echo "== rolodex timer =="
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$UNIT_DIR"
 cp -f "$IVY/systemd/ivy-rolodex-sync.service" "$UNIT_DIR/ivy-rolodex-sync.service"
@@ -134,7 +134,7 @@ echo "== first rolodex cache sync =="
 if "$IVY/rolodex/sync.sh"; then
   echo "rolodex cache ok"
 else
-  echo "WARN: first sync failed (timer will retry at 07:30 ET)"
+  echo "WARN: first sync failed (timer will retry on its next schedule)"
 fi
 
 echo "== smoke (localhost APIs, no secrets) =="

@@ -2,7 +2,7 @@
 Description=Rolodex cache refresh (edit OnCalendar for your install)
 
 [Timer]
-OnCalendar=*-*-* 07:30:00 America/New_York
+OnCalendar=daily
 OnBootSec=3min
 Persistent=true
 AccuracySec=1min
