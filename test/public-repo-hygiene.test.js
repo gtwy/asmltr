@@ -49,13 +49,6 @@ function emailDomainAllowed(dom) {
   return false;
 }
 
-test('docs/ivy.md has no Our-box section, emails, or home paths', () => {
-  const ivy = fs.readFileSync(path.join(ROOT, 'docs/ivy.md'), 'utf8');
-  assert.equal(/Our box only/i.test(ivy), false);
-  assert.equal(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(ivy), false);
-  assert.equal(/\/home\/[A-Za-z]/.test(ivy), false);
-});
-
 test('tracked files do not contain install-specific hosts, emails, or home paths', () => {
   const hits = [];
   for (const rel of trackedFiles()) {

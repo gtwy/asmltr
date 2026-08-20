@@ -1,6 +1,16 @@
 'use strict';
 /**
- * Public Discord step helpers. Grok thoughts may post only after sanitize.
+ * Public Discord live-step helpers (stream_steps).
+ *
+ * Not Grok-gated. Discord posts whatever the core forwards as onThinking /
+ * onTool. Claude already emits thinking blocks; Grok/Gemini/Codex do too when
+ * they think. If the engine sends no thinking, onThinking never fires and
+ * these helpers stay idle — a Claude-only install is unchanged except that
+ * extended-thinking turns may get sanitized 💭 chips (same shape as narration
+ * -# steps this connector already posts).
+ *
+ * Sanitize/drop is Discord DISPLAY only. Core, collector, and Live keep
+ * full-fidelity thoughts. Email does not get thought chips.
  * Leaky bubbles are dropped whole. Generic patterns only — no name denylist.
  */
 
