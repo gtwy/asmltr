@@ -445,7 +445,20 @@ function buildArgs(opts) {
 function parseLine(line) {
   const s = String(line || '').trim();
   if (!s || s[0] !== '{') return null;
-  try { return JSON.parse(s); } catch (_) { return null; }
+  try { return unwrapSessionUpdate(JSON.parse(s)); } catch (_) { return null; }
+}
+
+/** ACP session/update (updates.jsonl / some CLI stdout) → the streaming-json shapes applyEvent already knows. */
+function unwrapSessionUpdate(ev) {
+  if (!ev || typeof ev !== 'object') return ev;
+  const u = ev.params && ev.params.update;
+  if (!u || !u.sessionUpdate) return ev;
+  const k = u.sessionUpdate;
+  const chunk = (u.content && (u.content.text || u.content)) || '';
+  if (k === 'agent_thought_chunk') return { type: 'thought', text: String(chunk) };
+  if (k === 'agent_message_chunk') return { type: 'text', data: String(chunk) };
+  // tool_call already arrives as streaming-json {type:tool_call}; do not double-count ACP tool_call.
+  return ev;
 }
 
 function sessionIdFrom(obj) {
@@ -475,10 +488,11 @@ function isCompleteBlock(s) {
 
 function closeTextBlock(state) {
   const cur = String((state && state.text) || '').trim();
-  if (!cur) return;
+  if (!cur) return '';
   if (!Array.isArray(state.segments)) state.segments = [];
   state.segments.push(cur);
   state.text = '';
+  return cur;
 }
 
 function extractText(obj) {
@@ -529,11 +543,12 @@ function applyEvent(ev, state) {
     const tool = { name, input };
     // Discord: a tool closes the pending narration block. Later text is a new
     // block — persistAskTurn must store the last block (the answer), not glue.
+    let closed = '';
     if (t !== 'tool_call_update') {
-      closeTextBlock(state);
+      closed = closeTextBlock(state);
       state.tools.push(tool);
     }
-    return { kind: 'tool', tool };
+    return { kind: 'tool', tool, closed };
   }
   if (t === 'error' || ev.error) {
     state.isError = true;
@@ -553,6 +568,7 @@ function applyEvent(ev, state) {
     const incremental = typeof ev.delta === 'string' || (t === 'text' && typeof ev.data === 'string');
     const prev = state.text || '';
     let joined;
+    let closed = '';
     if (incremental) {
       joined = prev + text;
     } else if (text.startsWith(prev) && prev) {
@@ -560,7 +576,7 @@ function applyEvent(ev, state) {
     } else if (isCompleteBlock(prev) && isCompleteBlock(text)) {
       // Status/narration then the real answer: last block wins (Discord split).
       // Not the same as token glue ("time."+"The").
-      closeTextBlock(state);
+      closed = closeTextBlock(state);
       joined = text;
     } else {
       joined = joinText(prev, text);
@@ -568,7 +584,7 @@ function applyEvent(ev, state) {
     const replaced = !incremental && joined !== prev && !joined.startsWith(prev);
     const emitted = replaced ? joined : joined.slice(prev.length);
     state.text = joined;
-    return { kind: incremental ? 'delta' : 'text', text: emitted };
+    return { kind: incremental ? 'delta' : 'text', text: emitted, closed };
   }
   return { kind: 'ignore' };
 }
@@ -612,6 +628,10 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     if (!ev) return;
     if (onEvent) { try { onEvent(ev); } catch (_) {} }
     const r = applyEvent(ev, state);
+    // A tool (or a restated complete block) closes the live narration. Emit that
+    // closed block as a segment so Discord/web can post it as an intermediary
+    // step — incremental deltas never fire onSegment on their own.
+    if (r.closed && onSegment) { try { onSegment(r.closed); } catch (_) {} }
     if (r.kind === 'thinking' && r.thinking && onThinking) { try { onThinking(r.thinking); } catch (_) {} }
     else if (r.kind === 'tool' && r.tool && onTool) { try { onTool(r.tool); } catch (_) {} }
     else if (r.kind === 'error' && r.error && onSegment) { try { onSegment(`⚠️ grok: ${r.error}`); } catch (_) {} }
