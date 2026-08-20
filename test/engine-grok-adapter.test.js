@@ -267,6 +267,43 @@ test('applyEvent: thought chunks coalesce and flush on tool / text / end', () =>
   assert.equal(end.closedThinking, 'Wrap up');
 });
 
+
+test('applyEvent: tool_call_update does not emit onTool or close thinking', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  grok.applyEvent({ type: 'thought', text: 'scratch' }, state);
+  const r = grok.applyEvent({ type: 'tool_call_update', name: 'Read' }, state);
+  assert.equal(r.kind, 'tool_update');
+  assert.equal(r.tool, undefined);
+  assert.equal(state.thinking, 'scratch');
+  assert.deepEqual(state.tools, []);
+});
+
+test('applyEvent: nameless tool_call does not use type as name', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const r = grok.applyEvent({ type: 'tool_call', input: {} }, state);
+  assert.equal(r.kind, 'tool');
+  assert.equal(r.tool.name, '');
+  assert.notEqual(r.tool.name, 'tool_call');
+  assert.equal(grok.toolNameOf({ type: 'tool_call' }), '');
+  assert.equal(grok.toolNameOf({ type: 'tool_call', name: 'tool_call' }), '');
+  assert.equal(grok.toolNameOf({ type: 'tool_call', name: 'Read' }), 'Read');
+  assert.equal(grok.toolNameOf({ type: 'tool_call', toolCall: { name: 'Bash' } }), 'Bash');
+});
+
+test('applyEvent: named tool_call still closes thinking once', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  grok.applyEvent({ type: 'thought', text: 'plan' }, state);
+  grok.applyEvent({ type: 'thought', text: ' more' }, state);
+  const r = grok.applyEvent({ type: 'tool_call', name: 'Read', input: { path: '/tmp/x' } }, state);
+  assert.equal(r.kind, 'tool');
+  assert.equal(r.tool.name, 'Read');
+  assert.equal(r.closedThinking, 'plan more');
+  assert.equal(state.thinking, '');
+  const upd = grok.applyEvent({ type: 'tool_call_update' }, state);
+  assert.equal(upd.kind, 'tool_update');
+  assert.equal(state.thinking, '');
+});
+
 test('applyEvent: tool call closes narration so later text is not glued', () => {
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   const status = 'Coconut aminos is already on your card as the soy-sauce stand-in.';

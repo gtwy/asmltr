@@ -475,6 +475,21 @@ function extractUsage(obj) {
  * Fold one parsed event into turn state. Defensive across CLI versions.
  * @returns {{ kind: string, text?: string, tool?: object, thinking?: string, error?: string }}
  */
+function toolNameOf(ev) {
+  if (!ev || typeof ev !== 'object') return '';
+  const raw = ev.name || ev.title || ev.kind
+    || (ev.toolCall && ev.toolCall.name)
+    || (ev.tool_call && ev.tool_call.name)
+    || (ev.tool && ev.tool.name)
+    || ev.toolName
+    || '';
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const typ = String(ev.type || ev.event || '');
+  if (s === typ || /^(tool_call|tool_call_update|tool_use|function_call)$/i.test(s)) return '';
+  return s;
+}
+
 function applyEvent(ev, state) {
   if (!ev || typeof ev !== 'object') return { kind: 'ignore' };
   const sid = sessionIdFrom(ev);
@@ -488,19 +503,19 @@ function applyEvent(ev, state) {
     if (th) { state.thinking = (state.thinking || '') + String(th); return { kind: 'thinking-delta' }; }
     return { kind: 'ignore' };
   }
-  if (t === 'tool_call' || t === 'tool_use' || t === 'function_call' || t === 'tool_call_update') {
-    const name = ev.name || (ev.tool && ev.tool.name) || ev.toolName || t;
+  if (t === 'tool_call_update') {
+    // Progress pings. Do not onTool, do not close thinking.
+    return { kind: 'tool_update' };
+  }
+  if (t === 'tool_call' || t === 'tool_use' || t === 'function_call') {
+    const name = toolNameOf(ev);
     const input = ev.input || ev.args || ev.arguments || ev.tool || ev;
     const tool = { name, input };
     // Discord: a tool closes the pending narration block. Later text is a new
     // block — persistAskTurn must store the last block (the answer), not glue.
-    let closed = '';
-    let closedThinking = '';
-    if (t !== 'tool_call_update') {
-      closedThinking = closeThinking(state);
-      closed = closeTextBlock(state);
-      state.tools.push(tool);
-    }
+    const closedThinking = closeThinking(state);
+    const closed = closeTextBlock(state);
+    state.tools.push(tool);
     return { kind: 'tool', tool, closed, closedThinking };
   }
   if (t === 'error' || ev.error) {
@@ -640,7 +655,7 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState,
+  extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, toolNameOf,
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
