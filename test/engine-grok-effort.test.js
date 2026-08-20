@@ -102,9 +102,11 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
       'generate photo',
       'generate a picture',
       'generate drawing',
-      'generating a cartoon',
-      'generate the illustration',
-      'generate this sketch',
+      'make a cartoon',
+      'make this graphic',
+      'make a painting',
+      'generate a pic',
+      'make a photograph',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
@@ -113,7 +115,7 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
   }
 });
 
-test('visual generate xhigh is write-style verb+kind, not bag-of-words', () => {
+test('visual generate/make xhigh is verb+optional filler+kind only', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     for (const p of [
@@ -125,13 +127,17 @@ test('visual generate xhigh is write-style verb+kind, not bag-of-words', () => {
       'generate the photo',
       'generate a picture of the bun',
       'generate some drawings',
-      'generating this cartoon',
+      'make a cartoon',
+      'make an image',
+      'make this painting',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
     for (const p of [
       'generate',
+      'make',
       'generate a report',
+      'make a list',
       'regenerate the list',
       'image generate',
       'photo generate',
@@ -139,6 +145,9 @@ test('visual generate xhigh is write-style verb+kind, not bag-of-words', () => {
       'a photo generate',
       'I attached an image, please generate a report',
       'here is a photo — generate a list',
+      'generate the illustration',
+      'generate this sketch',
+      'generating a cartoon',
     ]) {
       assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
