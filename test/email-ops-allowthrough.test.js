@@ -26,7 +26,7 @@ test('domain match is @domain or a subdomain, not a suffix of the local part', (
 test('Entra sync matcher hits the sample Microsoft alert', () => {
   const hit = matchOpsAllowThrough(
     'mssecurity-noreply@microsoft.com',
-    'riggletruckingcom.onmicrosoft.com: Synchronization has stopped for at least 24 hours. – You have an important alert from Microsoft Entra ID',
+    'contoso.onmicrosoft.com: Synchronization has stopped for at least 24 hours. – You have an important alert from Microsoft Entra ID',
     'Synchronization to Microsoft Entra ID appears to have been stopped',
     ENTRA,
   );
