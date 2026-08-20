@@ -391,7 +391,7 @@ async function handle(envelope, opts = {}) {
         '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
         '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
         '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).\n' +
-        'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the grok UUID, recover prior chat from those files (`asmltr silo get memory/last-topics.md`, then `asmltr silo find <hint> --content --in memory/transcripts`) or `asmltr streams show ivy` / `asmltr streams recall ivy "…"`. Do NOT grep events-*.jsonl or ~/.grok/sessions for prior conversation.';
+        'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the grok UUID, recover prior chat from those files (`asmltr silo get memory/last-topics.md`, then `asmltr silo find <hint> --content --in memory/transcripts`) or `asmltr streams show ivy` / `asmltr streams recall ivy "…"`. Do NOT grep events-*.jsonl or ~/.grok/sessions for prior conversation. Silo memory is transcripts and artifacts, not identity files.';
     }
     if (VAULT_LOCKED) {
       pToolbelt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
