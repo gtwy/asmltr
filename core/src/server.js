@@ -562,13 +562,27 @@ async function handle(envelope, opts = {}) {
       // onToolCall (Claude SDK tool_use). Without this bridge the live
       // bubble never blockCloses and onDelta glues draft+answer (`on.Yes`).
       // Reset the token buffer so leftover flush cannot replay the draft.
-      onTool: (opts.onTool || opts.onToolCall) ? ((t) => {
+      // Always wire these so collector/dashboard get 💭/🔧 even when the
+      // connector is not streaming (email, or Discord with stream_steps off).
+      onTool: (t) => {
         _streamRaw = '';
         _emitted = 0;
+        const name = t && typeof t === 'object' ? t.name : t;
+        const input = t && typeof t === 'object' ? t.input : undefined;
+        try {
+          record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core',
+            event_type: 'tool', payload: { tool: name, input: truncate(input, 4000) } });
+        } catch (_) {}
         try { if (opts.onTool) opts.onTool(t); } catch (_) {}
-        try { if (opts.onToolCall) opts.onToolCall(t); } catch (_) {}
-      }) : undefined,
-      onThinking: opts.onThinking ? _pushThinking : undefined,
+        try { if (opts.onToolCall) opts.onToolCall(t && typeof t === 'object' ? t : { name: t }); } catch (_) {}
+      },
+      onThinking: (t) => {
+        try {
+          record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core',
+            event_type: 'thinking', payload: { text: truncate(t, 2000) } });
+        } catch (_) {}
+        if (opts.onThinking) _pushThinking(t);
+      },
       // Sub-agent (Task) lifecycle → record for history replay + forward live to a step consumer.
       onSubagent: (s) => {
         try { record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core', event_type: 'subagent', payload: { id: s.id, name: s.name, status: s.status, summary: truncate(s.summary, 500) } }); } catch (_) {}

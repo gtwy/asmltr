@@ -209,6 +209,31 @@ test('applyEvent: status block then restated answer persist is the answer only',
   assert.equal(segs[segs.length - 1], answer);
 });
 
+test('applyEvent: tool call returns closed narration for live step streaming', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const status = 'I will check the RE-review email and the silo.';
+  grok.applyEvent({ type: 'text', text: status }, state);
+  const r = grok.applyEvent({ type: 'tool_call', name: 'read_file', input: { path: '/tmp/x' } }, state);
+  assert.equal(r.kind, 'tool');
+  assert.equal(r.closed, status);
+  assert.equal(state.text, '');
+  assert.deepEqual(state.segments, [status]);
+});
+
+test('parseLine unwraps ACP agent_thought_chunk as thought', () => {
+  const line = JSON.stringify({
+    method: 'session/update',
+    params: { update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'checking mail' } } },
+  });
+  const ev = grok.parseLine(line);
+  assert.equal(ev.type, 'thought');
+  assert.equal(ev.text, 'checking mail');
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const r = grok.applyEvent(ev, state);
+  assert.equal(r.kind, 'thinking');
+  assert.equal(r.thinking, 'checking mail');
+});
+
 test('applyEvent: tool call closes narration so later text is not glued', () => {
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   const status = 'Coconut aminos is already on your card as the soy-sauce stand-in.';
