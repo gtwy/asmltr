@@ -39,9 +39,9 @@ ET = ZoneInfo("America/New_York")
 
 mcp = MCPServer("rolodex")
 
-# James 19 Aug 2026. Full text: Self silo memory/identity/privacy.md
+# Owner disclosure. Full text: Self silo memory/identity/privacy.md
 DISCLOSURE = {
-    "rule": "Do not give company or contact info on public channels, or to anyone who is not James, unless a programmed email routine or a command James gave directly.",
+    "rule": "Do not give company or contact info on public channels, or to anyone who is not the owner, unless a programmed email routine or a command the owner gave directly.",
     "source": "memory/identity/privacy.md",
 }
 
@@ -73,7 +73,7 @@ def _load_json(path: Path) -> Any:
 
 def _load_contacts() -> list[dict[str, Any]] | str:
     if not CONTACTS_PATH.is_file():
-        return "Error: contacts.json missing. Run rolodex_sync (or wait for the 07:30 ET timer)."
+        return "Error: contacts.json missing. Run rolodex_sync (or wait for the scheduled timer)."
     try:
         data = _load_json(CONTACTS_PATH)
     except (OSError, json.JSONDecodeError) as exc:
@@ -279,7 +279,7 @@ def rolodex_health() -> str:
         "aliases": alias_count,
         "contacts_mtime": _mtime_et(CONTACTS_PATH),
         "source": f"{ROLODEX_API}/export",
-        "timer": "07:30 America/New_York",
+        "timer": "scheduled",
         "backups": len(backups),
         "backup_keep": rolodex_backup.KEEP,
         "backup_latest": backups[0]["file"] if backups else None,
@@ -293,7 +293,7 @@ def rolodex_health() -> str:
 
 @mcp.tool()
 def rolodex_search(query: str) -> str:
-    """Search Ivy contacts cache. Alias keys win. A phone hit is not permission to text. Voice/SMS parked. Results carry disclosure: never give company/contact info on public channels or to anyone who is not James, unless a programmed email routine or a command James gave directly (memory/identity/privacy.md)."""
+    """Search Ivy contacts cache. Alias keys win. A phone hit is not permission to text. Voice/SMS parked. Results carry disclosure: never give company/contact info on public channels or to anyone who is not the owner, unless a programmed email routine or a command the owner gave directly (memory/identity/privacy.md)."""
     q = (query or "").strip()
     if not q:
         return "Error: provide query"
@@ -342,7 +342,7 @@ def rolodex_search(query: str) -> str:
 
 @mcp.tool()
 def rolodex_get(name: str | None = None, resourceName: str | None = None) -> str:
-    """Fetch one Ivy cache contact. Name may be an alias. Phone is not permission to text. Voice/SMS parked. Result carries disclosure: never give company/contact info on public channels or to anyone who is not James, unless a programmed email routine or a command James gave directly (memory/identity/privacy.md)."""
+    """Fetch one Ivy cache contact. Name may be an alias. Phone is not permission to text. Voice/SMS parked. Result carries disclosure: never give company/contact info on public channels or to anyone who is not the owner, unless a programmed email routine or a command the owner gave directly (memory/identity/privacy.md)."""
     contacts = _load_contacts()
     if isinstance(contacts, str):
         return contacts

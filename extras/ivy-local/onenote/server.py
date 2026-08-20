@@ -274,7 +274,7 @@ def _pending_public(pending: dict[str, Any]) -> dict[str, Any]:
         "verification_uri": pending.get("verification_uri") or "https://www.microsoft.com/devicelogin",
         "message": pending.get("message")
         or (
-            "Open the verification URL, enter the user code, and sign in as James. "
+            "Open the verification URL, enter the user code, and sign in as the notebook owner. "
             "This server polls until you finish or the code expires."
         ),
     }
