@@ -135,7 +135,6 @@ const XHIGH_PARTS = [
   'codebase',
   'write(?:ing)?\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:code|patch|function|module|helper|adapter)',
   'patch(?:ing)?\\s+(?:the\\s+|this\\s+|some\\s+|a\\s+)?(?:code|file|module|function|repo|branch)',
-  'commit',
   'generat(?:e|ing)\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:images?|photos?|pictures?|drawings?|cartoons?|illustrations?|sketch(?:es)?|paintings?|renders?|artworks?|posters?)',
 ];
 const XHIGH_RE = new RegExp('\\b(?:' + XHIGH_PARTS.join('|') + ')\\b', 'i');
@@ -219,10 +218,17 @@ function matchToken(re, text) {
   return String(m[0]).toLowerCase().replace(/\s+/g, ' ').slice(0, 32);
 }
 
+/** True if one sentence contains both whole words commit and push. Bare commit is not xhigh. */
+function commitAndPushSameSentence(text) {
+  const chunks = String(text || '').split(/[.!?]+\s*|\n+/);
+  return chunks.some((sent) => /\bcommit\b/i.test(sent) && /\bpush\b/i.test(sent));
+}
+
 function xhighReason(prompt) {
   const s = String(prompt || '');
   const m = matchToken(XHIGH_RE, s);
   if (m) return m;
+  if (commitAndPushSameSentence(s)) return 'commit-push';
   if (CODE_WORD_RE.test(s) && !CODE_WORD_EXCLUDE_RE.test(s)) return 'code';
   return '';
 }
@@ -660,6 +666,6 @@ module.exports = {
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
-  canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet,
+  canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet, commitAndPushSameSentence,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };
