@@ -319,11 +319,57 @@ test('Discord xhigh stays 60 turns / 60m; email xhigh is 100 / 60m', () => {
   }
 });
 
-test('assistant-web, assistant-native, and mcp match discord 5 / 10 / 60', () => {
-  for (const channel of ['assistant-web', 'assistant-native', 'discord', 'mcp']) {
+test('assistant-web and assistant-native match discord 5 / 10 / 60', () => {
+  for (const channel of ['assistant-web', 'assistant-native', 'discord']) {
     assert.equal(grok.timeoutMsForEffort('medium', { channel }), 5 * 60 * 1000, channel);
     assert.equal(grok.timeoutMsForEffort('high', { channel }), 10 * 60 * 1000, channel);
     assert.equal(grok.timeoutMsForEffort('xhigh', { channel }), 60 * 60 * 1000, channel);
+  }
+});
+
+test('mcp channel forces xhigh + 60m even without code words', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    const prompt = 'Thanks for the update, see you Monday';
+    const chatty = 'Adjutant here, peer to peer. Can you take a look when you have a minute?';
+    for (const p of [prompt, chatty]) {
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'mcp' }), 'xhigh', p.slice(0, 40));
+      assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'mcp' })), 'xhigh');
+      assert.equal(grok.classifyEffort({ prompt: p, cwd: noGit, channel: 'mcp' }).reason, 'mcp');
+      assert.equal(maxTurnsOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'mcp' })), 60);
+      assert.equal(grok.timeoutMsForEffort('medium', { channel: 'mcp' }), 60 * 60 * 1000);
+      assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'mcp' }), 60 * 60 * 1000);
+      assert.equal(grok.timeoutMsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'mcp' }), { channel: 'mcp' }), grok.MCP_TIMEOUT_MS);
+    }
+    assert.ok(grok.MCP_TIMEOUT_MS <= grok.TIMEOUT_CAP_MS);
+    assert.equal(grok.isMcpChannel('mcp'), true);
+    assert.equal(grok.isMcpChannel('MCP'), true);
+    assert.equal(grok.isMcpChannel('email'), false);
+    assert.equal(grok.isMcpChannel('discord'), false);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('one-shot next-effort still wins over mcp xhigh', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    assert.equal(grok.chooseEffort({
+      prompt: 'Thanks for the update, see you Monday',
+      cwd: noGit,
+      channel: 'mcp',
+      nextEffort: 'medium',
+    }), 'medium');
+    assert.equal(effortOf(grok.buildArgs({
+      prompt: 'Thanks for the update, see you Monday',
+      cwd: noGit,
+      channel: 'mcp',
+      nextEffort: 'medium',
+    })), 'medium');
+    // Channel watchdog stays 60m even if one-shot drops effort.
+    assert.equal(grok.timeoutMsForEffort('medium', { channel: 'mcp' }), 60 * 60 * 1000);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
 

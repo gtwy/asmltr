@@ -62,8 +62,9 @@ function maxTurnsForEffort(effort, opts) {
 const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // inbound email xhigh (everyone except owner-from)
 const OWNER_FROM_EMAIL = 'owner@example.com';
 const OWNER_EMAIL_TIMEOUT_MS = 4 * 60 * 60 * 1000; // From owner@example.com only
+const MCP_TIMEOUT_MS = 60 * 60 * 1000; // inbound mcp always xhigh
 
-// Discord / assistant-web / assistant-native / mcp (and generic non-email). Absolute, not scale-from-env.
+// Discord / assistant-web / assistant-native (and generic non-email). Absolute, not scale-from-env.
 const INTERACTIVE_TIMEOUT_MS = {
   low: 5 * 60 * 1000,
   medium: 5 * 60 * 1000,
@@ -73,6 +74,10 @@ const INTERACTIVE_TIMEOUT_MS = {
 
 function isEmailChannel(channel) {
   return String(channel || '').trim().toLowerCase() === 'email';
+}
+
+function isMcpChannel(channel) {
+  return String(channel || '').trim().toLowerCase() === 'mcp';
 }
 
 /** Bare addr from `Name <addr@host>` or `addr@host`. Display-name-only → empty. */
@@ -111,9 +116,10 @@ function isOwnerFromEmail(opts) {
 }
 
 /** Watchdog by channel. Cap 4 hours so owner-from email can use it. Not infinite.
- *  Interactive (discord, assistant-web, assistant-native, mcp, generic): 5 / 10 / 60.
+ *  Interactive (discord, assistant-web, assistant-native, generic): 5 / 10 / 60.
  *  Email xhigh is 60 minutes / 100 turns, except From owner@example.com → 4 hours
  *  (case-insensitive; display-name wrapping ignored; that exact address only).
+ *  MCP is always xhigh / 60 minutes (not the owner-from 4h path).
  *  Second arg is opts `{ channel, sender }` or a channel string. */
 function timeoutMsForEffort(effort, opts) {
   const o = (opts && typeof opts === 'object') ? opts : { channel: opts };
@@ -123,6 +129,7 @@ function timeoutMsForEffort(effort, opts) {
     const ms = isOwnerFromEmail(o) ? OWNER_EMAIL_TIMEOUT_MS : EMAIL_TIMEOUT_MS;
     return Math.min(ms, TIMEOUT_CAP_MS);
   }
+  if (isMcpChannel(channel)) return Math.min(MCP_TIMEOUT_MS, TIMEOUT_CAP_MS);
   const ms = INTERACTIVE_TIMEOUT_MS[e] || INTERACTIVE_TIMEOUT_MS.medium;
   return Math.min(ms, TIMEOUT_CAP_MS);
 }
@@ -144,10 +151,13 @@ function timeoutMsForEffort(effort, opts) {
 //   Tight: do not treat bare "fix" as xhigh (Eve "Proposed Fix", "quick fix").
 //   One-shot next-effort still wins. complete() skips auto-raise.
 //   Email channel (`email`) forces xhigh AFTER one-shot (a chatty mail body
-//   with no code words is still xhigh). Discord and others stay three-tier.
+//   with no code words is still xhigh). MCP channel (`mcp`) is the same:
+//   always xhigh after one-shot, 60-minute watchdog (not owner-from 4h).
+//   Discord and others stay three-tier.
 //   Email xhigh timeout is 60 minutes, or 4 hours only when From is
 //   owner@example.com (case-insensitive, display-name wrapping ignored;
-//   that exact address — not the domain, not other james@). Interactive
+//   that exact address — not the domain, not other james@). MCP watchdog
+//   is 60 minutes. Interactive (discord, assistant-web, assistant-native)
 //   5 / 10 / 60 (cap 4h so the owner-from path can use it; interactive
 //   stays absolute 5/10/60).
 //   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
@@ -333,8 +343,9 @@ function classifyEffort(opts) {
   if (token && canElevateEffort(opts)) {
     return { effort: token === '+xh' ? 'xhigh' : 'high', reason: 'token:' + token, stripToken: token };
   }
-  // After one-shot: inbound email is always xhigh. Discord/others keep the three-tier score.
+  // After one-shot: inbound email and mcp are always xhigh. Discord/others keep the three-tier score.
   if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
+  if (isMcpChannel(opts.channel)) return { effort: 'xhigh', reason: 'mcp' };
   const scored = scoringPrompt(opts);
   const codeTok = xhighReason(scored);
   const git = isProjectGitRepo(opts.cwd);
@@ -645,7 +656,7 @@ module.exports = {
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
   extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
   timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
-  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel,
+  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, MCP_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel, isMcpChannel,
   OWNER_FROM_EMAIL, OWNER_EMAIL_TIMEOUT_MS, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
