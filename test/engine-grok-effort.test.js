@@ -156,6 +156,34 @@ test('visual generate/make xhigh is verb+optional filler+kind only', () => {
   }
 });
 
+test('bare code is not xhigh; write/patch code still is', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    for (const p of [
+      'the code',
+      'show me the code',
+      'here is some code',
+      'what is the zip code',
+      'error code 500',
+      'code of conduct',
+      'I have a code',
+    ]) {
+      assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+    }
+    for (const p of [
+      'write some code for the picker',
+      'write the code',
+      'patch the code in grok.js',
+      'coding session',
+      'the codebase',
+    ]) {
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+    }
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
 test('bare commit is not xhigh; commit+push in the same post is', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
