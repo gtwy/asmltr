@@ -7,6 +7,7 @@ const path = require('path');
 
 const {
   parseAuthResults, authDisposition, formatAuthSummary, authRejected,
+  persistAuthReject, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal,
 } = require('../connectors/types/email/index.js');
 
 const rejectLog = path.join(os.tmpdir(), 'asmltr-email-auth-reject-test.jsonl');
@@ -103,4 +104,36 @@ test('authRejected is everyone, not owner-only', () => {
 test('formatAuthSummary', () => {
   assert.match(formatAuthSummary(authDisposition(parsedWith(GMAIL_PASS))), /DKIM=pass SPF=pass DMARC=pass — PASS/);
   assert.match(formatAuthSummary(authDisposition({ headers: { get() {} } })), /none \(treated as fail\)/);
+});
+
+test('formatAuthJournal is sender and subject only; empty when none', () => {
+  assert.equal(formatAuthJournal([]), '');
+  assert.equal(formatAuthJournal(null), '');
+  const body = formatAuthJournal([
+    { ts: '2026-08-20T12:00:00.000Z', from: 'spoof@example.com', subject: 'Hello', reason: 'DKIM=fail' },
+    { ts: '2026-08-20T13:00:00.000Z', from: 'other@example.com', subject: 'Hi' },
+  ]);
+  assert.match(body, /spoof@example.com — Hello/);
+  assert.match(body, /other@example.com — Hi/);
+  assert.equal(body.includes('DKIM=fail'), false);
+  assert.equal(body.includes('reason'), false);
+});
+
+test('filterAuthRejectsSince keeps the last window only', () => {
+  const entries = [
+    { ts: '2026-08-19T10:00:00.000Z', from: 'old@example.com', subject: 'old' },
+    { ts: '2026-08-20T10:00:00.000Z', from: 'new@example.com', subject: 'new' },
+  ];
+  const since = Date.parse('2026-08-20T00:00:00.000Z');
+  const kept = filterAuthRejectsSince(entries, since);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].from, 'new@example.com');
+});
+
+test('persist and load auth reject log', () => {
+  persistAuthReject({ ts: '2026-08-20T11:00:00.000Z', from: 'a@example.com', subject: 'x', reason: 'no header' });
+  const loaded = loadAuthRejectLog(rejectLog);
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].from, 'a@example.com');
+  assert.equal(loaded[0].subject, 'x');
 });

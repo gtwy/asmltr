@@ -185,13 +185,50 @@ function authRejected(auth) {
   return !auth || !!auth.failed;
 }
 
+function authRejectLogPath() {
+  return process.env.ASMLTR_EMAIL_AUTH_REJECT_LOG
+    || path.join(os.homedir(), '.asmltr', 'email-auth-reject.jsonl');
+}
+
 function persistAuthReject(entry) {
   try {
-    const f = process.env.ASMLTR_EMAIL_AUTH_REJECT_LOG
-      || path.join(os.homedir(), '.asmltr', 'email-auth-reject.jsonl');
+    const f = authRejectLogPath();
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.appendFileSync(f, JSON.stringify(entry) + '\n');
   } catch (_) {}
+}
+
+function loadAuthRejectLog(filePath) {
+  const f = filePath || authRejectLogPath();
+  let raw = '';
+  try { raw = fs.readFileSync(f, 'utf8'); } catch (_) { return []; }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line)); } catch (_) {}
+  }
+  return out;
+}
+
+function filterAuthRejectsSince(entries, sinceMs) {
+  const since = Number(sinceMs);
+  return (entries || []).filter((e) => {
+    const t = Date.parse(e && e.ts);
+    return Number.isFinite(t) && Number.isFinite(since) && t >= since;
+  });
+}
+
+/** Sender and subject only. Empty string when there is nothing to report. */
+function formatAuthJournal(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!list.length) return '';
+  const lines = ['Blocked inbound mail in the last 24 hours. Sender and subject only.', ''];
+  for (const e of list) {
+    const from = String((e && e.from) || '(unknown)');
+    const subject = String((e && e.subject) || '(no subject)');
+    lines.push(from + ' — ' + subject);
+  }
+  return lines.join('\n');
 }
 
 function defaultOpsAllowthroughPath() {
@@ -648,4 +685,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, headerLine };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine };
