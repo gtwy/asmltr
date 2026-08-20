@@ -16,6 +16,7 @@ const ALLOWED_EMAIL_DOMAINS = new Set([
   'microsoft.com',
   'other.com',
   'notmicrosoft.com',
+  'notexample.com',
 ]);
 const PRIVATE_HOST_RE = /\b(?:[a-z0-9-]+\.)+example\.invalid\b/gi;
 const HOME_RE = /\/home\/[A-Za-z][A-Za-z0-9._-]*/g;
