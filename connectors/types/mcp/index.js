@@ -94,10 +94,10 @@ const ASK_ORACLE_TOOL = {
 async function start(ctx) {
   const cfg = ctx.config || {};
   const PORT = cfg.port || 3018;
-  // Bind 127.0.0.1 by default (the asmltr principle). For the public instance we
-  // bind the docker-bridge gateway IP (e.g. 172.18.0.1) so Traefik — which lives
-  // on that network — can reach us WITHOUT exposing the port on the host's public
-  // NIC (the box has a public IP + ACCEPT iptables policy, so 0.0.0.0 would leak).
+  // Bind 127.0.0.1 by default (the asmltr principle). If a reverse proxy lives on
+  // a Docker bridge, you can bind that bridge gateway IP (e.g. 172.18.0.1) so the
+  // proxy can reach us WITHOUT exposing the port on the host's public NIC.
+  // Do not bind 0.0.0.0 on a host that accepts inbound on a public address.
   const BIND = cfg.bind_host || '127.0.0.1';
   const BASE_URL = cfg.base_url || 'https://mcp.example.com';
 

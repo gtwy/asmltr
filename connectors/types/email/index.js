@@ -217,7 +217,7 @@ async function start(ctx) {
     const fromName2 = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].name) || fromAddr;
     if (!fromAddr) return { handled: false };
     // Loop / automation guards — never answer ourselves or noreply/daemon senders,
-    // unless an ops-desk matcher (Self silo memory/ops/allowthrough.json) says this
+    // unless an ops matcher (Self silo memory/ops/allowthrough.json) says this
     // alert is allowed through (e.g. Microsoft Entra sync noreply).
     if (fromAddr === selfAddr) return { handled: false };
     const subject = parsed.subject || '(no subject)';
@@ -259,7 +259,7 @@ async function start(ctx) {
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
     // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
-    // Ops-desk allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
+    // Ops allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
     if (!known && !opsHit) {
       if (ownerForward && ownerForward !== fromAddr) {
         const fwd = `Ivy forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;

@@ -60,7 +60,7 @@ const meta = {
   credentialKeys: ['bot_token_bws_key'],
   // How the Access page presents identifiers for this surface (trust framework).
   identifierFormats: [{ surface: 'discord', label: 'Discord User ID', placeholder: '000000000000000000', pattern: '^\\d+$' }],
-  outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. TD-TSD-main)' } },
+  outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. general)' } },
   // Per-unit monitoring on/off: the assistant sits in many Discord channels and decides when to
   // chime in; each can be individually muted via the connector's /channels endpoint (no restart).
   // The dashboard reads this to know a session is mutable (matching a channel_id in the roster).
@@ -122,7 +122,7 @@ async function start(ctx) {
   const dataDir = cfg.data_dir || path.join(__dirname, '..', '..', 'manager', 'data');
   const memoryFile = path.join(dataDir, `discord-${ctx.instanceId}-memory.json`);
 
-  // channel aliases for unified outbound (TD-TSD-main → channel id)
+  // channel aliases for unified outbound (alias → channel id)
   let aliases = {};
   try { aliases = JSON.parse(fs.readFileSync(cfg.aliases_file || path.join(__dirname, 'channel-aliases.json'), 'utf8')).aliases || {}; } catch (_) {}
   const resolveChannel = (t) => aliases[t] || t;
