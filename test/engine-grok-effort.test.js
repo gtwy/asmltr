@@ -515,41 +515,60 @@ test('+xh / +h override is one turn and does not persist nextEffort', () => {
   }
 });
 
-test('owner-from email james@techdirect.io is 4h; other inbound email stays 1h', () => {
+test('owner-from email (ASMLTR_OWNER_FROM_EMAIL) is 4h; other inbound email stays 1h', () => {
   const H = 60 * 60 * 1000;
-  const owner = { channel: 'email', sender: { raw_id: 'james@techdirect.io', raw_username: 'James Watt' } };
-  assert.equal(grok.timeoutMsForEffort('xhigh', owner), 4 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'JAMES@TECHDIRECT.IO' } }), 4 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'James Watt <james@techdirect.io>' } }), 4 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { from: 'James Watt <james@techdirect.io>' } }), 4 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { email: 'james@techdirect.io' } }), 4 * H);
-  assert.equal(grok.parseEmailAddress('James Watt <james@techdirect.io>'), 'james@techdirect.io');
-  assert.equal(grok.parseEmailAddress('james@techdirect.io'), 'james@techdirect.io');
-  assert.equal(grok.parseEmailAddress('James Watt'), '');
-  assert.equal(grok.isOwnerFromEmail(owner), true);
-  assert.equal(grok.maxTurnsForEffort('xhigh', owner), 100);
-  assert.equal(grok.chooseEffort({ prompt: 'Thanks for the update', cwd: noGit, channel: 'email', sender: owner.sender }), 'xhigh');
+  const OWNER = 'owner@example.com';
+  process.env.ASMLTR_OWNER_FROM_EMAIL = OWNER;
+  try {
+    const owner = { channel: 'email', sender: { raw_id: OWNER, raw_username: 'Owner Name' } };
+    assert.equal(grok.timeoutMsForEffort('xhigh', owner), 4 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'OWNER@EXAMPLE.COM' } }), 4 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'Owner Name <owner@example.com>' } }), 4 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { from: 'Owner Name <owner@example.com>' } }), 4 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { email: OWNER } }), 4 * H);
+    assert.equal(grok.parseEmailAddress('Owner Name <owner@example.com>'), OWNER);
+    assert.equal(grok.parseEmailAddress(OWNER), OWNER);
+    assert.equal(grok.parseEmailAddress('Owner Name'), '');
+    assert.equal(grok.isOwnerFromEmail(owner), true);
+    assert.equal(grok.maxTurnsForEffort('xhigh', owner), 100);
+    assert.equal(grok.chooseEffort({ prompt: 'Thanks for the update', cwd: noGit, channel: 'email', sender: owner.sender }), 'xhigh');
 
-  const other = { channel: 'email', sender: { raw_id: 'other@example.com', raw_username: 'Other' } };
-  assert.equal(grok.timeoutMsForEffort('xhigh', other), 1 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'jess@techdirect.io' } }), 1 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'james@other.com' } }), 1 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_username: 'James Watt' } }), 1 * H);
-  assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 1 * H);
-  assert.equal(grok.isOwnerFromEmail(other), false);
-  assert.equal(grok.TIMEOUT_CAP_MS, 4 * H);
-  assert.equal(grok.OWNER_EMAIL_TIMEOUT_MS, 4 * H);
-  assert.equal(grok.EMAIL_TIMEOUT_MS, 1 * H);
+    const other = { channel: 'email', sender: { raw_id: 'other@example.com', raw_username: 'Other' } };
+    assert.equal(grok.timeoutMsForEffort('xhigh', other), 1 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'plus@example.com' } }), 1 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'owner@other.com' } }), 1 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_username: 'Owner Name' } }), 1 * H);
+    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 1 * H);
+    assert.equal(grok.isOwnerFromEmail(other), false);
+    assert.equal(grok.TIMEOUT_CAP_MS, 4 * H);
+    assert.equal(grok.OWNER_EMAIL_TIMEOUT_MS, 4 * H);
+    assert.equal(grok.EMAIL_TIMEOUT_MS, 1 * H);
+  } finally {
+    delete process.env.ASMLTR_OWNER_FROM_EMAIL;
+  }
+});
+
+test('owner-from 4h is off when ASMLTR_OWNER_FROM_EMAIL is unset', () => {
+  const H = 60 * 60 * 1000;
+  delete process.env.ASMLTR_OWNER_FROM_EMAIL;
+  const ownerish = { channel: 'email', sender: { raw_id: 'owner@example.com' } };
+  assert.equal(grok.isOwnerFromEmail(ownerish), false);
+  assert.equal(grok.timeoutMsForEffort('xhigh', ownerish), 1 * H);
 });
 
 test('discord / mcp / dashboard stay 5 / 10 / 60 after owner-email 4h cap', () => {
-  for (const channel of ['discord', 'assistant-web', 'assistant-native', 'mcp']) {
-    assert.equal(grok.timeoutMsForEffort('medium', { channel }), 5 * 60 * 1000, channel);
-    assert.equal(grok.timeoutMsForEffort('high', { channel }), 10 * 60 * 1000, channel);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel }), 60 * 60 * 1000, channel);
-    assert.equal(grok.timeoutMsForEffort('xhigh', {
-      channel,
-      sender: { raw_id: 'james@techdirect.io' },
-    }), 60 * 60 * 1000, channel + ' owner email must not 4h interactive');
+  process.env.ASMLTR_OWNER_FROM_EMAIL = 'owner@example.com';
+  try {
+    for (const channel of ['discord', 'assistant-web', 'assistant-native', 'mcp']) {
+      assert.equal(grok.timeoutMsForEffort('medium', { channel }), 5 * 60 * 1000, channel);
+      assert.equal(grok.timeoutMsForEffort('high', { channel }), 10 * 60 * 1000, channel);
+      assert.equal(grok.timeoutMsForEffort('xhigh', { channel }), 60 * 60 * 1000, channel);
+      assert.equal(grok.timeoutMsForEffort('xhigh', {
+        channel,
+        sender: { raw_id: 'owner@example.com' },
+      }), 60 * 60 * 1000, channel + ' owner email must not 4h interactive');
+    }
+  } finally {
+    delete process.env.ASMLTR_OWNER_FROM_EMAIL;
   }
 });

@@ -2,19 +2,19 @@
   "servers": {
     "corona": {
       "type": "stdio",
-      "command": "/home/adjutant/src/asmltr/extras/ivy-local/corona/run.sh",
+      "command": "/path/to/asmltr/extras/ivy-local/corona/run.sh",
       "args": [],
       "env": {}
     },
     "rolodex": {
       "type": "stdio",
-      "command": "/home/adjutant/src/asmltr/extras/ivy-local/rolodex/run.sh",
+      "command": "/path/to/asmltr/extras/ivy-local/rolodex/run.sh",
       "args": [],
       "env": {}
     },
     "onenote": {
       "type": "stdio",
-      "command": "/home/adjutant/src/asmltr/extras/ivy-local/onenote/run.sh",
+      "command": "/path/to/asmltr/extras/ivy-local/onenote/run.sh",
       "args": [],
       "env": {}
     }

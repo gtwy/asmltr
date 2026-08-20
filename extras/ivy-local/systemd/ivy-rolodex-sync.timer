@@ -1,5 +1,5 @@
 [Unit]
-Description=Ivy Rolodex cache refresh at 07:30 America/New_York
+Description=Rolodex cache refresh (edit OnCalendar for your install)
 
 [Timer]
 OnCalendar=*-*-* 07:30:00 America/New_York

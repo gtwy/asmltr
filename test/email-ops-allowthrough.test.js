@@ -14,7 +14,7 @@ const ENTRA = [{
 
 test('noreply/microsoft security is automated', () => {
   assert.equal(isAutomatedSender('mssecurity-noreply@microsoft.com'), true);
-  assert.equal(isAutomatedSender('james@techdirect.io'), false);
+  assert.equal(isAutomatedSender('person@example.com'), false);
 });
 
 test('domain match is @domain or a subdomain, not a suffix of the local part', () => {
@@ -45,7 +45,7 @@ test('Entra matcher does not fire without both keywords', () => {
 
 test('Entra matcher does not fire from a non-Microsoft sender', () => {
   assert.equal(matchOpsAllowThrough(
-    'james@techdirect.io',
+    'person@example.com',
     'Synchronization has stopped — Microsoft Entra ID',
     'Synchronization to Microsoft Entra ID stopped',
     ENTRA,
