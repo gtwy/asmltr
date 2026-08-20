@@ -2,7 +2,9 @@
 """Stdio MCP server: OneNote via Microsoft Graph.
 
 Secrets live at ~/.asmltr/onenote/{token.json,.client.json} (mode 600). Never print them.
-Override with ONENOTE_HOME. Eve: skip extras/ivy-local unless you want these extras.
+Override with ONENOTE_HOME. Optional ownership_site in .client.json (or ONENOTE_OWNERSHIP_SITE)
+selects a SharePoint site; if unset, Graph calls use /me/onenote only.
+Eve: skip extras/ivy-local unless you want these extras.
 """
 
 from __future__ import annotations
@@ -415,13 +417,18 @@ def _enc_id(value: str) -> str:
 
 
 def _ownership_site() -> str:
-    env = (os.environ.get("ONENOTE_OWNERSHIP_SITE") or "").strip()
+    env = (os.environ.get("ONENOTE_OWNERSHIP_SITE") or os.environ.get("OWNERSHIP_SITE") or "").strip()
     if env:
         return env
-    client = _load_client()
-    if isinstance(client, dict):
-        return str(client.get("ownership_site") or "").strip()
-    return ""
+    if not CLIENT_PATH.is_file():
+        return ""
+    try:
+        data = _load_json(CLIENT_PATH)
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("ownership_site") or data.get("OWNERSHIP_SITE") or "").strip()
 
 
 def _onenote_roots() -> list[str]:
