@@ -30,7 +30,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
-const { looksLikePromptLeak, discordToolLine, discordThoughtLine, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptLeak, discordToolLine, discordThoughtLine, speakerHintsFrom, thoughtBudget, humanToolChip, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -490,6 +490,10 @@ RESPONSE RULES:
         // or a new narration block begins. The block still open at `done` is the final answer.
         let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
         let beatTimer = null;
+        const isPublic = message.channel.type !== 1;
+        const hints = speakerHintsFrom(message.author, message.member);
+        let maxThoughts = isPublic ? 2 : Infinity;
+        let thoughtsPosted = 0;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
         const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
         const armBeat = () => {
@@ -517,18 +521,28 @@ RESPONSE RULES:
           pending = t;
         };
         const actions = await ctx.core.handleStream(envelope, {
+          onEffort: (effort) => {
+            maxThoughts = thoughtBudget(effort, { publicChannel: isPublic });
+          },
           onSegment: (t) => { holdAnswer(t); },
           onTool: (tool) => {
             pending = '';
             if (sawNoReply) return;
             const line = discordToolLine(streamTools, tool);
-            if (line) postChip(line);
+            if (!line) return;
+            // Quiet budget: skip generic "Working" tool chips (unknown MCP names).
+            if (maxThoughts !== Infinity && !streamTools && humanToolChip(tool) === 'Working') return;
+            postChip(line);
           },
           // Engine-agnostic: Claude/Grok/Gemini/Codex all use onThinking. No-op if none.
           onThinking: (t) => {
             if (sawNoReply) return;
-            const line = discordThoughtLine(t);
-            if (line) { postChip(line); return; }
+            const line = discordThoughtLine(t, hints);
+            if (line && thoughtsPosted < maxThoughts) {
+              thoughtsPosted += 1;
+              postChip(line);
+              return;
+            }
             if (!lastChip) postChip(WORKING_LINE);
             else if (!beatTimer) armBeat();
           },
