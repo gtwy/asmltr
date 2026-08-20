@@ -53,16 +53,15 @@ test('isUuid / resumeArgs: -r for a UUID, never -s or -c', () => {
   assert.deepEqual(grok.resumeArgs('latest'), []);
 });
 
-test('buildArgs is headless -p, streaming-json, finite max-turns, no TUI', () => {
+test('buildArgs is headless -p, streaming-json, no CLI turn cap, no TUI', () => {
   const args = grok.buildArgs({ prompt: 'hello', systemPrompt: 'IDENTITY', sessionId: '01234567-89ab-cdef-0123-456789abcdef' });
   assert.equal(args[0], '--no-auto-update');
   assert.ok(args.includes('-p'));
   assert.ok(args.includes('--output-format'));
   assert.equal(args[args.indexOf('--output-format') + 1], 'streaming-json');
   assert.ok(args.includes('--always-approve'));
-  assert.ok(args.includes('--max-turns'));
-  const mt = Number(args[args.indexOf('--max-turns') + 1]);
-  assert.ok(Number.isFinite(mt) && mt > 0 && mt <= 100);
+  assert.equal(args.includes('--max-turns'), false);
+  assert.ok(args.includes('--effort'));
   assert.ok(args.includes('-s'));
   assert.ok(!args.includes('-r'));
   const p = args[args.indexOf('-p') + 1];
@@ -90,11 +89,25 @@ test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
   assert.ok(!('XAI_API_KEY' in env));
 });
 
-test('timeout and max-turns are finite (never infinite)', () => {
-  assert.ok(grok.DEFAULT_TIMEOUT_MS > 0 && grok.DEFAULT_TIMEOUT_MS <= 30 * 60 * 1000);
-  assert.ok(grok.DEFAULT_MAX_TURNS > 0 && grok.DEFAULT_MAX_TURNS <= 100);
-  assert.equal(grok.timeoutMs(), grok.DEFAULT_TIMEOUT_MS);
-  assert.equal(grok.maxTurns(), grok.DEFAULT_MAX_TURNS);
+test('buildArgs omits a turn-cap flag; runTurn/complete do not arm a kill timer', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.equal(args.includes('--max-turns'), false);
+  assert.ok(args.includes('--effort'));
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  const build = src.match(/function buildArgs\([\s\S]*?\n\}/);
+  assert.ok(build);
+  assert.equal(build[0].includes('--max-turns'), false);
+  assert.ok(src.includes('abortController'));
+  const run = src.match(/async function runTurn\([\s\S]*?\n\}/);
+  assert.ok(run);
+  assert.equal(/setTimeout\([\s\S]{0,200}child\.kill/.test(run[0]), false);
+  assert.equal(run[0].includes('watchdog'), false);
+  const complete = src.match(/async function complete\([\s\S]*?\n\}/);
+  assert.ok(complete);
+  assert.equal(/setTimeout\([\s\S]{0,200}child\.kill/.test(complete[0]), false);
+  assert.equal(complete[0].includes('watchdog'), false);
 });
 
 test('historyReplaysSystemPrompt is true after live-verified -r replay', () => {
