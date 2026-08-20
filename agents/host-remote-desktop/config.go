@@ -79,6 +79,7 @@ func LoadConfig(args []string) (Config, error) {
 		fConfig  = fs.String("config", "", "path to JSON config file (optional)")
 		fBroker  = fs.String("broker", "", "broker base URL (overrides config/env)")
 		fToken   = fs.String("token", "", "peer token")
+		fEnroll  = fs.String("enroll", "", "one-time enrollment code; redeems a device credential, then persists it")
 		fHostID  = fs.String("host-id", "", "host id to register under")
 		fName    = fs.String("name", "", "display name")
 		fAudio   = fs.String("audio", "", "publish system audio (true/false)")
@@ -119,6 +120,10 @@ func LoadConfig(args []string) (Config, error) {
 	if v, ok := envAny("ASMLTR_RD_TOKEN", "RD_TOKEN"); ok {
 		cfg.Token = v
 	}
+	enrollCode := ""
+	if v, ok := envAny("ASMLTR_RD_ENROLL", "RD_ENROLL"); ok {
+		enrollCode = v
+	}
 	if v, ok := envAny("ASMLTR_RD_HOST_ID", "RD_HOST_ID"); ok {
 		cfg.HostID = v
 	}
@@ -158,6 +163,9 @@ func LoadConfig(args []string) (Config, error) {
 	}
 	if *fToken != "" {
 		cfg.Token = *fToken
+	}
+	if *fEnroll != "" {
+		enrollCode = *fEnroll
 	}
 	if *fHostID != "" {
 		cfg.HostID = *fHostID
@@ -201,6 +209,39 @@ func LoadConfig(args []string) (Config, error) {
 			cfg.AppDir = "."
 		}
 	}
+
+	// --- device credential: stored enrollment, or redeem a one-time code -------------------------
+	// Precedence keeps an explicit -token/env override on top (useful for recovery); otherwise a
+	// previously enrolled credential is reused, and only a machine with neither reaches out to
+	// enroll. Enrollment is therefore a genuine one-time step, not something a restart repeats.
+	if cfg.Token == "" {
+		if stored, ok := loadStoredCredential(cfg.AppDir); ok {
+			cfg.Token = stored.Token
+			if cfg.HostID == "" && stored.DeviceID != "" {
+				cfg.HostID = stored.DeviceID
+			}
+		} else if enrollCode != "" {
+			if strings.TrimSpace(cfg.BrokerURL) == "" {
+				return cfg, fmt.Errorf("-enroll needs a broker URL (set -broker or ASMLTR_RD_BROKER)")
+			}
+			issued, err := redeemEnrollment(cfg.BrokerURL, enrollCode)
+			if err != nil {
+				return cfg, fmt.Errorf("enrollment failed: %w", err)
+			}
+			if err := saveStoredCredential(cfg.AppDir, issued); err != nil {
+				return cfg, fmt.Errorf("enrolled, but could not save the credential to %s: %w", credentialPath(cfg.AppDir), err)
+			}
+			cfg.Token = issued.Token
+			if issued.DeviceID != "" {
+				cfg.HostID = issued.DeviceID
+			}
+			if cfg.Name == "" && issued.Name != "" {
+				cfg.Name = issued.Name
+			}
+			fmt.Fprintf(os.Stderr, "enrolled as device %q; credential saved to %s\n", issued.DeviceID, credentialPath(cfg.AppDir))
+		}
+	}
+
 	if cfg.HostID == "" {
 		if h, err := os.Hostname(); err == nil {
 			cfg.HostID = h

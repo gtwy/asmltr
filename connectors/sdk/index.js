@@ -144,6 +144,30 @@ function makeCoreClient(coreUrl) {
         req.end();
       });
     },
+    // Device registry auth (docs/DEVICE-REGISTRY.md): verify a credential a device presented.
+    // Resolves to the device record, or null when the credential is unknown/revoked — that is an
+    // EXPECTED outcome on an auth path, not an error, so it resolves rather than rejects. A genuine
+    // transport failure still rejects, so a caller can tell "bad token" from "core unreachable"
+    // and fail closed loudly instead of silently locking every device out.
+    deviceAuth(token, transport) {
+      return new Promise((resolve, reject) => {
+        const payload = JSON.stringify({ token, transport: transport || null });
+        const req = lib.request({
+          hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: '/v2/devices/auth', method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+        }, (res) => {
+          let data = ''; res.setEncoding('utf8'); res.on('data', (c) => { data += c; });
+          res.on('end', () => {
+            if (res.statusCode === 401) return resolve(null);
+            let j = {}; try { j = data ? JSON.parse(data) : {}; } catch (_) {}
+            if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(j.error || `core ${res.statusCode}`));
+            resolve(j);
+          });
+        });
+        req.on('error', reject); guard(req); req.write(payload); req.end();
+      });
+    },
     // Fire-and-resolve JSON POST to a core control endpoint (abort/inject live-turn controls).
     _post(path, body) {
       return new Promise((resolve, reject) => {

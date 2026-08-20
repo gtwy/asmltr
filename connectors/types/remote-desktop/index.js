@@ -61,12 +61,59 @@ async function start(ctx) {
   const viewers = new Map();  // client_id → { res, identity, since }
   const sessions = new Map(); // session_id → { host_id, client_id, control, identity, since }
 
+  // --- peer authentication: the DEVICE REGISTRY first, keys.json only as a migration fallback -----
+  // Credentials used to live in a hand-edited gitignored keys.json. They now live in the TRUST vault,
+  // issued per device by `asmltr device enroll`, with the registry holding only a hash (see
+  // docs/DEVICE-REGISTRY.md). The file path is kept ONLY so an install mid-migration keeps working;
+  // it logs loudly every time it is used so the leftover cannot go unnoticed.
+  //
+  // This runs on EVERY signaling message, so it must not put a core round-trip in front of each ICE
+  // candidate: results are cached briefly, negatives for less time than positives, and core pokes
+  // POST /rd/invalidate on revoke so a revocation is not left waiting on a TTL.
+  const AUTH_TTL_MS = Number(cfg.auth_cache_ttl_ms || 60000);
+  const AUTH_NEG_TTL_MS = Math.min(15000, AUTH_TTL_MS);
+  const authCache = new Map(); // token → { who: entry|null, exp }
+  let warnedLegacyKeys = false;
+
   const keyEntry = (token) => loadKeys(keysFile).find((k) => k.key === token) || null;
-  function auth(token) {
-    if (!requireToken) { const e = token && keyEntry(token); return { identity: (e && e.identity) || 'rd-anon' }; }
-    if (!token) return null;
-    const e = keyEntry(token);
-    return e ? { identity: e.identity } : null;
+
+  function legacyAuth(token) {
+    const e = token && keyEntry(token);
+    if (!e) return null;
+    if (!warnedLegacyKeys) {
+      warnedLegacyKeys = true;
+      ctx.log(`WARNING: peer authenticated from the legacy ${path.basename(keysFile)} instead of the device registry. ` +
+        'Enroll this peer (`asmltr device enroll`) and delete the file — it is an un-revocable credential on disk.');
+    }
+    return { identity: e.identity, device_id: null, device_name: e.username || e.identity, legacy: true };
+  }
+
+  const ANON = { identity: 'rd-anon', device_id: null, device_name: 'anonymous', legacy: true };
+
+  async function auth(token) {
+    if (!token) return requireToken ? null : ANON;
+    const hit = authCache.get(token);
+    if (hit && hit.exp > Date.now()) return hit.who;
+
+    let who = null;
+    try {
+      const d = await ctx.core.deviceAuth(token, 'rd');
+      if (d && d.ok) {
+        // Grants still resolve against a PRINCIPAL in P0 — the device's owner. Per-device grants
+        // (principal x device x capability) land in P1; until then this preserves today's behaviour
+        // exactly while moving where the credential is stored.
+        who = { identity: d.owner_principal_id || d.device_id, device_id: d.device_id, device_name: d.name, legacy: false };
+      }
+    } catch (e) {
+      // Core unreachable: do NOT fall through to a cached/legacy allow. Fail closed and say so.
+      ctx.log(`device auth unavailable (${e.message}) — refusing the peer`);
+      return null;
+    }
+    if (!who) who = legacyAuth(token);
+    authCache.set(token, { who, exp: Date.now() + (who ? AUTH_TTL_MS : AUTH_NEG_TTL_MS) });
+    // An open broker (require_token=false) still authenticates a KNOWN token, so an enrolled device
+    // keeps its real identity and grants; only an unrecognised peer degrades to the anonymous one.
+    return who || (requireToken ? null : ANON);
   }
   const push = (map, id, obj) => { const d = map.get(id); if (!d) return false; try { d.res.write(`data: ${JSON.stringify(obj)}\n\n`); return true; } catch (_) { return false; } };
 
@@ -103,7 +150,7 @@ async function start(ctx) {
 
   // ICE config: STUN always; TURN only if explicitly enabled (short-lived coturn REST creds).
   app.get('/rd/ice-config', async (req, res) => {
-    if (requireToken && !auth(req.query.token)) return res.status(401).json({ ok: false, error: 'invalid token' });
+    if (requireToken && !(await auth(req.query.token))) return res.status(401).json({ ok: false, error: 'invalid token' });
     const iceServers = [{ urls: cfg.stun_urls && cfg.stun_urls.length ? cfg.stun_urls : ['stun:stun.l.google.com:19302'] }];
     if (cfg.turn_enabled && cfg.turn_url) {
       try {
@@ -117,8 +164,8 @@ async function start(ctx) {
   });
 
   // Persistent SSE stream per peer (host or viewer).
-  app.get('/rd/stream', (req, res) => {
-    const who = auth(req.query.token);
+  app.get('/rd/stream', async (req, res) => {
+    const who = await auth(req.query.token);
     if (requireToken && !who) return res.status(401).end();
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.flushHeaders && res.flushHeaders();
@@ -127,14 +174,14 @@ async function start(ctx) {
       const id = String(req.query.host_id || who.identity);
       const prev = hosts.get(id); if (prev && prev.res !== res) { try { prev.res.end(); } catch (_) {} }
       const caps = { video: true, audio: req.query.audio === '1', control: req.query.control === '1' };
-      hosts.set(id, { res, name: String(req.query.name || id), identity: who.identity, caps, since: Date.now() });
+      hosts.set(id, { res, name: String(req.query.name || id), identity: who.identity, device_id: who.device_id || null, caps, since: Date.now() });
       res.write(`data: ${JSON.stringify({ type: 'ready', host_id: id })}\n\n`);
       ctx.emit({ surface: 'assistant-native', event_type: 'control', session_id: `rd:host:${id}`, identity: who.identity, payload: { action: 'host-online', host_id: id } });
       req.on('close', () => { if (hosts.get(id) && hosts.get(id).res === res) hosts.delete(id); });
     } else {
       const id = String(req.query.client_id || who.identity);
       const prev = viewers.get(id); if (prev && prev.res !== res) { try { prev.res.end(); } catch (_) {} }
-      viewers.set(id, { res, identity: who.identity, since: Date.now() });
+      viewers.set(id, { res, identity: who.identity, device_id: who.device_id || null, since: Date.now() });
       res.write(`data: ${JSON.stringify({ type: 'ready', client_id: id })}\n\n`);
       req.on('close', () => { if (viewers.get(id) && viewers.get(id).res === res) viewers.delete(id); });
     }
@@ -143,7 +190,7 @@ async function start(ctx) {
   // All signaling messages. SDP/ICE are relayed VERBATIM between the two peers of a session only.
   app.post('/rd/msg', async (req, res) => {
     const b = req.body || {};
-    const who = auth(b.token);
+    const who = await auth(b.token);
     if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid token' });
     const type = String(b.type || '');
     try {
@@ -162,7 +209,7 @@ async function start(ctx) {
         if (wantControl && !g.control) return res.status(403).json({ ok: false, error: 'no control grant (view-only)' });
         const sessionId = crypto.randomBytes(9).toString('base64url');
         const clientId = String(b.client_id || who.identity);
-        sessions.set(sessionId, { host_id: hostId, client_id: clientId, control: wantControl && g.control, identity: who.identity, since: Date.now() });
+        sessions.set(sessionId, { host_id: hostId, client_id: clientId, control: wantControl && g.control, identity: who.identity, device_id: who.device_id || null, since: Date.now() });
         // Ask the host to make an offer for this session (control flag stamped by the broker → agent re-checks it).
         push(hosts, hostId, { type: 'offer_request', session_id: sessionId, control: wantControl && g.control });
         ctx.emit({ surface: 'assistant-native', event_type: 'control', session_id: `rd:sess:${sessionId}`, identity: who.identity, payload: { action: 'session-open', host_id: hostId, control: wantControl && g.control } });
@@ -217,7 +264,7 @@ async function start(ctx) {
   // viewer's later `connect` is STILL re-checked against the phone token's grants by the broker).
   app.post('/rd/cast', async (req, res) => {
     const b = req.body || {};
-    const who = auth(b.token);
+    const who = await auth(b.token);
     if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid token' });
     const g = await grants(who.identity);
     if (!g.control) return res.status(403).json({ ok: false, error: 'cast requires full trust (control grant)' });
@@ -240,7 +287,7 @@ async function start(ctx) {
   // Which android devices can we cast to? Proxy the android gateway's device list (view-gated) so the
   // dashboard can offer a target picker; empty/'*' in /rd/cast still broadcasts to all connected devices.
   app.get('/rd/devices', async (req, res) => {
-    const who = auth(req.query.token);
+    const who = await auth(req.query.token);
     if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid token' });
     const g = await grants(who.identity);
     if (!g.view) return res.json({ ok: true, devices: [], can_cast: false });
@@ -252,6 +299,60 @@ async function start(ctx) {
       for (const d of [...(j.devices || []), ...(j.control || [])]) if (d && d.id && !seen.has(d.id)) seen.set(d.id, { id: d.id, name: d.name || d.id });
       res.json({ ok: true, devices: [...seen.values()], can_cast: g.control });
     } catch (e) { res.json({ ok: true, devices: [], can_cast: g.control, error: e.message }); }
+  });
+
+  // --- enrollment: a machine claims its own credential ------------------------------------------
+  // The ONLY /rd route reachable without a device credential — necessarily, since the caller does
+  // not have one yet. Core is the authority: it consumes the single-use code and mints the token.
+  // The agent talks only to the broker (core is not publicly reachable), so this proxies.
+  // The code carries 192 bits of entropy, so guessing is not the threat; a bad actor hammering this
+  // endpoint is, hence the small per-IP throttle.
+  const enrollHits = new Map(); // ip → { n, resetAt }
+  function enrollThrottled(ip) {
+    const t = enrollHits.get(ip);
+    if (!t || t.resetAt < Date.now()) { enrollHits.set(ip, { n: 1, resetAt: Date.now() + 60000 }); return false; }
+    t.n += 1;
+    return t.n > 10;
+  }
+  app.post('/rd/enroll', async (req, res) => {
+    const ip = req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+    if (enrollThrottled(ip)) return res.status(429).json({ ok: false, error: 'too many enrollment attempts; wait a minute' });
+    const code = String((req.body || {}).code || '');
+    if (!code) return res.status(400).json({ ok: false, error: 'code required' });
+    try {
+      const r = await ctx.core._post('/v2/devices/redeem', { code });
+      ctx.emit({ surface: 'assistant-native', event_type: 'control', session_id: `rd:enroll:${r.device_id}`, identity: r.device_id, payload: { action: 'device-enrolled', device_id: r.device_id, transport: r.transport } });
+      ctx.log(`device enrolled: ${r.name || r.device_id} (${r.transport})`);
+      return res.json({ ok: true, token: r.token, device_id: r.device_id, name: r.name, transport: r.transport });
+    } catch (e) {
+      // Invalid and expired are deliberately indistinguishable to the caller.
+      ctx.log(`enrollment refused from ${ip}: ${e.message}`);
+      return res.status(400).json({ ok: false, error: 'invalid or expired enrollment code' });
+    }
+  });
+
+  // Revocation must not wait out the auth cache TTL. Core pokes this the moment a device (or one of
+  // its transports) is revoked; we drop the cached decision and tear down anything that peer holds.
+  app.post('/rd/invalidate', (req, res) => {
+    const b = req.body || {};
+    const deviceId = String(b.device_id || '');
+    if (b.token) authCache.delete(String(b.token));
+    let cleared = 0;
+    for (const [tok, v] of authCache.entries()) {
+      if (!deviceId || (v.who && v.who.device_id === deviceId)) { authCache.delete(tok); cleared++; }
+    }
+    // Drop live sessions belonging to that device, both peers told why.
+    let killed = 0;
+    for (const [sid, sess] of [...sessions.entries()]) {
+      const h = hosts.get(sess.host_id);
+      if (deviceId && !(h && h.device_id === deviceId) && sess.device_id !== deviceId) continue;
+      push(hosts, sess.host_id, { type: 'bye', session_id: sid, reason: 'revoked' });
+      push(viewers, sess.client_id, { type: 'bye', session_id: sid, reason: 'revoked' });
+      sessions.delete(sid); killed++;
+    }
+    if (deviceId) { const h = hosts.get(deviceId); if (h) { try { h.res.end(); } catch (_) {} hosts.delete(deviceId); } }
+    ctx.emit({ surface: 'assistant-native', event_type: 'control', session_id: `rd:revoke:${deviceId || 'token'}`, identity: 'core', payload: { action: 'invalidate', device_id: deviceId || null, cache_cleared: cleared, sessions_killed: killed } });
+    res.json({ ok: true, cache_cleared: cleared, sessions_killed: killed });
   });
 
   app.get('/rd/health', (_req, res) => res.json({ ok: true, hosts: hosts.size, viewers: viewers.size, sessions: sessions.size }));
