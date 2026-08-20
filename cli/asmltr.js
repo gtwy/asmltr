@@ -263,7 +263,7 @@ async function cmdSend(rest) {
   if (!channel || !target || (!text && !file)) {
     throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
       '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"]\n' +
-      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@b.com "the body" --subject "Hello" --cc "boss@x.com" --file /root/report.pdf');
+      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@example.com "the body" --subject "Hello" --cc "boss@example.com" --file /root/report.pdf');
   }
   const body = file
     ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject, cc }

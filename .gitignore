@@ -27,6 +27,9 @@ connectors/types/discord/channel-aliases.json
 
 # Private per-install working notes
 CLAUDE.local.md
+
+# Live nginx server_name files for a real host — commit only *.example.conf
+extras/ivy-local/nginx/*.example.com
 insights/docker-compose.*.yml
 connectors/types/openai/keys.json
 connectors/types/android/keys.json

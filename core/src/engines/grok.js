@@ -17,7 +17,7 @@
  *   pass `-r <uuid>` only. `--fork-session` / `--restore-code` / `grok sessions` /
  *   `grok export` are preserved as notes, not wired. See /workspace/grok-cli-features.md.
  *
- * historyReplaysSystemPrompt is TRUE: osiris live-verified 2026-08-17 that `-r <uuid>`
+ * historyReplaysSystemPrompt is TRUE: live-verified 2026-08-17 that `-r <uuid>`
  * replays the first-turn system block (probe: "What were you instructed to be?" →
  * "A one-word ping fixture."). ASMLTR_INJECT_ONCE=off remains the kill-switch.
  */
@@ -60,9 +60,13 @@ function maxTurnsForEffort(effort, opts) {
 }
 
 const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // inbound email xhigh (everyone except owner-from)
-const OWNER_FROM_EMAIL = 'owner@example.com';
-const OWNER_EMAIL_TIMEOUT_MS = 4 * 60 * 60 * 1000; // From owner@example.com only
+const OWNER_EMAIL_TIMEOUT_MS = 4 * 60 * 60 * 1000; // From ASMLTR_OWNER_FROM_EMAIL only
 const MCP_TIMEOUT_MS = 60 * 60 * 1000; // inbound mcp always xhigh
+
+/** Exact From address that gets the 4h email watchdog. Empty = no owner-from path. Never hardcode a real address. */
+function ownerFromEmail() {
+  return String(process.env.ASMLTR_OWNER_FROM_EMAIL || '').trim().toLowerCase();
+}
 
 // Discord / assistant-web / assistant-native (and generic non-email). Absolute, not scale-from-env.
 const INTERACTIVE_TIMEOUT_MS = {
@@ -112,12 +116,14 @@ function extractSenderEmail(opts) {
 }
 
 function isOwnerFromEmail(opts) {
-  return extractSenderEmail(opts) === OWNER_FROM_EMAIL;
+  const owner = ownerFromEmail();
+  if (!owner) return false;
+  return extractSenderEmail(opts) === owner;
 }
 
 /** Watchdog by channel. Cap 4 hours so owner-from email can use it. Not infinite.
  *  Interactive (discord, assistant-web, assistant-native, generic): 5 / 10 / 60.
- *  Email xhigh is 60 minutes / 100 turns, except From owner@example.com → 4 hours
+ *  Email xhigh is 60 minutes / 100 turns, except From ASMLTR_OWNER_FROM_EMAIL → 4 hours
  *  (case-insensitive; display-name wrapping ignored; that exact address only).
  *  MCP is always xhigh / 60 minutes (not the owner-from 4h path).
  *  Second arg is opts `{ channel, sender }` or a channel string. */
@@ -134,7 +140,7 @@ function timeoutMsForEffort(effort, opts) {
   return Math.min(ms, TIMEOUT_CAP_MS);
 }
 
-// Reasoning effort — three tiers (James / Adjutant, 19 Aug 2026):
+// Reasoning effort — three tiers (19 Aug 2026):
 //   Always pass `--effort <level>` (CLI alias of --reasoning-effort).
 //   Baseline is ASMLTR_GROK_EFFORT (Ivy live: medium). envEffort() if unset still
 //   || 'high' so other installs keep the old default. xhigh is NOT the default.
@@ -154,9 +160,9 @@ function timeoutMsForEffort(effort, opts) {
 //   with no code words is still xhigh). MCP channel (`mcp`) is the same:
 //   always xhigh after one-shot, 60-minute watchdog (not owner-from 4h).
 //   Discord and others stay three-tier.
-//   Email xhigh timeout is 60 minutes, or 4 hours only when From is
-//   owner@example.com (case-insensitive, display-name wrapping ignored;
-//   that exact address — not the domain, not other james@). MCP watchdog
+//   Email xhigh timeout is 60 minutes, or 4 hours only when From matches
+//   ASMLTR_OWNER_FROM_EMAIL (case-insensitive, display-name wrapping ignored;
+//   that exact address — not the domain). Do not put a real address in git. MCP watchdog
 //   is 60 minutes. Interactive (discord, assistant-web, assistant-native)
 //   5 / 10 / 60 (cap 4h so the owner-from path can use it; interactive
 //   stays absolute 5/10/60).
@@ -646,7 +652,7 @@ async function complete({ prompt, model, appendSystemPrompt = null }) {
   return out.trim();
 }
 
-// See file header: flip to true after osiris confirms `-r` replays the first-turn system block.
+// See file header: flip to true after live-verifying `-r` replays the first-turn system block.
 const historyReplaysSystemPrompt = true;
 
 module.exports = {
@@ -657,7 +663,7 @@ module.exports = {
   extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
   timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, MCP_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel, isMcpChannel,
-  OWNER_FROM_EMAIL, OWNER_EMAIL_TIMEOUT_MS, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
+  ownerFromEmail, OWNER_EMAIL_TIMEOUT_MS, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
   canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet,

@@ -1,26 +1,20 @@
-# extras/ivy-local — osiris-only MCP wrappers
+# extras/ivy-local — optional localhost MCP wrappers
 
-Eve: skip this tree. Ivy on this box only.
-
-Small stdio MCP servers Grok/Ivy calls via `~/.asmltr/mcp.json` and `grok mcp add`.
-They do **not** fork `grok.js`. Secrets stay out of git.
+Stdio MCP servers the Grok engine can call via `~/.asmltr/mcp.json` and `grok mcp add`.
+They do **not** fork `grok.js`. Secrets stay out of git. Eve: skip unless you want the same extras.
 
 | Server | Talks to | Tools |
 | --- | --- | --- |
-| `corona` | `http://127.0.0.1:12701` | `corona_health`, `corona_recipe`, `corona_cigars`, `corona_cooking` (no `/say`) |
-| `rolodex` | Ivy cache `~/.asmltr/rolodex-cache` (source `:12702/export`); writes hit `:12702` live | `rolodex_health`, `rolodex_search`, `rolodex_get`, `rolodex_alias`, `rolodex_sync`, `rolodex_create`, `rolodex_add_phone`, `rolodex_delete`, `rolodex_backups`, `rolodex_restore` |
+| `corona` | `http://127.0.0.1:12701` (override with env) | `corona_health`, `corona_recipe`, `corona_cigars`, `corona_cooking` (no `/say`) |
+| `rolodex` | cache `~/.asmltr/rolodex-cache` (source `:12702/export`); writes hit `:12702` live | `rolodex_health`, `rolodex_search`, `rolodex_get`, `rolodex_alias`, `rolodex_sync`, `rolodex_create`, `rolodex_add_phone`, `rolodex_delete`, `rolodex_backups`, `rolodex_restore` |
 | `onenote` | Graph, creds in `~/.asmltr/onenote/{token.json,.client.json}` mode 600 | `onenote_health`, `onenote_login`, notebooks/sections/pages/get/create/update |
 
-Rolodex is **Ivy’s two-file setup** (her choice, 19 Aug 2026): `contacts.json` is the daily Google dump; `aliases.json` is the static nickname index. People cards stay relationship memory. Do not invent a third store. Rotating copies of `contacts.json` live in `~/.asmltr/rolodex-cache/backups/` (one per ET day, first snapshot of the day wins, max 5) — copies, not a lookup store. `rolodex_restore` recreates one My Contact in Google from a copy; it does not bulk-push the dump. Cache path is `~/.asmltr/rolodex-cache`, not Adjutant’s 08:00 box cache and not `/home/adjutant/rolodex`. Timer: **07:30 America/New_York**, `OnBootSec=3min`, `Persistent=true`. Sync never writes `aliases.json`. Prefer an alias hit. A phone number is not permission to text. Voice/SMS parked.
+Rolodex uses two files in the cache dir: `contacts.json` (daily dump) and `aliases.json` (static nicknames; sync must never overwrite). People cards stay relationship memory. Rotating copies of `contacts.json` live in `~/.asmltr/rolodex-cache/backups/` (one per local day, max 5) — copies, not a lookup store. Prefer an alias hit. A phone number is not permission to text.
 
-Cigar writeups: kektech `#cigars` first (who, when ET 24-hour), then exactly `Additional notes from the web`.
-
-## Install on osiris
+## Install
 
 ```bash
-cd /home/adjutant/src/asmltr
-git checkout ivy
-git pull
+cd /path/to/asmltr
 bash extras/ivy-local/register.sh
 ```
 
@@ -32,10 +26,9 @@ bash extras/ivy-local/register.sh
 curl -sf http://127.0.0.1:12701/health
 curl -sf http://127.0.0.1:12702/health
 grok mcp list
-# asmltr ask 'Use corona_health and rolodex_health, then say ok.'
 stat -c '%a %n' ~/.asmltr/onenote/token.json ~/.asmltr/onenote/.client.json
 # expect 600 — do not cat
 systemctl --user list-timers ivy-rolodex-sync.timer
 ```
 
-Do not commit `token.json`, `.client.json`, cache JSON, or `.venv`.
+Do not commit `token.json`, `.client.json`, cache JSON, `.venv`, or any live nginx `server_name`.

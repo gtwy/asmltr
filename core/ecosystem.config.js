@@ -1,6 +1,6 @@
 // PM2 config for asmltr-core.
 // MUST run on the host (not Docker). Ivy/grok: needs Node >= 24 (set interpreter
-// or ASMLTR_NODE — system node on osiris is 18), grok CLI on PATH, ~/.grok/auth.json.
+// or ASMLTR_NODE if system node is too old), grok CLI on PATH, ~/.grok/auth.json.
 // Bind 127.0.0.1. Do NOT start the connector manager for a localhost-only ivy.
 // Port/URLs come from the environment (see env.ivy.example); defaults below.
 module.exports = {

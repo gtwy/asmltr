@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Stdio MCP: Corona localhost API on osiris (127.0.0.1:12701).
+"""Stdio MCP: Corona localhost API (127.0.0.1:12701).
 
-Read-only. No /say. Eve: skip extras/ivy-local.
+Read-only. No /say. Eve: skip extras/ivy-local unless you want these extras.
 """
 
 from __future__ import annotations

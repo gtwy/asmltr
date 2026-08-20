@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Ivy's local MCP servers on osiris and register them.
+# Install optional localhost MCP servers and register them.
 # Does not touch corona.service or rolodex.service. Does not print secrets.
 set -euo pipefail
 
@@ -11,7 +11,7 @@ MCP_FILE="${ASMLTR_MCP_FILE:-$HOME/.asmltr/mcp.json}"
 ONENOTE_HOME="${ONENOTE_HOME:-$HOME/.asmltr/onenote}"
 CACHE_DIR="${ROLODEX_CACHE:-$HOME/.asmltr/rolodex-cache}"
 
-echo "== ivy-local register as $(whoami) on $(hostname) =="
+echo "== ivy-local register as $(whoami) =="
 test -d "$IVY" || { echo "NEED $IVY"; exit 1; }
 export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
 
@@ -120,6 +120,8 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$UNIT_DIR"
 cp -f "$IVY/systemd/ivy-rolodex-sync.service" "$UNIT_DIR/ivy-rolodex-sync.service"
 cp -f "$IVY/systemd/ivy-rolodex-sync.timer" "$UNIT_DIR/ivy-rolodex-sync.timer"
+# Template in git uses a placeholder path. Point ExecStart at this clone.
+sed -i "s|^ExecStart=.*|ExecStart=$IVY/rolodex/sync.sh|" "$UNIT_DIR/ivy-rolodex-sync.service"
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user daemon-reload
   systemctl --user enable --now ivy-rolodex-sync.timer

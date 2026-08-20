@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Stdio MCP server: Example Owner's OneNote via Microsoft Graph (osiris Ivy, Adjutant Connector).
+"""Stdio MCP server: OneNote via Microsoft Graph.
 
 Secrets live at ~/.asmltr/onenote/{token.json,.client.json} (mode 600). Never print them.
-Override with ONENOTE_HOME. Eve: skip extras/ivy-local.
+Override with ONENOTE_HOME. Eve: skip extras/ivy-local unless you want these extras.
 """
 
 from __future__ import annotations

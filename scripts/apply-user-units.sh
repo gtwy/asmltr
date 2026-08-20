@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Apply ivy localhost on osiris as adjutant.
-# systemd --user only. Do not install pm2. Do not start Discord.
+# Apply ivy localhost as systemd --user units.
+# Do not install pm2. Do not start Discord.
 # Do not touch corona.service or rolodex.service. Do not push. Do not cat ~/.grok/auth.json.
 set -euo pipefail
 
@@ -9,8 +9,7 @@ NODE24="${ASMLTR_NODE:-$HOME/.local/bin/node}"
 GROK_BIN="${ASMLTR_GROK_BIN:-$HOME/.grok/bin/grok}"
 WITH_COLLECTOR="${WITH_COLLECTOR:-0}"
 
-echo "== ivy apply as $(whoami) on $(hostname) =="
-test "$(whoami)" = adjutant || { echo "MUST run as adjutant"; exit 1; }
+echo "== ivy apply as $(whoami) =="
 
 export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
 unset XAI_API_KEY
@@ -71,4 +70,4 @@ fi
 echo "== talk to ivy =="
 echo "  $NODE24 $REPO/cli/asmltr.js ask \"Reply with exactly the word pong and nothing else.\""
 echo "DONE. Do not start connector-manager. Do not git push. Do not install pm2."
-echo "James-only Corona/Rolodex/OneNote layout: bash $REPO/extras/ivy-local/register.sh"
+echo "Optional Corona/Rolodex/OneNote wrappers: bash $REPO/extras/ivy-local/register.sh"

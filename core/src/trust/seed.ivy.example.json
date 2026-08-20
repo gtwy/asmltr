@@ -1,11 +1,11 @@
 {
-  "_comment": "Ivy on osiris. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner` / Example Owner. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No Discord snowflakes.",
+  "_comment": "Ivy example seed. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner`. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No Discord snowflakes. No personal names or emails in git.",
   "roles": [],
   "principals": [
     {
       "id": "owner",
-      "display_name": "Example Owner",
-      "notes": "Owner of ivy. Full trust / bypass_moderation.",
+      "display_name": "Owner",
+      "notes": "Owner of this install. Full trust / bypass_moderation.",
       "identifiers": [
         { "surface": "assistant-web", "value": "owner" }
       ],

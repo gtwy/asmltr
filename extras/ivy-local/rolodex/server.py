@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Stdio MCP: Ivy Rolodex cache (separate from /home/adjutant/rolodex).
+"""Stdio MCP: Rolodex cache.
 
-Reads ~/.asmltr/rolodex-cache/contacts.json (refreshed 07:30 ET from 127.0.0.1:12702/export).
+Reads ~/.asmltr/rolodex-cache/contacts.json (refreshed from 127.0.0.1:12702/export).
 Writes (create / add-phone / delete) go to the live localhost API, then update that row.
 Daily copies of contacts.json live in backups/ (max 5, not a lookup store).
 Aliases stay in that cache dir and are never overwritten by sync.
-Eve: skip extras/ivy-local.
+Eve: skip extras/ivy-local unless you want these extras.
 """
 
 from __future__ import annotations
