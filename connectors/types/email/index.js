@@ -276,9 +276,9 @@ async function start(ctx) {
     let extra =
       `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
       `Do not type a name or signature block — "${fromName}" and the rest of the signature are appended automatically. NEVER sign as the operator/owner or impersonate a human. ` +
-      `When the company name is used, write "Example Co" in full — never "Example Co" alone. ` +
+      `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
       `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
-      `Ops desk: inbound Example Co alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type.`;
+      `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type.`;
     if (opsHit) {
       extra += ` This message matched ops matcher '${opsHit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
     }
