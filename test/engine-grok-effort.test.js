@@ -91,6 +91,9 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
       'deep dive the mailbox',
       'open a PR for the adapter',
       'git commit this',
+      'commit and push',
+      'push this, then commit',
+      'Please commit the change and push it',
       'write some code for the picker',
       'patch the code in grok.js',
       'generate an image of a corgi',
@@ -138,6 +141,30 @@ test('visual generate xhigh is write-style verb+kind, not bag-of-words', () => {
       'here is a photo — generate a list',
     ]) {
       assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+    }
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('bare commit is not xhigh; commit+push in the same sentence is', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    for (const p of [
+      'commit this',
+      'we should commit',
+      'I have a prior commit in mind',
+      'Commit the change. Then we can talk.',
+      'Commit now. Push later.',
+    ]) {
+      assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+    }
+    for (const p of [
+      'commit and push',
+      'push and then commit',
+      'Commit this and push to origin',
+    ]) {
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
