@@ -147,38 +147,51 @@ function authHeaderText(parsed) {
 }
 
 /**
- * Disposition of inbound auth headers. Missing header → present=false, failed=false
- * (do not lock out mail from servers that omit the header).
- * passed: DMARC pass, or DKIM+SPF both pass.
- * failed: a fail/softfail and not passed (DMARC pass wins).
+ * Disposition of inbound auth headers.
+ * Hard rule: DKIM, SPF, and DMARC must each be pass. Missing header is a fail.
+ * Do not reply to or run a turn for a failed message.
  */
 function authDisposition(parsed) {
   const raw = authHeaderText(parsed);
   const results = parseAuthResults(raw);
   const present = !!String(raw || '').trim();
-  const passed = results.dmarc === 'pass' || (results.dkim === 'pass' && results.spf === 'pass');
-  const anyFail = results.dmarc === 'fail'
-    || results.dkim === 'fail'
-    || results.spf === 'fail'
-    || results.spf === 'softfail';
-  const failed = present && !passed && anyFail;
-  return { present, results, passed, failed, raw: present ? raw : '' };
+  if (!present) {
+    return { present: false, results, passed: false, failed: true, raw: '', reason: 'no Authentication-Results header' };
+  }
+  const parts = [
+    ['DKIM', results.dkim],
+    ['SPF', results.spf],
+    ['DMARC', results.dmarc],
+  ];
+  const failedParts = parts.filter(([, v]) => v !== 'pass').map(([k, v]) => k + '=' + (v || 'missing'));
+  const passed = failedParts.length === 0;
+  const reason = passed
+    ? 'DKIM=pass SPF=pass DMARC=pass'
+    : failedParts.join(' ');
+  return { present, results, passed, failed: !passed, raw, reason };
 }
 
 function formatAuthSummary(auth) {
   if (!auth || !auth.present) {
-    return 'Inbound Authentication-Results: none on this message; identity is From-address only.';
+    return 'Inbound Authentication-Results: none (treated as fail).';
   }
   const r = auth.results || {};
-  return `Inbound Authentication-Results: DKIM=${r.dkim || 'n/a'} SPF=${r.spf || 'n/a'} DMARC=${r.dmarc || 'n/a'}.`;
+  const verdict = auth.failed ? 'FAIL' : 'PASS';
+  return `Inbound Authentication-Results: DKIM=${r.dkim || 'missing'} SPF=${r.spf || 'missing'} DMARC=${r.dmarc || 'missing'} — ${verdict}.`;
 }
 
-/** True when From claims to be ASMLTR_OWNER_FROM_EMAIL but DKIM/SPF/DMARC failed. */
-function ownerAuthRejected(fromAddr, auth) {
-  const owner = ownerFromEmail();
-  if (!owner) return false;
-  if (String(fromAddr || '').trim().toLowerCase() !== owner) return false;
-  return !!(auth && auth.failed);
+/** True when the message must not get a turn or a reply. */
+function authRejected(auth) {
+  return !auth || !!auth.failed;
+}
+
+function persistAuthReject(entry) {
+  try {
+    const f = process.env.ASMLTR_EMAIL_AUTH_REJECT_LOG
+      || path.join(os.homedir(), '.asmltr', 'email-auth-reject.jsonl');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.appendFileSync(f, JSON.stringify(entry) + '\n');
+  } catch (_) {}
 }
 
 function defaultOpsAllowthroughPath() {
@@ -337,13 +350,27 @@ async function start(ctx) {
     ctx.emit({ event_type: 'inbound', session_id: convKey, identity: fromAddr, payload: { text: `${subject} — ${body.slice(0, 160)}` } });
 
     const auth = authDisposition(parsed);
-    if (ownerAuthRejected(fromAddr, auth)) {
-      const warnTo = ownerForward || ownerFromEmail();
+    if (authRejected(auth)) {
       const summary = formatAuthSummary(auth);
-      ctx.log(`owner-from auth fail ${fromAddr} — ${summary} — no trusted turn`);
-      if (warnTo) {
-        const fwd = `Ivy did not treat this as you. From claims ${fromAddr} but inbound auth failed.\n${summary}\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
-        await sendMail({ to: warnTo, subject: `Fwd: [auth fail] ${subject}`, text: fwd });
+      const reason = (auth && auth.reason) || 'auth failed';
+      ctx.log(`auth reject from=${fromAddr} subject=${subject} ${summary} reason=${reason}`);
+      ctx.emit({
+        event_type: 'auth_reject',
+        session_id: convKey,
+        identity: fromAddr,
+        payload: {
+          from: fromAddr, subject, reason,
+          dkim: auth.results.dkim, spf: auth.results.spf, dmarc: auth.results.dmarc,
+          present: auth.present,
+        },
+      });
+      persistAuthReject({
+        ts: new Date().toISOString(), from: fromAddr, subject, reason,
+        dkim: auth.results.dkim, spf: auth.results.spf, dmarc: auth.results.dmarc,
+        present: auth.present,
+      });
+      if (ownerFromEmail() && fromAddr === ownerFromEmail()) {
+        ctx.log(`auth reject OWNER mail — ${reason} — not treated as a trusted turn`);
       }
       return { handled: true };
     }
@@ -621,4 +648,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, ownerAuthRejected, headerLine };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, headerLine };
