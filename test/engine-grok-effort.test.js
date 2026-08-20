@@ -147,7 +147,7 @@ test('visual generate xhigh is write-style verb+kind, not bag-of-words', () => {
   }
 });
 
-test('bare commit is not xhigh; commit+push in the same sentence is', () => {
+test('bare commit is not xhigh; commit+push in the same post is', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     for (const p of [
@@ -155,7 +155,6 @@ test('bare commit is not xhigh; commit+push in the same sentence is', () => {
       'we should commit',
       'I have a prior commit in mind',
       'Commit the change. Then we can talk.',
-      'Commit now. Push later.',
     ]) {
       assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
@@ -163,6 +162,7 @@ test('bare commit is not xhigh; commit+push in the same sentence is', () => {
       'commit and push',
       'push and then commit',
       'Commit this and push to origin',
+      'Commit now. Push later.',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
