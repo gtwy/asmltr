@@ -149,7 +149,8 @@ function timeoutMsForEffort(effort, opts) {
 //           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
 //           Not a coding session.
 //   xhigh   git or code, or a deep dive (implement, refactor, write/patch code,
-//           commit, PR, "deep dive"). Project git cwd that is not $HOME.
+//           commit, PR, "deep dive"), or consecutive "generate (an) image" /
+//           "generate (a) photo" (word order matters). Project git cwd that is not $HOME.
 //   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
 //   repo and would xhigh every ask). Use the session/turn cwd if provided.
 //   Score opts.effortPrompt when set (current user message only) — NOT
@@ -177,7 +178,7 @@ function timeoutMsForEffort(effort, opts) {
 //   three-tier and email. Do not persist nextEffort from the token. No
 //   owner snowflake in git.
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
-// xhigh: code / git / deep dive. No bare \bfix\b.
+// xhigh: code / git / deep dive / image gen. No bare \bfix\b.
 const XHIGH_PARTS = [
   'implement(?:ing|ation)?',
   'refactor(?:ing)?',
@@ -191,6 +192,8 @@ const XHIGH_PARTS = [
   'write(?:ing)?\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:code|patch|function|module|helper|adapter)',
   'patch(?:ing)?\\s+(?:the\\s+|this\\s+|some\\s+|a\\s+)?(?:code|file|module|function|repo|branch)',
   'commit',
+  'generate(?:\\s+an)?\\s+image',
+  'generate(?:\\s+a)?\\s+photo',
 ];
 const XHIGH_RE = new RegExp('\\b(?:' + XHIGH_PARTS.join('|') + ')\\b', 'i');
 const CODE_WORD_RE = /\bcode\b/i;

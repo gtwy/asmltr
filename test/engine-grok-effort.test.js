@@ -97,8 +97,43 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
       'git commit this',
       'write some code for the picker',
       'patch the code in grok.js',
+      'generate an image of a corgi',
+      'generate image',
+      'generate a photo of the workspace',
+      'generate photo',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+    }
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('image/photo xhigh is consecutive phrases only, not bag-of-words', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    for (const p of [
+      'Please generate an image of a corgi',
+      'GENERATE IMAGE',
+      'can you generate a photo',
+      'Generate Photo of the shop',
+    ]) {
+      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
+    }
+    for (const p of [
+      'generate',
+      'generate a report',
+      'regenerate the list',
+      'image generate',
+      'photo generate',
+      'an image generate',
+      'a photo generate',
+      'I attached an image, please generate a report',
+      'here is a photo — generate a list',
+      'generate the image',
+      'generate the photo',
+    ]) {
+      assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
