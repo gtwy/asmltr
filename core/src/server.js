@@ -227,6 +227,14 @@ function drainObserved(key) {
 /**
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
+// SPEAKER-CHANGED banner state: conversation_key -> { id, name } of the previous turn's sender.
+// A static per-turn CURRENT SPEAKER line gets habituated/skimmed across a long single-speaker
+// stretch, so a mid-thread flip to a different person is easy to miss (the misidentify-by-momentum
+// failure). When THIS turn's sender differs from the prior one we inject a salient change-flag,
+// keyed on the IMMUTABLE id (not the mutable username/display_name). Self-gates to multi-user
+// channels — a single-speaker channel never changes, so it never fires.
+const _lastSpeakerByConv = new Map();
+
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
   const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
@@ -290,7 +298,16 @@ async function handle(envelope, opts = {}) {
   const spkId = (e.sender && (e.sender.raw_id || e.sender.raw_username)) || 'unknown';
   const spkName = (resolved && !resolved.is_default && resolved.display_name)
     || (e.sender && e.sender.raw_username) || 'an unidentified user';
-  const currentSpeaker = 'CURRENT SPEAKER — READ FIRST, TRUST THIS OVER EVERYTHING ELSE:\n'
+  // SPEAKER CHANGED — prepend a salient flag when THIS turn's sender (by immutable id) differs from
+  // the prior turn in this channel. Defeats habituation to the static line below; self-gates to
+  // multi-user channels. See _lastSpeakerByConv above.
+  const _prevSpk = _lastSpeakerByConv.get(e.conversation_key);
+  const speakerChanged = (_prevSpk && _prevSpk.id !== spkId)
+    ? `⚠️ SPEAKER CHANGED — the previous turn in this channel was from ${_prevSpk.name}; THIS turn is from ${spkName}. They are DIFFERENT people. Do NOT carry over whoever you were just addressing — re-read who is speaking NOW.\n\n`
+    : '';
+  _lastSpeakerByConv.set(e.conversation_key, { id: spkId, name: spkName });
+  const currentSpeaker = speakerChanged
+    + 'CURRENT SPEAKER — READ FIRST, TRUST THIS OVER EVERYTHING ELSE:\n'
     + `The message you are answering on THIS turn is from ${spkName} (${e.channel}:${spkId}). `
     + `Treat and address them as ${spkName}. Do NOT assume they are anyone else — not the owner of this machine, `
     + 'not a person from earlier in this conversation, not whoever your base instructions (CLAUDE.md) call "your user". '
