@@ -524,6 +524,7 @@ RESPONSE RULES:
             const line = discordToolLine(streamTools, tool);
             if (line) postChip(line);
           },
+          // Engine-agnostic: Claude/Grok/Gemini/Codex all use onThinking. No-op if none.
           onThinking: (t) => {
             if (sawNoReply) return;
             const line = discordThoughtLine(t);
