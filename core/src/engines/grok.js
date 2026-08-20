@@ -95,9 +95,11 @@ function isOwnerFromEmail(opts) {
 //   high    lookup/research, Corona (recipe/cigar/cooking), Rolodex/contacts,
 //           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
 //           Not a coding session. Web channels are always this after one-shot.
-//   xhigh   git or code, or a deep dive (implement, refactor, write/patch code,
-//           commit, PR, "deep dive"), or generate|make [a/an/the/this/some]
+//   xhigh   git or a coding session, or a deep dive (implement, refactor,
+//           write/patch code, commit+push, PR, "deep dive"), or generate|make
+//           [a/an/the/this/some]
 //           picture/image/graphic/cartoon/painting/drawing/photo/photograph/pic.
+//           Bare "code" is not xhigh.
 //           Project git cwd that is not $HOME.
 //           Email and MCP are always xhigh after one-shot.
 //   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
@@ -123,7 +125,7 @@ function isOwnerFromEmail(opts) {
 //   three-tier and email. Web ignores the token. Do not persist nextEffort
 //   from the token. No owner snowflake in git.
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
-// xhigh: code / git / deep dive / image gen. No bare \bfix\b.
+// xhigh: coding session / git / deep dive / image gen. No bare \bfix\b or \bcode\b.
 const XHIGH_PARTS = [
   'implement(?:ing|ation)?',
   'refactor(?:ing)?',
@@ -139,8 +141,6 @@ const XHIGH_PARTS = [
   '(?:generate|make)\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?)',
 ];
 const XHIGH_RE = new RegExp('\\b(?:' + XHIGH_PARTS.join('|') + ')\\b', 'i');
-const CODE_WORD_RE = /\bcode\b/i;
-const CODE_WORD_EXCLUDE_RE = /\b(?:zip|area|dress|door|promo(?:tional)?|country|postal|access|error|status|exit|http)\s+codes?\b|\bcode of conduct\b/i;
 // high: find / read / recall. Not a coding session.
 const HIGH_PARTS = [
   'look(?:ing)?\\s+(?:it\\s+)?up',
@@ -230,7 +230,6 @@ function xhighReason(prompt) {
   const m = matchToken(XHIGH_RE, s);
   if (m) return m;
   if (commitAndPushSamePost(s)) return 'commit-push';
-  if (CODE_WORD_RE.test(s) && !CODE_WORD_EXCLUDE_RE.test(s)) return 'code';
   return '';
 }
 
