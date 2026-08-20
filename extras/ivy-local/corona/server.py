@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdio MCP: Corona localhost API.
 
-Read-only. No /say. Base URL from CORONA_URL (default http://127.0.0.1:8080).
+Read-only. No /say. Base URL from CORONA_URL (default http://127.0.0.1:12701).
 Eve: skip extras/ivy-local unless you want these extras.
 """
 
@@ -16,7 +16,7 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-CORONA_BASE = (os.environ.get("CORONA_URL") or "http://127.0.0.1:8080").rstrip("/")
+CORONA_BASE = (os.environ.get("CORONA_URL") or "http://127.0.0.1:12701").rstrip("/")
 TIMEOUT = 30
 
 mcp = MCPServer("corona")
