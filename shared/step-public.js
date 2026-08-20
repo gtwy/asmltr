@@ -1,11 +1,16 @@
 'use strict';
 /**
- * Public Discord step helpers. Grok thoughts stay off Discord; tool start
- * posts a short human chip (or a sanitized title when stream_tools is on).
- * Generic leak patterns only — no name denylist.
+ * Public Discord step helpers. Grok thoughts may post only after sanitize.
+ * Leaky bubbles are dropped whole. Generic patterns only — no name denylist.
  */
 
+const { redactSecrets } = require('./redact');
+
 const ACP_TYPE = /^(tool_call|tool_call_update|tool_use|function_call)$/i;
+const THINK_HEARTBEAT_MS = 45000;
+const WORKING_LINE = '-# Working';
+const STILL_WORKING_LINE = '-# Still working';
+const THOUGHT_CLAMP = 280;
 
 function looksLikePromptLeak(text) {
   const s = String(text || '');
@@ -38,7 +43,6 @@ function humanToolChip(tool) {
   return 'Working';
 }
 
-/** Discord line to post, or '' to skip. streamTools true → 🔧 title; else human chip. */
 function discordToolLine(streamTools, tool) {
   if (streamTools) {
     const title = toolTitle(tool);
@@ -47,4 +51,19 @@ function discordToolLine(streamTools, tool) {
   return `-# ${humanToolChip(tool)}`;
 }
 
-module.exports = { looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine };
+/** Sanitized Discord thought chip, or '' to drop. Never raw text. */
+function discordThoughtLine(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  if (looksLikePromptLeak(raw)) return '';
+  const cleaned = String(redactSecrets(raw).text || '').trim();
+  if (!cleaned || looksLikePromptLeak(cleaned)) return '';
+  let body = cleaned.replace(/\s+/g, ' ');
+  if (body.length > THOUGHT_CLAMP) body = body.slice(0, THOUGHT_CLAMP - 1) + '…';
+  return `-# 💭 ${body}`;
+}
+
+module.exports = {
+  looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
+  THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, THOUGHT_CLAMP,
+};
