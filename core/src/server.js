@@ -262,9 +262,8 @@ function persistAskTurn(e, result, assistantText) {
 
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
-  // Finite idle (default 15 min). Was hardcoded infinite for BOTH sync and async —
-  // that left grok/ivy sessions open forever. Policy is 'idle:<minutes>' | 'infinite'
-  // (see sessions.parseIdlePolicy). Override with ASMLTR_IDLE_MS (ms) or ASMLTR_IDLE_POLICY.
+  // Grok session idle comes from ASMLTR_IDLE_POLICY (unset/infinite/off/none → infinite).
+  // ASMLTR_IDLE_MS is the Live card nap only (collector default 30 min). Do not read it here.
   const idlePolicy = sessions.idlePolicyFromEnv();
 
   const _cc = e.channel_context || {};
