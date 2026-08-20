@@ -471,14 +471,14 @@ test('unknown user +xh stays picker and token remains', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
   try {
-    const opts = { prompt: 'hello +xh', cwd: noGit, senderId: '999000111222333444' };
+    const opts = { prompt: 'hello +xh', cwd: noGit, senderId: '000000000000000000' };
     assert.equal(grok.chooseEffort(opts), 'medium');
     assert.equal(grok.classifyEffort(opts).reason, 'baseline');
     const args = grok.buildArgs(opts);
     assert.equal(effortOf(args), 'medium');
     assert.ok(promptOf(args).includes('+xh'), 'token remains for unknown');
     // picker still applies
-    const impl = { prompt: 'implement the picker +xh', cwd: noGit, senderId: '999000111222333444' };
+    const impl = { prompt: 'implement the picker +xh', cwd: noGit, senderId: '000000000000000000' };
     assert.equal(grok.chooseEffort(impl), 'xhigh');
     assert.ok(promptOf(grok.buildArgs(impl)).includes('+xh'));
   } finally {
