@@ -38,6 +38,13 @@ async function imapNoopProbe(imap, timeoutMs = 15000) {
   await Promise.race([np, new Promise((_, rej) => setTimeout(() => rej(new Error('noop timeout')), timeoutMs))]);
 }
 
+// Mid-fetch / lock errors that mean the IMAP handle is dead even if 'close' never fired.
+// fetchNew close()s on these so the close handler reconnects. Exported for tests.
+function isImapConnectionError(err) {
+  const m = String((err && err.message) || err || '').toLowerCase();
+  return /connection not available|not connected|\bsocket\b|\bclosed\b|\btimeout\b|econnreset|econnrefused|epipe|enotconn|etimedout/.test(m);
+}
+
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
 
 const meta = {
@@ -293,12 +300,22 @@ async function start(ctx) {
   // baseline is the mailbox tip, so we only react to mail that arrives AFTER we start watching
   // (unless process_backlog). The cursor survives reconnects, so mail during a blip isn't missed.
   const persistedUid = readLastUid(ctx.instanceId);
-  let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false;
+  let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false, connecting = false;
+  let reconnectTimer = null;
+  function scheduleConnectImap() {
+    if (stopped || connecting || reconnectTimer) return;
+    if (imap && imap.usable) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!stopped) connectImap();
+    }, 10000);
+  }
   async function fetchNew() {
     if (!imap || !imap.usable || busy) return;
     busy = true;
-    const lock = await imap.getMailboxLock(MAILBOX);
+    let lock;
     try {
+      lock = await imap.getMailboxLock(MAILBOX);
       for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
         if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
         try {
@@ -321,30 +338,57 @@ async function start(ctx) {
           break; // do not walk past a failed uid; retry it next fetch
         }
       }
-    } finally { lock.release(); busy = false; }
+    } catch (e) {
+      ctx.log(`fetchNew: ${e.message}`);
+      if (isImapConnectionError(e)) {
+        try { if (imap) imap.close(); } catch (_) {}
+      }
+    } finally {
+      try { if (lock) lock.release(); } catch (_) {}
+      busy = false;
+    }
   }
   async function connectImap() {
-    if (stopped) return;
-    imap = new ImapFlow({ host: cfg.imap_host, port: cfg.imap_port || 993, secure: true, auth: { user: address, pass: password }, logger: false });
-    imap.on('exists', () => fetchNew().catch((e) => ctx.log(`fetchNew: ${e.message}`)));
-    imap.on('error', (e) => ctx.log(`imap error: ${e.message}`));
-    imap.on('close', () => { if (!stopped) { ctx.log('imap closed — reconnecting in 10s'); setTimeout(connectImap, 10000); } });
-    await imap.connect();
-    const mb = await imap.mailboxOpen(MAILBOX);
-    if (lastUid < 0) lastUid = cfg.process_backlog ? 0 : ((mb.uidNext || 1) - 1); // baseline once, keep across reconnects
-    ctx.log(`watching ${address} · ${MAILBOX} · policy=${policy} · from uid>${lastUid}`);
-    try { ctx.heartbeat(); } catch (_) {} // connected + mailbox open → the watcher's I/O path is alive
-    await fetchNew().catch((e) => ctx.log(`initial fetch: ${e.message}`));
+    if (stopped || connecting) return;
+    connecting = true;
+    let failed = false;
+    try {
+      imap = new ImapFlow({ host: cfg.imap_host, port: cfg.imap_port || 993, secure: true, auth: { user: address, pass: password }, logger: false });
+      imap.on('exists', () => fetchNew().catch((e) => ctx.log(`fetchNew: ${e.message}`)));
+      imap.on('error', (e) => ctx.log(`imap error: ${e.message}`));
+      imap.on('close', () => { if (!stopped) { ctx.log('imap closed — reconnecting in 10s'); scheduleConnectImap(); } });
+      await imap.connect();
+      const mb = await imap.mailboxOpen(MAILBOX);
+      if (lastUid < 0) lastUid = cfg.process_backlog ? 0 : ((mb.uidNext || 1) - 1); // baseline once, keep across reconnects
+      ctx.log(`watching ${address} · ${MAILBOX} · policy=${policy} · from uid>${lastUid}`);
+      try { ctx.heartbeat(); } catch (_) {} // connected + mailbox open → the watcher's I/O path is alive
+      await fetchNew().catch((e) => ctx.log(`initial fetch: ${e.message}`));
+    } catch (e) {
+      ctx.log(`imap connect failed: ${e.message}`);
+      const dead = imap;
+      imap = null;
+      try { if (dead) dead.close(); } catch (_) {}
+      failed = true;
+    } finally {
+      connecting = false;
+    }
+    if (failed && !stopped) scheduleConnectImap();
   }
-  connectImap().catch((e) => ctx.log(`imap connect failed: ${e.message}`));
+  connectImap();
 
   // Liveness watchdog: IDLE can silently die (a half-open connection that never emits 'close'), leaving
   // the watcher deaf while the process stays up. A periodic NOOP proves the link end-to-end: success →
   // heartbeat (the manager sees it healthy); failure/stall → force a reconnect (close() → the 'close'
-  // handler above reconnects). This closes the email half of #34.
+  // handler above reconnects). If the handle is already gone (`!imap || !imap.usable`), schedule
+  // connectImap instead of returning as a no-op — otherwise a failed first connect stays deaf forever.
   let probing = false;
   const probeTimer = setInterval(async () => {
-    if (stopped || probing || !imap || !imap.usable) return; // not connected → connect/close flow owns recovery
+    if (stopped || probing) return;
+    if (!imap || !imap.usable) {
+      ctx.log('imap probe: handle dead — scheduling reconnect');
+      scheduleConnectImap();
+      return;
+    }
     probing = true;
     try { await imapNoopProbe(imap); ctx.heartbeat(); }
     catch (e) { ctx.log(`imap probe failed (${e.message}) — forcing reconnect`); try { imap.close(); } catch (_) {} }
@@ -456,9 +500,9 @@ async function start(ctx) {
   const httpServer = app.listen(PORT, BIND, () => ctx.log(`email outbound on ${BIND}:${PORT} (from ${address})`));
 
   return {
-    async stop() { stopped = true; clearInterval(probeTimer); try { if (imap) await imap.logout(); } catch (_) {} try { if (readImap) await readImap.logout(); } catch (_) {} try { smtp.close(); } catch (_) {} await new Promise((r) => httpServer.close(() => r())); },
+    async stop() { stopped = true; clearInterval(probeTimer); if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } try { if (imap) await imap.logout(); } catch (_) {} try { if (readImap) await readImap.logout(); } catch (_) {} try { smtp.close(); } catch (_) {} await new Promise((r) => httpServer.close(() => r())); },
     health() { return { address, mailbox: MAILBOX, policy, imap: !!(imap && imap.usable) }; },
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid };
