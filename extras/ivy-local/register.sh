@@ -38,6 +38,19 @@ else
   echo "WARN: $ONENOTE_HOME/.client.json missing"
 fi
 
+if [[ -f "$HOME/.asmltr/corona.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  . "$HOME/.asmltr/corona.env"
+  set +a
+fi
+if [[ -f "$HOME/.asmltr/rolodex.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  . "$HOME/.asmltr/rolodex.env"
+  set +a
+fi
+
 echo "== ~/.asmltr/mcp.json =="
 "$IVY/.venv/bin/python" - "$MCP_FILE" "$IVY" << 'PY'
 import json
@@ -52,13 +65,13 @@ servers = {
         "type": "stdio",
         "command": str(ivy / "corona" / "run.sh"),
         "args": [],
-        "env": {},
+        "env": ({"CORONA_URL": os.environ["CORONA_URL"]} if os.environ.get("CORONA_URL") else {}),
     },
     "rolodex": {
         "type": "stdio",
         "command": str(ivy / "rolodex" / "run.sh"),
         "args": [],
-        "env": {},
+        "env": ({"ROLODEX_URL": os.environ["ROLODEX_URL"]} if os.environ.get("ROLODEX_URL") else {}),
     },
     "onenote": {
         "type": "stdio",
@@ -82,6 +95,9 @@ for name, spec in servers.items():
     prev = cfg["servers"].get(name) or {}
     disabled = bool(prev.get("disabled")) if isinstance(prev, dict) else False
     entry = dict(spec)
+    prev_env = prev.get("env") if isinstance(prev, dict) else None
+    if isinstance(prev_env, dict) or entry.get("env"):
+        entry["env"] = {**(prev_env if isinstance(prev_env, dict) else {}), **(entry.get("env") or {})}
     if disabled:
         entry["disabled"] = True
     cfg["servers"][name] = entry
@@ -96,15 +112,17 @@ PY
 
 if [[ -x "$GROK_BIN" ]]; then
   echo "== grok mcp add =="
-  existing="$("$GROK_BIN" mcp list 2>/dev/null || true)"
   for pair in "corona:corona" "rolodex:rolodex" "onenote:onenote"; do
     name="${pair%%:*}"
     dir="${pair##*:}"
-    if printf '%s\n' "$existing" | grep -q "$name"; then
-      echo "grok mcp already has $name"
-      continue
+    add_args=("$name")
+    if [[ "$name" == corona && -n "${CORONA_URL:-}" ]]; then
+      add_args+=(-e "CORONA_URL=${CORONA_URL}")
     fi
-    if "$GROK_BIN" mcp add "$name" -- "$IVY/$dir/run.sh"; then
+    if [[ "$name" == rolodex && -n "${ROLODEX_URL:-}" ]]; then
+      add_args+=(-e "ROLODEX_URL=${ROLODEX_URL}")
+    fi
+    if "$GROK_BIN" mcp add "${add_args[@]}" -- "$IVY/$dir/run.sh"; then
       echo "grok mcp added $name"
     else
       echo "WARN: grok mcp add $name failed"
@@ -138,16 +156,8 @@ else
 fi
 
 echo "== smoke (localhost APIs, no secrets) =="
-if [[ -f "$HOME/.asmltr/corona.env" ]]; then
-  # shellcheck disable=SC1091
-  . "$HOME/.asmltr/corona.env"
-fi
-if [[ -f "$HOME/.asmltr/rolodex.env" ]]; then
-  # shellcheck disable=SC1091
-  . "$HOME/.asmltr/rolodex.env"
-fi
-CORONA_SMOKE="${CORONA_URL:-http://127.0.0.1:8080}"
-ROLODEX_SMOKE="${ROLODEX_URL:-http://127.0.0.1:8081}"
+CORONA_SMOKE="${CORONA_URL:-http://127.0.0.1:12701}"
+ROLODEX_SMOKE="${ROLODEX_URL:-http://127.0.0.1:12702}"
 curl -sf --max-time 5 "${CORONA_SMOKE}/health" && echo || echo "WARN: Corona /health failed"
 curl -sf --max-time 5 "${ROLODEX_SMOKE}/health" && echo || echo "WARN: Rolodex /health failed"
 if [[ -e "$ONENOTE_HOME/token.json" && -e "$ONENOTE_HOME/.client.json" ]]; then

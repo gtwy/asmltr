@@ -5,7 +5,7 @@ They do **not** fork `grok.js`. Secrets stay out of git. Eve: skip unless you wa
 
 | Server | Talks to | Tools |
 | --- | --- | --- |
-| `corona` | localhost API (`CORONA_URL`, default `http://127.0.0.1:8080`) | `corona_health`, `corona_recipe`, `corona_cigars`, `corona_cooking` (no `/say`) |
+| `corona` | localhost API (`CORONA_URL`, default `http://127.0.0.1:12701`) | `corona_health`, `corona_recipe`, `corona_cigars`, `corona_cooking` (no `/say`) |
 | `rolodex` | cache `~/.asmltr/rolodex-cache` (source `ROLODEX_URL/export`); writes hit `ROLODEX_URL` live | `rolodex_health`, `rolodex_search`, `rolodex_get`, `rolodex_alias`, `rolodex_sync`, `rolodex_create`, `rolodex_add_phone`, `rolodex_delete`, `rolodex_backups`, `rolodex_restore` |
 | `onenote` | Graph, creds in `~/.asmltr/onenote/{token.json,.client.json}` mode 600 | `onenote_health`, `onenote_login`, notebooks/sections/pages/get/create/update |
 
@@ -23,8 +23,8 @@ bash extras/ivy-local/register.sh
 ## Test
 
 ```bash
-curl -sf "${CORONA_URL:-http://127.0.0.1:8080}/health"
-curl -sf "${ROLODEX_URL:-http://127.0.0.1:8081}/health"
+curl -sf "${CORONA_URL:-http://127.0.0.1:12701}/health"
+curl -sf "${ROLODEX_URL:-http://127.0.0.1:12702}/health"
 grok mcp list
 stat -c '%a %n' ~/.asmltr/onenote/token.json ~/.asmltr/onenote/.client.json
 # expect 600 — do not cat
