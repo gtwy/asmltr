@@ -15,7 +15,6 @@ delete process.env.ASMLTR_GROK_TIMEOUT_MS;
 delete process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS;
 
 const grok = require('../core/src/engines/grok');
-const sessions = require('../core/src/sessions');
 
 const noGit = path.join(tmp, 'nogit');
 const gitCwd = path.join(tmp, 'gitproj');
@@ -23,7 +22,6 @@ fs.mkdirSync(noGit, { recursive: true });
 fs.mkdirSync(path.join(gitCwd, '.git'), { recursive: true });
 
 after(() => {
-  try { sessions.db.close(); } catch (_) {}
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
   delete process.env.ASMLTR_GROK_EFFORT;
   delete process.env.ASMLTR_GROK_NEXT_EFFORT_FILE;
@@ -38,10 +36,8 @@ function effortOf(args) {
   return args[i + 1];
 }
 
-function maxTurnsOf(args) {
-  const i = args.indexOf('--max-turns');
-  assert.ok(i >= 0, 'buildArgs must include --max-turns');
-  return Number(args[i + 1]);
+function assertNoMaxTurns(args) {
+  assert.equal(args.includes('--max-turns'), false, 'buildArgs must omit --max-turns');
 }
 
 test('buildArgs includes --effort high by default', () => {
@@ -222,18 +218,6 @@ test('next-turn file: xhigh once then reset to baseline', () => {
   assert.equal(grok.effortForTurn({ prompt: 'What is 2+2?', cwd: noGit }), 'high');
 });
 
-test('next-turn session flag: xhigh once then reset to baseline', () => {
-  delete process.env.ASMLTR_GROK_EFFORT;
-  const key = 'assistant-web:local:effort-test';
-  sessions.ensure(key, 'assistant-web', 'idle:45', noGit);
-  assert.equal(sessions.setNextEffort(key, 'xhigh'), true);
-  assert.equal(sessions.get(key).next_effort, 'xhigh');
-  assert.equal(grok.effortForTurn({ prompt: 'What is 2+2?', cwd: noGit, conversationKey: key }), 'xhigh');
-  assert.equal(sessions.get(key).next_effort, null);
-  assert.equal(sessions.consumeNextEffort(key), null);
-  assert.equal(grok.effortForTurn({ prompt: 'What is 2+2?', cwd: noGit, conversationKey: key }), 'high');
-  sessions.remove(key);
-});
 
 test('one-shot next-effort still wins over keywords', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
@@ -257,36 +241,38 @@ test('complete() skips auto-raise', () => {
   }
 });
 
-test('max-turns-for-effort: medium 20, high 40, xhigh 60 (cap 100)', () => {
-  assert.equal(grok.maxTurnsForEffort('medium'), 20);
-  assert.equal(grok.maxTurnsForEffort('high'), 40);
-  assert.equal(grok.maxTurnsForEffort('xhigh'), 60);
-  assert.equal(grok.maxTurnsForEffort('low'), 20);
-  assert.ok(grok.maxTurnsForEffort('xhigh') <= grok.MAX_TURNS_CAP);
+test('buildArgs never includes a turn-cap flag and always includes --effort', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
-    assert.equal(maxTurnsOf(grok.buildArgs({ prompt: 'ok thanks', cwd: noGit })), 20);
-    assert.equal(maxTurnsOf(grok.buildArgs({ prompt: 'look up the cigar in Corona', cwd: noGit })), 40);
-    assert.equal(maxTurnsOf(grok.buildArgs({ prompt: 'implement the picker', cwd: noGit })), 60);
+    for (const opts of [
+      { prompt: 'ok thanks', cwd: noGit },
+      { prompt: 'look up the cigar in Corona', cwd: noGit },
+      { prompt: 'implement the picker', cwd: noGit },
+      { prompt: 'Thanks for the update, see you Monday', cwd: noGit, channel: 'email' },
+      { prompt: 'Thanks for the update, see you Monday', cwd: noGit, channel: 'mcp' },
+      { prompt: 'ok thanks', cwd: noGit, channel: 'discord' },
+      { prompt: 'ok thanks', cwd: noGit, channel: 'assistant-web' },
+      { prompt: 'title me', complete: true, cwd: noGit },
+    ]) {
+      const args = grok.buildArgs(opts);
+      assertNoMaxTurns(args);
+      assert.ok(args.includes('--effort'), JSON.stringify(opts));
+    }
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
 
-test('interactive watchdog is 5 / 10 / 60 even if env baseline is 10m', () => {
-  delete process.env.ASMLTR_GROK_TIMEOUT_MS;
-  assert.equal(grok.timeoutMsForEffort('medium'), 5 * 60 * 1000);
-  assert.equal(grok.timeoutMsForEffort('high'), 10 * 60 * 1000);
-  assert.equal(grok.timeoutMsForEffort('xhigh'), 60 * 60 * 1000);
-  assert.ok(grok.timeoutMsForEffort('xhigh') <= grok.TIMEOUT_CAP_MS);
-  process.env.ASMLTR_GROK_TIMEOUT_MS = '600000';
-  try {
-    assert.equal(grok.timeoutMsForEffort('medium'), 5 * 60 * 1000);
-    assert.equal(grok.timeoutMsForEffort('high'), 10 * 60 * 1000);
-    assert.equal(grok.timeoutMsForEffort('xhigh'), 60 * 60 * 1000);
-  } finally {
-    delete process.env.ASMLTR_GROK_TIMEOUT_MS;
-  }
+test('runTurn source does not arm a kill timer', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  const run = src.match(/async function runTurn\([\s\S]*?\n\}/);
+  assert.ok(run);
+  assert.equal(/setTimeout\([\s\S]{0,240}child\.kill/.test(run[0]), false);
+  assert.equal(run[0].includes('watchdog'), false);
+  assert.ok(run[0].includes('abortController'));
+  const complete = src.match(/async function complete\([\s\S]*?\n\}/);
+  assert.ok(complete);
+  assert.equal(/setTimeout\([\s\S]{0,240}child\.kill/.test(complete[0]), false);
 });
 
 test('zip code / lastEffort inherit are not xhigh', () => {
@@ -299,7 +285,7 @@ test('zip code / lastEffort inherit are not xhigh', () => {
   }
 });
 
-test('email channel forces xhigh + 100 turns + 60m even without code words', () => {
+test('email channel forces xhigh even without code words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const prompt = 'Thanks for the update, see you Monday';
@@ -307,14 +293,9 @@ test('email channel forces xhigh + 100 turns + 60m even without code words', () 
     for (const p of [prompt, chatty]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), 'xhigh', p.slice(0, 40));
       assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 'xhigh');
-      assert.equal(maxTurnsOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 100);
-      assert.equal(grok.maxTurnsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), { channel: 'email' }), 100);
-      assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 60 * 60 * 1000);
-      assert.equal(grok.timeoutMsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), { channel: 'email' }), grok.EMAIL_TIMEOUT_MS);
+      assert.equal(grok.classifyEffort({ prompt: p, cwd: noGit, channel: 'email' }).reason, 'email');
+      assertNoMaxTurns(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' }));
     }
-    // generic xhigh (no channel) is 60m
-    assert.equal(grok.timeoutMsForEffort('xhigh'), 60 * 60 * 1000);
-    assert.ok(grok.EMAIL_TIMEOUT_MS <= grok.TIMEOUT_CAP_MS);
     assert.equal(grok.isEmailChannel('email'), true);
     assert.equal(grok.isEmailChannel('discord'), false);
   } finally {
@@ -322,47 +303,63 @@ test('email channel forces xhigh + 100 turns + 60m even without code words', () 
   }
 });
 
-test('discord ok thanks stays medium 20 / 5m', () => {
+test('discord ok thanks stays medium; --effort present; no turn cap', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const opts = { prompt: 'ok thanks', cwd: noGit, channel: 'discord' };
     assert.equal(grok.chooseEffort(opts), 'medium');
-    assert.equal(effortOf(grok.buildArgs(opts)), 'medium');
-    assert.equal(maxTurnsOf(grok.buildArgs(opts)), 20);
-    assert.equal(grok.maxTurnsForEffort('medium'), 20);
-    assert.equal(grok.timeoutMsForEffort('medium', { channel: 'discord' }), 5 * 60 * 1000);
-    assert.equal(grok.timeoutMsForEffort('high', { channel: 'discord' }), 10 * 60 * 1000);
-    assert.equal(grok.timeoutMsForEffort(grok.chooseEffort(opts), opts), 5 * 60 * 1000);
+    const args = grok.buildArgs(opts);
+    assert.equal(effortOf(args), 'medium');
+    assertNoMaxTurns(args);
+    assert.ok(args.includes('--effort'));
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
 
-test('Discord xhigh stays 60 turns / 60m; email xhigh is 100 / 60m', () => {
+test('Discord xhigh stays picker; email xhigh is still xhigh', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const impl = { prompt: 'Please implement a helper', cwd: noGit, channel: 'discord' };
     assert.equal(grok.chooseEffort(impl), 'xhigh');
-    assert.equal(maxTurnsOf(grok.buildArgs(impl)), 60);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'discord' }), 60 * 60 * 1000);
+    assert.equal(effortOf(grok.buildArgs(impl)), 'xhigh');
+    assertNoMaxTurns(grok.buildArgs(impl));
     const mail = { prompt: 'Thanks for the update, see you Monday', cwd: noGit, channel: 'email' };
     assert.equal(grok.chooseEffort(mail), 'xhigh');
-    assert.equal(maxTurnsOf(grok.buildArgs(mail)), 100);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 60 * 60 * 1000);
+    assert.equal(effortOf(grok.buildArgs(mail)), 'xhigh');
+    assertNoMaxTurns(grok.buildArgs(mail));
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
 
-test('assistant-web and assistant-native match discord 5 / 10 / 60', () => {
-  for (const channel of ['assistant-web', 'assistant-native', 'discord']) {
-    assert.equal(grok.timeoutMsForEffort('medium', { channel }), 5 * 60 * 1000, channel);
-    assert.equal(grok.timeoutMsForEffort('high', { channel }), 10 * 60 * 1000, channel);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel }), 60 * 60 * 1000, channel);
+test('web channels always high after oneshot; not overridable by +h/+xh or picker', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    for (const channel of ['assistant-web', 'assistant-native', 'eve-assistant-web', 'eve-assistant-native']) {
+      assert.equal(grok.isWebChannel(channel), true, channel);
+      const chat = { prompt: 'ok thanks', cwd: noGit, channel };
+      assert.equal(grok.chooseEffort(chat), 'high', channel);
+      assert.equal(grok.classifyEffort(chat).reason, 'web', channel);
+      assert.equal(effortOf(grok.buildArgs(chat)), 'high', channel);
+      assertNoMaxTurns(grok.buildArgs(chat));
+      assert.equal(grok.chooseEffort({ prompt: 'implement the picker', cwd: noGit, channel }), 'high', channel);
+      assert.equal(grok.chooseEffort({ prompt: 'generate an image of a corgi', cwd: noGit, channel }), 'high', channel);
+      assert.equal(grok.chooseEffort({ prompt: 'look up the cigar in Corona', cwd: noGit, channel }), 'high', channel);
+      assert.equal(grok.chooseEffort({ prompt: 'hello +xh', cwd: noGit, channel, owner: true }), 'high', channel);
+      assert.equal(grok.chooseEffort({ prompt: 'hello +h', cwd: noGit, channel, owner: true }), 'high', channel);
+      assert.equal(grok.classifyEffort({ prompt: 'hello +xh', cwd: noGit, channel, owner: true }).reason, 'web', channel);
+      assert.equal(grok.chooseEffort({ prompt: 'ok thanks', cwd: noGit, channel, nextEffort: 'medium' }), 'medium', channel);
+      assert.equal(grok.chooseEffort({ prompt: 'ok thanks', cwd: noGit, channel, effort: 'xhigh' }), 'xhigh', channel);
+    }
+    assert.equal(grok.isWebChannel('discord'), false);
+    assert.equal(grok.isWebChannel('email'), false);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
 
-test('mcp channel forces xhigh + 60m even without code words', () => {
+test('mcp channel forces xhigh even without code words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const prompt = 'Thanks for the update, see you Monday';
@@ -371,12 +368,8 @@ test('mcp channel forces xhigh + 60m even without code words', () => {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'mcp' }), 'xhigh', p.slice(0, 40));
       assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'mcp' })), 'xhigh');
       assert.equal(grok.classifyEffort({ prompt: p, cwd: noGit, channel: 'mcp' }).reason, 'mcp');
-      assert.equal(maxTurnsOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'mcp' })), 60);
-      assert.equal(grok.timeoutMsForEffort('medium', { channel: 'mcp' }), 60 * 60 * 1000);
-      assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'mcp' }), 60 * 60 * 1000);
-      assert.equal(grok.timeoutMsForEffort(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'mcp' }), { channel: 'mcp' }), grok.MCP_TIMEOUT_MS);
+      assertNoMaxTurns(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'mcp' }));
     }
-    assert.ok(grok.MCP_TIMEOUT_MS <= grok.TIMEOUT_CAP_MS);
     assert.equal(grok.isMcpChannel('mcp'), true);
     assert.equal(grok.isMcpChannel('MCP'), true);
     assert.equal(grok.isMcpChannel('email'), false);
@@ -395,14 +388,14 @@ test('one-shot next-effort still wins over mcp xhigh', () => {
       channel: 'mcp',
       nextEffort: 'medium',
     }), 'medium');
-    assert.equal(effortOf(grok.buildArgs({
+    const args = grok.buildArgs({
       prompt: 'Thanks for the update, see you Monday',
       cwd: noGit,
       channel: 'mcp',
       nextEffort: 'medium',
-    })), 'medium');
-    // Channel watchdog stays 60m even if one-shot drops effort.
-    assert.equal(grok.timeoutMsForEffort('medium', { channel: 'mcp' }), 60 * 60 * 1000);
+    });
+    assert.equal(effortOf(args), 'medium');
+    assertNoMaxTurns(args);
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
@@ -417,22 +410,19 @@ test('one-shot next-effort still wins over email xhigh', () => {
       channel: 'email',
       nextEffort: 'medium',
     }), 'medium');
-    assert.equal(effortOf(grok.buildArgs({
+    const args = grok.buildArgs({
       prompt: 'Thanks for the update, see you Monday',
       cwd: noGit,
       channel: 'email',
       nextEffort: 'medium',
-    })), 'medium');
-    assert.equal(maxTurnsOf(grok.buildArgs({
-      prompt: 'Thanks for the update, see you Monday',
-      cwd: noGit,
-      channel: 'email',
-      nextEffort: 'medium',
-    })), 20);
+    });
+    assert.equal(effortOf(args), 'medium');
+    assertNoMaxTurns(args);
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
 });
+
 
 function promptOf(args) {
   const i = args.indexOf('-p');
@@ -550,60 +540,44 @@ test('+xh / +h override is one turn and does not persist nextEffort', () => {
   }
 });
 
-test('owner-from email (ASMLTR_OWNER_FROM_EMAIL) is 4h; other inbound email stays 1h', () => {
-  const H = 60 * 60 * 1000;
+test('owner-from email helpers still parse From; they do not set a kill timer', () => {
   const OWNER = 'owner@example.com';
   process.env.ASMLTR_OWNER_FROM_EMAIL = OWNER;
   try {
     const owner = { channel: 'email', sender: { raw_id: OWNER, raw_username: 'Owner Name' } };
-    assert.equal(grok.timeoutMsForEffort('xhigh', owner), 4 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'OWNER@EXAMPLE.COM' } }), 4 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'Owner Name <owner@example.com>' } }), 4 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { from: 'Owner Name <owner@example.com>' } }), 4 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { email: OWNER } }), 4 * H);
     assert.equal(grok.parseEmailAddress('Owner Name <owner@example.com>'), OWNER);
     assert.equal(grok.parseEmailAddress(OWNER), OWNER);
     assert.equal(grok.parseEmailAddress('Owner Name'), '');
     assert.equal(grok.isOwnerFromEmail(owner), true);
-    assert.equal(grok.maxTurnsForEffort('xhigh', owner), 100);
     assert.equal(grok.chooseEffort({ prompt: 'Thanks for the update', cwd: noGit, channel: 'email', sender: owner.sender }), 'xhigh');
+    assertNoMaxTurns(grok.buildArgs({ prompt: 'Thanks for the update', cwd: noGit, channel: 'email', sender: owner.sender }));
 
     const other = { channel: 'email', sender: { raw_id: 'other@example.com', raw_username: 'Other' } };
-    assert.equal(grok.timeoutMsForEffort('xhigh', other), 1 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'plus@example.com' } }), 1 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_id: 'owner@other.com' } }), 1 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email', sender: { raw_username: 'Owner Name' } }), 1 * H);
-    assert.equal(grok.timeoutMsForEffort('xhigh', { channel: 'email' }), 1 * H);
     assert.equal(grok.isOwnerFromEmail(other), false);
-    assert.equal(grok.TIMEOUT_CAP_MS, 4 * H);
-    assert.equal(grok.OWNER_EMAIL_TIMEOUT_MS, 4 * H);
-    assert.equal(grok.EMAIL_TIMEOUT_MS, 1 * H);
+    assert.equal(grok.chooseEffort({ prompt: 'Thanks for the update', cwd: noGit, ...other }), 'xhigh');
   } finally {
     delete process.env.ASMLTR_OWNER_FROM_EMAIL;
   }
 });
 
-test('owner-from 4h is off when ASMLTR_OWNER_FROM_EMAIL is unset', () => {
-  const H = 60 * 60 * 1000;
+test('owner-from helper is off when ASMLTR_OWNER_FROM_EMAIL is unset', () => {
   delete process.env.ASMLTR_OWNER_FROM_EMAIL;
   const ownerish = { channel: 'email', sender: { raw_id: 'owner@example.com' } };
   assert.equal(grok.isOwnerFromEmail(ownerish), false);
-  assert.equal(grok.timeoutMsForEffort('xhigh', ownerish), 1 * H);
+  assert.equal(grok.chooseEffort({ prompt: 'Thanks for the update', cwd: noGit, ...ownerish }), 'xhigh');
 });
 
-test('discord / mcp / dashboard stay 5 / 10 / 60 after owner-email 4h cap', () => {
-  process.env.ASMLTR_OWNER_FROM_EMAIL = 'owner@example.com';
-  try {
-    for (const channel of ['discord', 'assistant-web', 'assistant-native', 'mcp']) {
-      assert.equal(grok.timeoutMsForEffort('medium', { channel }), 5 * 60 * 1000, channel);
-      assert.equal(grok.timeoutMsForEffort('high', { channel }), 10 * 60 * 1000, channel);
-      assert.equal(grok.timeoutMsForEffort('xhigh', { channel }), 60 * 60 * 1000, channel);
-      assert.equal(grok.timeoutMsForEffort('xhigh', {
-        channel,
-        sender: { raw_id: 'owner@example.com' },
-      }), 60 * 60 * 1000, channel + ' owner email must not 4h interactive');
-    }
-  } finally {
-    delete process.env.ASMLTR_OWNER_FROM_EMAIL;
-  }
+test('next-turn session flag: xhigh once then reset to baseline', () => {
+  delete process.env.ASMLTR_GROK_EFFORT;
+  const sessions = require('../core/src/sessions');
+  const key = 'assistant-web:local:effort-test';
+  sessions.ensure(key, 'assistant-web', 'idle:45', noGit);
+  assert.equal(sessions.setNextEffort(key, 'xhigh'), true);
+  assert.equal(sessions.get(key).next_effort, 'xhigh');
+  assert.equal(grok.effortForTurn({ prompt: 'What is 2+2?', cwd: noGit, conversationKey: key }), 'xhigh');
+  assert.equal(sessions.get(key).next_effort, null);
+  assert.equal(sessions.consumeNextEffort(key), null);
+  assert.equal(grok.effortForTurn({ prompt: 'What is 2+2?', cwd: noGit, conversationKey: key }), 'high');
+  sessions.remove(key);
+  try { sessions.db.close(); } catch (_) {}
 });

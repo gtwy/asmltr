@@ -7,7 +7,7 @@
  * and we STRIP XAI_API_KEY so the CLI cannot fall through to metered API billing.
  *
  * Harness turns are headless (`grok -p`), never the interactive TUI (bare `grok`).
- * Finite --max-turns + a spawn watchdog; no infinite idle.
+ * No spawn watchdog and no CLI turn cap. Operator abort (abortController) only.
  *
  * RESUME UUID (Grok-specific — do not drop):
  *   Sessions are UUIDs (UUIDv7 when the CLI assigns one). `-s/--session-id` CREATES
@@ -32,49 +32,10 @@ const { composePrompt } = require('../../../shared/prompt-compose');
 const id = 'grok';
 const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — finite, never infinite
-const DEFAULT_MAX_TURNS = 20;
-const TIMEOUT_CAP_MS = 4 * 60 * 60 * 1000;
-const MAX_TURNS_CAP = 100;
-
-function timeoutMs() {
-  const n = Number(process.env.ASMLTR_GROK_TIMEOUT_MS);
-  if (Number.isFinite(n) && n > 0) return Math.min(n, TIMEOUT_CAP_MS);
-  return DEFAULT_TIMEOUT_MS;
-}
-function maxTurns() {
-  const n = Number(process.env.ASMLTR_GROK_MAX_TURNS);
-  if (Number.isFinite(n) && n > 0) return Math.min(Math.floor(n), MAX_TURNS_CAP);
-  return DEFAULT_MAX_TURNS;
-}
-
-const TURNS_FOR_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
-const TIMEOUT_SCALE = { low: 1, medium: 1, high: 1, xhigh: 1.5 }; // unused for watchdog; interactive is absolute 5/10/60
-
-/** medium 20 / high 40 / xhigh 60. Cap 100. Env MAX_TURNS is the complete() baseline, not a flatten. */
-function maxTurnsForEffort(effort, opts) {
-  const e = normalizeEffort(effort) || 'medium';
-  const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
-  if (isEmailChannel(channel) && e === 'xhigh') return MAX_TURNS_CAP;
-  return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
-}
-
-const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // inbound email xhigh (everyone except owner-from)
-const OWNER_EMAIL_TIMEOUT_MS = 4 * 60 * 60 * 1000; // From ASMLTR_OWNER_FROM_EMAIL only
-const MCP_TIMEOUT_MS = 60 * 60 * 1000; // inbound mcp always xhigh
-
-/** Exact From address that gets the 4h email watchdog. Empty = no owner-from path. Never hardcode a real address. */
+/** Exact From address for owner-from helpers. Empty = unset. Never hardcode a real address. */
 function ownerFromEmail() {
   return String(process.env.ASMLTR_OWNER_FROM_EMAIL || '').trim().toLowerCase();
 }
-
-// Discord / assistant-web / assistant-native (and generic non-email). Absolute, not scale-from-env.
-const INTERACTIVE_TIMEOUT_MS = {
-  low: 5 * 60 * 1000,
-  medium: 5 * 60 * 1000,
-  high: 10 * 60 * 1000,
-  xhigh: 60 * 60 * 1000,
-};
 
 function isEmailChannel(channel) {
   return String(channel || '').trim().toLowerCase() === 'email';
@@ -82,6 +43,12 @@ function isEmailChannel(channel) {
 
 function isMcpChannel(channel) {
   return String(channel || '').trim().toLowerCase() === 'mcp';
+}
+
+function isWebChannel(channel) {
+  const c = String(channel || '').trim().toLowerCase();
+  return c === 'assistant-web' || c === 'assistant-native'
+    || c === 'eve-assistant-web' || c === 'eve-assistant-native';
 }
 
 /** Bare addr from `Name <addr@host>` or `addr@host`. Display-name-only → empty. */
@@ -121,53 +88,30 @@ function isOwnerFromEmail(opts) {
   return extractSenderEmail(opts) === owner;
 }
 
-/** Watchdog by channel. Cap 4 hours so owner-from email can use it. Not infinite.
- *  Interactive (discord, assistant-web, assistant-native, generic): 5 / 10 / 60.
- *  Email xhigh is 60 minutes / 100 turns, except From ASMLTR_OWNER_FROM_EMAIL → 4 hours
- *  (case-insensitive; display-name wrapping ignored; that exact address only).
- *  MCP is always xhigh / 60 minutes (not the owner-from 4h path).
- *  Second arg is opts `{ channel, sender }` or a channel string. */
-function timeoutMsForEffort(effort, opts) {
-  const o = (opts && typeof opts === 'object') ? opts : { channel: opts };
-  const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
-  const e = normalizeEffort(effort) || 'medium';
-  if (isEmailChannel(channel) && e === 'xhigh') {
-    const ms = isOwnerFromEmail(o) ? OWNER_EMAIL_TIMEOUT_MS : EMAIL_TIMEOUT_MS;
-    return Math.min(ms, TIMEOUT_CAP_MS);
-  }
-  if (isMcpChannel(channel)) return Math.min(MCP_TIMEOUT_MS, TIMEOUT_CAP_MS);
-  const ms = INTERACTIVE_TIMEOUT_MS[e] || INTERACTIVE_TIMEOUT_MS.medium;
-  return Math.min(ms, TIMEOUT_CAP_MS);
-}
-
-// Reasoning effort — three tiers (19 Aug 2026):
-//   Always pass `--effort <level>` (CLI alias of --reasoning-effort).
+// Reasoning effort — always pass `--effort <level>` (CLI alias of --reasoning-effort).
 //   Baseline is ASMLTR_GROK_EFFORT (Ivy live: medium). envEffort() if unset still
 //   || 'high' so other installs keep the old default. xhigh is NOT the default.
-//   medium  normal conversation
+//   medium  normal conversation (Discord baseline)
 //   high    lookup/research, Corona (recipe/cigar/cooking), Rolodex/contacts,
 //           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
-//           Not a coding session.
+//           Not a coding session. Web channels are always this after one-shot.
 //   xhigh   git or code, or a deep dive (implement, refactor, write/patch code,
 //           commit, PR, "deep dive"), or consecutive "generate (an) image" /
 //           "generate (a) photo" (word order matters). Project git cwd that is not $HOME.
+//           Email and MCP are always xhigh after one-shot.
 //   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
 //   repo and would xhigh every ask). Use the session/turn cwd if provided.
 //   Score opts.effortPrompt when set (current user message only) — NOT
 //   drainObserved/catch-up glued onto prompt in server.js.
 //   Tight: do not treat bare "fix" as xhigh (Eve "Proposed Fix", "quick fix").
 //   One-shot next-effort still wins. complete() skips auto-raise.
-//   Email channel (`email`) forces xhigh AFTER one-shot (a chatty mail body
-//   with no code words is still xhigh). MCP channel (`mcp`) is the same:
-//   always xhigh after one-shot, 60-minute watchdog (not owner-from 4h).
-//   Discord and others stay three-tier.
-//   Email xhigh timeout is 60 minutes, or 4 hours only when From matches
-//   ASMLTR_OWNER_FROM_EMAIL (case-insensitive, display-name wrapping ignored;
-//   that exact address — not the domain). Do not put a real address in git. MCP watchdog
-//   is 60 minutes. Interactive (discord, assistant-web, assistant-native)
-//   5 / 10 / 60 (cap 4h so the owner-from path can use it; interactive
-//   stays absolute 5/10/60).
-//   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
+//   Web (assistant-web, assistant-native, eve-assistant-web, eve-assistant-native)
+//   is always high AFTER one-shot/explicit. No +h/+xh, no word picker.
+//   Email (`email`) and MCP (`mcp`) force xhigh AFTER one-shot (a chatty body
+//   with no code words is still xhigh). Discord keeps the three-tier picker
+//   (+h/+xh/word/git). Do not inherit last effort. Do not use a generic
+//   XHIGH_CHANNELS list. No spawn kill timer. No CLI turn cap. Do not apply
+//   Claude maxTurns or ASMLTR_MAX_THINKING_TOKENS here.
 //   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
 //   Whole-word +xh / +h (whitespace-split, start/end/standalone) override to
@@ -175,8 +119,8 @@ function timeoutMsForEffort(effort, opts) {
 //   raw Discord id is in ASMLTR_GROK_EFFORT_ELEVATE_IDS. Honored token is
 //   stripped from effortPrompt and the grok user prompt. Unknown senders keep
 //   the token and stay on the picker. After one-shot / explicit; wins over
-//   three-tier and email. Do not persist nextEffort from the token. No
-//   owner snowflake in git.
+//   three-tier and email. Web ignores the token. Do not persist nextEffort
+//   from the token. No owner snowflake in git.
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 // xhigh: code / git / deep dive / image gen. No bare \bfix\b.
 const XHIGH_PARTS = [
@@ -348,11 +292,13 @@ function classifyEffort(opts) {
   const oneshotExplicit = normalizeEffort(opts.effort);
   if (oneshotExplicit) return { effort: oneshotExplicit, reason: 'explicit' };
   if (opts.complete) return { effort: envEffort(), reason: 'complete' };
+  // After one-shot/explicit: web is always high (no token, no word picker).
+  if (isWebChannel(opts.channel)) return { effort: 'high', reason: 'web' };
   const token = detectElevateToken(scoringPrompt(opts));
   if (token && canElevateEffort(opts)) {
     return { effort: token === '+xh' ? 'xhigh' : 'high', reason: 'token:' + token, stripToken: token };
   }
-  // After one-shot: inbound email and mcp are always xhigh. Discord/others keep the three-tier score.
+  // After one-shot: inbound email and mcp are always xhigh. Discord keeps the three-tier score.
   if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
   if (isMcpChannel(opts.channel)) return { effort: 'xhigh', reason: 'mcp' };
   const scored = scoringPrompt(opts);
@@ -427,8 +373,6 @@ function buildArgs(opts) {
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
-  const turns = opts.complete ? maxTurns() : maxTurnsForEffort(classified.effort, opts);
-  args.push('--max-turns', String(turns));
   args.push('--effort', classified.effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
@@ -631,8 +575,6 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
   if (abortController) abortController.signal.addEventListener('abort', kill);
-  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMsForEffort(effort, { channel, sender }));
-  if (watchdog.unref) watchdog.unref();
 
   const state = newState(sessionId);
   let buf = '';
@@ -658,7 +600,6 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   child.stderr.on('data', (d) => { stderr += d.toString(); });
 
   const code = await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
-  clearTimeout(watchdog);
   if (buf.trim()) handleLine(buf);
   if (state.thinking && onThinking) {
     try { onThinking(state.thinking); } catch (_) {}
@@ -685,12 +626,9 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
 async function complete({ prompt, model, appendSystemPrompt = null }) {
   const args = buildArgs({ prompt, systemPrompt: appendSystemPrompt, model: model || cheapModel, complete: true });
   const child = spawn(bin(), args, { env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
-  const watchdog = setTimeout(() => { try { child.kill('SIGTERM'); } catch (_) {} }, timeoutMs());
-  if (watchdog.unref) watchdog.unref();
   let out = '';
   child.stdout.on('data', (d) => { out += d.toString(); });
   await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
-  clearTimeout(watchdog);
   return out.trim();
 }
 
@@ -702,10 +640,9 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, timeoutMs, maxTurns,
-  timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
-  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, MCP_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel, isMcpChannel,
-  ownerFromEmail, OWNER_EMAIL_TIMEOUT_MS, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
+  extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState,
+  isEmailChannel, isMcpChannel, isWebChannel,
+  ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
   classifyEffort, chooseEffort, effortForTurn,
   canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet,
