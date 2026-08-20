@@ -4,10 +4,16 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -f "$HOME/.asmltr/rolodex.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$HOME/.asmltr/rolodex.env"
+  set +a
+fi
 CACHE_DIR="${ROLODEX_CACHE:-$HOME/.asmltr/rolodex-cache}"
 DEST="${CACHE_DIR}/contacts.json"
 TMP="${DEST}.tmp.$$"
-EXPORT_URL="${ROLODEX_EXPORT_URL:-http://127.0.0.1:12702/export}"
+EXPORT_URL="${ROLODEX_EXPORT_URL:-${ROLODEX_URL:-http://127.0.0.1:8081}/export}"
 CURL_MAX_TIME="${ROLODEX_SYNC_TIMEOUT:-180}"
 BACKUP_PY="${DIR}/backup.py"
 

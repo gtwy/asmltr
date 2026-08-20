@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdio MCP: Rolodex cache.
 
-Reads ~/.asmltr/rolodex-cache/contacts.json (refreshed from 127.0.0.1:12702/export).
+Reads ~/.asmltr/rolodex-cache/contacts.json (refreshed from ROLODEX_URL /export).
 Writes (create / add-phone / delete) go to the live localhost API, then update that row.
 Daily copies of contacts.json live in backups/ (max 5, not a lookup store).
 Aliases stay in that cache dir and are never overwritten by sync.
@@ -34,7 +34,7 @@ CONTACTS_PATH = CACHE_DIR / "contacts.json"
 ALIASES_PATH = CACHE_DIR / "aliases.json"
 BACKUP_DIR = rolodex_backup.backup_dir(CACHE_DIR)
 SYNC_SCRIPT = _SCRIPT_DIR / "sync.sh"
-ROLODEX_API = os.environ.get("ROLODEX_URL") or "http://127.0.0.1:12702"
+ROLODEX_API = (os.environ.get("ROLODEX_URL") or "http://127.0.0.1:8081").rstrip("/")
 ET = ZoneInfo("America/New_York")
 
 mcp = MCPServer("rolodex")
@@ -278,7 +278,7 @@ def rolodex_health() -> str:
         "contacts": contact_count,
         "aliases": alias_count,
         "contacts_mtime": _mtime_et(CONTACTS_PATH),
-        "source": "http://127.0.0.1:12702/export",
+        "source": f"{ROLODEX_API}/export",
         "timer": "07:30 America/New_York",
         "backups": len(backups),
         "backup_keep": rolodex_backup.KEEP,

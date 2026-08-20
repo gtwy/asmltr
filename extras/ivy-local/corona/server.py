@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Stdio MCP: Corona localhost API (127.0.0.1:12701).
+"""Stdio MCP: Corona localhost API.
 
-Read-only. No /say. Eve: skip extras/ivy-local unless you want these extras.
+Read-only. No /say. Base URL from CORONA_URL (default http://127.0.0.1:8080).
+Eve: skip extras/ivy-local unless you want these extras.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,7 +16,7 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-CORONA_BASE = "http://127.0.0.1:12701"
+CORONA_BASE = (os.environ.get("CORONA_URL") or "http://127.0.0.1:8080").rstrip("/")
 TIMEOUT = 30
 
 mcp = MCPServer("corona")
@@ -82,9 +84,9 @@ def corona_recipe(query: str | None = None, thread_id: str | None = None) -> str
 
 @mcp.tool()
 def corona_cigars(query: str | None = None, message_id: str | None = None) -> str:
-    """Search kektech #cigars via Corona. Provide query or message_id (one required).
+    """Search a configured Corona channel. Provide query or message_id (one required).
 
-    Writeup: lead with #cigars (who, when America/New_York 24-hour, what they said),
+    Writeup: lead with the channel (who, when, what they said),
     then a section headed exactly Additional notes from the web. No /say.
     """
     params = _require_one({"q": query, "message_id": message_id}, "query or message_id")
