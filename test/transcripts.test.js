@@ -64,13 +64,42 @@ test('appendTurn appends a second turn and keeps newest topic first', () => {
   assert.ok(lines.some((l) => l.includes('Laphroaig')));
 });
 
-test('recallForInject returns last-topics plus recent turns for a conversation', () => {
-  const block = transcripts.recallForInject({ conversationKey: 'assistant-web:local:owner' });
+test('recallForInject returns last-topics plus recent turns for a conversation when opted in', () => {
+  const block = transcripts.recallForInject({ conversationKey: 'assistant-web:local:owner', includeLastTopics: true });
   assert.ok(block.includes('LAST TOPICS'));
   assert.ok(block.includes('Caol Ila'));
   assert.ok(block.includes('Laphroaig 10'));
   assert.ok(block.includes('RECENT TURNS FROM THIS CONVERSATION'));
   assert.ok(block.includes('**user:**'));
+});
+
+test('recallForInject default omits global last-topics so other principals do not see them', () => {
+  const ts = Date.UTC(2026, 7, 18, 18, 10, 0);
+  transcripts.appendTurn({
+    conversationKey: 'discord:other-user',
+    channel: 'discord',
+    userText: 'secret discord topic xyz-only-here',
+    assistantText: 'noted',
+    ts,
+  });
+  transcripts.appendTurn({
+    conversationKey: 'email:customer-thread',
+    channel: 'email',
+    userText: 'please reset our vpn',
+    assistantText: 'working on it',
+    ts: ts + 1000,
+  });
+  const customer = transcripts.recallForInject({ conversationKey: 'email:customer-thread' });
+  assert.ok(customer.includes('please reset our vpn'));
+  assert.ok(customer.includes('RECENT TURNS FROM THIS CONVERSATION'));
+  assert.equal(customer.includes('LAST TOPICS'), false);
+  assert.equal(customer.includes('secret discord topic xyz-only-here'), false);
+  assert.equal(customer.includes('Laphroaig 10'), false);
+
+  const owner = transcripts.recallForInject({ conversationKey: 'email:customer-thread', includeLastTopics: true });
+  assert.ok(owner.includes('LAST TOPICS'));
+  assert.ok(owner.includes('secret discord topic xyz-only-here'));
+  assert.ok(owner.includes('please reset our vpn'));
 });
 
 test('recallForInject is empty when the silo has no transcript for that key', () => {
