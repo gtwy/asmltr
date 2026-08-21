@@ -21,6 +21,7 @@ const crypto = require('crypto');
 require('../sqlite-stmt-keep');
 const Database = require('better-sqlite3');
 const { identifierLookups } = require('./ident-lookups');
+const { identAddDecision } = require('./ident-add');
 const { crossChannelIdentityLine } = require('./cast-identity');
 
 const DB_PATH = process.env.ASMLTR_TRUST_DB || path.join(__dirname, '..', '..', 'data', 'trust.db');
@@ -148,7 +149,19 @@ const principals = {
   },
 };
 const identifiers = {
-  add: (principal_id, surface, value) => { db.prepare('INSERT OR REPLACE INTO identifiers (principal_id,surface,value) VALUES (?,?,?)').run(principal_id, surface, value); return principals.get(principal_id); },
+  add: (principal_id, surface, value) => {
+    const existing = db.prepare('SELECT principal_id FROM identifiers WHERE surface=? AND value=?').get(surface, value);
+    const decision = identAddDecision({ existingPrincipalId: existing && existing.principal_id, targetPrincipalId: principal_id });
+    if (!decision.ok) {
+      const err = new Error(decision.error);
+      err.status = decision.status;
+      throw err;
+    }
+    if (!decision.same) {
+      db.prepare('INSERT INTO identifiers (principal_id,surface,value) VALUES (?,?,?)').run(principal_id, surface, value);
+    }
+    return principals.get(principal_id);
+  },
   remove: (id) => db.prepare('DELETE FROM identifiers WHERE id=?').run(id).changes > 0,
 };
 const roles = {

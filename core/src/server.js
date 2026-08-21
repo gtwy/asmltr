@@ -2088,7 +2088,10 @@ app.post('/trust/principals/:id/merge', (req, res) => {
   const merged = trust.principals.merge(req.params.id, req.body && req.body.into);
   return merged ? res.json(merged) : res.status(400).json({ error: 'merge failed — unknown or identical principals' });
 });
-app.post('/trust/principals/:id/identifiers', (req, res) => res.json(trust.identifiers.add(req.params.id, req.body.surface, String(req.body.value))));
+app.post('/trust/principals/:id/identifiers', (req, res) => {
+  try { res.json(trust.identifiers.add(req.params.id, req.body.surface, String(req.body.value))); }
+  catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
 app.delete('/trust/identifiers/:iid', (req, res) => res.json({ ok: trust.identifiers.remove(Number(req.params.iid)) }));
 app.get('/trust/roles', (req, res) => res.json({ roles: trust.roles.list() }));
 app.post('/trust/roles', (req, res) => res.json(trust.roles.upsert(req.body)));
