@@ -12,6 +12,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
 const silo = require('./silo');
 
 const LAST_TOPICS_REL = 'memory/last-topics.md';
@@ -32,9 +33,9 @@ function oneLine(s) {
   return String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 }
 
-/** Filesystem-safe conversation_key (colons etc. → dashes). */
+/** Filesystem-safe conversation_key: sha256 hex (do not slice — prefixes collide). */
 function safeKey(key) {
-  return String(key || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'unknown';
+  return createHash('sha256').update(String(key || 'unknown')).digest('hex');
 }
 
 function formatTurn({ ts, conversationKey, channel, userText, assistantText }) {

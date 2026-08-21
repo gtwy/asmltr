@@ -15,9 +15,18 @@ after(() => {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
 });
 
-test('safeKey strips colons so conversation_key is a filename', () => {
-  assert.equal(transcripts.safeKey('assistant-web:local:owner'), 'assistant-web-local-owner');
-  assert.equal(transcripts.safeKey(''), 'unknown');
+test('safeKey hashes the conversation key (sha256 hex)', () => {
+  const { createHash } = require('crypto');
+  const hex = (s) => createHash('sha256').update(s).digest('hex');
+  assert.equal(transcripts.safeKey('assistant-web:local:owner'), hex('assistant-web:local:owner'));
+  assert.equal(transcripts.safeKey(''), hex('unknown'));
+  assert.equal(transcripts.safeKey('assistant-web:local:owner').length, 64);
+});
+
+test('keys that share an 80-char prefix do not collide', () => {
+  const a = 'x'.repeat(80) + '-one';
+  const b = 'x'.repeat(80) + '-two';
+  assert.notEqual(transcripts.safeKey(a), transcripts.safeKey(b));
 });
 
 test('appendTurn writes user+assistant into Self silo memory/transcripts and last-topics', () => {
@@ -29,7 +38,7 @@ test('appendTurn writes user+assistant into Self silo memory/transcripts and las
     assistantText: 'Islay peat plus sherry is a solid pairing.',
     ts,
   });
-  assert.equal(wrote.transcript, 'memory/transcripts/assistant-web-local-owner.md');
+  assert.equal(wrote.transcript, 'memory/transcripts/' + transcripts.safeKey('assistant-web:local:owner') + '.md');
   assert.equal(wrote.lastTopics, 'memory/last-topics.md');
 
   const self = silo.ensureSelf();
@@ -55,7 +64,7 @@ test('appendTurn appends a second turn and keeps newest topic first', () => {
     ts,
   });
   const self = silo.ensureSelf();
-  const md = fs.readFileSync(path.join(self.dir, 'memory/transcripts/assistant-web-local-owner.md'), 'utf8');
+  const md = fs.readFileSync(path.join(self.dir, 'memory/transcripts/' + transcripts.safeKey('assistant-web:local:owner') + '.md'), 'utf8');
   assert.ok(md.includes('Laphroaig 10'));
   assert.ok(md.includes('Caol Ila'));
   const topics = fs.readFileSync(path.join(self.dir, 'memory/last-topics.md'), 'utf8');
