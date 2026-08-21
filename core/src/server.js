@@ -214,8 +214,8 @@ function drainObserved(key) {
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
 
-/** Write a completed turn into Self memory/transcripts. Owner-only keys also
- *  attach to the ivy stream (V32). Best-effort: never fail the turn. */
+/** Write a completed turn into Self memory/transcripts. Owner + silo-allowlisted
+ *  Discord attach to the ivy stream (V32). Email/GitHub/schedule never do. */
 const { shouldAttachIvyStream } = require('../../shared/ivy-stream-attach');
 
 function persistAskTurn(e, result, assistantText, resolved) {

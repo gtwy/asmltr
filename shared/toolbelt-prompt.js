@@ -49,22 +49,22 @@ function buildToolbeltPrompt({
       'announce for everything else. Never steer a session into a loop (don\'t steer one that\'s steering you).';
   }
   if (selfSiloDir && !d.silo) {
-    const findMcp = bypassModeration ? ', `asmltr_silo_find`' : '';
+    const findMcp = ', `asmltr_silo_find`';
     const how = d.shell
       ? `Browse/recall it with the silo MCP tools (\`asmltr_silo_overview\`, \`asmltr_silo_ls\`${findMcp}, \`asmltr_silo_get\`) — not Bash:\n`
       : 'Browse/recall it with the Bash tool:\n';
     s += `\n\nSELF SILO — your persistent memory + the DEFAULT home for anything you create is a data silo at \`${selfSiloDir}\`. ` +
       'When you produce an artifact (a document, image, app, export) and the task doesn\'t specify where, create it UNDER the Self silo — ' +
       'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). ' + how +
-      '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n';
-    if (bypassModeration) {
-      s += '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n';
-    }
+      '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
+      '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n';
     s += d.siloWrite
       ? '• `asmltr silo get <path>` (read-only this turn; no put/mkdir/rm). Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n'
       : '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n';
     if (bypassModeration) {
       s += 'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the engine session, recover prior chat from those files (`asmltr silo get memory/transcripts/…`).\n';
+    } else {
+      s += 'Turns in this room are auto-written to `memory/transcripts/`. You may silo-find other allowlisted rooms on this Discord. Do not pull work email or customer internals into a mixed room.\n';
     }
   }
   if (vaultLocked) {

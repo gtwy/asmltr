@@ -33,6 +33,22 @@ test('allowlisted guild keeps silo, still denies shell/streams/send', () => {
   assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true });
 });
 
+test('denyChannels opt a room out of the guild silo allowlist', () => {
+  const allow = { guilds: ['guild-allow-1'], channels: [], denyChannels: ['nope'] };
+  const denied = policyFor({
+    channel: 'discord', public: true,
+    context: { scope_id: 'guild:guild-allow-1' },
+    channel_context: { channelId: 'nope' },
+  }, { bypass_moderation: false }, allow);
+  const kept = policyFor({
+    channel: 'discord', public: true,
+    context: { scope_id: 'guild:guild-allow-1' },
+    channel_context: { channelId: 'ok' },
+  }, { bypass_moderation: false }, allow);
+  assert.equal(denied.deny.silo, true);
+  assert.equal(kept.deny.silo, false);
+});
+
 test('discord DM + bypass_moderation denies nothing', () => {
   const p = policyFor({
     channel: 'discord', public: false,
@@ -83,8 +99,8 @@ test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
     selfSiloDir: '/tmp/self',
   });
   assert.ok(text.includes('SELF SILO'));
-  assert.equal(text.includes('asmltr_silo_find'), false);
-  assert.equal(text.includes('asmltr silo find'), false);
+  assert.ok(text.includes('asmltr_silo_find'));
+  assert.ok(text.includes('asmltr silo find'));
   assert.ok(text.includes('asmltr silo ls') || text.includes('asmltr_silo_ls'));
   assert.equal(text.includes('use the Bash tool'), false);
   assert.equal(text.includes('asmltr send'), false);

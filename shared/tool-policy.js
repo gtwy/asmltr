@@ -20,9 +20,10 @@ function loadAllowlist(file) {
     return {
       guilds: (silo.guilds || []).map(String),
       channels: (silo.channels || []).map(String),
+      denyChannels: (silo.denyChannels || []).map(String),
     };
   } catch {
-    return { guilds: [], channels: [] };
+    return { guilds: [], channels: [], denyChannels: [] };
   }
 }
 
@@ -43,6 +44,7 @@ function siloAllowlisted(envelope, allow) {
   const a = allow || loadAllowlist();
   const g = guildIdFrom(envelope);
   const c = channelIdFrom(envelope);
+  if (c && (a.denyChannels || []).includes(c)) return false;
   return !!(g && a.guilds.includes(g)) || !!(c && a.channels.includes(c));
 }
 
