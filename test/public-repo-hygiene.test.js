@@ -81,3 +81,20 @@ test('tracked files do not contain install-specific hosts, emails, or home paths
   }
   assert.deepEqual(hits, []);
 });
+
+test('leak-strip files have no hardcoded given-name denylist', () => {
+  const files = [
+    'shared/step-public.js',
+    'connectors/types/discord/index.js',
+    'shared/redact.js',
+  ];
+  const denyConst = /\b(?:NAME_DENY|GIVEN_NAMES|FAMILY_NAMES|denylist\s*=\s*\[)/i;
+  const namesArray = /const\s+\w*names?\w*\s*=\s*\[\s*'[A-Z][a-z]+'\s*,\s*'[A-Z][a-z]+'\s*,\s*'[A-Z][a-z]+'/i;
+  const hits = [];
+  for (const rel of files) {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    if (denyConst.test(text)) hits.push(rel + ': deny-const');
+    if (namesArray.test(text)) hits.push(rel + ': names-array');
+  }
+  assert.deepEqual(hits, []);
+});
