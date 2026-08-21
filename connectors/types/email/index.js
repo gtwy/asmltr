@@ -739,10 +739,11 @@ async function start(ctx) {
   }
 
   // --- outbound HTTP (/out — the manager's unified send calls this) ----------
+  const { requireConnectorToken } = require('../../../shared/connector-http-auth');
   const app = express();
   app.use(express.json({ limit: '25mb' }));
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
-  app.post('/out', async (req, res) => {
+  app.post('/out', requireConnectorToken, async (req, res) => {
     try {
       const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
@@ -760,7 +761,7 @@ async function start(ctx) {
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   // Mailbox browse (the manager's /read proxies here; op = list | read | search).
-  app.post('/read', async (req, res) => {
+  app.post('/read', requireConnectorToken, async (req, res) => {
     try {
       const b = req.body || {};
       if (b.op === 'list') return res.json({ ok: true, messages: await mailList(b) });
