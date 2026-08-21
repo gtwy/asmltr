@@ -120,8 +120,8 @@ function start(ctx) {
     const dir = path.join(workspace, full.replace('/', '__'));
     try {
       if (fs.existsSync(path.join(dir, '.git'))) {
-        await execp('git', ['-C', dir, 'fetch', '--quiet', '--depth', '1', 'origin'], {}).catch(() => {});
-        await execp('git', ['-C', dir, 'reset', '--hard', '--quiet', 'origin/HEAD'], {}).catch(() => {});
+        await execp('git', ['-C', dir, 'fetch', '--quiet', '--depth', '1', 'origin'], { env: cloneGitEnv(pat) }).catch(() => {});
+        await execp('git', ['-C', dir, 'reset', '--hard', '--quiet', 'origin/HEAD'], { env: cloneGitEnv(pat) }).catch(() => {});
       } else {
         fs.mkdirSync(workspace, { recursive: true });
         await execp('git', cloneArgv(full, dir), { env: cloneGitEnv(pat) });
