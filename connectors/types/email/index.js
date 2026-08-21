@@ -1,4 +1,5 @@
 'use strict';
+const { sendPolicyFromConfig } = require('./send-policy');
 /**
  * asmltr connector type: EMAIL (SMTP send + IMAP receive/watch).
  *
@@ -364,7 +365,7 @@ async function start(ctx) {
   const BIND = cfg.bind_host || '127.0.0.1';
   const MAILBOX = cfg.mailbox || 'INBOX';
   const fromName = cfg.from_name || NAME;
-  const policy = cfg.approval_policy || 'always_draft';
+  const policy = sendPolicyFromConfig(cfg);
   const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
   const signature = cfg.signature || `\n\n—\n${fromName}`;
   const coreBase = String(process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle\/?$/i, '');
@@ -420,56 +421,8 @@ async function start(ctx) {
     if (fromAddr === selfAddr) return { handled: false };
     const subject = parsed.subject || '(no subject)';
     const body = (parsed.text || parsed.html || '').toString().trim();
-    const extraAddrs = collectOriginalAddrs(parsed, fromAddr, body);
-    const opsHit = matchOpsAllowThrough(fromAddr, subject, body, undefined, extraAddrs);
-    if (opsHit && opsHit.log_only) {
-      const original = extraAddrs.find((a) => a && a !== fromAddr) || fromAddr;
-      persistLogOnlyAlert(opsHit, {
-        ts: new Date().toISOString(),
-        from: fromAddr,
-        original_from: original,
-        extra_addrs: extraAddrs,
-        subject,
-        message_id: parsed.messageId || null,
-        body: body.slice(0, 200000),
-        attachments: (parsed.attachments || []).map((a) => a && a.filename).filter(Boolean),
-      });
-      ctx.log(`log-only ${opsHit.id} from=${fromAddr} subject=${subject}`);
-      return { handled: true };
-    }
-    if (isAutomatedSender(fromAddr) && !(opsHit && opsHit.noreply_ok !== false)) {
-      ctx.log(`skip automated sender ${fromAddr}`);
-      return { handled: false };
-    }
-    const messageId = parsed.messageId || null;
-    const refs = parsed.references ? (Array.isArray(parsed.references) ? parsed.references : [parsed.references]) : [];
-    const inReplyTo = parsed.inReplyTo || null;
-    const rootId = root32(parsed.references, inReplyTo, messageId);
-    const convKey = `email:${ctx.instanceId}:thread:${crypto.createHash('sha1').update(String(rootId)).digest('hex').slice(0, 16)}`;
-    const replySubject = /^re:/i.test(subject) ? subject : `Re: ${subject}`;
 
-    // Attachments → shared upload surface (findable from any channel), noted for the model.
-    const savedNotes = [];
-    for (const a of parsed.attachments || []) {
-      if (!a || !a.content) continue;
-      try {
-        const rec = ctx.uploads.save({
-          channel: 'email', instance: ctx.instanceId, buffer: a.content,
-          filename: a.filename || `attachment-${Date.now()}`, mime: a.contentType, kind: 'document',
-          caption: subject, sender: fromAddr, senderId: fromAddr, conversationKey: convKey,
-        });
-        savedNotes.push(`- ${rec.filename} (${rec.mime}, ${ctx.uploads.humanSize(rec.size)}) → ${rec.path}`);
-      } catch (e) { ctx.log(`attachment save failed: ${e.message}`); }
-    }
-
-    // Remember thread context for threaded replies (inline auto-send AND later draft approval).
-    threads.set(convKey, { subject: replySubject, messageId, references: [...refs, messageId].filter(Boolean) });
-
-    let text = `From: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
-    if (savedNotes.length) text += `\n\n[Attachments saved to the shared asmltr upload area (findable via \`asmltr uploads\`):\n${savedNotes.join('\n')}]`;
-
-    ctx.emit({ event_type: 'inbound', session_id: convKey, identity: fromAddr, payload: { text: `${subject} — ${body.slice(0, 160)}` } });
-
+    // Auth-Results before persist/uploads/thread/telemetry. Reject: no attachments, no log_only.
     const auth = authDisposition(parsed);
     if (authRejected(auth)) {
       const summary = formatAuthSummary(auth);
@@ -477,7 +430,7 @@ async function start(ctx) {
       ctx.log(`auth reject from=${fromAddr} subject=${subject} ${summary} reason=${reason}`);
       ctx.emit({
         event_type: 'auth_reject',
-        session_id: convKey,
+        session_id: `email:${ctx.instanceId}:auth-reject`,
         identity: fromAddr,
         payload: {
           from: fromAddr, subject, reason,
@@ -496,6 +449,57 @@ async function start(ctx) {
       return { handled: true };
     }
 
+    const extraAddrs = collectOriginalAddrs(parsed, fromAddr, body);
+    const opsHitLog = matchOpsAllowThrough(fromAddr, subject, body, undefined, extraAddrs);
+    if (opsHitLog && opsHitLog.log_only) {
+      const original = extraAddrs.find((a) => a && a !== fromAddr) || fromAddr;
+      persistLogOnlyAlert(opsHitLog, {
+        ts: new Date().toISOString(),
+        from: fromAddr,
+        original_from: original,
+        extra_addrs: extraAddrs,
+        subject,
+        message_id: parsed.messageId || null,
+        body: body.slice(0, 200000),
+        attachments: (parsed.attachments || []).map((a) => a && a.filename).filter(Boolean),
+      });
+      ctx.log(`log-only ${opsHitLog.id} from=${fromAddr} subject=${subject}`);
+      return { handled: true };
+    }
+    // Turns: header From only. Extra/body addresses are log_only (V6).
+    const opsHit = matchOpsAllowThrough(fromAddr, subject, body, undefined, []);
+    if (isAutomatedSender(fromAddr) && !(opsHit && opsHit.noreply_ok !== false)) {
+      ctx.log(`skip automated sender ${fromAddr}`);
+      return { handled: false };
+    }
+    const messageId = parsed.messageId || null;
+    const refs = parsed.references ? (Array.isArray(parsed.references) ? parsed.references : [parsed.references]) : [];
+    const inReplyTo = parsed.inReplyTo || null;
+    const rootId = root32(parsed.references, inReplyTo, messageId);
+    const convKey = `email:${ctx.instanceId}:thread:${crypto.createHash('sha1').update(String(rootId)).digest('hex').slice(0, 16)}`;
+    const replySubject = /^re:/i.test(subject) ? subject : `Re: ${subject}`;
+
+    // Attachments after auth pass only.
+    const savedNotes = [];
+    for (const a of parsed.attachments || []) {
+      if (!a || !a.content) continue;
+      try {
+        const rec = ctx.uploads.save({
+          channel: 'email', instance: ctx.instanceId, buffer: a.content,
+          filename: a.filename || `attachment-${Date.now()}`, mime: a.contentType, kind: 'document',
+          caption: subject, sender: fromAddr, senderId: fromAddr, conversationKey: convKey,
+        });
+        savedNotes.push(`- ${rec.filename} (${rec.mime}, ${ctx.uploads.humanSize(rec.size)}) → ${rec.path}`);
+      } catch (e) { ctx.log(`attachment save failed: ${e.message}`); }
+    }
+
+    threads.set(convKey, { subject: replySubject, messageId, references: [...refs, messageId].filter(Boolean) });
+
+    let text = `From: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
+    if (savedNotes.length) text += `\n\n[Attachments saved to the shared asmltr upload area (findable via \`asmltr uploads\`):\n${savedNotes.join('\n')}]`;
+
+    ctx.emit({ event_type: 'inbound', session_id: convKey, identity: fromAddr, payload: { text: `${subject} — ${body.slice(0, 160)}` } });
+
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
     // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
@@ -511,7 +515,7 @@ async function start(ctx) {
       return { handled: true };
     }
 
-    const sendPolicy = 'always_send';
+    const sendPolicy = policy;
     const suppressReply = isAutomatedSender(fromAddr) || !!(opsHit && opsHit.reply_to_sender === false);
     let extra =
       `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +

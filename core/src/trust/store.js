@@ -20,6 +20,7 @@ const path = require('path');
 const crypto = require('crypto');
 require('../sqlite-stmt-keep');
 const Database = require('better-sqlite3');
+const { identifierLookups } = require('./ident-lookups');
 
 const DB_PATH = process.env.ASMLTR_TRUST_DB || path.join(__dirname, '..', '..', 'data', 'trust.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -232,10 +233,9 @@ function resolve(envelope) {
   const { raw_id, raw_username, api_key } = envelope.sender || {};
   const scopeId = envelope.context && envelope.context.scope_id;
 
-  // identifier match: (surface,id) → (surface,username) → (apikey,key)
+  // identifier match: (surface,id) → (surface,username except email) → (apikey,key)
   let pid = null;
-  for (const [s, v] of [[surface, raw_id], [surface, raw_username], ['apikey', api_key]]) {
-    if (!v) continue;
+  for (const [s, v] of identifierLookups(surface, { raw_id, raw_username, api_key })) {
     const row = _identBySurfaceVal.get(s, String(v));
     if (row) { pid = row.principal_id; break; }
   }
@@ -365,4 +365,4 @@ function buildRelationshipPrompt(resolved, envelope) {
   return parts.length ? 'CAST & RELATIONSHIPS\n' + parts.join('\n') : '';
 }
 
-module.exports = { db, principals, identifiers, roles, grants, profiles, relationships, engagement, resolve, buildAuthzPrompt, buildRelationshipPrompt, SELF_ID, DB_PATH };
+module.exports = { db, principals, identifiers, roles, grants, profiles, relationships, engagement, resolve, buildAuthzPrompt, buildRelationshipPrompt, identifierLookups, SELF_ID, DB_PATH };
