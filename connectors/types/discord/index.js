@@ -33,6 +33,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
+const { injectBy } = require('./inject-by');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -440,7 +441,8 @@ RESPONSE RULES:
       if (isAddressed(message, forced)) {
         const guidance = String(message.content || '').replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim();
         if (guidance) {
-          ctx.core.inject(convKeyFor(message), guidance, { by: 'operator', interrupt: false })
+          const by = injectBy(await isOwner(message), message.author.id);
+          ctx.core.inject(convKeyFor(message), guidance, { by, interrupt: false })
             .then(() => message.react('👀').catch(() => {}))
             .catch((e) => ctx.log('mid-turn steer failed: ' + e.message));
         }

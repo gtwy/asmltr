@@ -41,6 +41,7 @@ const { randomUUID } = require('crypto');
 const env = require('./envelope');
 // Load openai (moderation) BEFORE any better-sqlite3 module so Node 24 GC during that import cannot collect Statements.
 const moderation = require('./moderation');
+const injectSteer = require('./inject-steer');
 const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
 const deviceStore = require('./devices/store'); // device registry — the machines asmltr drives (docs/DEVICE-REGISTRY.md)
 const deviceEnroll = require('./devices/enroll'); // device credential issuance (vault-backed; replaces keys.json)
@@ -1957,17 +1958,19 @@ app.post('/v2/abort', (req, res) => {
   res.json({ ok: true, aborted: key });
 });
 
-// Operator STEER: inject a message into a live session — resume it with the operator's text, then
-// route the reply back to the origin channel via the manager's /send (works for ANY connector,
-// since /send is unified). Stops any in-flight turn first (steer replaces the current generation).
-// Bypasses moderation (the operator is trusted). Redacts on the way out like any public reply.
+// STEER: inject a message into a live session, then route the reply back to the origin
+// channel via the manager's /send (works for ANY connector, since /send is unified).
+// Skip inbound moderation and frame as Operator only when `by` is an operator surface
+// (operator / dashboard / tui / empty). Any other by runs the same inbound moderation,
+// frames as that speaker, and fail-closes if blocked. Do not cookie-gate this route.
+// Redacts on the way out like any public reply.
 app.post('/v2/inject', (req, res) => {
   const { conversation_key: key, text, by, interrupt } = req.body || {};
   if (!key || !text) return res.status(400).json({ error: 'need conversation_key + text' });
   // MESH STEER (`by: "mesh:<label>"`) = one SESSION steering another. Unlike the advisory `announce`
   // mailbox (a note the peer sees next turn and decides whether to act on), a steer is COERCIVE — it
   // pushes into a live turn. It's OFF by default; the operator opts in per instance with
-  // ASMLTR_MESH_STEER=on. Operator/dashboard steers (any other `by`) are always allowed.
+  // ASMLTR_MESH_STEER=on. Operator/dashboard/tui steers are always allowed.
   const meshSteer = typeof by === 'string' && by.startsWith('mesh:');
   if (meshSteer && !/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
     return res.status(403).json({ error: 'mesh steer is disabled on this instance (set ASMLTR_MESH_STEER=on to allow session-to-session steering)' });
@@ -1982,20 +1985,35 @@ app.post('/v2/inject', (req, res) => {
   if (interrupt && wasRunning) { try { inFlight.get(key).abort(); } catch (_) {} }
 
   withKeyLock(key, async () => {
-    record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
+    const actor = injectSteer.actorFromBy(by);
+    const gated = await injectSteer.gateInject({
+      by, text,
+      resolve: (envelope) => trust.resolve(envelope),
+      moderate: (msg, resolved, meta) => moderation.moderate(msg, resolved, meta),
+      platform: row.channel,
+    });
+    if (!gated.ok) {
+      const resolved = gated.resolved || { user_key: actor, display_name: actor };
+      record({ surface: row.channel, session_id: key, event_type: 'moderation_decision',
+        identity: resolved.user_key || actor, source: 'core',
+        payload: { decision: 'BLOCK', riskLevel: (gated.mod && gated.mod.riskLevel) || 10, injected: true } });
+      if (gated.mod && gated.mod.riskLevel >= 7) {
+        try { await moderation.notifyBlock(resolved, text, gated.mod, row.channel); } catch (_) {}
+      }
+      if (!res.headersSent) res.status(403).json({ ok: false, error: 'blocked by moderation' });
+      return;
+    }
+    record({ surface: row.channel, session_id: key, event_type: 'control', identity: actor, source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
     const { resume } = sessions.resolveForTurn(key, row.channel, sessions.idlePolicyFromEnv());
     // Mid-task steer → frame the text so the model continues its current work with this guidance
     // rather than answering it in isolation. Idle session → deliver it as a normal message.
-    const steerer = meshSteer ? `Peer session "${by.slice(5)}"` : 'Operator';
-    const prompt = (wasRunning || interrupt)
-      ? `[${steerer} steering — you are mid-task. Incorporate the following guidance into the work you are ALREADY doing and continue it. Do NOT restart from scratch, and do NOT treat it as a standalone question to answer in isolation.]\n\n${text}`
-      : text;
+    const prompt = injectSteer.frameInjectPrompt(text, by, { wasRunning, interrupt });
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
     const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
-        senderId: by || 'operator', owner: true,
+        senderId: actor, owner: gated.plan.owner,
         onEvent: (sdkEvt) => {
-          const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
+          const base = { surface: row.channel, session_id: key, identity: actor, source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_use') record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } });
             // Thinking recorded in handle() onThinking only — not again here.
@@ -2011,7 +2029,7 @@ app.post('/v2/inject', (req, res) => {
         // engine session was pruned must not 500 forever — drop the dead id and deliver it fresh.
         if (!resume || ac.signal.aborted || !require('./engines').isMissingSessionError(turnErr)) throw turnErr;
         sessions.clearEngineId(key);
-        record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core',
+        record({ surface: row.channel, session_id: key, event_type: 'control', identity: actor, source: 'core',
           payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
         result = await runTurn({ ...injectOpts, resume: null });
       }
@@ -2019,7 +2037,7 @@ app.post('/v2/inject', (req, res) => {
     if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
     sessions.touch(key);
     const reply = redactSecrets((result.text || '').trim()).text;
-    record({ surface: row.channel, session_id: key, event_type: 'outbound', identity: by || 'operator', source: 'core', payload: { text: truncate(reply, 500), injected: true } });
+    record({ surface: row.channel, session_id: key, event_type: 'outbound', identity: actor, source: 'core', payload: { text: truncate(reply, 500), injected: true } });
 
     let delivered = false, deliverErr = null;
     if (reply && row.outbound_instance_id && row.outbound_target) {
