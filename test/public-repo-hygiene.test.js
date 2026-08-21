@@ -17,6 +17,10 @@ const ALLOWED_EMAIL_DOMAINS = new Set([
   'other.com',
   'notmicrosoft.com',
   'notexample.com',
+  // RFC 2606 / 6761 reserved TLDs used as dummy fixtures (evil.test, victim.example, …)
+  'test',
+  'example',
+  'invalid',
 ]);
 const PRIVATE_HOST_RE = /\b(?:[a-z0-9-]+\.)+example\.invalid\b/gi;
 const HOME_RE = /\/home\/[A-Za-z][A-Za-z0-9._-]*/g;
