@@ -1,6 +1,7 @@
 'use strict';
 const { sendPolicyFromConfig } = require('./send-policy');
 const { parseAuthResults: parseAuthResultsAligned, alignsWithFrom } = require('./auth-align');
+const { persistAuthRejectLine } = require('./auth-reject-persist');
 /**
  * asmltr connector type: EMAIL (SMTP send + IMAP receive/watch).
  *
@@ -198,9 +199,7 @@ function authRejectLogPath() {
 
 function persistAuthReject(entry) {
   try {
-    const f = authRejectLogPath();
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.appendFileSync(f, JSON.stringify(entry) + '\n');
+    persistAuthRejectLine(authRejectLogPath(), entry);
   } catch (_) {}
 }
 
