@@ -21,6 +21,7 @@ const crypto = require('crypto');
 require('../sqlite-stmt-keep');
 const Database = require('better-sqlite3');
 const { identifierLookups } = require('./ident-lookups');
+const { crossChannelIdentityLine } = require('./cast-identity');
 
 const DB_PATH = process.env.ASMLTR_TRUST_DB || path.join(__dirname, '..', '..', 'data', 'trust.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -340,10 +341,8 @@ function buildRelationshipPrompt(resolved, envelope) {
     parts.push(who.join(' '));
   }
 
-  if (resolved.identities && resolved.identities.length > 1) {
-    const across = resolved.identities.map((i) => `${i.surface}:${i.value}`).join(', ');
-    parts.push(`CROSS-CHANNEL IDENTITY — ${resolved.display_name} is the SAME person you also know as ${across}. It is one relationship across channels, not several strangers; recognize them on any of these.`);
-  }
+  const identLine = crossChannelIdentityLine(resolved, envelope);
+  if (identLine) parts.push(identLine);
 
   if (resolved.relationship) {
     const r = resolved.relationship;

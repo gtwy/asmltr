@@ -35,6 +35,7 @@ const { isNoReplySentinel } = require('../../../shared/silence');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
+const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -226,7 +227,7 @@ async function start(ctx) {
     // provides only what the SESSION doesn't have: cross-channel references + location/participants.
     const sid = message.guild?.id || 'DM', cid = message.channel.id;
     return {
-      crossContext: searchGlobalTimeline(message.content, sid, cid).slice(0, 3),
+      crossContext: crossContextForPrompt(),
       location: { serverName: memory.servers[sid]?.name || 'Direct Message', channelName: memory.servers[sid]?.channels[cid]?.name || 'DM', participants: Array.from(memory.servers[sid]?.channels[cid]?.participants || []) },
     };
   }
@@ -385,7 +386,7 @@ async function start(ctx) {
     const mode = forced ? 'You were directly @-mentioned (silence mode is on, so only mentions reach you).'
       : mentioned ? 'You were directly @-mentioned.'
       : 'You were NOT @-mentioned — this message was surfaced as *possibly* relevant. Decide whether it is actually for you (see MULTI-AGENT below) before replying.';
-    const cross = context.crossContext.length ? `\n\nCROSS-CONTEXT (other servers/channels, reference only):\n${context.crossContext.map(m => `- [${m.serverName}/#${m.channelName}] ${m.author}: ${m.content.substring(0, 100)}...`).join('\n')}` : '';
+    const cross = crossContextBlock(context.crossContext);
     // NOTE: authorization/trust is now the core's trust framework (data-driven,
     // scoped per server) — NOT hardcoded here. This preamble is Discord CONTEXT only.
     const iAmMentioned = message.mentions.has(client.user);
