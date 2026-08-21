@@ -20,6 +20,7 @@ const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { isImage } = require('../../../shared/mimeguess');
 const { MediaGroupCoalescer } = require('./media-group'); // batch album photos into one turn
+const { requireConnectorToken } = require('../../../shared/connector-http-auth');
 
 const meta = {
   type: 'telegram',
@@ -199,7 +200,6 @@ async function start(ctx) {
   hbTimer.unref();
 
   // --- outbound HTTP endpoints (transport other tools depend on) -------------
-  const { requireConnectorToken } = require('../../../shared/connector-http-auth');
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   const target = () => (allowed.size ? [...allowed][0] : learnedChat);

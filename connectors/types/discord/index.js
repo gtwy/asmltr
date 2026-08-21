@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder, Status } = require('discord.js');
+const { requireConnectorToken } = require('../../../shared/connector-http-auth');
 // THE shared asmltr speech layer — same TTS/STT used by the dashboard + core /v2/speak (DRY).
 const sharedTts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
@@ -1180,7 +1181,6 @@ RESPONSE RULES:
   });
 
   // --- /send-message endpoint (message-discord depends on this) ---
-  const { requireConnectorToken } = require('../../../shared/connector-http-auth');
   const app = express();
   app.use(express.json({ limit: '4mb' }));
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'discord', instance: ctx.instanceId, uptime: process.uptime() }));

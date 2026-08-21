@@ -3,7 +3,7 @@
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
 const { bearerEqual } = require('../../shared/bearer-equal');
-const { managerAuthHeaders } = require('../../shared/connector-http-auth');
+const { connectorAuthHeaders } = require('../../shared/connector-http-auth');
 /**
  * asmltr connector manager — registry + supervisor + management API (the plane
  * the dashboard "Integrations" page drives). Host/PM2, bind 127.0.0.1.
@@ -34,6 +34,7 @@ const childEnv = {
   ASMLTR_CORE_URL: process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle',
   ASMLTR_COLLECTOR_URL: process.env.ASMLTR_COLLECTOR_URL || 'http://127.0.0.1:3017/ingest',
   ASMLTR_INSIGHTS_TOKEN: process.env.ASMLTR_INSIGHTS_TOKEN || '',
+  ASMLTR_MANAGER_TOKEN: process.env.ASMLTR_MANAGER_TOKEN || '',
 };
 const supervisor = makeSupervisor(childEnv);
 
@@ -149,7 +150,7 @@ async function proxyEndpoint(id, endpoint, method, body) {
   if (!port) return { status: 400, json: { ok: false, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` } };
   try {
     const r = await fetch(`http://127.0.0.1:${port}/${endpoint}`, {
-      method, headers: managerAuthHeaders(), body: body ? JSON.stringify(body) : undefined,
+      method, headers: connectorAuthHeaders(TOKEN), body: body ? JSON.stringify(body) : undefined,
     });
     const j = await r.json().catch(() => ({}));
     return { status: r.status, json: { instance_id: id, type: inst.type, name: inst.name, ...j } };
@@ -196,7 +197,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const bindHost = inst.config && inst.config.bind_host;
   const host = (bindHost && bindHost !== '0.0.0.0' && bindHost !== '::') ? bindHost : '127.0.0.1';
   try {
-    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: managerAuthHeaders(), body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, cc, ref, title, require_headphones }) });
+    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, cc, ref, title, require_headphones }) });
     const j = await r.json().catch(() => ({}));
     // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
     // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.
@@ -221,7 +222,7 @@ async function readSource(body) {
   if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` };
   try {
     const { channel: _c, instance_id: _i, ...args } = body;
-    const r = await fetch(`http://127.0.0.1:${port}/read`, { method: 'POST', headers: managerAuthHeaders(), body: JSON.stringify(args) });
+    const r = await fetch(`http://127.0.0.1:${port}/read`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify(args) });
     const j = await r.json().catch(() => ({}));
     return settleDelivery(r.ok, j, { via: `${inst.type}:${inst.name}` });
   } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }

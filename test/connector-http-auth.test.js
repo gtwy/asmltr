@@ -1,54 +1,70 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { managerAuthHeaders, requireConnectorToken } = require('../shared/connector-http-auth');
+const { readFileSync } = require('fs');
+const path = require('path');
+const { connectorAuthHeaders, requireConnectorToken } = require('../shared/connector-http-auth');
 
-function mockRes() {
-  const r = { statusCode: 200, body: null };
-  r.status = (n) => { r.statusCode = n; return r; };
-  r.json = (b) => { r.body = b; return r; };
-  return r;
+const PREV = process.env.ASMLTR_MANAGER_TOKEN;
+
+function withToken(t, fn) {
+  process.env.ASMLTR_MANAGER_TOKEN = t;
+  try { return fn(); } finally {
+    if (PREV === undefined) delete process.env.ASMLTR_MANAGER_TOKEN;
+    else process.env.ASMLTR_MANAGER_TOKEN = PREV;
+  }
 }
 
-test('managerAuthHeaders attaches Bearer when token is set', () => {
-  const prev = process.env.ASMLTR_MANAGER_TOKEN;
-  process.env.ASMLTR_MANAGER_TOKEN = 'unit-test-token';
-  try {
-    const h = managerAuthHeaders();
-    assert.equal(h['Content-Type'], 'application/json');
-    assert.equal(h.Authorization, 'Bearer unit-test-token');
-  } finally {
-    if (prev == null) delete process.env.ASMLTR_MANAGER_TOKEN;
-    else process.env.ASMLTR_MANAGER_TOKEN = prev;
-  }
+function mockReq(auth) {
+  return { get: (h) => (String(h).toLowerCase() === 'authorization' ? auth : '') };
+}
+
+test('unauth /out is 401', () => {
+  withToken('test-manager-token', () => {
+    let status = 0, body = null, nexted = false;
+    const res = { status(s) { status = s; return this; }, json(b) { body = b; return this; } };
+    requireConnectorToken(mockReq(''), res, () => { nexted = true; });
+    assert.equal(status, 401);
+    assert.equal(nexted, false);
+    assert.equal(body && body.ok, false);
+  });
 });
 
-test('requireConnectorToken is 401 without token or without header', () => {
-  const prev = process.env.ASMLTR_MANAGER_TOKEN;
-  delete process.env.ASMLTR_MANAGER_TOKEN;
-  try {
-    const res = mockRes();
-    let next = false;
-    requireConnectorToken({ get: () => '' }, res, () => { next = true; });
-    assert.equal(next, false);
-    assert.equal(res.statusCode, 401);
-  } finally {
-    if (prev == null) delete process.env.ASMLTR_MANAGER_TOKEN;
-    else process.env.ASMLTR_MANAGER_TOKEN = prev;
-  }
+test('auth with Bearer is allowed', () => {
+  withToken('test-manager-token', () => {
+    let nexted = false;
+    requireConnectorToken(mockReq('Bearer test-manager-token'), {}, () => { nexted = true; });
+    assert.equal(nexted, true);
+  });
 });
 
-test('requireConnectorToken allows matching Bearer', () => {
-  const prev = process.env.ASMLTR_MANAGER_TOKEN;
-  process.env.ASMLTR_MANAGER_TOKEN = 'unit-test-token';
-  try {
-    const res = mockRes();
-    let next = false;
-    requireConnectorToken({ get: (k) => k.toLowerCase() === 'authorization' ? 'Bearer unit-test-token' : '' }, res, () => { next = true; });
-    assert.equal(next, true);
-    assert.equal(res.statusCode, 200);
-  } finally {
-    if (prev == null) delete process.env.ASMLTR_MANAGER_TOKEN;
-    else process.env.ASMLTR_MANAGER_TOKEN = prev;
-  }
+test('manager header builder attaches Authorization', () => {
+  const h = connectorAuthHeaders('test-manager-token');
+  assert.equal(h.Authorization, 'Bearer test-manager-token');
+  assert.equal(h['Content-Type'], 'application/json');
+});
+
+test('unset token fails closed', () => {
+  withToken('', () => {
+    let status = 0, nexted = false;
+    const res = { status(s) { status = s; return this; }, json() { return this; } };
+    requireConnectorToken(mockReq('Bearer anything'), res, () => { nexted = true; });
+    assert.equal(status, 401);
+    assert.equal(nexted, false);
+    const h = connectorAuthHeaders('');
+    assert.equal('Authorization' in h, false);
+  });
+});
+
+test('discord and telegram /out use requireConnectorToken; manager send attaches headers', () => {
+  const discord = readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const telegram = readFileSync(path.join(__dirname, '../connectors/types/telegram/index.js'), 'utf8');
+  const manager = readFileSync(path.join(__dirname, '../connectors/manager/server.js'), 'utf8');
+  assert.ok(discord.includes('requireConnectorToken'));
+  assert.ok(telegram.includes('requireConnectorToken'));
+  assert.match(discord, /app\.post\('\/out',\s*requireConnectorToken/);
+  assert.match(discord, /app\.post\('\/send-message',\s*requireConnectorToken/);
+  assert.match(telegram, /app\.post\('\/out',\s*requireConnectorToken/);
+  assert.match(telegram, /app\.post\('\/send',\s*requireConnectorToken/);
+  assert.ok(manager.includes('connectorAuthHeaders'));
 });

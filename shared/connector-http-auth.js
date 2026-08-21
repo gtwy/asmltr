@@ -1,7 +1,7 @@
 'use strict';
 /**
- * Connector loopback HTTP is not enough. /out and /send require ASMLTR_MANAGER_TOKEN.
- * Fail closed if the token is unset.
+ * V27: connector /out /send require a Bearer token. Loopback is not enough.
+ * Manager deliver/read/proxy must send the same ASMLTR_MANAGER_TOKEN.
  */
 const { bearerEqual } = require('./bearer-equal');
 
@@ -9,19 +9,16 @@ function connectorToken() {
   return process.env.ASMLTR_MANAGER_TOKEN || '';
 }
 
-function managerAuthHeaders(extra) {
-  const token = connectorToken();
+function connectorAuthHeaders(token, extra) {
+  const t = token == null ? connectorToken() : String(token);
   const headers = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
-  if (token) headers.Authorization = 'Bearer ' + token;
+  if (t) headers.Authorization = 'Bearer ' + t;
   return headers;
 }
 
 function requireConnectorToken(req, res, next) {
-  const token = connectorToken();
-  if (!token || !bearerEqual(req.get('authorization'), token)) {
-    return res.status(401).json({ ok: false, error: 'unauthorized' });
-  }
-  return next();
+  if (bearerEqual(req.get && req.get('authorization'), connectorToken())) return next();
+  return res.status(401).json({ ok: false, error: 'unauthorized' });
 }
 
-module.exports = { connectorToken, managerAuthHeaders, requireConnectorToken };
+module.exports = { connectorToken, connectorAuthHeaders, requireConnectorToken };
