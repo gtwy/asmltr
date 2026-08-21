@@ -817,6 +817,8 @@ const auth = require('../../shared/auth');
 const { requireVaultWrite } = require('./vault/write-gate');
 const vaultWrite = requireVaultWrite(auth);
 const { requireTrustWrite } = require('./trust/write-gate');
+const { requireScheduleApi } = require('./schedules/write-gate');
+const scheduleApi = requireScheduleApi(auth);
 const authSecureCookie = () => process.env.ASMLTR_AUTH_INSECURE_COOKIE !== '1'; // Secure cookie by default (https)
 app.get('/v2/auth/status', (req, res) => {
   const s = auth.verifySession(auth.tokenFromReq(req));
@@ -1086,14 +1088,14 @@ try { backup.startScheduler({ log: (m) => console.log('[backup] ' + m) }); } cat
 // This replaces the retired `claude -p` wake-up crontab. See shared/schedules.js + core/src/scheduler.js.
 const schedules = require('../../shared/schedules');
 const scheduler = require('./scheduler');
-app.get('/v2/schedules', (req, res) => res.json({ jobs: schedules.list() }));
-app.get('/v2/schedules/:id', (req, res) => { const j = schedules.get(req.params.id); return j ? res.json(j) : res.status(404).json({ error: 'no such schedule' }); });
-app.post('/v2/schedules', (req, res) => { try { res.status(201).json(schedules.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.patch('/v2/schedules/:id', (req, res) => { try { res.json(schedules.update(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.delete('/v2/schedules/:id', (req, res) => res.json({ ok: schedules.remove(req.params.id) }));
+app.get('/v2/schedules', scheduleApi, (req, res) => res.json({ jobs: schedules.list() }));
+app.get('/v2/schedules/:id', scheduleApi, (req, res) => { const j = schedules.get(req.params.id); return j ? res.json(j) : res.status(404).json({ error: 'no such schedule' }); });
+app.post('/v2/schedules', scheduleApi, (req, res) => { try { res.status(201).json(schedules.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.patch('/v2/schedules/:id', scheduleApi, (req, res) => { try { res.json(schedules.update(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/schedules/:id', scheduleApi, (req, res) => res.json({ ok: schedules.remove(req.params.id) }));
 // Run-now — fire a job immediately (out of band), record the outcome, return it. Async jobs (prompt turns)
 // can take a while; we await so the caller gets the result + refreshed row.
-app.post('/v2/schedules/:id/run', async (req, res) => {
+app.post('/v2/schedules/:id/run', scheduleApi, async (req, res) => {
   const job = schedules.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'no such schedule' });
   try {
