@@ -1,5 +1,6 @@
 'use strict';
 const { sendPolicyFromConfig } = require('./send-policy');
+const { parseAuthResults: parseAuthResultsAligned, alignsWithFrom } = require('./auth-align');
 /**
  * asmltr connector type: EMAIL (SMTP send + IMAP receive/watch).
  *
@@ -130,7 +131,8 @@ function headerLine(parsed, name) {
  * Parse DKIM/SPF/DMARC from an Authentication-Results (or ARC) header.
  * First token wins per method. Unknown methods ignored.
  */
-function parseAuthResults(headerText) {
+function parseAuthResults(headerText) { return parseAuthResultsAligned(headerText); }
+function parseAuthResultsLegacy(headerText) {
   const out = { dkim: null, spf: null, dmarc: null };
   const s = String(headerText || '');
   if (!s.trim()) return out;
@@ -165,11 +167,14 @@ function authDisposition(parsed) {
     ['DMARC', results.dmarc],
   ];
   const failedParts = parts.filter(([, v]) => v !== 'pass').map(([k, v]) => k + '=' + (v || 'missing'));
-  const passed = failedParts.length === 0;
-  const reason = passed
-    ? 'DKIM=pass SPF=pass DMARC=pass'
-    : failedParts.join(' ');
-  return { present, results, passed, failed: !passed, raw, reason };
+  const fromRaw = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '';
+  const aligned = alignsWithFrom(fromRaw, results);
+  let passed = failedParts.length === 0 && aligned;
+  let reason;
+  if (failedParts.length) reason = failedParts.join(' ');
+  else if (!aligned) reason = 'From does not align with DKIM d= / SPF mailfrom / header.from';
+  else reason = 'DKIM=pass SPF=pass DMARC=pass aligned';
+  return { present, results, passed, failed: !passed, raw, reason, aligned };
 }
 
 function formatAuthSummary(auth) {

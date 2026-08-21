@@ -19,8 +19,9 @@ after(() => {
   try { fs.unlinkSync(rejectLog); } catch (_) {}
 });
 
-function parsedWith(header) {
+function parsedWith(header, fromAddr) {
   return {
+    from: fromAddr ? { value: [{ address: fromAddr }] } : { value: [{ address: 'owner@example.com' }] },
     headers: {
       get(name) {
         if (String(name).toLowerCase() === 'authentication-results') return header;
@@ -44,8 +45,10 @@ test('parseAuthResults reads dkim/spf/dmarc first token', () => {
 });
 
 test('parseAuthResults empty header is all null', () => {
-  assert.deepEqual(parseAuthResults(''), { dkim: null, spf: null, dmarc: null });
-  assert.deepEqual(parseAuthResults(null), { dkim: null, spf: null, dmarc: null });
+  assert.equal(parseAuthResults('').dkim, null);
+  assert.equal(parseAuthResults('').spf, null);
+  assert.equal(parseAuthResults('').dmarc, null);
+  assert.equal(parseAuthResults(null).dkim, null);
 });
 
 test('authDisposition pass only when DKIM and SPF and DMARC are pass', () => {
@@ -136,4 +139,20 @@ test('persist and load auth reject log', () => {
   assert.equal(loaded.length, 1);
   assert.equal(loaded[0].from, 'a@example.com');
   assert.equal(loaded[0].subject, 'x');
+});
+
+const { alignsWithFrom } = require('../connectors/types/email/auth-align');
+
+test('Auth-Results pass fails closed when 5322 From does not align', () => {
+  const a = authDisposition(parsedWith(GMAIL_PASS, 'attacker@evil.test'));
+  assert.equal(a.passed, false);
+  assert.equal(a.failed, true);
+  assert.equal(authRejected(a), true);
+  assert.match(a.reason, /align/i);
+});
+
+test('alignsWithFrom binds From to dkim d= / spf mailfrom', () => {
+  const r = parseAuthResults(GMAIL_PASS);
+  assert.equal(alignsWithFrom('owner@example.com', r), true);
+  assert.equal(alignsWithFrom('attacker@evil.test', r), false);
 });
