@@ -69,7 +69,7 @@ function shouldHold(policy, resolved) {
   if (policy === 'auto_send_full_trust') return !(resolved && resolved.bypass_moderation);
   const m = /^trust_tier:(\d+)$/.exec(policy);
   if (m) return (Number(resolved && resolved.trust_tier) || 0) < Number(m[1]);
-  return false; // unknown policy → fail open to send (never silently swallow a reply)
+  return true; // unknown policy → fail closed (hold)
 }
 
 module.exports = { create, get, list, setStatus, pendingCount, shouldHold };
