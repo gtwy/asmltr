@@ -378,6 +378,7 @@ function buildArgs(opts) {
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
+  if (opts.denyShell) args.push('--disallowed-tools', 'bash,shell');
   args.push('--effort', classified.effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
@@ -587,7 +588,7 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
@@ -599,8 +600,12 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
   try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + ')\n'); } catch (_) {}
   if (onEvent) { try { onEvent({ type: 'effort', effort }); } catch (_) {} }
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender });
-  const child = spawn(bin(), args, { cwd: cwd || undefined, env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+  const { denyToolsEnv } = require('../../../shared/tool-policy');
+  const deny = denyTools || {};
+  const denyEnv = denyToolsEnv(deny);
+  const childEnv = launchEnv(Object.assign({}, process.env, denyEnv ? { ASMLTR_DENY_TOOLS: denyEnv } : {}));
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell });
+  const child = spawn(bin(), args, { cwd: cwd || undefined, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
   if (abortController) abortController.signal.addEventListener('abort', kill);

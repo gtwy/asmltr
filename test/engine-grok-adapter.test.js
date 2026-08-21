@@ -83,6 +83,19 @@ test('complete() argv uses plain output', () => {
   assert.equal(args[args.indexOf('-m') + 1], 'grok-3');
 });
 
+test('buildArgs denyShell adds --disallowed-tools bash,shell and keeps --always-approve', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyShell: true });
+  assert.ok(args.includes('--always-approve'));
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.equal(args[i + 1], 'bash,shell');
+});
+
+test('buildArgs without denyShell does not pass --disallowed-tools', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.equal(args.includes('--disallowed-tools'), false);
+});
+
 test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
   const env = grok.launchEnv({ PATH: '/bin', XAI_API_KEY: 'xai-should-never-leak', HOME: '/tmp' });
   assert.equal(env.PATH, '/bin');

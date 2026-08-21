@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 try { require('../shared/loadenv'); } catch (_) {}
+const { exitIfDenied } = require('../shared/tool-policy');
 /**
  * asmltr — terminal client + TUI (plan §B9).
  *
@@ -248,6 +249,7 @@ async function cmdRelease(key) {
 }
 
 async function cmdSend(rest) {
+  exitIfDenied('send');
   // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."]
   let file = null, caption = null, subject = null, cc = null;
   const words = [];
@@ -387,6 +389,7 @@ async function cmdUploads(rest) {
 // Topic/project event streams (roadmap §A). `asmltr streams` [·show·recall·new·rm]. Sessions check the
 // list before starting longer-running work and create a stream when a task deserves its own thread.
 async function cmdStreams(rest) {
+  exitIfDenied('streams');
   const sub = rest[0];
   if (sub === 'new' || sub === 'create') {
     const name = rest[1]; if (!name) { console.error(A.red('usage: asmltr streams new <name> ["description"]')); return process.exit(1); }
@@ -697,6 +700,7 @@ async function cmdUpdate(rest, f) {
 
 // asmltr silo <verb> — browse/search/read/write a data silo (default: the Self silo).
 async function cmdSilo(rest, f) {
+  exitIfDenied('silo');
   const fs = require('fs');
   const silo = require('../shared/silo');
   const identity = require('../shared/identity');

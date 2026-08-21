@@ -2,6 +2,8 @@
 'use strict';
 const _sqliteKeep = require('./sqlite-stmt-keep');
 const { healthPayload } = require('./health-payload');
+const { policyFor } = require('../../shared/tool-policy');
+const { buildToolbeltPrompt } = require('../../shared/toolbelt-prompt');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
 /**
@@ -343,57 +345,21 @@ async function handle(envelope, opts = {}) {
   // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
   const pRel = trust.buildRelationshipPrompt(resolved, e) || '';
   const pExtra = e.system_prompt_extra || ''; // connector-supplied per-turn context (e.g. Discord)
+  const toolPolicy = policyFor(e, resolved);
   let pToolbelt = '';                          // STABLE: asmltr toolbelt / silo / vault / attachments awareness
   let pUploadsInstr = '', pUploadsList = '', pAnnounce = ''; // uploads-instr = STABLE; uploads-list + announce = VOLATILE
   if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
-    pToolbelt = 'ASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
-      'You have an `asmltr` CLI (run `asmltr help` for everything). Key cross-session ops (use the Bash tool):\n' +
-      '• `asmltr ls` (active sessions) · `asmltr map` (grouped by working dir) · `asmltr who <path>` (who recently touched a file/dir) — check these before duplicating work another session is already doing (also exposed as the `asmltr_map` / `asmltr_who` toolbelt tools for engines that prefer MCP over the shell).\n' +
-      '• `asmltr streams` — persistent per-TOPIC event streams that several sessions share as a common memory for a project. When you begin substantial, LONGER-RUNNING work on a project or topic (something that will likely span multiple sessions, or accrue decisions/notes worth recalling later — NOT a quick one-off), FIRST run `asmltr streams` to see if one already exists; if a matching one does, use `asmltr streams recall <name> "<what you need>"` to catch up on prior context before proceeding. If none fits and the task genuinely deserves its own durable thread, create one with `asmltr streams new <name> ["description"]`. Don\'t spin up a stream for throwaway tasks. (`asmltr streams show <name>` reads the recent tail.)\n' +
-      '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
-      'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here. ' +
-      'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n' +
-      '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists live ones.\n' +
-      'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
-    // Mesh steer is a COERCIVE verb — only advertise it when the operator has enabled it, and always
-    // teach the announce-vs-steer distinction so it's used deliberately, not reflexively.
-    if (/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
-      pToolbelt += '\n• `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]` — push guidance ' +
-        'directly into ANOTHER session\'s LIVE turn. This is fundamentally different from `announce`: **announce** ' +
-        'is an advisory note the other session sees on its NEXT turn and decides for itself whether to act on; ' +
-        '**steer** overrides what that session is doing RIGHT NOW and makes it act on your guidance (`--interrupt` ' +
-        'abandons its current turn; without it, your guidance is applied after the current turn finishes). Steer is ' +
-        'coercive — it spends the other session\'s turn. Use it sparingly for time-sensitive redirection; prefer ' +
-        'announce for everything else. Never steer a session into a loop (don\'t steer one that\'s steering you).';
-    }
-    if (SELF_SILO_DIR) {
-      pToolbelt += `\n\nSELF SILO — your persistent memory + the DEFAULT home for anything you create is a data silo at \`${SELF_SILO_DIR}\`. ` +
-        'When you produce an artifact (a document, image, app, export) and the task doesn\'t specify where, create it UNDER the Self silo — ' +
-        'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). Browse/recall it with the Bash tool:\n' +
-        '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
-        '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
-        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).\n';
-      // last-topics.md is a cross-conversation operator index. Only full-trust sessions
-      // are pointed at it or injected with it — other principals would see other people's threads.
-      if (resolved.bypass_moderation) {
-        pToolbelt +=
-          'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the engine session, recover prior chat from those files (`asmltr silo get memory/last-topics.md`, then `asmltr silo find <hint> --content --in memory/transcripts`) or `asmltr streams show ivy` / `asmltr streams recall ivy "…"`. Do NOT grep events-*.jsonl for prior conversation. Silo memory is transcripts and artifacts, not identity files.';
-      } else {
-        pToolbelt +=
-          'Turns in this conversation are auto-written to `memory/transcripts/` for this thread. Do NOT grep events-*.jsonl for prior conversation. Silo memory is transcripts and artifacts, not identity files.';
-      }
-    }
-    if (VAULT_LOCKED) {
-      pToolbelt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
-        '(fetching API keys/secrets, encrypted-storage keys) will FAIL right now. If a task needs a credential, tell the ' +
-        'user the vault is locked and ask them to unlock it (`asmltr vault unseal` or the dashboard Vault page) — do NOT ' +
-        'guess, hardcode, or work around a missing secret.';
-    }
-    // If THIS channel supports attachments, tell the agent exactly how — so it never claims it can't.
-    if (e.capabilities && e.capabilities.supports_attachments_out) {
-      const chTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || '<this channel id>';
-      pToolbelt += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${e.channel} ${chTarget} --file <abs-path> [--caption "…"]\`. Do NOT tell the user you can't attach files here or fall back to another channel — you can.`;
-    }
+    const chTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || '<this channel id>';
+    pToolbelt = buildToolbeltPrompt({
+      deny: toolPolicy.deny,
+      meshSteer: /^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || ''),
+      selfSiloDir: SELF_SILO_DIR,
+      vaultLocked: VAULT_LOCKED,
+      attachments: !!(e.capabilities && e.capabilities.supports_attachments_out),
+      channel: e.channel,
+      chTarget,
+      bypassModeration: !!(resolved && resolved.bypass_moderation),
+    });
   }
   // Cross-channel file uploads: every file a user sends on ANY channel is saved to one shared
   // area (see shared/uploads.js), so "find the thing I sent" works even when it arrived on a
@@ -547,6 +513,7 @@ async function handle(envelope, opts = {}) {
       resume,
       cwd,
       conversationKey: e.conversation_key,
+      denyTools: toolPolicy.deny,
       abortController,
       images,
       onDelta: opts.onText ? _pushDelta : undefined,
