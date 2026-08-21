@@ -31,6 +31,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const NAME = process.env.ASSISTANT_NAME || 'the assistant'; // shown in the MCP tool description
+const { corsAllowOrigin, authVerifyUrl, sessionOkFromVerify, approveDecision } = require('./approve-gate');
 
 const meta = {
   type: 'mcp',
@@ -181,10 +182,17 @@ async function start(ctx) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     ctx.log(`${req.method} ${url.pathname}`);
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    const allowOrigin = corsAllowOrigin(url.pathname);
+    if (allowOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    async function ivyWebSessionOk() {
+      return sessionOkFromVerify(fetch, authVerifyUrl(process.env.ASMLTR_CORE_URL), req.headers.cookie || '');
+    }
 
     // --- OAuth 2.1 endpoints -------------------------------------------------
     if (req.method === 'GET' && url.pathname === '/.well-known/oauth-protected-resource') {
@@ -210,6 +218,11 @@ async function start(ctx) {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/oauth/authorize') {
+      if (!(await ivyWebSessionOk())) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'authentication required', error_description: 'Ivy web session required' }));
+        return;
+      }
       const params = Object.fromEntries(url.searchParams);
       const result = oauthServer.handleAuthorizationRequest(params);
       if (result.error) {
@@ -232,9 +245,17 @@ async function start(ctx) {
       req.on('end', async () => {
         try {
           const params = JSON.parse(body);
-          if (!params.approved) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'access_denied', error_description: 'User denied authorization' }));
+          const sessionOk = await ivyWebSessionOk();
+          const decision = approveDecision({
+            sessionOk,
+            approved: params.approved,
+            client: oauthServer.getClient(params.client_id),
+            redirectUri: params.redirect_uri,
+            isRedirectUriAllowed: oauthServer.isRedirectUriAllowed,
+          });
+          if (!decision.ok) {
+            res.writeHead(decision.status, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: decision.error, error_description: decision.error_description }));
             return;
           }
           // client_id → userId mapping preserved verbatim from the original

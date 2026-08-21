@@ -729,6 +729,7 @@ export default {
   handleAuthorizationRequest,
   handleTokenRequest,
   generateWWWAuthenticateHeader,
+  isRedirectUriAllowed,
 
   // Initialization
   initializeOAuthServer,
