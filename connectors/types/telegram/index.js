@@ -199,24 +199,25 @@ async function start(ctx) {
   hbTimer.unref();
 
   // --- outbound HTTP endpoints (transport other tools depend on) -------------
+  const { requireConnectorToken } = require('../../../shared/connector-http-auth');
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   const target = () => (allowed.size ? [...allowed][0] : learnedChat);
   app.get('/health', (req, res) => res.json({ status: 'healthy', type: 'telegram', instance: ctx.instanceId }));
-  app.post('/send', async (req, res) => {
+  app.post('/send', requireConnectorToken, async (req, res) => {
     try { const m = await bot.sendMessage(target(), req.body.message, req.body.options || {}); res.json({ ok: true, messageId: m.message_id }); }
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
-  app.post('/send-photo', async (req, res) => {
+  app.post('/send-photo', requireConnectorToken, async (req, res) => {
     try { const m = await bot.sendPhoto(target(), req.body.photoPath, { caption: req.body.caption || '' }); res.json({ ok: true, messageId: m.message_id }); }
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
-  app.post('/send-document', async (req, res) => {
+  app.post('/send-document', requireConnectorToken, async (req, res) => {
     try { const m = await bot.sendDocument(target(), req.body.documentPath, { caption: req.body.caption || '' }); res.json({ ok: true, messageId: m.message_id }); }
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   // Unified outbound endpoint (the manager /send router calls this).
-  app.post('/out', async (req, res) => {
+  app.post('/out', requireConnectorToken, async (req, res) => {
     try {
       const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
       const to = tg || target();

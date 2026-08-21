@@ -1180,10 +1180,11 @@ RESPONSE RULES:
   });
 
   // --- /send-message endpoint (message-discord depends on this) ---
+  const { requireConnectorToken } = require('../../../shared/connector-http-auth');
   const app = express();
   app.use(express.json({ limit: '4mb' }));
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'discord', instance: ctx.instanceId, uptime: process.uptime() }));
-  app.post('/send-message', async (req, res) => {
+  app.post('/send-message', requireConnectorToken, async (req, res) => {
     try {
       const { channelId, message } = req.body;
       if (!channelId || !message) return res.status(400).json({ success: false, error: 'channelId and message required' });
@@ -1194,7 +1195,7 @@ RESPONSE RULES:
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
   });
   // Unified outbound endpoint (manager /send router → here). Resolves aliases.
-  app.post('/out', async (req, res) => {
+  app.post('/out', requireConnectorToken, async (req, res) => {
     try {
       const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
