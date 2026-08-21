@@ -535,8 +535,8 @@ test('owner +xh → xhigh and token stripped', () => {
     assert.equal(effortOf(bypass), 'xhigh');
     assert.equal(promptOf(bypass).includes('+xh'), false);
     const byKey = grok.buildArgs({ prompt: 'ping +xh', cwd: noGit, user_key: 'owner' });
-    assert.equal(effortOf(byKey), 'xhigh');
-    assert.equal(promptOf(byKey).includes('+xh'), false);
+    assert.equal(effortOf(byKey), 'medium');
+    assert.equal(promptOf(byKey).includes('+xh'), true);
     // wins over three-tier picker (lookup would be high)
     assert.equal(grok.chooseEffort({ prompt: 'look up Corona +xh', cwd: noGit, owner: true }), 'xhigh');
   } finally {

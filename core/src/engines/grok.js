@@ -185,13 +185,12 @@ function elevateIdSet() {
 /** Owner / bypass identity, or raw sender id in ASMLTR_GROK_EFFORT_ELEVATE_IDS. */
 function canElevateEffort(opts) {
   opts = opts || {};
-  if (opts.owner === true || opts.bypass === true || opts.bypass_moderation === true) return true;
-  if (String(opts.user_key || '') === 'owner') return true;
+  if (opts.bypass === true || opts.bypass_moderation === true) return true;
+  if (opts.owner === true) return true; // core-set after trust, not a client user_key
   let sid = opts.senderId;
   if (sid == null && opts.sender && typeof opts.sender === 'object') sid = opts.sender.raw_id;
   else if (sid == null) sid = opts.sender;
   sid = String(sid || '').trim();
-  if (sid === 'owner') return true;
   if (!sid) return false;
   return elevateIdSet().has(sid);
 }
