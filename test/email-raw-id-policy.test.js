@@ -16,9 +16,9 @@ test('email resolve lookups skip display name / raw_username', () => {
   assert.equal(values.includes('stored-email-identifier@victim.example'), false);
 });
 
-test('discord still looks up username', () => {
-  const pairs = identifierLookups('discord', { raw_id: '111', raw_username: 'somehandle' });
-  assert.deepEqual(pairs, [['discord', '111'], ['discord', 'somehandle']]);
+test('discord and telegram resolve numeric id only, not username', () => {
+  assert.deepEqual(identifierLookups('discord', { raw_id: '111', raw_username: 'somehandle' }), [['discord', '111']]);
+  assert.deepEqual(identifierLookups('telegram', { raw_id: '222', raw_username: 'tgname' }), [['telegram', '222']]);
 });
 
 test('sendPolicy comes from config, default always_draft', () => {
