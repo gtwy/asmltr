@@ -378,7 +378,10 @@ function buildArgs(opts) {
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
-  if (opts.denyShell) args.push('--disallowed-tools', 'bash,shell');
+  if (opts.denyShell) {
+    args.push('--disallowed-tools', 'bash,shell,run_terminal_cmd');
+    args.push('--deny', 'Bash');
+  }
   args.push('--effort', classified.effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));

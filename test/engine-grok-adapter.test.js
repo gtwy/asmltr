@@ -83,12 +83,16 @@ test('complete() argv uses plain output', () => {
   assert.equal(args[args.indexOf('-m') + 1], 'grok-3');
 });
 
-test('buildArgs denyShell adds --disallowed-tools bash,shell and keeps --always-approve', () => {
+test('buildArgs denyShell adds --disallowed-tools bash,shell,run_terminal_cmd and --deny Bash', () => {
   const args = grok.buildArgs({ prompt: 'hello', denyShell: true });
   assert.ok(args.includes('--always-approve'));
   const i = args.indexOf('--disallowed-tools');
   assert.ok(i >= 0);
-  assert.equal(args[i + 1], 'bash,shell');
+  assert.equal(args[i + 1], 'bash,shell,run_terminal_cmd');
+  assert.ok(args[i + 1].includes('run_terminal_cmd'));
+  const d = args.indexOf('--deny');
+  assert.ok(d >= 0);
+  assert.equal(args[d + 1], 'Bash');
 });
 
 test('buildArgs without denyShell does not pass --disallowed-tools', () => {
