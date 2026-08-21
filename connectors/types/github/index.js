@@ -32,6 +32,7 @@ const GH_API = process.env.ASMLTR_GITHUB_API_BASE || 'https://api.github.com';
 const GH_FETCH_TIMEOUT_MS = Number(process.env.ASMLTR_GITHUB_FETCH_TIMEOUT_MS) || 15000;
 const NAME = process.env.ASSISTANT_NAME || 'Assistant'; // display name in comments/prompt
 const { redactSecrets } = require('../../../shared/redact');
+const { cloneArgv, cloneGitEnv, githubIdentityPrompt } = require('./clone-auth');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const COLLECTOR_BASE = (process.env.ASMLTR_COLLECTOR_URL || 'http://127.0.0.1:3017/ingest').replace(/\/ingest\/?$/, '');
 
@@ -210,8 +211,7 @@ function start(ctx) {
         await execp('git', ['-C', dir, 'reset', '--hard', '--quiet', 'origin/HEAD'], {}).catch(() => {});
       } else {
         fs.mkdirSync(workspace, { recursive: true });
-        const url = `https://x-access-token:${pat}@github.com/${full}.git`;
-        await execp('git', ['clone', '--quiet', '--depth', '1', url, dir]);
+        await execp('git', cloneArgv(full, dir), { env: cloneGitEnv(pat) });
         // scrub the token from the stored remote (use a credential-less URL going forward)
         await execp('git', ['-C', dir, 'remote', 'set-url', 'origin', `https://github.com/${full}.git`]).catch(() => {});
         ctx.log(`cloned ${full} → ${dir}`);
@@ -237,7 +237,7 @@ function start(ctx) {
       hasClone
         ? `A current local clone of the repo is your working directory — READ and grep the actual code to ground your answer.`
         : `You do NOT have the repo checked out; reason from the issue text and say so if you'd need to see the code.`,
-      `GITHUB IDENTITY (CRITICAL): on this repo you act ONLY as ${acct}. The host's default \`gh\`/git auth may be a DIFFERENT, unauthorized account — NEVER use it here. For ANY GitHub operation (gh CLI, REST API, git push), authenticate as ${acct} using this connector's PAT (secret key '${patKey}' in your configured secret store); export it as GH_TOKEN before the command, e.g. \`GH_TOKEN="<pat>" gh issue close ${issueNumber} --repo ${full}\`. If you cannot authenticate as ${acct}, do NOT fall back to another account — say so and stop.`,
+      githubIdentityPrompt({ name: NAME, acct, patKey, issueNumber, full }),
       'SCOPE: you may do GitHub housekeeping the human explicitly asks for (close the issue, add a label, comment) — but ONLY as the account above. Code changes (commits, PRs, merges) are out of scope for now.',
       'If the request is ambiguous or you lack information, ASK one clear clarifying question and stop — the human will reply with another mention.',
       'This is a persistent multi-turn thread; you retain the prior context of this issue.',
