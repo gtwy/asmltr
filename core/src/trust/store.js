@@ -20,7 +20,7 @@ const path = require('path');
 const crypto = require('crypto');
 require('../sqlite-stmt-keep');
 const Database = require('better-sqlite3');
-const { identifierLookups } = require('./ident-lookups');
+const { identifierLookups, normalizeIdentValue } = require('./ident-lookups');
 const { identAddDecision } = require('./ident-add');
 const { crossChannelIdentityLine } = require('./cast-identity');
 
@@ -150,6 +150,7 @@ const principals = {
 };
 const identifiers = {
   add: (principal_id, surface, value) => {
+    value = normalizeIdentValue(surface, value);
     const existing = db.prepare('SELECT principal_id FROM identifiers WHERE surface=? AND value=?').get(surface, value);
     const decision = identAddDecision({ existingPrincipalId: existing && existing.principal_id, targetPrincipalId: principal_id });
     if (!decision.ok) {
