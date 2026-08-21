@@ -34,6 +34,7 @@ const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
+const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -326,14 +327,29 @@ async function start(ctx) {
         await doLeaveVoice(message); return true;
       case 'stop': case 'cancel': case 'abort': case 'halt': {
         // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
-        // joined from this channel (#138). The session survives and stays resumable. 🤷 if nothing ran.
+        // joined from this channel (#138). Starter or owner only for a running text turn (V2) —
+        // a mid-turn steerer who did not start it cannot abort. Do not put stop in OWNER_ONLY_CMDS.
+        // Session survives; next message continues it.
+        const slot = processing.get(cid);
         const gid = message.guild?.id;
         let voice; try { voice = require('./voice'); } catch (_) {}
         const originCh = gid ? voiceText.get(gid) : null;
         const voiceHere = !!(gid && voice && voice.isConnected(gid) && (!originCh || originCh.id === message.channel.id));
+        if (slot) {
+          const starterId = starterIdFromSlot(slot);
+          const owner = await isOwner(message);
+          if (!canAbortTurn({ isOwner: owner, authorId: message.author.id, starterId })) {
+            await message.react('🙅').catch(() => {});
+            await message.channel.send('Only the person who started this turn (or my owner) can stop it.').catch(() => {});
+            return true;
+          }
+        } else if (!voiceHere) {
+          await message.react('🤷').catch(() => {});
+          return true;
+        }
         let acted = false;
         if (voiceHere) { const s = await stopVoiceReply(gid, { chime: false }); acted = acted || s; }
-        if (processing.get(cid)) {
+        if (slot) {
           try { await ctx.core.abort(convKeyFor(message)); acted = true; }
           catch (e) { ctx.log('abort failed: ' + e.message); await message.channel.send('⚠ Couldn\'t stop the current turn.'); }
         }
@@ -449,7 +465,7 @@ RESPONSE RULES:
       }
       return;
     }
-    processing.set(cid, true);
+    processing.set(cid, { starterId: String(message.author.id) });
     // Discord's typing indicator auto-expires after ~10s. Re-trigger it every
     // 8s so the "…is typing" shows for the ENTIRE (possibly multi-minute)
     // processing time, not just the first few seconds. Cleared in finally.
