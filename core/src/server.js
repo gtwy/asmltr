@@ -853,6 +853,7 @@ app.post('/v2/vault/unseal', async (req, res) => {
 // Auth — the session-gate foundation (roadmap P1 phase A; docs/AUTH.md). ADDITIVE + enforcement OFF:
 // requireAuth is a no-op unless ASMLTR_AUTH=on, so these endpoints exist without gating anything yet.
 const auth = require('../../shared/auth');
+const { requireTrustWrite } = require('./trust/write-gate');
 const authSecureCookie = () => process.env.ASMLTR_AUTH_INSECURE_COOKIE !== '1'; // Secure cookie by default (https)
 app.get('/v2/auth/status', (req, res) => {
   const s = auth.verifySession(auth.tokenFromReq(req));
@@ -2075,6 +2076,7 @@ app.post('/v2/release', (req, res) => {
 });
 
 // --- trust framework CRUD (the dashboard Access page drives these) -----------
+app.use(requireTrustWrite(auth));
 // Read-only identity resolution (connectors use this to authorize owner-only actions).
 // Body: an envelope-shaped { channel, sender:{raw_id,raw_username,api_key}, context:{scope_id} }.
 app.post('/trust/resolve', (req, res) => { try { res.json(trust.resolve(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
