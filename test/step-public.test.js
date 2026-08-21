@@ -2,8 +2,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
-  speakerHintsFrom, mentionsSpeaker, thoughtBudget,
+  looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
+  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget,
   stripThoughtChrome, quietReplyFromResult,
 } = require('../shared/step-public');
 
@@ -98,4 +98,85 @@ test('Discord never renderSteps raw thought text', () => {
   assert.match(src, /if \(maxThoughts <= 0\) return;/);
   assert.match(src, /not xhigh: 💭 only, no tooling/);
   assert.match(src, /no Working filler on medium\/high/);
+  assert.match(src, /pickPublicReply/);
+  assert.match(src, /identityHintsFrom/);
+  assert.match(src, /leakDropped/);
+});
+
+test('looksLikePromptRestatement does not treat vendor email as a prompt dump', () => {
+  assert.equal(looksLikePromptRestatement('write owner@example.com a note'), false);
+  assert.equal(looksLikePromptLeak('write owner@example.com a note'), true);
+  assert.equal(looksLikePromptRestatement('CURRENT SPEAKER — READ FIRST'), true);
+});
+
+test('identityHintsFrom splits hyphenated principal ids and keeps mailboxes whole', () => {
+  const hints = identityHintsFrom([{
+    id: 'fixture-person',
+    display_name: 'Ada Lovelace',
+    identifiers: [
+      { surface: 'email', value: 'ada@example.com' },
+      { surface: 'discord', value: '123456789012345678' },
+    ],
+  }, { id: 'self', display_name: 'IvyBot' }]);
+  assert.ok(hints.includes('fixture-person'));
+  assert.ok(hints.includes('person'));
+  assert.ok(hints.includes('Lovelace'));
+  assert.ok(hints.includes('ada@example.com'));
+  assert.equal(hints.includes('com'), false);
+  assert.equal(hints.includes('123456789012345678'), false);
+  assert.equal(hints.includes('self'), false);
+  assert.equal(hints.includes('IvyBot'), false);
+  assert.equal(discordThoughtLine('Updating principal fixture-person', hints), '');
+  assert.equal(discordThoughtLine('Email Ada Lovelace the links', hints), '');
+  assert.equal(discordThoughtLine('Checking the recipe board', hints), '-# 💭 Checking the recipe board');
+});
+
+test('pickPublicReply: public leak does not fall back to raw reply; DMs still do', () => {
+  const hints = identityHintsFrom([{
+    id: 'fixture-person',
+    display_name: 'Ada Lovelace',
+    identifiers: [{ surface: 'email', value: 'ada@example.com' }],
+  }]);
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Sent to ada@example.com',
+    leakDropped: true,
+    publicSurface: true,
+    hints,
+  }), '');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Sent to ada@example.com',
+    leakDropped: true,
+    publicSurface: false,
+    hints,
+  }), 'Sent to ada@example.com');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Sent to ada@example.com',
+    leakDropped: false,
+    publicSurface: true,
+    hints,
+  }), '');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Use vendor@example.com for the catalog.',
+    leakDropped: false,
+    publicSurface: true,
+    hints,
+  }), 'Use vendor@example.com for the catalog.');
+  assert.equal(pickPublicReply({
+    pending: 'Sent. Same pack, to the address on file.',
+    replyText: 'Sent to ada@example.com',
+    leakDropped: false,
+    publicSurface: true,
+    hints,
+  }), 'Sent. Same pack, to the address on file.');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Updating fixture-person now.',
+    leakDropped: false,
+    publicSurface: true,
+    hints,
+  }), '');
 });

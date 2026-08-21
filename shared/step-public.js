@@ -12,8 +12,8 @@
  * Sanitize/drop is Discord DISPLAY only. Core, collector, and Live keep
  * full-fidelity thoughts. Email does not get thought chips.
  * Leaky bubbles are dropped whole. Generic patterns only — no name denylist
- * in git. Speaker tokens (username / display name) are passed at runtime
- * from the Discord message and never hardcoded.
+ * in git. Speaker tokens (username / display name) and Access principal
+ * ids / display names / mailboxes are passed at runtime and never hardcoded.
  *
  * Thought volume: xhigh uncapped. high and medium → 2 💭 chips (public and DM).
  * Below medium (low) → 0: no chips, just the answer.
@@ -28,18 +28,24 @@ const WORKING_LINE = '-# Working';
 const STILL_WORKING_LINE = '-# Still working';
 const THOUGHT_CLAMP = 280;
 
-function looksLikePromptLeak(text) {
+function looksLikePromptRestatement(text) {
   const s = String(text || '');
   if (!s.trim()) return false;
   if (/CURRENT SPEAKER/i.test(s)) return true;
   if (/\bidentity\.md\b/i.test(s)) return true;
   if (/\bCLAUDE\.md\b/i.test(s)) return true;
-  if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(s)) return true;
   if (/\/home\/[A-Za-z0-9._-]+/.test(s)) return true;
   if (/\bThe user is\b/i.test(s)) return true;
   if (/This is a Discord message/i.test(s)) return true;
   if (/I was @-mentioned/i.test(s)) return true;
   if (/\basking me \(/i.test(s)) return true;
+  return false;
+}
+
+function looksLikePromptLeak(text) {
+  const s = String(text || '');
+  if (looksLikePromptRestatement(s)) return true;
+  if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(s)) return true;
   return false;
 }
 
@@ -79,6 +85,55 @@ function mentionsSpeaker(text, hints) {
     if (new RegExp('\\b' + escapeRe(h) + '\\b', 'i').test(s)) return true;
   }
   return false;
+}
+
+/**
+ * Access principal tokens at runtime: id (`fixture-person` → also `person`),
+ * display name (`Ada Lovelace` → also `Lovelace`), non-numeric identifiers.
+ * Emails stay whole (no `.com` split). Skip `self` so "myself" thoughts survive.
+ */
+function identityHintsFrom(records) {
+  const out = [];
+  const addName = (raw) => {
+    const s = String(raw || '').trim();
+    if (s.length < 4 || /^\d+$/.test(s)) return;
+    out.push(s);
+    for (const p of s.split(/[\s._-]+/)) {
+      if (p.length >= 4 && !/^\d+$/.test(p)) out.push(p);
+    }
+  };
+  for (const rec of records || []) {
+    if (!rec || rec.id === 'self') continue;
+    addName(rec.id);
+    addName(rec.display_name);
+    for (const ident of rec.identifiers || []) {
+      const v = ident && ident.value != null ? String(ident.value).trim() : '';
+      if (!v || /^\d+$/.test(v)) continue;
+      if (/@/.test(v)) { if (v.length >= 4) out.push(v); continue; }
+      addName(v);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * Final Discord reply after streaming. Public guild: never fall back to the
+ * raw reply if the held segment was dropped as a leak, and drop answers that
+ * name Access identities. DMs keep the raw reply. Vendor emails not in Access
+ * still post.
+ */
+function pickPublicReply({ pending, replyText, leakDropped, publicSurface, hints }) {
+  const held = String(pending || '').trim();
+  if (held) {
+    if (publicSurface && mentionsSpeaker(held, hints)) return '';
+    return held;
+  }
+  const raw = String(replyText || '').trim();
+  if (!raw) return '';
+  if (!publicSurface) return raw;
+  if (leakDropped) return '';
+  if (looksLikePromptRestatement(raw) || mentionsSpeaker(raw, hints)) return '';
+  return raw;
 }
 
 /** How many 💭 chips to post. Infinity = no cap. 0 = none (go straight to the answer). */
@@ -168,8 +223,8 @@ function discordThoughtLine(text, hints) {
 }
 
 module.exports = {
-  looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
-  speakerHintsFrom, mentionsSpeaker, thoughtBudget,
+  looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
+  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget,
   stripThoughtChrome, quietReplyFromResult,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, THOUGHT_CLAMP,
 };

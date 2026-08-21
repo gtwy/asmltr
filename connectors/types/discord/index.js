@@ -32,7 +32,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
-const { looksLikePromptLeak, discordToolLine, discordThoughtLine, speakerHintsFrom, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -143,6 +143,18 @@ async function start(ctx) {
   let lastResponseTime = 0;
   const responseCount = new Map();
   const recentReplies = new Map(); // cid -> last few reply texts (dedup verbatim repeats)
+  // Access principal ids / names / mailboxes for public 💭 + reply drop. Runtime, not a git denylist.
+  let identityHints = [];
+  let identityHintsAt = 0;
+  async function loadIdentityHints() {
+    if (Date.now() - identityHintsAt < 60 * 1000) return identityHints;
+    try {
+      const list = ctx.core.trustPrincipals ? await ctx.core.trustPrincipals() : [];
+      identityHints = identityHintsFrom(list || []);
+    } catch (e) { ctx.log('identity hints failed: ' + e.message); }
+    identityHintsAt = Date.now();
+    return identityHints;
+  }
   // persisted per-instance settings: per-channel enable/disable + engage-all-bots toggle.
   // channelStates holds EXPLICIT per-channel overrides (cid -> bool); channelsDefault decides
   // any channel without an override. default=true → "listen everywhere except disabled" (blocklist);
@@ -511,13 +523,14 @@ RESPONSE RULES:
       const addressed = forced || message.channel.type === 1 || message.mentions.has(client.user)
         || addressesName(message.cleanContent || message.content || '');
       let replyText = '';
+      let leakDropped = false;
+      const hints = [...new Set([...speakerHintsFrom(message.author, message.member), ...(await loadIdentityHints())])];
       if (streamSteps && addressed) {
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
         // boundary closes — either a tool call starts (the common case: post immediately, no lag)
         // or a new narration block begins. The block still open at `done` is the final answer.
         let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
         let beatTimer = null;
-        const hints = speakerHintsFrom(message.author, message.member);
         let maxThoughts = thoughtBudget('medium');
         let thoughtsPosted = 0;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
@@ -544,7 +557,12 @@ RESPONSE RULES:
           const clean = String(t || '').trim();
           if (!clean) { pending = ''; return; }
           if (isSilence(clean)) { sawNoReply = true; pending = ''; stopBeat(); return; }
-          if (looksLikePromptLeak(clean)) { pending = ''; return; }
+          if (looksLikePromptRestatement(clean) || (envelope.public && mentionsSpeaker(clean, hints))) {
+            pending = '';
+            leakDropped = true;
+            return;
+          }
+          leakDropped = false;
           pending = t;
         };
         const actions = await ctx.core.handleStream(envelope, {
@@ -578,11 +596,23 @@ RESPONSE RULES:
         stopBeat();
         await chain; // all step messages posted before the final answer
         const reply = actions.find(a => a.type === 'reply');
-        replyText = ((pending && pending.trim()) || (reply ? reply.text.trim() : '')).trim();
+        replyText = pickPublicReply({
+          pending,
+          replyText: reply ? reply.text.trim() : '',
+          leakDropped,
+          publicSurface: !!envelope.public,
+          hints,
+        });
       } else {
         const actions = await ctx.core.handle(envelope);
         const reply = actions.find(a => a.type === 'reply');
-        replyText = reply ? reply.text.trim() : '';
+        replyText = pickPublicReply({
+          pending: '',
+          replyText: reply ? reply.text.trim() : '',
+          leakDropped: false,
+          publicSurface: !!envelope.public,
+          hints,
+        });
       }
       // Self-gated suppression: the model decided this message wasn't for it (multi-agent
       // channel), or there's nothing to say. Drop it — don't post to the channel.
