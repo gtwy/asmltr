@@ -1161,14 +1161,22 @@ app.post('/v2/backups/restore', (req, res) => {
   if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required (restore overwrites config + databases)' });
   try { require('fs').accessSync(b.file); } catch (_) { return res.status(404).json({ error: 'backup file not found: ' + b.file }); }
   const { spawn } = require('child_process');
+  const { restoreSpawnPlan } = require('./restore-spawn');
   const log = RESTORE_LOG();
-  const args = [_bkpath.join(__dirname, '..', '..', 'scripts', 'backup.js'), 'restore', b.file, '--activate'];
-  if (b.force) args.push('--force');
+  const plan = restoreSpawnPlan({
+    execPath: process.execPath,
+    scriptPath: _bkpath.join(__dirname, '..', '..', 'scripts', 'backup.js'),
+    file: b.file,
+    force: b.force,
+  });
   const env = { ...process.env };
   if (b.passphrase) env.ASMLTR_BACKUP_PASSPHRASE = String(b.passphrase);
   try { require('fs').writeFileSync(log, `[${new Date().toISOString()}] restore starting: ${b.file}\n`); } catch (_) {}
-  const child = spawn('setsid', ['bash', '-c', `sleep 1; { "${process.execPath}" ${args.map((a) => `"${a}"`).join(' ')}; echo "[$(date)] restore-runner exited $?"; } >> "${log}" 2>&1`], { detached: true, stdio: 'ignore', env });
+  const fs = require('fs');
+  const logFd = fs.openSync(log, 'a');
+  const child = spawn(plan.command, plan.args, { detached: true, stdio: ['ignore', logFd, logFd], env });
   child.unref();
+  try { fs.closeSync(logFd); } catch (_) {}
   res.json({ started: true, pid: child.pid || null, log });
 });
 // Poll the restore log (GUI progress). Returns the tail of BACKUP_DIR/restore.log.
