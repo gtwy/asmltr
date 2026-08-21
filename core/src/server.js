@@ -843,16 +843,12 @@ app.get('/v2/vault/status', async (req, res) => {
   const h = await vault.health();
   res.json({ configured: true, reachable: h.ok, sealed: h.sealed, url: process.env.ASMLTR_VAULT_URL });
 });
-// Unseal the vault with the master passphrase (never persisted — held only in the vault's memory).
-app.post('/v2/vault/unseal', async (req, res) => {
-  const pw = (req.body || {}).password;
-  if (!pw) return res.status(400).json({ error: 'password required' });
-  try { const r = await vault.unseal(pw); res.json({ ok: true, ...r }); } catch (e) { res.status(400).json({ error: e.message }); }
-});
 
 // Auth — the session-gate foundation (roadmap P1 phase A; docs/AUTH.md). ADDITIVE + enforcement OFF:
 // requireAuth is a no-op unless ASMLTR_AUTH=on, so these endpoints exist without gating anything yet.
 const auth = require('../../shared/auth');
+const { requireVaultWrite } = require('./vault/write-gate');
+const vaultWrite = requireVaultWrite(auth);
 const { requireTrustWrite } = require('./trust/write-gate');
 const authSecureCookie = () => process.env.ASMLTR_AUTH_INSECURE_COOKIE !== '1'; // Secure cookie by default (https)
 app.get('/v2/auth/status', (req, res) => {
@@ -975,16 +971,21 @@ app.post('/v2/integrations/:id/test', async (req, res) => res.json(await integra
 
 // Vault key management — metadata only (names/tiers/access counts), NEVER values. Store/delete a
 // credential. Values are write-only from the GUI; retrieval is the SACRED core's job, not the UI's.
-app.get('/v2/vault/secrets', async (req, res) => {
+app.post('/v2/vault/unseal', vaultWrite, async (req, res) => {
+  const pw = (req.body || {}).password;
+  if (!pw) return res.status(400).json({ error: 'password required' });
+  try { const r = await vault.unseal(pw); res.json({ ok: true, ...r }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/v2/vault/secrets', vaultWrite, async (req, res) => {
   try { res.json({ secrets: (await vault.listSecrets()) || [] }); } catch (e) { res.status(502).json({ error: e.message, secrets: [] }); }
 });
-app.post('/v2/vault/secrets', async (req, res) => {
+app.post('/v2/vault/secrets', vaultWrite, async (req, res) => {
   const b = req.body || {};
   if (!b.name || b.value == null) return res.status(400).json({ error: 'name + value required' });
   try { await vault.storeSecret(String(b.name), { value: String(b.value) }, { minTrust: b.min_trust || 'SACRED' }); res.json({ ok: true, name: b.name }); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
-app.delete('/v2/vault/secrets/:name', async (req, res) => {
+app.delete('/v2/vault/secrets/:name', vaultWrite, async (req, res) => {
   try { await vault.deleteSecret(req.params.name); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
