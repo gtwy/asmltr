@@ -52,7 +52,7 @@ test('parseAuthResults empty header is all null', () => {
 });
 
 test('authDisposition pass only when DKIM and SPF and DMARC are pass', () => {
-  const a = authDisposition(parsedWith(GMAIL_PASS));
+  const a = authDisposition(parsedWith(GMAIL_PASS), { authservIds: ['mx.google.com'] });
   assert.equal(a.present, true);
   assert.equal(a.passed, true);
   assert.equal(a.failed, false);
@@ -60,7 +60,7 @@ test('authDisposition pass only when DKIM and SPF and DMARC are pass', () => {
 });
 
 test('authDisposition fail when any of the three is fail', () => {
-  const a = authDisposition(parsedWith(GMAIL_FAIL));
+  const a = authDisposition(parsedWith(GMAIL_FAIL), { authservIds: ['mx.google.com'] });
   assert.equal(a.present, true);
   assert.equal(a.passed, false);
   assert.equal(a.failed, true);
@@ -68,16 +68,16 @@ test('authDisposition fail when any of the three is fail', () => {
 });
 
 test('authDisposition missing header is a fail', () => {
-  const a = authDisposition({ headers: { get() { return undefined; } } });
+  const a = authDisposition({ headers: { get() { return undefined; } } }, { authservIds: ['mx.google.com'] });
   assert.equal(a.present, false);
   assert.equal(a.failed, true);
   assert.equal(a.passed, false);
   assert.equal(authRejected(a), true);
-  assert.match(a.reason, /no Authentication-Results header/);
+  assert.match(a.reason, /missing AR/);
 });
 
 test('dmarc pass does not excuse a dkim or spf miss', () => {
-  const a = authDisposition(parsedWith('mx.example; spf=fail; dkim=fail; dmarc=pass'));
+  const a = authDisposition(parsedWith('mx.example; spf=fail; dkim=fail; dmarc=pass'), { authservIds: ['mx.example'] });
   assert.equal(a.passed, false);
   assert.equal(a.failed, true);
   assert.match(a.reason, /DKIM=fail/);
@@ -85,28 +85,28 @@ test('dmarc pass does not excuse a dkim or spf miss', () => {
 });
 
 test('spf pass and dkim pass without dmarc is a fail', () => {
-  const a = authDisposition(parsedWith('mx.example; dkim=pass; spf=pass'));
+  const a = authDisposition(parsedWith('mx.example; dkim=pass; spf=pass'), { authservIds: ['mx.example'] });
   assert.equal(a.failed, true);
   assert.match(a.reason, /DMARC=missing/);
 });
 
 test('softfail SPF is not a pass', () => {
-  const a = authDisposition(parsedWith('mx.example; dkim=pass; spf=softfail; dmarc=pass'));
+  const a = authDisposition(parsedWith('mx.example; dkim=pass; spf=softfail; dmarc=pass'), { authservIds: ['mx.example'] });
   assert.equal(a.failed, true);
   assert.match(a.reason, /SPF=softfail/);
 });
 
 test('authRejected is everyone, not owner-only', () => {
-  const fail = authDisposition(parsedWith(GMAIL_FAIL));
-  const pass = authDisposition(parsedWith(GMAIL_PASS));
+  const fail = authDisposition(parsedWith(GMAIL_FAIL), { authservIds: ['mx.google.com'] });
+  const pass = authDisposition(parsedWith(GMAIL_PASS), { authservIds: ['mx.google.com'] });
   assert.equal(authRejected(fail), true);
   assert.equal(authRejected(pass), false);
   assert.equal(authRejected(null), true);
 });
 
 test('formatAuthSummary', () => {
-  assert.match(formatAuthSummary(authDisposition(parsedWith(GMAIL_PASS))), /DKIM=pass SPF=pass DMARC=pass — PASS/);
-  assert.match(formatAuthSummary(authDisposition({ headers: { get() {} } })), /none \(treated as fail\)/);
+  assert.match(formatAuthSummary(authDisposition(parsedWith(GMAIL_PASS), { authservIds: ['mx.google.com'] })), /DKIM=pass SPF=pass DMARC=pass — PASS/);
+  assert.match(formatAuthSummary(authDisposition({ headers: { get() {} } }, { authservIds: ['mx.google.com'] })), /none \(treated as fail\)/);
 });
 
 test('formatAuthJournal is sender and subject only; empty when none', () => {
@@ -144,7 +144,7 @@ test('persist and load auth reject log', () => {
 const { alignsWithFrom } = require('../connectors/types/email/auth-align');
 
 test('Auth-Results pass fails closed when 5322 From does not align', () => {
-  const a = authDisposition(parsedWith(GMAIL_PASS, 'attacker@evil.test'));
+  const a = authDisposition(parsedWith(GMAIL_PASS, 'attacker@evil.test'), { authservIds: ['mx.google.com'] });
   assert.equal(a.passed, false);
   assert.equal(a.failed, true);
   assert.equal(authRejected(a), true);
@@ -155,4 +155,74 @@ test('alignsWithFrom binds From to dkim d= / spf mailfrom', () => {
   const r = parseAuthResults(GMAIL_PASS);
   assert.equal(alignsWithFrom('owner@example.com', r), true);
   assert.equal(alignsWithFrom('attacker@evil.test', r), false);
+});
+
+const {
+  parseAuthservId, loadAuthservAllowlist, listAuthenticationResults,
+} = require('../connectors/types/email/index.js');
+
+test('Gmail-shaped AR + config mx.google.com accepts', () => {
+  const a = authDisposition(parsedWith(GMAIL_PASS), { authservIds: ['mx.google.com'] });
+  assert.equal(a.passed, true);
+  assert.equal(a.failed, false);
+});
+
+test('same AR but allowlist unset fails with unset', () => {
+  const a = authDisposition(parsedWith(GMAIL_PASS), { authservIds: [] });
+  assert.equal(a.failed, true);
+  assert.match(a.reason, /unset/);
+});
+
+test('AR from other authserv fails mismatch', () => {
+  const a = authDisposition(parsedWith(GMAIL_PASS), { authservIds: ['mx.microsoft.com'] });
+  assert.equal(a.failed, true);
+  assert.match(a.reason, /mismatch/);
+});
+
+test('missing AR, only ARC with pass, fails ARC-only', () => {
+  const parsed = {
+    from: { value: [{ address: 'owner@example.com' }] },
+    headers: {
+      get(name) {
+        const k = String(name).toLowerCase();
+        if (k === 'arc-authentication-results') {
+          return 'i=1; mx.google.com; dkim=pass header.i=@example.com; spf=pass smtp.mailfrom=owner@example.com; dmarc=pass header.from=example.com';
+        }
+        return undefined;
+      },
+    },
+  };
+  const a = authDisposition(parsed, { authservIds: ['mx.google.com'] });
+  assert.equal(a.failed, true);
+  assert.match(a.reason, /ARC-only/);
+});
+
+test('concatenated extra AR: only matching authserv counts', () => {
+  const parsed = {
+    from: { value: [{ address: 'owner@example.com' }] },
+    headerLines: [
+      { key: 'authentication-results', line: 'Authentication-Results: mx.other.com; dkim=fail; spf=fail; dmarc=fail' },
+      { key: 'authentication-results', line: 'Authentication-Results: ' + GMAIL_PASS },
+    ],
+    headers: { get() { return undefined; } },
+  };
+  const a = authDisposition(parsed, { authservIds: ['mx.google.com'] });
+  assert.equal(a.passed, true);
+  assert.equal(parseAuthservId(a.raw), 'mx.google.com');
+});
+
+test('parseAuthservId is first token before semicolon', () => {
+  assert.equal(parseAuthservId(GMAIL_PASS), 'mx.google.com');
+  assert.equal(parseAuthservId('Authentication-Results: mx.microsoft.com; dkim=pass'), 'mx.microsoft.com');
+});
+
+test('loadAuthservAllowlist empty/missing file is empty', () => {
+  assert.deepEqual(loadAuthservAllowlist('/tmp/asmltr-no-such-authserv.json'), []);
+});
+
+test('loadAuthservAllowlist reads authserv_ids from temp file', () => {
+  const f = path.join(os.tmpdir(), 'asmltr-authserv-allow.json');
+  fs.writeFileSync(f, JSON.stringify({ authserv_ids: ['mx.google.com'] }));
+  assert.deepEqual(loadAuthservAllowlist(f), ['mx.google.com']);
+  fs.unlinkSync(f);
 });

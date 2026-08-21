@@ -91,6 +91,12 @@ const meta = {
       signature: { type: 'string', title: 'Signature (blank = auto from from_name)', default: '' },
       process_backlog: { type: 'boolean', title: 'On first connect, process existing unread mail (off = only react to NEW arrivals)', default: false },
       owner_forward_to: { type: 'string', title: 'Forward unknown senders here (blank = do not forward)', default: '' },
+      authserv_id: {
+        type: 'string',
+        title: 'Pointer only — real allowlist is ~/.asmltr/email-authserv.json',
+        description: 'Do not put the value here. Write authserv_ids in ~/.asmltr/email-authserv.json (mode 600). Copy the first token of Authentication-Results from a real message delivered to THIS mailbox (the stamp of the server that hosts the bot address, not the sender). Examples: mx.google.com (Google accounts), mx.microsoft.com (Microsoft 365). Not the DNS MX (aspmx.l.google.com, protection.outlook.com). Empty default.',
+        default: '',
+      },
     },
   },
 };
@@ -146,22 +152,94 @@ function parseAuthResultsLegacy(headerText) {
   return out;
 }
 
-function authHeaderText(parsed) {
-  return headerLine(parsed, 'authentication-results') || headerLine(parsed, 'arc-authentication-results');
+
+function parseAuthservId(headerText) {
+  let s = String(headerText || '').trim().replace(/^authentication-results:\s*/i, '');
+  if (!s) return '';
+  return s.split(';')[0].trim().split(/\s+/)[0].toLowerCase();
+}
+
+function authservAllowlistFile() {
+  return process.env.ASMLTR_EMAIL_AUTHSERV_FILE
+    || path.join(os.homedir(), '.asmltr', 'email-authserv.json');
+}
+
+function loadAuthservAllowlist(file) {
+  const p = file || authservAllowlistFile();
+  try {
+    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const ids = j && j.authserv_ids;
+    if (!Array.isArray(ids)) return [];
+    return ids.map((x) => String(x || '').trim().toLowerCase()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function listAuthenticationResults(parsed) {
+  const out = [];
+  if (parsed && Array.isArray(parsed.headerLines)) {
+    for (const h of parsed.headerLines) {
+      if (String(h.key || '').toLowerCase() !== 'authentication-results') continue;
+      let body = '';
+      if (h.line) body = String(h.line).replace(/^authentication-results:\s*/i, '');
+      else if (h.value != null) body = String(h.value);
+      if (body.trim()) out.push(body);
+    }
+    if (out.length) return out;
+  }
+  if (!parsed || !parsed.headers || typeof parsed.headers.get !== 'function') return out;
+  const v = parsed.headers.get('authentication-results');
+  if (v == null) return out;
+  const parts = Array.isArray(v) ? v : [v];
+  for (const x of parts) {
+    const s = (x && typeof x === 'object' && x.value != null) ? String(x.value) : String(x);
+    for (const line of s.split(/\n+/)) {
+      const body = line.replace(/^authentication-results:\s*/i, '').trim();
+      if (body) out.push(body);
+    }
+  }
+  return out;
+}
+
+function hasArcAuthenticationResults(parsed) {
+  return !!String(headerLine(parsed, 'arc-authentication-results') || '').trim();
+}
+
+/**
+ * Authentication-Results only. Never ARC. Pick the header whose authserv-id
+ * is in the host allowlist (~/.asmltr/email-authserv.json). Do not join headers.
+ */
+function authHeaderText(parsed, allow) {
+  const ids = allow || loadAuthservAllowlist();
+  if (!ids.length) return '';
+  const headers = listAuthenticationResults(parsed);
+  const hit = headers.find((h) => ids.includes(parseAuthservId(h)));
+  return hit || '';
 }
 
 /**
  * Disposition of inbound auth headers.
- * Hard rule: DKIM, SPF, and DMARC must each be pass. Missing header is a fail.
- * Do not reply to or run a turn for a failed message.
+ * Fail closed: authserv unset / missing AR / authserv mismatch / ARC-only.
+ * Then DKIM, SPF, and DMARC must each be pass. No turn or reply on fail.
  */
-function authDisposition(parsed) {
-  const raw = authHeaderText(parsed);
-  const results = parseAuthResults(raw);
-  const present = !!String(raw || '').trim();
-  if (!present) {
-    return { present: false, results, passed: false, failed: true, raw: '', reason: 'no Authentication-Results header' };
+function authDisposition(parsed, opts) {
+  const allow = (opts && opts.authservIds) || loadAuthservAllowlist();
+  const empty = parseAuthResults('');
+  if (!allow.length) {
+    return { present: false, results: empty, passed: false, failed: true, raw: '', reason: 'authserv unset' };
   }
+  const headers = listAuthenticationResults(parsed);
+  if (!headers.length) {
+    const reason = hasArcAuthenticationResults(parsed) ? 'ARC-only' : 'missing AR';
+    return { present: false, results: empty, passed: false, failed: true, raw: '', reason };
+  }
+  const raw = headers.find((h) => allow.includes(parseAuthservId(h))) || '';
+  if (!raw) {
+    return { present: true, results: empty, passed: false, failed: true, raw: '', reason: 'authserv mismatch' };
+  }
+  const results = parseAuthResults(raw);
+  const present = true;
   const parts = [
     ['DKIM', results.dkim],
     ['SPF', results.spf],
@@ -170,7 +248,7 @@ function authDisposition(parsed) {
   const failedParts = parts.filter(([, v]) => v !== 'pass').map(([k, v]) => k + '=' + (v || 'missing'));
   const fromRaw = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '';
   const aligned = alignsWithFrom(fromRaw, results);
-  let passed = failedParts.length === 0 && aligned;
+  const passed = failedParts.length === 0 && aligned;
   let reason;
   if (failedParts.length) reason = failedParts.join(' ');
   else if (!aligned) reason = 'From does not align with DKIM d= / SPF mailfrom / header.from';
@@ -778,4 +856,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
