@@ -272,7 +272,7 @@ function recordStable(conversation_key, stable_hash, engine) {
 const _setNextEffort = db.prepare('UPDATE sessions SET next_effort = ? WHERE conversation_key = ?');
 
 /**
- * Ivy/operator one-shot: persist effort for the NEXT grok -p on this conversation_key.
+ * Operator one-shot: persist effort for the NEXT grok -p on this conversation_key.
  * Consumed (cleared) by consumeNextEffort at spawn. Current in-flight grok -p is unchanged.
  * effort: high|xhigh|medium|low. Pass null to clear.
  */

@@ -196,7 +196,7 @@ async function start(ctx) {
     }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-    async function ivyWebSessionOk() {
+    async function operatorWebSessionOk() {
       return sessionOkFromVerify(fetch, authVerifyUrl(process.env.ASMLTR_CORE_URL), req.headers.cookie || '');
     }
 
@@ -224,9 +224,9 @@ async function start(ctx) {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/oauth/authorize') {
-      if (!(await ivyWebSessionOk())) {
+      if (!(await operatorWebSessionOk())) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'authentication required', error_description: 'Ivy web session required' }));
+        res.end(JSON.stringify({ error: 'authentication required', error_description: 'operator web session required' }));
         return;
       }
       const params = Object.fromEntries(url.searchParams);
@@ -251,7 +251,7 @@ async function start(ctx) {
       req.on('end', async () => {
         try {
           const params = JSON.parse(body);
-          const sessionOk = await ivyWebSessionOk();
+          const sessionOk = await operatorWebSessionOk();
           const decision = approveDecision({
             sessionOk,
             approved: params.approved,

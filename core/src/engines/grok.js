@@ -89,7 +89,7 @@ function isOwnerFromEmail(opts) {
 }
 
 // Reasoning effort — always pass `--effort <level>` (CLI alias of --reasoning-effort).
-//   Baseline is ASMLTR_GROK_EFFORT (Ivy live: medium). envEffort() if unset still
+//   Baseline is ASMLTR_GROK_EFFORT (this install: medium). envEffort() if unset still
 //   || 'high' so other installs keep the old default. xhigh is NOT the default.
 //   medium  normal conversation (Discord baseline)
 //   high    lookup/research, Corona (recipe/cigar/cooking), Rolodex/contacts,
@@ -106,7 +106,7 @@ function isOwnerFromEmail(opts) {
 //   repo and would xhigh every ask). Use the session/turn cwd if provided.
 //   Score opts.effortPrompt when set (current user message only) — NOT
 //   drainObserved/catch-up glued onto prompt in server.js.
-//   Tight: do not treat bare "fix" as xhigh (Eve "Proposed Fix", "quick fix").
+//   Tight: do not treat bare "fix" as xhigh (other agents' "Proposed Fix", "quick fix").
 //   One-shot next-effort wins on Discord/web, not on email/mcp. complete() skips auto-raise.
 //   Web (assistant-web, assistant-native, eve-assistant-web, eve-assistant-native)
 //   is always high AFTER one-shot/explicit. No +h/+xh, no word picker.
@@ -115,7 +115,7 @@ function isOwnerFromEmail(opts) {
 //   (+h/+xh/word/git). Do not inherit last effort. Do not use a generic
 //   XHIGH_CHANNELS list. No spawn kill timer. No CLI turn cap. Do not apply
 //   Claude maxTurns or ASMLTR_MAX_THINKING_TOKENS here.
-//   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
+//   Operator one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
 //   next grok -p spawn. sessions.next_effort is the same one-shot per key.
 //   Whole-word +xh / +h (whitespace-split, start/end/standalone) override to
 //   xhigh / high for this turn only when the sender is owner/bypass or their

@@ -1,5 +1,5 @@
 {
-  "_comment": "Ivy example seed. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner`. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No Discord snowflakes. No personal names or emails in git.",
+  "_comment": "Example seed. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner`. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No Discord snowflakes. No personal names or emails in git.",
   "roles": [],
   "principals": [
     {

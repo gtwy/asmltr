@@ -588,7 +588,7 @@ async function start(ctx) {
     // Ops allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
     if (!known && !opsHit) {
       if (ownerForward && ownerForward !== fromAddr) {
-        const fwd = `Ivy forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
+        const fwd = `${NAME} forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
         await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd });
         ctx.log(`forwarded unknown ${fromAddr} → ${ownerForward}`);
       } else {
@@ -667,7 +667,7 @@ async function start(ctx) {
           try {
             const result = await processMessage(await simpleParser(msg.source));
             // Gmail/IMAP unread is \Seen, not our UID cursor. Mark mail we actually handled
-            // so the inbox matches what Ivy has already seen. Skip noreply/self.
+            // so the inbox matches what the assistant has already seen. Skip noreply/self.
             if (result && result.handled) {
               try { await imap.messageFlagsAdd({ uid: msg.uid }, ['\\Seen'], { uid: true }); }
               catch (e) { ctx.log(`mark seen uid ${msg.uid}: ${e.message}`); }

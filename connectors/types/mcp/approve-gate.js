@@ -1,6 +1,6 @@
 'use strict';
 /**
- * V16: MCP OAuth approve + consent require an existing Ivy web session
+ * V16: MCP OAuth approve + consent require an existing operator web session
  * (ASMLTR_AUTH). Do not CORS * those paths. Re-check redirect_uri on approve.
  * /mcp and ask_oracle stay cookie-free.
  */
@@ -31,7 +31,7 @@ async function sessionOkFromVerify(fetchImpl, url, cookie) {
 
 function approveDecision({ sessionOk, approved, client, redirectUri, isRedirectUriAllowed }) {
   if (!sessionOk) {
-    return { ok: false, status: 401, error: 'authentication required', error_description: 'Ivy web session required' };
+    return { ok: false, status: 401, error: 'authentication required', error_description: 'operator web session required' };
   }
   if (!approved) {
     return { ok: false, status: 400, error: 'access_denied', error_description: 'User denied authorization' };

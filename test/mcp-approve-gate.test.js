@@ -13,6 +13,7 @@ test('approve without session is 401', () => {
   });
   assert.equal(d.ok, false);
   assert.equal(d.status, 401);
+  assert.equal(d.error_description, 'operator web session required');
 });
 
 test('approve with a valid session cookie is allowed', () => {

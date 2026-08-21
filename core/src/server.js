@@ -231,8 +231,9 @@ function persistAskTurn(e, result, assistantText) {
     });
   } catch (_) {}
   try {
-    let st = streams.get('ivy');
-    if (!st) st = streams.create({ name: 'ivy', description: 'Ivy local ask / grok turns (auto-written)' });
+    const streamName = (process.env.ASSISTANT_NAME || 'assistant').trim() || 'assistant';
+    let st = streams.get(streamName.toLowerCase()) || streams.get('ivy');
+    if (!st) st = streams.create({ name: streamName, description: `${streamName} local ask / grok turns (auto-written)` });
     if (e.conversation_key) streams.attach(st.id, e.conversation_key);
     streams.append(st.id, {
       source: 'ask',

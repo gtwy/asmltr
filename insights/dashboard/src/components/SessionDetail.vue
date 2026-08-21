@@ -84,7 +84,7 @@ onMounted(loadMuteState)
 watch(key, loadMuteState)
 // Last-block live replace is Grok (status snapshot → answer). Claude/Gemini/Codex
 // narrate→tool→answer must keep the narration. Default claude so a failed fetch
-// does not collapse Eve's dashboard.
+// does not collapse a Claude-default dashboard.
 const reasoningEngine = ref('claude')
 const grokLive = computed(() => reasoningEngine.value === 'grok')
 onMounted(async () => {
