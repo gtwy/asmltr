@@ -274,20 +274,88 @@ function domainMatches(addr, domain) {
   return a.endsWith('@' + d) || a.endsWith('.' + d);
 }
 
-function matchOpsAllowThrough(fromAddr, subject, body, matchers) {
+function collectOriginalAddrs(parsed, fromAddr, body) {
+  const addrs = new Set();
+  const add = (v) => {
+    String(v || '').toLowerCase().replace(/[<>"'()]/g, ' ').split(/[\s,;]+/).forEach((t) => {
+      if (/^[^@\s]+@[^@\s]+\.[a-z0-9.-]+$/.test(t)) addrs.add(t);
+    });
+  };
+  add(fromAddr);
+  const fromVals = parsed && parsed.from && parsed.from.value;
+  if (Array.isArray(fromVals)) for (const x of fromVals) add(x && x.address);
+  const rt = parsed && parsed.replyTo && parsed.replyTo.value;
+  if (Array.isArray(rt)) for (const x of rt) add(x && x.address);
+  for (const h of ['x-original-sender', 'resent-from', 'return-path', 'x-forwarded-from', 'x-original-from']) {
+    add(headerLine(parsed, h));
+  }
+  const text = String(body || '');
+  for (const m of text.matchAll(/(?:^|\n)From:\s*(?:[^<\n]*<)?([^\s<>]+@[^\s<>]+)>?/gi)) add(m[1]);
+  return [...addrs];
+}
+
+function matchOpsAllowThrough(fromAddr, subject, body, matchers, extraAddrs) {
   const list = Array.isArray(matchers) ? matchers : loadMatchers();
   const addr = String(fromAddr || '').toLowerCase();
   const blob = `${subject || ''}\n${body || ''}`;
   const blobLc = blob.toLowerCase();
+  const extra = (extraAddrs || []).map((a) => String(a || '').toLowerCase()).filter(Boolean);
+  const pool = new Set([addr, ...extra]);
   for (const m of list) {
     if (!m || m.enabled === false) continue;
+    const fromAddrs = (m.from_addrs || []).map((a) => String(a).toLowerCase()).filter(Boolean);
     const domains = m.from_domains || [];
-    const domainOk = !domains.length || domains.some((d) => domainMatches(addr, d));
+    let fromOk;
+    if (fromAddrs.length) {
+      fromOk = fromAddrs.some((a) => pool.has(a));
+    } else {
+      fromOk = !domains.length || domains.some((d) => domainMatches(addr, d) || extra.some((e) => domainMatches(e, d)));
+    }
     const allKw = m.all_keywords || [];
     const keysOk = allKw.every((k) => blobLc.includes(String(k).toLowerCase()));
-    if (domainOk && keysOk) return m;
+    if (fromOk && keysOk) return m;
   }
   return null;
+}
+
+function logOnlyDir(matcherId) {
+  const id = String(matcherId || 'log-only').replace(/[^a-z0-9._-]+/gi, '_');
+  return process.env.ASMLTR_OPS_LOGONLY_DIR
+    || path.join(os.homedir(), '.asmltr', 'silos', 'self', 'memory', 'ops', id);
+}
+
+function persistLogOnlyAlert(hit, rec) {
+  const dir = logOnlyDir(hit && hit.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const dayDir = path.join(dir, 'messages', day);
+  fs.mkdirSync(dayDir, { recursive: true });
+  const idSrc = String((rec && (rec.message_id || rec.from + rec.subject + rec.ts)) || Date.now());
+  const id = crypto.createHash('sha1').update(idSrc).digest('hex').slice(0, 16);
+  const row = { id, matcher: (hit && hit.id) || 'log-only', ...rec };
+  fs.appendFileSync(path.join(dir, 'alerts.jsonl'), JSON.stringify(row) + '\n');
+  const body = String((rec && rec.body) || '');
+  const header = [
+    `From: ${row.from || ''}`,
+    `Original-From: ${row.original_from || ''}`,
+    `Subject: ${row.subject || ''}`,
+    `Date: ${row.ts || ''}`,
+    `Message-ID: ${row.message_id || ''}`,
+    `Matcher: ${row.matcher}`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(dayDir, id + '.txt'), header + body + (body.endsWith('\n') ? '' : '\n'));
+  const countsPath = path.join(dir, 'counts.json');
+  let counts = { total: 0, by_from: {} };
+  try { counts = JSON.parse(fs.readFileSync(countsPath, 'utf8')); } catch (_) {}
+  counts.total = (Number(counts.total) || 0) + 1;
+  counts.last_ts = row.ts;
+  counts.first_ts = counts.first_ts || row.ts;
+  const fk = String(row.original_from || row.from || 'unknown').toLowerCase();
+  counts.by_from = counts.by_from || {};
+  counts.by_from[fk] = (counts.by_from[fk] || 0) + 1;
+  fs.writeFileSync(countsPath, JSON.stringify(counts, null, 2) + '\n');
+  return { dir, id };
 }
 
 async function start(ctx) {
@@ -352,7 +420,23 @@ async function start(ctx) {
     if (fromAddr === selfAddr) return { handled: false };
     const subject = parsed.subject || '(no subject)';
     const body = (parsed.text || parsed.html || '').toString().trim();
-    const opsHit = matchOpsAllowThrough(fromAddr, subject, body);
+    const extraAddrs = collectOriginalAddrs(parsed, fromAddr, body);
+    const opsHit = matchOpsAllowThrough(fromAddr, subject, body, undefined, extraAddrs);
+    if (opsHit && opsHit.log_only) {
+      const original = extraAddrs.find((a) => a && a !== fromAddr) || fromAddr;
+      persistLogOnlyAlert(opsHit, {
+        ts: new Date().toISOString(),
+        from: fromAddr,
+        original_from: original,
+        extra_addrs: extraAddrs,
+        subject,
+        message_id: parsed.messageId || null,
+        body: body.slice(0, 200000),
+        attachments: (parsed.attachments || []).map((a) => a && a.filename).filter(Boolean),
+      });
+      ctx.log(`log-only ${opsHit.id} from=${fromAddr} subject=${subject}`);
+      return { handled: true };
+    }
     if (isAutomatedSender(fromAddr) && !(opsHit && opsHit.noreply_ok !== false)) {
       ctx.log(`skip automated sender ${fromAddr}`);
       return { handled: false };
@@ -685,4 +769,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
