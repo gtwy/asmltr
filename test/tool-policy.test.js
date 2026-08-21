@@ -83,7 +83,9 @@ test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
     selfSiloDir: '/tmp/self',
   });
   assert.ok(text.includes('SELF SILO'));
-  assert.ok(text.includes('asmltr_silo_find'));
+  assert.equal(text.includes('asmltr_silo_find'), false);
+  assert.equal(text.includes('asmltr silo find'), false);
+  assert.ok(text.includes('asmltr silo ls') || text.includes('asmltr_silo_ls'));
   assert.equal(text.includes('use the Bash tool'), false);
   assert.equal(text.includes('asmltr send'), false);
   assert.equal(text.includes('asmltr streams'), false);
