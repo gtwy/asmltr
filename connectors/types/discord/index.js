@@ -35,6 +35,7 @@ const { isNoReplySentinel } = require('../../../shared/silence');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
+const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
 const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
@@ -1111,10 +1112,19 @@ RESPONSE RULES:
   // `update-asmltr` command: pull the latest code, reinstall deps, and restart — DETACHED so the
   // restart survives this very connector being cycled — then confirm in-channel after it's back up.
   async function doUpdateAsmltr(message) {
-    const { exec, spawn, execSync } = require('child_process');
+    const { exec, spawn, execSync, execFile, execFileSync } = require('child_process');
     const repo = path.join(__dirname, '..', '..', '..'); // connectors/types/discord → repo root
     await message.channel.send('🔄 Updating asmltr — pulling latest + reinstalling. I\'ll confirm here once the restart completes (~15s).').catch(() => {});
-    exec('git fetch origin && git reset --hard origin/main', { cwd: repo, timeout: 120000 }, (e1, o1, s1) => {
+    let branch;
+    try { branch = execFileSync('git', ['-C', repo, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', timeout: 15000 }).trim(); }
+    catch (e0) { message.channel.send(`⚠️ Update failed (branch): ${String(e0.message).slice(0, 400)}`).catch(() => {}); return; }
+    let resetArgv, fetchArgv;
+    try { resetArgv = updateResetArgv(branch); fetchArgv = fetchOriginArgv(branch); }
+    catch (e0) { message.channel.send(`⚠️ Update failed (ref): ${String(e0.message).slice(0, 400)}`).catch(() => {}); return; }
+    execFile('git', ['-C', repo, ...fetchArgv], { timeout: 120000 }, (e1, o1, s1) => {
+      if (e1) { message.channel.send(`⚠️ Update failed (git): ${String(s1 || e1.message).slice(0, 400)}`).catch(() => {}); return; }
+      execFile('git', ['-C', repo, ...resetArgv], { timeout: 120000 }, (e1b, o1b, s1b) => {
+      const e1 = e1b, o1 = o1b, s1 = s1b;
       if (e1) { message.channel.send(`⚠️ Update failed (git): ${String(s1 || e1.message).slice(0, 400)}`).catch(() => {}); return; }
       exec('for d in core connectors insights/collector cli; do (cd "$d" && npm install) || exit 1; done', { cwd: repo, timeout: 600000, shell: '/bin/bash' }, (e2, o2, s2) => {
         if (e2) { message.channel.send(`⚠️ Update failed (npm install): ${String(s2 || e2.message).slice(0, 400)}`).catch(() => {}); return; }
@@ -1127,6 +1137,7 @@ RESPONSE RULES:
         const script = 'sleep 5; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager';
         try { spawn('setsid', ['bash', '-c', script], { detached: true, stdio: 'ignore', cwd: repo }).unref(); }
         catch (e3) { message.channel.send(`⚠️ Update installed but restart-launch failed: ${e3.message}`).catch(() => {}); }
+      });
       });
     });
   }
