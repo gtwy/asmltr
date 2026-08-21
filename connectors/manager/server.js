@@ -2,6 +2,7 @@
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
+const { bearerEqual } = require('../../shared/bearer-equal');
 /**
  * asmltr connector manager — registry + supervisor + management API (the plane
  * the dashboard "Integrations" page drives). Host/PM2, bind 127.0.0.1.
@@ -76,8 +77,7 @@ function validateConfig(typeMeta, config) {
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 function requireToken(req, res, next) {
-  if (!TOKEN) return next();
-  if ((req.get('authorization') || '') === `Bearer ${TOKEN}`) return next();
+  if (bearerEqual(req.get('authorization'), TOKEN)) return next();
   return res.status(401).json({ error: 'unauthorized' });
 }
 
