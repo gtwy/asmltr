@@ -214,11 +214,10 @@ function drainObserved(key) {
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
 
-/** Write a completed turn into Self memory/transcripts. Owner + silo-allowlisted
- *  Discord attach to the ivy stream (V32). Email/GitHub/schedule never do. */
-const { shouldAttachIvyStream } = require('../../shared/ivy-stream-attach');
-
-function persistAskTurn(e, result, assistantText, resolved) {
+/** Write a completed ask/grok turn into the Self silo (memory/transcripts + last-topics)
+ *  and the ivy stream so a fresh session after idle can rehydrate without grepping
+ *  events-*.jsonl. Best-effort: never fail the turn. */
+function persistAskTurn(e, result, assistantText) {
   if (!e || !result || result.isError) return;
   const userText = String((e.content && e.content.text) || '');
   const text = assistantText != null ? String(assistantText) : String(result.text || '');
@@ -231,7 +230,6 @@ function persistAskTurn(e, result, assistantText, resolved) {
       assistantText: text,
     });
   } catch (_) {}
-  if (!shouldAttachIvyStream(e, resolved)) return;
   try {
     let st = streams.get('ivy');
     if (!st) st = streams.create({ name: 'ivy', description: 'Ivy local ask / grok turns (auto-written)' });
@@ -706,7 +704,7 @@ async function handle(envelope, opts = {}) {
 
   // Self silo + ivy stream: persist the (possibly redacted) user+assistant turn for rehydrate.
   const replyText = (actions.find((a) => a && a.type === 'reply') || {}).text;
-  persistAskTurn(e, result, replyText, resolved);
+  persistAskTurn(e, result, replyText);
 
   // --- DRAFT / APPROVAL GATE ---------------------------------------------------
   // If the connector attached an approval policy and it says HOLD for this recipient, divert the
