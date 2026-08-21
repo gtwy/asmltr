@@ -34,7 +34,7 @@ const TOOLS = [
       properties: { channel: { type: 'string', description: 'discord | telegram | email | …' }, target: { type: 'string', description: 'channel id / chat id / email address' }, text: { type: 'string' }, subject: { type: 'string', description: 'email subject (email only)' } },
       additionalProperties: false },
     argv: (a) => ['send', a.channel, a.target, a.text, ...(a.subject ? ['--subject', a.subject] : [])] },
-  { name: 'asmltr_announce', description: `Post a non-coercive announcement other ${NAME} sessions see on their next turn (they decide what to do with it).`,
+  { name: 'asmltr_announce', deny: 'send', description: `Post a non-coercive announcement other ${NAME} sessions see on their next turn (they decide what to do with it).`,
     inputSchema: { type: 'object', required: ['text'],
       properties: { text: { type: 'string' }, to: { type: 'string', description: 'optional target scope' }, urgent: { type: 'boolean' } },
       additionalProperties: false },

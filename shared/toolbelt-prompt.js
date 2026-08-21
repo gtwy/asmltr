@@ -34,8 +34,10 @@ function buildToolbeltPrompt({
       'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here. ' +
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n';
   }
-  s += '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists pending notes.\n' +
-    'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
+  if (!d.send) {
+    s += '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists pending notes.\n';
+  }
+  s += 'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
   if (meshSteer) {
     s += '\n• `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]` — push guidance ' +
       'directly into ANOTHER session\'s LIVE turn. This is fundamentally different from `announce`: **announce** ' +
@@ -54,7 +56,9 @@ function buildToolbeltPrompt({
       'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). ' + how +
       '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
       '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
-      '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n';
+      + (d.siloWrite
+        ? '• `asmltr silo get <path>` (read-only this turn; no put/mkdir/rm). Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n'
+        : '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n');
     if (bypassModeration) {
       s += 'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the engine session, recover prior chat from those files (`asmltr silo get memory/transcripts/…`).\n';
     } else {

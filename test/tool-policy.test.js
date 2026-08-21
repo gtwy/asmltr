@@ -21,7 +21,7 @@ test('public discord denies shell/streams/send/silo', () => {
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
   assert.equal(p.restricted, true);
-  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: true });
+  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true });
 });
 
 test('allowlisted guild keeps silo, still denies shell/streams/send', () => {
@@ -30,7 +30,7 @@ test('allowlisted guild keeps silo, still denies shell/streams/send', () => {
     context: { scope_id: 'guild:guild-allow-1' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
-  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false });
+  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true });
 });
 
 test('discord DM + bypass_moderation denies nothing', () => {
@@ -39,7 +39,7 @@ test('discord DM + bypass_moderation denies nothing', () => {
     context: { scope_id: 'dm:someone' },
   }, { bypass_moderation: true });
   assert.equal(p.restricted, false);
-  assert.deepEqual(p.deny, { shell: false, streams: false, send: false, silo: false });
+  assert.deepEqual(p.deny, { shell: false, streams: false, send: false, silo: false, write: false, siloWrite: false });
 });
 
 test('discord DM without bypass is restricted', () => {
@@ -56,7 +56,7 @@ test('email and mcp deny nothing', () => {
   for (const ch of ['email', 'mcp', 'core', 'assistant-web']) {
     const p = policyFor({ channel: ch, public: false }, { bypass_moderation: false });
     assert.equal(p.restricted, false, ch);
-    assert.deepEqual(p.deny, { shell: false, streams: false, send: false, silo: false }, ch);
+    assert.deepEqual(p.deny, { shell: false, streams: false, send: false, silo: false, write: false, siloWrite: false }, ch);
   }
 });
 
@@ -70,6 +70,7 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
   });
   assert.equal(text.includes('asmltr send'), false);
   assert.equal(text.includes('asmltr streams'), false);
+  assert.equal(text.includes('asmltr announce'), false);
   assert.equal(text.includes('SELF SILO'), false);
   assert.equal(text.includes('asmltr silo'), false);
   assert.equal(/use the Bash tool/.test(text), false);
@@ -78,7 +79,7 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
 
 test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
   const text = buildToolbeltPrompt({
-    deny: { shell: true, streams: true, send: true, silo: false },
+    deny: { shell: true, streams: true, send: true, silo: false, siloWrite: true },
     selfSiloDir: '/tmp/self',
   });
   assert.ok(text.includes('SELF SILO'));
@@ -86,9 +87,11 @@ test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
   assert.equal(text.includes('use the Bash tool'), false);
   assert.equal(text.includes('asmltr send'), false);
   assert.equal(text.includes('asmltr streams'), false);
+  assert.equal(text.includes('asmltr announce'), false);
+  assert.equal(text.includes('asmltr silo put'), false);
 });
 
 test('denyToolsEnv lists denied kinds', () => {
-  assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: true }), 'shell,streams,send,silo');
-  assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: false }), 'shell,streams,send');
+  assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true }), 'shell,streams,send,silo,write,siloWrite');
+  assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true }), 'shell,streams,send,write,siloWrite');
 });

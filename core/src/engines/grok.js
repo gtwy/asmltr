@@ -378,10 +378,17 @@ function buildArgs(opts) {
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
+  const disallowed = [];
   if (opts.denyShell) {
-    args.push('--disallowed-tools', 'bash,shell,run_terminal_cmd');
+    disallowed.push('bash', 'shell', 'run_terminal_cmd');
     args.push('--deny', 'Bash');
   }
+  if (opts.denyWrite) {
+    disallowed.push('search_replace');
+    args.push('--deny', 'Edit');
+    args.push('--deny', 'Write');
+  }
+  if (disallowed.length) args.push('--disallowed-tools', disallowed.join(','));
   args.push('--effort', classified.effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
@@ -607,7 +614,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const deny = denyTools || {};
   const denyEnv = denyToolsEnv(deny);
   const childEnv = launchEnv(Object.assign({}, process.env, denyEnv ? { ASMLTR_DENY_TOOLS: denyEnv } : {}));
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell });
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };

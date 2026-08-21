@@ -312,6 +312,7 @@ async function cmdWho(rest) {
   }
 }
 async function cmdAnnounce(rest) {
+  exitIfDenied('announce');
   // asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]
   // Parse flags out of the args so the remaining words are the announcement text.
   const opts = { target: '*', priority: 'normal', from: ACTOR, ttl: null };
@@ -705,6 +706,7 @@ async function cmdSilo(rest, f) {
   const silo = require('../shared/silo');
   const identity = require('../shared/identity');
   const verb = rest[0] || 'overview';
+  if (['put', 'mkdir', 'rm', 'mv', 'new', 'create'].includes(verb)) exitIfDenied('siloWrite');
   const pos = rest.slice(1).filter((a) => !a.startsWith('--')); // positional args (flags stripped)
   const has = (name) => rest.includes('--' + name);            // boolean-flag presence
 

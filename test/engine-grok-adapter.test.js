@@ -95,6 +95,25 @@ test('buildArgs denyShell adds --disallowed-tools bash,shell,run_terminal_cmd an
   assert.equal(args[d + 1], 'Bash');
 });
 
+test('buildArgs denyWrite adds search_replace and --deny Edit/Write, keeps always-approve', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyWrite: true });
+  assert.ok(args.includes('--always-approve'));
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.ok(args[i + 1].includes('search_replace'));
+  const denies = [];
+  for (let n = 0; n < args.length; n++) if (args[n] === '--deny') denies.push(args[n + 1]);
+  assert.ok(denies.includes('Edit'));
+  assert.ok(denies.includes('Write'));
+});
+
+test('unrestricted buildArgs has no write/edit deny', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.equal(args.includes('--disallowed-tools'), false);
+  assert.equal(args.includes('--deny'), false);
+  assert.ok(args.includes('--always-approve'));
+});
+
 test('buildArgs without denyShell does not pass --disallowed-tools', () => {
   const args = grok.buildArgs({ prompt: 'hello' });
   assert.equal(args.includes('--disallowed-tools'), false);

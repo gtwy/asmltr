@@ -54,17 +54,19 @@ function isRestricted(envelope, resolved) {
 }
 
 function policyFor(envelope, resolved, allow) {
-  const deny = { shell: false, streams: false, send: false, silo: false };
+  const deny = { shell: false, streams: false, send: false, silo: false, write: false, siloWrite: false };
   if (!isRestricted(envelope, resolved)) return { deny, restricted: false };
   deny.shell = true;
   deny.streams = true;
   deny.send = true;
+  deny.write = true;
+  deny.siloWrite = true;
   deny.silo = !siloAllowlisted(envelope, allow);
   return { deny, restricted: true };
 }
 
 function denyToolsEnv(deny) {
-  return ['shell', 'streams', 'send', 'silo'].filter((k) => deny && deny[k]).join(',');
+  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite'].filter((k) => deny && deny[k]).join(',');
 }
 
 function parseDenyEnv(raw) {
@@ -74,13 +76,16 @@ function parseDenyEnv(raw) {
     streams: set.has('streams'),
     send: set.has('send'),
     silo: set.has('silo'),
+    write: set.has('write'),
+    siloWrite: set.has('siloWrite'),
   };
 }
 
 function exitIfDenied(kind) {
   const d = parseDenyEnv(process.env.ASMLTR_DENY_TOOLS);
-  if (d[kind]) {
-    console.error('denied: ' + kind);
+  const mapped = kind === 'announce' ? 'send' : kind;
+  if (d[mapped] || d[kind]) {
+    console.error('denied: ' + mapped);
     process.exit(2);
   }
 }

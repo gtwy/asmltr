@@ -31,3 +31,15 @@ test('asmltr silo overview refuses when silo denied', () => {
   assert.notEqual(r.status, 0);
   assert.match(String(r.stderr || r.stdout), /denied: silo/);
 });
+
+test('asmltr announce refuses when send denied (send-class)', () => {
+  const r = run(['announce', 'hi'], 'send');
+  assert.notEqual(r.status, 0);
+  assert.match(String(r.stderr || r.stdout), /denied: send/);
+});
+
+test('asmltr silo put refuses when siloWrite denied even if silo allowed', () => {
+  const r = run(['silo', 'put', 'x', '/etc/hosts'], 'siloWrite');
+  assert.notEqual(r.status, 0);
+  assert.match(String(r.stderr || r.stdout), /denied: siloWrite/);
+});
