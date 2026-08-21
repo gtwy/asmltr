@@ -19,6 +19,7 @@ function buildToolbeltPrompt({
     streams: !!deny.streams,
     send: !!deny.send,
     silo: !!deny.silo,
+    siloWrite: !!deny.siloWrite,
   };
   const via = d.shell
     ? 'Key cross-session ops (Bash is off this turn — use MCP tools where listed):\n'
@@ -55,10 +56,10 @@ function buildToolbeltPrompt({
       'When you produce an artifact (a document, image, app, export) and the task doesn\'t specify where, create it UNDER the Self silo — ' +
       'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). ' + how +
       '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
-      '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
-      + (d.siloWrite
-        ? '• `asmltr silo get <path>` (read-only this turn; no put/mkdir/rm). Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n'
-        : '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n');
+      '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n';
+    s += d.siloWrite
+      ? '• `asmltr silo get <path>` (read-only this turn; no put/mkdir/rm). Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n'
+      : '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts).\n';
     if (bypassModeration) {
       s += 'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the engine session, recover prior chat from those files (`asmltr silo get memory/transcripts/…`).\n';
     } else {

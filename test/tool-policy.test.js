@@ -89,6 +89,20 @@ test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
   assert.equal(text.includes('asmltr streams'), false);
   assert.equal(text.includes('asmltr announce'), false);
   assert.equal(text.includes('asmltr silo put'), false);
+  assert.equal(text.includes('NaN'), false);
+  assert.ok(text.includes('asmltr silo get'));
+});
+
+test('silo prompt has no NaN; put only when siloWrite is allowed', () => {
+  const owner = buildToolbeltPrompt({ deny: {}, selfSiloDir: '/tmp/self', bypassModeration: true });
+  assert.equal(owner.includes('NaN'), false);
+  assert.ok(owner.includes('asmltr silo put'));
+  const ro = buildToolbeltPrompt({
+    deny: { siloWrite: true },
+    selfSiloDir: '/tmp/self',
+  });
+  assert.equal(ro.includes('NaN'), false);
+  assert.equal(ro.includes('asmltr silo put'), false);
 });
 
 test('denyToolsEnv lists denied kinds', () => {
