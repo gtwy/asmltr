@@ -123,6 +123,11 @@ test('streaming-json parser maps text / thought / tool_call / usage / sessionId 
   assert.equal(state.text, 'Hipong');
   assert.equal(grok.applyEvent({ type: 'thought', text: 'hmm' }, state).kind, 'thinking-delta');
   assert.equal(state.thinking, 'hmm');
+  const rsn = grok.newState();
+  assert.equal(grok.applyEvent({ type: 'reasoning', data: 'plan it' }, rsn).kind, 'thinking-delta');
+  assert.equal(rsn.thinking, 'plan it');
+  assert.equal(grok.extractText({ type: 'reasoning', text: 'nope' }), '');
+  assert.equal(grok.extractText({ type: 'thought_summary', text: 'nope' }), '');
   assert.equal(grok.applyEvent({ type: 'tool_call', name: 'shell', input: { cmd: 'ls' } }, state).kind, 'tool');
   assert.equal(state.tools[0].name, 'shell');
   assert.equal(grok.applyEvent({ type: 'usage', usage: { input_tokens: 10, output_tokens: 4 } }, state).kind, 'usage');

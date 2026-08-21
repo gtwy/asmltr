@@ -117,6 +117,44 @@ function discordToolLine(streamTools, tool) {
   return `-# ${humanToolChip(tool)}`;
 }
 
+/**
+ * Email/MCP must never send Discord thought chips or grok thought preambles.
+ * Discord keeps 💭 via discordThoughtLine. This is DISPLAY for quiet surfaces.
+ */
+function stripThoughtChrome(text) {
+  let s = String(text || '');
+  s = s.split('\n').filter((l) => {
+    const t = l.trim();
+    if (!t) return true;
+    if (/^💭/.test(t)) return false;
+    if (/^-#(\s|$)/.test(t)) return false;
+    return true;
+  }).join('\n').trim();
+  const cut = s.match(/I['’]ll answer the thread directly\.?/i);
+  if (cut) {
+    const after = s.slice(cut.index + cut[0].length).replace(/^\s+/, '');
+    if (after.length > 20) s = after;
+  }
+  const paras = s.split(/\n\n+/);
+  if (paras.length >= 2) {
+    const head = paras[0];
+    if (looksLikePromptLeak(head)
+      || /not an ops-desk alert/i.test(head)
+      || /^(the user|james) asked\b/i.test(head)) {
+      s = paras.slice(1).join('\n\n').trim();
+    }
+  }
+  return s;
+}
+
+/** Last narration block, with thought chrome removed. Email/MCP reply body. */
+function quietReplyFromResult(result) {
+  const segs = ((result && result.segments) || [])
+    .map((x) => String(x || '').trim()).filter(Boolean);
+  const text = segs.length ? segs[segs.length - 1] : String((result && result.text) || '');
+  return stripThoughtChrome(text);
+}
+
 /** Sanitized Discord thought chip, or '' to drop. Never raw text. */
 function discordThoughtLine(text, hints) {
   const raw = String(text || '').trim();
@@ -132,5 +170,6 @@ function discordThoughtLine(text, hints) {
 module.exports = {
   looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, thoughtBudget,
+  stripThoughtChrome, quietReplyFromResult,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, THOUGHT_CLAMP,
 };

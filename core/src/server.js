@@ -81,6 +81,7 @@ const _vaultTimer = setInterval(refreshVaultLocked, 30000); if (_vaultTimer.unre
 const { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, generateRecordingSummary, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
+const { quietReplyFromResult } = require('../../shared/step-public'); // email/mcp: no thought chips in the body
 
 const PORT = Number(process.env.ASMLTR_CORE_PORT || 3023);
 const HOST = '127.0.0.1';
@@ -554,7 +555,7 @@ async function handle(envelope, opts = {}) {
       // Reset the token buffer so leftover flush cannot replay the draft.
       // Always wire tools so collector/dashboard get 🔧 even when the
       // connector is not streaming (email, or Discord with stream_steps off).
-      // Thinking is live-conversation only — never record or stream it on email.
+      // Thinking is live-conversation only — never record or stream it on email or MCP.
       onTool: (t) => {
         _streamRaw = '';
         _emitted = 0;
@@ -568,7 +569,8 @@ async function handle(envelope, opts = {}) {
         try { if (opts.onToolCall) opts.onToolCall(t && typeof t === 'object' ? t : { name: t }); } catch (_) {}
       },
       onThinking: (t) => {
-        if (e.channel === 'email') return;
+        const ch = String(e.channel || '').toLowerCase();
+        if (ch === 'email' || ch === 'mcp') return;
         try {
           record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core',
             event_type: 'thinking', payload: { text: truncate(t, 2000) } });
@@ -697,6 +699,17 @@ async function handle(envelope, opts = {}) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'empty-no-reply' } });
     return [];
+  }
+
+  const quietCh = String(e.channel || '').toLowerCase();
+  if (quietCh === 'email' || quietCh === 'mcp') {
+    result.text = quietReplyFromResult(result);
+    result.segments = [];
+    if (!(result.text || '').trim()) {
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+        identity: resolved.user_key, source: 'core', payload: { action: 'empty-no-reply', via: 'quiet-thought-strip' } });
+      return [];
+    }
   }
 
   const actions = [env.reply(result.text, { segments: result.segments || [] })];

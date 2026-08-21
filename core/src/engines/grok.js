@@ -452,10 +452,17 @@ function closeThinking(state) {
   return cur;
 }
 
+function isThoughtType(t) {
+  const s = String(t || '').toLowerCase();
+  return s === 'thought' || s === 'thinking' || s === 'reasoning'
+    || s === 'agent_thought' || s === 'agent_thought_chunk'
+    || s === 'thought_summary' || s === 'redacted_thinking';
+}
+
 function extractText(obj) {
   if (!obj || typeof obj !== 'object') return '';
   const t = obj.type;
-  if (t === 'thought' || t === 'thinking' || t === 'error') return '';
+  if (isThoughtType(t) || t === 'error') return '';
   // Never trim data/delta/text — official grok CLI puts the leading space on the next token.
   if (typeof obj.delta === 'string') return obj.delta;
   if (typeof obj.text === 'string') return obj.text;
@@ -504,7 +511,7 @@ function applyEvent(ev, state) {
   if (usage) { state.usage.tokens_in = usage.tokens_in || state.usage.tokens_in; state.usage.tokens_out = usage.tokens_out || state.usage.tokens_out; }
 
   const t = ev.type || ev.event || '';
-  if (t === 'thought' || t === 'thinking') {
+  if (isThoughtType(t)) {
     const th = ev.text || ev.thought || ev.content || (typeof ev.data === 'string' ? ev.data : '') || '';
     if (th) { state.thinking = (state.thinking || '') + String(th); return { kind: 'thinking-delta' }; }
     return { kind: 'ignore' };
@@ -663,7 +670,7 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, toolNameOf,
+  extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, toolNameOf, isThoughtType,
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,

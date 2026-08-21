@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, thoughtBudget,
+  stripThoughtChrome, quietReplyFromResult,
 } = require('../shared/step-public');
 
 test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
@@ -57,6 +58,20 @@ test('human chips: start only, no paths or ACP type names', () => {
   assert.equal(discordToolLine(true, { name: 'Read' }), '-# 🔧 `Read`');
   assert.equal(discordToolLine(true, { name: 'tool_call' }), '-# 🔧 `Working`');
   assert.ok(!discordToolLine(false, { name: 'Read', input: { path: '/home/someone/x' } }).includes('/home'));
+});
+
+test('stripThoughtChrome: email/mcp drop chips and thought preamble, keep the answer', () => {
+  const leaked = "James asked how the TECHDIRECT.AI negotiation is going. That is not an ops-desk alert — I'll answer the thread directly.You did well on the first two replies.";
+  const out = stripThoughtChrome(leaked);
+  assert.equal(out.startsWith('You did well'), true, out.slice(0, 80));
+  assert.equal(out.includes('ops-desk'), false);
+  assert.equal(stripThoughtChrome('-# Working\n-# 💭 Checking mail\nThe SPF is fixed.'), 'The SPF is fixed.');
+  assert.equal(stripThoughtChrome('You did well on the first two replies.'), 'You did well on the first two replies.');
+  const q = quietReplyFromResult({
+    segments: ['James asked how the deal is going.', '**What worked**\nYou did not take $1,000.'],
+    text: 'glued should not win',
+  });
+  assert.equal(q, '**What worked**\nYou did not take $1,000.');
 });
 
 test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 chip', () => {
