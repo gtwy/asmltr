@@ -1,7 +1,8 @@
 'use strict';
 /**
- * V31: per-turn tool policy. Restricted Discord cannot shell/streams/send.
- * Silo only if the guild/channel is in the host allowlist (never git).
+ * V31: per-turn tool policy. Restricted Discord cannot shell/streams/send/cwd-write.
+ * Silo read/write is not part of that deny (James 21 Aug 2026). Do not fold
+ * silo denies into a V31 PR — privacy.md is the silo safeguard.
  */
 const fs = require('fs');
 const path = require('path');
@@ -60,8 +61,6 @@ function policyFor(envelope, resolved, allow) {
   deny.streams = true;
   deny.send = true;
   deny.write = true;
-  deny.siloWrite = true;
-  deny.silo = !siloAllowlisted(envelope, allow);
   return { deny, restricted: true };
 }
 

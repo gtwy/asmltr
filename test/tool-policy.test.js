@@ -14,23 +14,23 @@ fs.writeFileSync(allowFile, JSON.stringify({
 }));
 process.env.ASMLTR_TOOL_POLICY_FILE = allowFile;
 
-test('public discord denies shell/streams/send/silo', () => {
+test('public discord denies shell/streams/send/write, not silo', () => {
   const p = policyFor({
     channel: 'discord', public: true,
     context: { scope_id: 'guild:other-guild' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
   assert.equal(p.restricted, true);
-  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true });
+  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: false });
 });
 
-test('allowlisted guild keeps silo, still denies shell/streams/send', () => {
+test('allowlisted guild same denies; silo still on', () => {
   const p = policyFor({
     channel: 'discord', public: true,
     context: { scope_id: 'guild:guild-allow-1' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
-  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true });
+  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: false });
 });
 
 test('discord DM + bypass_moderation denies nothing', () => {
