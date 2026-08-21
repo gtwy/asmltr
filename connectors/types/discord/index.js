@@ -7,11 +7,10 @@
  * chunking, and the /send-message HTTP endpoint (message-discord depends on it).
  * The LLM turn goes through asmltr-core: the rich Discord context + server-aware
  * authorization rides as `system_prompt_extra`; content.text is the clean user
- * message (so moderation + identity work correctly). Per-guild continuity comes
- * from the core's session resume (conversation_key), replacing the old per-server
- * session-ids file.
+ * message (so moderation + identity work correctly). Continuity is per-channel
+ * (conversation_key), not per-guild. DMs are per user.
  *
- * conversation_key = discord:<instanceId>:guild:<guildId>  (DMs: :dm:<userId>)
+ * conversation_key = discord:<instanceId>:channel:<channelId>  (DMs: :dm:<userId>)
  */
 
 const fs = require('fs');

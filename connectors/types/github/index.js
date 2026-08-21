@@ -50,7 +50,7 @@ const meta = {
         properties: { owner: { type: 'string' }, repo: { type: 'string' } }, required: ['owner', 'repo'] } },
       pat_bws_key: { type: 'string', title: 'PAT secret key', description: 'secret key name for this account\'s GitHub PAT, e.g. my_github_pat' },
       mention: { type: 'string', title: 'Trigger token', description: 'Literal token that wakes the assistant in an issue/comment. Blank → defaults to *<assistant-name> (e.g. @bot).' },
-      poll_interval_ms: { type: 'integer', title: 'Poll interval (ms)', default: 20000 },
+      poll_interval_ms: { type: 'integer', title: 'Poll interval (ms)', default: 120000 },
       workspace_dir: { type: 'string', title: 'Local clone workspace', default: '', description: 'Where repos are shallow-cloned. Empty = ~/.asmltr/github-repos' },
       clone_repos: { type: 'boolean', title: 'Clone repos for code-awareness', default: true },
       stream: { type: 'boolean', title: 'Working placeholder, then final answer (never thinking/tools)', default: true },
@@ -93,7 +93,7 @@ function start(ctx) {
   const doStream = cfg.stream !== false && !dryRun;
   const doClone = cfg.clone_repos !== false;
   const workspace = cfg.workspace_dir || process.env.ASMLTR_GITHUB_WORKSPACE || path.join(require('os').homedir(), '.asmltr', 'github-repos');
-  const pollMs = cfg.poll_interval_ms || 20000;
+  const pollMs = cfg.poll_interval_ms || 120000;
 
   const statePath = path.join(__dirname, '..', '..', 'manager', 'data', `github-state-${ctx.instanceId}.json`);
   let state = { seen: [], mine: [], since: null };
