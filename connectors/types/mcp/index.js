@@ -32,6 +32,7 @@ const fs = require('fs');
 const path = require('path');
 const NAME = process.env.ASSISTANT_NAME || 'the assistant'; // shown in the MCP tool description
 const { corsAllowOrigin, authVerifyUrl, sessionOkFromVerify, approveDecision } = require('./approve-gate');
+const { canAskOracle, lookupClientIdentity, identityForApprove } = require('./client-identity');
 
 const meta = {
   type: 'mcp',
@@ -73,7 +74,11 @@ function loadClientIdentities() {
   return _clientIdentities;
 }
 function clientToIdentity(clientId) {
-  return loadClientIdentities().get(clientId) || { userId: 'unknown', username: 'unknown' };
+  return lookupClientIdentity(loadClientIdentities(), clientId);
+}
+function rememberIdentity(clientId, ident) {
+  if (!clientId || !ident) return;
+  loadClientIdentities().set(clientId, ident);
 }
 
 const ASK_ORACLE_TOOL = {
@@ -130,6 +135,7 @@ async function start(ctx) {
    * query proxy + hardcoded prompt. Returns the reply text.
    */
   async function askOracle(question, clientIdentity) {
+    if (!canAskOracle(clientIdentity)) throw new Error('client not mapped');
     const convKey = `mcp:${ctx.instanceId}:user:${clientIdentity.userId}`;
     ctx.emit({
       event_type: 'inbound',
@@ -258,8 +264,19 @@ async function start(ctx) {
             res.end(JSON.stringify({ error: decision.error, error_description: decision.error_description }));
             return;
           }
-          // client_id → userId mapping preserved verbatim from the original
-          const { userId, username } = clientToIdentity(params.client_id);
+          const client = oauthServer.getClient(params.client_id);
+          const ident = identityForApprove(
+            params.client_id,
+            clientToIdentity(params.client_id),
+            client && client.client_name,
+          );
+          if (!ident) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'invalid_request', error_description: 'client_id required' }));
+            return;
+          }
+          rememberIdentity(params.client_id, ident);
+          const { userId, username } = ident;
           const code = oauthServer.createAuthorizationCode({
             clientId: params.client_id,
             redirectUri: params.redirect_uri,
