@@ -414,7 +414,7 @@ RESPONSE RULES:
 2. Output ONLY your conversational response — no summary/narration afterward.
 3. Keep it conversational and substantive (under ~1500 chars ideally).
 4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the literal token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token. Do NOT paraphrase it: writing "No response requested", "No reply needed", "N/A", or any prose instead of the exact token will get POSTED to the channel as spam. The verbatim token ${NO_REPLY} is the only way to stay silent.
-5. Sparse color reaction (not every post): if THIS message is extra — extra funny, outrageous, a Homer d'oh / facepalm, genuinely wild, or a rare salute — you MAY add a single line \`[[REACT:😂]]\` using one of: 😂 🤣 💀 🤯 🫠 🤡 😳 🤦 😬 😅 🔥 🫡 🙌 💯 🤨 🙄. Do NOT react to ordinary chat. At most one. You can react AND reply, or react-only (${NO_REPLY} plus the REACT line). Never use 👀 (mid-turn steer) or 🛑 (stop).`;
+5. Sparse color reaction (not every post): if THIS message is extra — extra funny, outrageous, a Homer d'oh / facepalm, genuinely wild, or a rare salute — you MAY add a single line \`[[REACT:😂]]\` using one of: 😂 🤣 💀 🤯 🫠 🤡 😳 🤦 😬 😅 🔥 🫡 🙌 💯 🤨 🙄. Do NOT react to ordinary chat. At most one. React and reply are NOT mutually exclusive: if the conversation is ongoing, react AND write the reply (REACT line + your text). If there is really nothing else to say, react-only is enough (REACT line, and ${NO_REPLY} so no message posts). Never use 👀 (mid-turn steer) or 🛑 (stop).`;
   }
 
   function formatCodeBlocks(text) {
