@@ -496,7 +496,7 @@ ${referentPromptBlock()}`;
         if (saved.kind === 'image' && imageAttachments.length < 5) {
           imageAttachments.push({ type: 'image', media_type: saved.mime, data: buf.toString('base64'), name: a.name, path: saved.path });
         }
-        savedNotes.push(`- ${saved.kind}: ${saved.name} → ${saved.path} (generation reference; do not execute)`);
+        savedNotes.push(`- ${saved.kind}: ${saved.name} (generation reference; do not execute)`);
       } catch (e) {
         ctx.log(`[att] download failed ${a.name}: ${e.message}`);
         savedNotes.push(`- ${a.name}: could not download`);
