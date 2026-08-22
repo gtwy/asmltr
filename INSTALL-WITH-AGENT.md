@@ -59,7 +59,7 @@ cp .env.example .env
 Edit `.env` and set:
 - `ASSISTANT_NAME` — from step 0.
 - The secret keys for the chosen channels/features. **⛏ ASK USER** for each needed value:
-  - `OPENAI_API_KEY` — required (moderation; Discord voice STT).
+  - `OPENAI_API_KEY` — required for moderation and for picture-intent classify (gpt-5-nano YES/NO before still gen). If unset, moderation fails-secure on non-owner inbound; picture-intent classify logs once and stays OFF (image_gen tools still work).
   - `ELEVENLABS_API_KEY` — only if Discord voice mode is wanted.
   - `DISCORD_BOT_TOKEN` / `TELEGRAM_BOT_TOKEN` — for those channels.
   - For GitHub: a PAT env var, e.g. `MY_GITHUB_PAT` (you'll reference its lowercase name as the connector's `pat_bws_key`).

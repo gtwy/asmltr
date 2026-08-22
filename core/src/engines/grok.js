@@ -778,14 +778,19 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   let classifyUsage = null;
   const skipImageClassify = !!deny.image || isEmailChannel(channel) || isMcpChannel(channel) || imageGenClassifyOff();
   if (!skipImageClassify && mentionsImageKind(scored)) {
+    // Picture-intent: gpt-5-nano on the moderation OpenAI key. If that key is
+    // missing, classifyRaw logs once and returns skipped — we do NOT fall back
+    // to a grok complete() spawn. image_gen still works (tool path).
     try {
       const moderation = require('../moderation');
       const r = await moderation.classifyRaw(
         'You are ONLY a classifier. Reply YES or NO. No extra text.',
         buildImageGenClassifyPrompt(scored)
       );
-      classifyUsage = r.usage || null;
-      imageGen = parseImageGenVerdict(r.text);
+      if (r && !r.skipped) {
+        classifyUsage = r.usage || null;
+        imageGen = parseImageGenVerdict(r.text);
+      }
     } catch (_) { imageGen = false; }
     classified = raiseForImageGen(classified, { imageGen, channel });
   }

@@ -133,14 +133,45 @@ async function providerRaw(systemPrompt, userPrompt, jsonMode) {
     usage: { tokens_in: u.prompt_tokens || 0, tokens_out: u.completion_tokens || 0 } };
 }
 
-// Run the classifier; returns the parsed assessment. Deterministic JSON on OpenAI + a single
-// retry so an occasional malformed reply no longer fail-secure-blocks a legitimate request.
 /**
- * Lightweight YES/NO (or short text) classify on the moderation key/model.
+ * Picture-intent classify (gpt-5-nano YES/NO) uses the SAME secret as
+ * moderation: `openai_api_key` unless ASMLTR_MODERATION_KEY points elsewhere.
+ *
+ * SETUP (for an LLM installing asmltr):
+ *   1. Put `openai_api_key` in .env / secrets / the TRUST vault.
+ *   2. If that key is missing, picture-intent classify is OFF — log once, do
+ *      not call OpenAI, do not spawn grok to classify, do not crash.
+ *   3. image_gen / image_edit still work. Discord will not post the Generating
+ *      chip until those tools fire. moderate() is a separate allow/block call.
+ */
+function pictureIntentOffLog(keyName) {
+  return '[asmltr] picture-intent classify OFF: missing ' + keyName
+    + ' (same secret as moderation / ASMLTR_MODERATION_KEY). '
+    + 'Set openai_api_key to enable gpt-5-nano YES/NO before still generation. '
+    + 'image_gen tools still work. Discord Generating-chip waits until image_gen fires. '
+    + 'Not a crash — this install has no moderation LLM key.';
+}
+
+let _loggedPictureIntentOff = false;
+async function moderationKeyPresent() {
+  const key = await getModKey();
+  return !!(key && String(key).trim());
+}
+
+/**
+ * Lightweight YES/NO classify on the moderation key/model.
  * Fail-closed at the caller. Does not block, does not alert, does not JSON-mode.
- * Not part of moderate() so connectors do not have to change.
+ * Do not fold intent into moderate() — every inbound path would change.
+ * No key → skipped:true (picture-intent using OpenAI is off).
  */
 async function classifyRaw(systemPrompt, userPrompt, { timeoutMs = 15000 } = {}) {
+  if (!(await moderationKeyPresent())) {
+    if (!_loggedPictureIntentOff) {
+      _loggedPictureIntentOff = true;
+      try { console.error(pictureIntentOffLog(MOD_KEY_NAME)); } catch (_) {}
+    }
+    return { text: '', skipped: true, usage: null };
+  }
   const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : 15000;
   let timer = null;
   try {
@@ -151,6 +182,7 @@ async function classifyRaw(systemPrompt, userPrompt, { timeoutMs = 15000 } = {})
     ]);
     return {
       text: r.text,
+      skipped: false,
       usage: { tokens_in: r.usage.tokens_in, tokens_out: r.usage.tokens_out, model: MOD_MODEL, provider: MOD_PROVIDER },
     };
   } finally {
@@ -158,6 +190,8 @@ async function classifyRaw(systemPrompt, userPrompt, { timeoutMs = 15000 } = {})
   }
 }
 
+// Run the classifier; returns the parsed assessment. Deterministic JSON on OpenAI + a single
+// retry so an occasional malformed reply no longer fail-secure-blocks a legitimate request.
 async function runModeration(systemPrompt, userPrompt) {
   let jsonMode = MOD_PROVIDER !== 'anthropic';
   const usage = { tokens_in: 0, tokens_out: 0 }; // accumulate across retries — every call still costs
@@ -331,4 +365,7 @@ async function notifyBlock(resolved, userMessage, moderation, platform) {
   adminAlert(body);
 }
 
-module.exports = { moderate, notifyBlock, logModerationEvent, buildOpenAIParams, parseReasoningEffort, classifyRaw };
+module.exports = {
+  moderate, notifyBlock, logModerationEvent, buildOpenAIParams, parseReasoningEffort,
+  classifyRaw, pictureIntentOffLog, moderationKeyPresent,
+};

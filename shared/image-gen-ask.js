@@ -4,7 +4,8 @@
  * moderation key (gpt-5-nano). Discord Generating-chip and grok xhigh consume
  * the verdict. Not a tool allow. Intent is NOT folded into moderate() today.
  *
- * Gate is the kind list only (picture/photo/image/…). No verb+kind regex.
+ * If openai_api_key is missing, classifyRaw skips (logged once). Do not fall
+ * back to grok complete(). Gate is the kind list only (picture/photo/image/…).
  */
 
 const KIND_RE = /\b(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?)\b/i;
