@@ -43,11 +43,31 @@ function forumTitle(title, body) {
   return s || 'post';
 }
 
-function isForumChannel(ch) {
+function isThreadChannel(ch) {
   if (!ch) return false;
-  if (typeof ch.isThread === 'function' && ch.isThread()) return false;
+  if (typeof ch.isThread === 'function') return !!ch.isThread();
   const t = ch.type;
-  return t === 15 || t === 'GUILD_FORUM' || String(t) === '15';
+  return t === 10 || t === 11 || t === 12 || String(t) === '11';
+}
+
+function isForumChannel(ch) {
+  if (!ch || isThreadChannel(ch)) return false;
+  const t = ch.type;
+  return t === 15 || t === 16 || t === 'GUILD_FORUM' || t === 'GUILD_MEDIA'
+    || String(t) === '15' || String(t) === '16';
+}
+
+/** Guild text, announcement, forum, or media — places a same-guild post can land. */
+function isPostableGuildChannel(ch) {
+  if (!ch || isThreadChannel(ch)) return false;
+  const t = ch.type;
+  return t === 0 || t === 5 || t === 15 || t === 16
+    || t === 'GUILD_TEXT' || t === 'GUILD_ANNOUNCEMENT' || t === 'GUILD_FORUM' || t === 'GUILD_MEDIA';
+}
+
+/** Threads live on text, announcement, forum, and media parents — not only forums. */
+function shouldFetchThreads(ch) {
+  return isPostableGuildChannel(ch);
 }
 
 function destGuildId(ch) {
@@ -98,5 +118,6 @@ function rankTargets(query, rows) {
 
 module.exports = {
   prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId,
+  isThreadChannel, isPostableGuildChannel, shouldFetchThreads,
   looksLikeSnowflake, normName, matchScore, rankTargets,
 };

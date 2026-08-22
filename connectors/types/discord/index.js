@@ -1284,32 +1284,7 @@ ${referentPromptBlock()}`;
         const q = String(query || tg || '').trim();
         if (!source_guild) return res.status(400).json({ ok: false, error: 'source guild required' });
         if (!q) return res.status(400).json({ ok: false, error: 'query required' });
-        const guild = await client.guilds.fetch(String(source_guild));
-        await guild.channels.fetch();
-        const rows = [];
-        for (const ch of guild.channels.cache.values()) {
-          const t = ch.type;
-          if (t === 0 || t === 5) rows.push({ id: String(ch.id), name: ch.name, kind: 'channel' });
-          if (t === 15 || gp.isForumChannel(ch)) {
-            rows.push({ id: String(ch.id), name: ch.name, kind: 'forum' });
-            try {
-              if (ch.threads && ch.threads.fetchActive) {
-                const active = await ch.threads.fetchActive();
-                for (const th of (active.threads || active).values()) {
-                  rows.push({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
-                }
-              }
-            } catch (_) {}
-            try {
-              if (ch.threads && ch.threads.fetchArchived) {
-                const arch = await ch.threads.fetchArchived({ limit: 100 });
-                for (const th of (arch.threads || arch).values()) {
-                  rows.push({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
-                }
-              }
-            } catch (_) {}
-          }
-        }
+        const rows = await listGuildPostTargets(client, source_guild, gp);
         return res.json({ ok: true, posted: false, matches: gp.rankTargets(q, rows) });
       }
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
@@ -1428,4 +1403,51 @@ ${referentPromptBlock()}`;
   };
 }
 
-module.exports = { meta, start };
+/** Name lookup for guild-post: text + announcement + forum + media, plus their threads. */
+async function listGuildPostTargets(client, sourceGuild, gp) {
+  const guild = await client.guilds.fetch(String(sourceGuild));
+  await guild.channels.fetch();
+  const rows = [];
+  const seen = new Set();
+  const add = (row) => {
+    const id = String((row && row.id) || '');
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    rows.push(row);
+  };
+  async function pullThreads(ch) {
+    if (!ch || !ch.threads) return;
+    try {
+      if (ch.threads.fetchActive) {
+        const active = await ch.threads.fetchActive();
+        for (const th of (active.threads || active).values()) {
+          add({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
+        }
+      }
+    } catch (_) {}
+    try {
+      if (ch.threads.fetchArchived) {
+        const arch = await ch.threads.fetchArchived({ limit: 100 });
+        for (const th of (arch.threads || arch).values()) {
+          add({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
+        }
+      }
+    } catch (_) {}
+  }
+  for (const ch of guild.channels.cache.values()) {
+    if (gp.isThreadChannel(ch)) {
+      add({
+        id: String(ch.id), name: ch.name, kind: 'thread',
+        parent: (ch.parent && ch.parent.name) || undefined,
+        parentId: ch.parentId ? String(ch.parentId) : undefined,
+      });
+      continue;
+    }
+    if (gp.isForumChannel(ch)) add({ id: String(ch.id), name: ch.name, kind: 'forum' });
+    else if (gp.isPostableGuildChannel(ch)) add({ id: String(ch.id), name: ch.name, kind: 'channel' });
+    if (gp.shouldFetchThreads(ch)) await pullThreads(ch);
+  }
+  return rows;
+}
+
+module.exports = { meta, start, listGuildPostTargets };

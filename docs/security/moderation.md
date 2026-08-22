@@ -115,6 +115,17 @@ So if you use the **anthropic** moderation provider, provide its key **without**
 
 (The `openai` provider has no such constraint — `OPENAI_API_KEY` in the env is fine.)
 
+### Picture-intent classify (stills, not moderation)
+
+A **separate** YES/NO call (`classifyRaw` in `core/src/moderation.js`) runs **before** still generation on Discord/Telegram. It is **not** folded into `moderate()` — inbound moderation is unchanged.
+
+- **Gate:** the user text mentions a kind-word (`picture` / `image` / `photo` / … — not bare `art`) **or** a still was attached this turn.
+- **Model:** `gpt-5-nano` on the **same** moderation OpenAI key. Text only — never still bytes, never `CHANNEL MEDIA` paths. If a still arrived, one notice line that a photo was attached.
+- **YES** → Discord/Telegram raise that turn to `xhigh` (web/email/MCP keep their own effort; email/MCP skip classify).
+- **Missing `openai_api_key`:** log once, classify stays OFF, `image_gen` tools still work.
+- **Kill switch:** `ASMLTR_IMAGE_GEN_CLASSIFY=off` (also `0` / `false` / `no`).
+- Who may actually **call** `image_gen` is `~/.asmltr/tool-policy.json` (`photoAllow` / `imageAllow`) — owner/bypass always can. See `shared/tool-policy.example.json`.
+
 ### Examples
 
 ```bash

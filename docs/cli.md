@@ -21,6 +21,7 @@ asmltr tail            live global event stream
 asmltr watch <key>     live stream for one session
 asmltr system          current system metrics
 asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
+asmltr guild-post <id-or-name> "<text>"  same Discord server only (Access 1–5 or owner)
 asmltr announce "<text>" [--to T]    post a cross-session announcement
 asmltr announcements                 list live announcements
 asmltr attach <key>    claim a channel session + resume it in tmux
@@ -195,6 +196,22 @@ asmltr send <channel> <target> --file <path> [--caption "<text>"]
 
 Posts to the connector manager's `/send`; prints `✓ sent …` with the delivery route
 on success, or the error on failure.
+
+Public Discord denies this verb even for the owner (no email / other servers). Same-server
+posting is `asmltr guild-post`.
+
+### `asmltr guild-post`
+
+Post in **this** Discord server only (Access card `default_tier` 1–5, or owner). A **name**
+looks up and does not post — confirm, then call again with the id. Normal channels post in
+the channel (not a thread). Forum: thread id comments; forum channel id starts a new post
+(`--title`). Never the same channel they asked from. Muted destinations still accept the
+post. Prefixed `Posting on behalf of <@asker>`. After a real post the ask channel gets
+`Post complete.`
+
+```
+asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>]
+```
 
 ### `asmltr announce`
 

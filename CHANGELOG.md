@@ -9,6 +9,8 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Example configs for ivy exceptions (no PII):** `shared/tool-policy.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.ivy.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_TOOL_POLICY_FILE` in `.env.example` / `env.ivy.example`.
+- **`asmltr guild-post` name lookup** also indexes threads on regular text/announcement channels (not only forums) and media channels.
 
 - **Chunked file uploads.** `POST /v2/upload/init`, `PUT /v2/upload/:id/:index` (raw
   `application/octet-stream`), `GET /v2/upload/:id`, `POST /v2/upload/:id/finish`, and

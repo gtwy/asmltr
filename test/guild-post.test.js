@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName } = require('../shared/guild-post');
+const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/guild-post');
 const { policyFor } = require('../shared/tool-policy');
 const fs = require('fs');
 const path = require('path');
@@ -32,8 +32,16 @@ test('sameGuild: this server only', () => {
 
 test('forum parent vs thread', () => {
   assert.equal(isForumChannel({ type: 15 }), true);
+  assert.equal(isForumChannel({ type: 16 }), true);
   assert.equal(isForumChannel({ type: 0, isThread: () => false }), false);
   assert.equal(isForumChannel({ type: 11, isThread: () => true }), false);
+  assert.equal(isThreadChannel({ type: 11, isThread: () => true }), true);
+  assert.equal(isPostableGuildChannel({ type: 0, isThread: () => false }), true);
+  assert.equal(isPostableGuildChannel({ type: 5, isThread: () => false }), true);
+  assert.equal(shouldFetchThreads({ type: 0, isThread: () => false }), true);
+  assert.equal(shouldFetchThreads({ type: 5, isThread: () => false }), true);
+  assert.equal(shouldFetchThreads({ type: 15 }), true);
+  assert.equal(shouldFetchThreads({ type: 11, isThread: () => true }), false);
   assert.equal(forumTitle('Steak 666', 'body'), 'Steak 666');
   assert.equal(forumTitle('', 'First line\nrest').length <= 100, true);
   assert.equal(destGuildId({ guildId: 'g1' }), 'g1');
@@ -78,6 +86,8 @@ test('discord /out handles guild_post and forum threads', () => {
   assert.match(src, /same_channel/);
   assert.match(src, /guild_resolve/);
   assert.match(src, /fetchArchived/);
+  assert.match(src, /listGuildPostTargets/);
+  assert.match(src, /shouldFetchThreads/);
   const postBlock = src.slice(src.indexOf("kind === 'guild_post'"), src.indexOf("kind === 'guild_post'") + 1200);
   assert.equal(postBlock.includes('channelEnabled'), false);
   assert.match(src, /Mute\/disable is inbound only/);

@@ -48,6 +48,11 @@ Resolution rules (from `deliver()` in `connectors/manager/server.js`):
     (surfaced to the agent as `supports_attachments_out`). Text sends work on any
     outbound-capable connector.
 
+!!! warning "Public Discord denies `asmltr send`"
+    Even the owner cannot `asmltr send` from a public Discord channel (no email, no Telegram, no
+    other Discord servers). Same-server posting is a separate verb: `asmltr guild-post` (Access
+    cards tier 1–5 or owner). See [Discord → Same-guild post](../connectors/discord.md#same-guild-post-asmltr-guild-post).
+
 ## The agent verb: `asmltr send`
 
 Inside a turn, the session reaches this through the `asmltr` CLI (via the Bash tool). The core
