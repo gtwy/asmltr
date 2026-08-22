@@ -78,6 +78,9 @@ test('discord /out handles guild_post and forum threads', () => {
   assert.match(src, /same_channel/);
   assert.match(src, /guild_resolve/);
   assert.match(src, /fetchArchived/);
+  const postBlock = src.slice(src.indexOf("kind === 'guild_post'"), src.indexOf("kind === 'guild_post'") + 1200);
+  assert.equal(postBlock.includes('channelEnabled'), false);
+  assert.match(src, /Mute\/disable is inbound only/);
   const cli = fs.readFileSync(path.join(__dirname, '../cli/asmltr.js'), 'utf8');
   assert.match(cli, /cmdGuildPost/);
   const belt = fs.readFileSync(path.join(__dirname, '../mcp/toolbelt-server.js'), 'utf8');

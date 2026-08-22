@@ -2,7 +2,8 @@
 /**
  * Same-guild Discord post. Access cards tier 1–5 or owner. Not asmltr send:
  * no email, no telegram, no other Discord servers, never the same channel
- * they asked from. Remote body has no thought chips. Ask-channel reply is
+ * they asked from. Mute/disable is inbound only — posting into a muted
+ * channel still works. Remote body has no thought chips. Ask-channel reply is
  * a short "Post complete." — not a copy of the post.
  *
  * Connector always prepends: Posting on behalf of <@speakerId>

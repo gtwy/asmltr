@@ -1279,6 +1279,7 @@ ${referentPromptBlock()}`;
     try {
       const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
       if (kind === 'guild_resolve') {
+        // Mute/disable is inbound only. Name lookup includes muted channels/threads.
         const gp = require('../../../shared/guild-post');
         const q = String(query || tg || '').trim();
         if (!source_guild) return res.status(400).json({ ok: false, error: 'source guild required' });
@@ -1314,6 +1315,7 @@ ${referentPromptBlock()}`;
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
       if (!channel) return res.status(404).json({ ok: false, error: 'channel not found' });
       if (kind === 'guild_post') {
+        // Mute/disable is inbound only. Cross-post into a muted channel/thread is allowed.
         const gp = require('../../../shared/guild-post');
         if (gp.sameChannel(source_channel, channel.id) || gp.sameChannel(source_channel, resolveChannel(tg))) {
           return res.json({ ok: true, skipped: true, reason: 'same_channel' });
