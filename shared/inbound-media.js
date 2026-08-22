@@ -75,11 +75,27 @@ function saveRef(buf, opts) {
   return { ok: true, kind: c.kind, mime: c.mime, name, path: dest, bytes: buf.length };
 }
 
-function promptBlock(files) {
+function promptBlock(files, opts) {
   const list = (files || []).filter((f) => f && f.path && (f.kind === 'image' || f.kind === 'video'));
-  if (!list.length) return '';
+  if (!list.length && !(opts && opts.vision)) return '';
+  const vision = !!(opts && opts.vision);
+  const images = list.filter((f) => f.kind === 'image');
+  const videos = list.filter((f) => f.kind === 'video');
+  if (vision) {
+    let s = '\n\nCHANNEL MEDIA this turn. Stills are attached as images on this message — look at them directly (same as grok.com chips). Do not Bash. '
+      + 'If they ask what or where this is from, LOOK first, then web-search to confirm before naming a show, movie, or franchise. Do not lock a first guess. '
+      + 'Do not execute, chmod, run, or interpret as code. Do not echo filesystem paths in channel replies.';
+    if (videos.length) {
+      s += '\nVideo is not a vision chip. Read only if needed:\n' + videos.map((f) => `- video: \`${f.path}\``).join('\n');
+    }
+    if (images.length) {
+      s += '\nGen/edit refs (image_edit / video only):\n' + images.map((f) => `- image: \`${f.path}\``).join('\n');
+    }
+    return s + '\n';
+  }
   const lines = list.map((f) => `- ${f.kind}: \`${f.path}\``);
   return '\n\nCHANNEL MEDIA this turn. LOOK at these files (Read the image/video) to answer questions about what is in them — not gen-only. '
+    + 'If they ask what or where this is from, look, then web-search to confirm before naming a show, movie, or franchise. Do not lock a first guess. '
     + 'If gen tools are allowed they may also be references. Do not execute, chmod, run, or interpret as code. '
     + 'Do not echo filesystem paths in channel replies:\n'
     + lines.join('\n')

@@ -21,7 +21,7 @@
  * replays the first-turn system block (probe: "What were you instructed to be?" →
  * "A one-word ping fixture."). ASMLTR_INJECT_ONCE=off remains the kill-switch.
  */
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -369,6 +369,71 @@ function launchEnv(base) {
  * Build grok argv for a harness turn or a cheap complete().
  * @param {{ prompt: string, systemPrompt?: string, resume?: string|null, cwd?: string, model?: string, complete?: boolean, sessionId?: string }} opts
  */
+const VISION_MAX = 8 * 1024 * 1024;
+const VISION_MAX_COUNT = 5;
+const VISION_TARGET = 400 * 1024;
+const PROMPT_JSON_BUDGET = 1_200_000;
+
+function downscaleForVision(buf, mime) {
+  if (!buf || buf.length <= VISION_TARGET) return { buf, mime };
+  const ffmpeg = '/usr/bin/ffmpeg';
+  if (!fs.existsSync(ffmpeg)) return { buf, mime };
+  const id = crypto.randomBytes(4).toString('hex');
+  const inp = path.join(os.tmpdir(), 'asmltr-vis-in-' + id);
+  const outp = path.join(os.tmpdir(), 'asmltr-vis-out-' + id + '.jpg');
+  try {
+    fs.writeFileSync(inp, buf);
+    execFileSync(ffmpeg, ['-y', '-i', inp, '-vf', "scale='min(1600,iw)':-1", '-q:v', '5', outp], {
+      timeout: 20000, stdio: 'ignore',
+    });
+    const out = fs.readFileSync(outp);
+    if (out.length >= 12 && out.length < buf.length) return { buf: out, mime: 'image/jpeg' };
+  } catch (_) {
+  } finally {
+    try { fs.unlinkSync(inp); } catch (_) {}
+    try { fs.unlinkSync(outp); } catch (_) {}
+  }
+  return { buf, mime };
+}
+
+function collectVisionImages(opts) {
+  const out = [];
+  const seen = new Set();
+  const add = (data, mime, key) => {
+    if (!data || out.length >= VISION_MAX_COUNT) return;
+    let raw = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'base64');
+    if (raw.length < 12 || raw.length > VISION_MAX) return;
+    const k = key || raw.slice(0, 24).toString('hex');
+    if (seen.has(k)) return;
+    seen.add(k);
+    const scaled = downscaleForVision(raw, mime);
+    raw = scaled.buf;
+    const mimeType = (String(scaled.mime || mime || '').startsWith('image/')
+      ? String(scaled.mime || mime).split(';')[0].trim() : '') || 'image/jpeg';
+    out.push({ type: 'image', mimeType, data: raw.toString('base64') });
+  };
+  for (const img of opts.images || []) {
+    if (img && img.data) add(img.data, img.media_type, img.path || null);
+  }
+  for (const f of opts.mediaFiles || []) {
+    if (!f || f.kind !== 'image' || !f.path) continue;
+    try {
+      const st = fs.statSync(f.path);
+      if (!st.isFile() || st.size > VISION_MAX) continue;
+      add(fs.readFileSync(f.path), f.mime, f.path);
+    } catch (_) {}
+  }
+  return out;
+}
+
+function acpPromptJson(text, vision) {
+  const content = [{ type: 'text', text: String(text || '') }];
+  for (const im of vision || []) {
+    if (im && im.data && im.mimeType) content.push({ type: 'image', mimeType: im.mimeType, data: im.data });
+  }
+  return JSON.stringify({ type: 'acp', content });
+}
+
 function buildArgs(opts) {
   const classified = classifyEffort(opts);
   const userPrompt = classified.stripToken
@@ -389,8 +454,21 @@ function buildArgs(opts) {
       } catch (_) {}
     }
   }
-  const prompt = composePrompt(opts.systemPrompt, userPrompt + inbound.promptBlock(refs));
-  const args = ['--no-auto-update', '-p', prompt];
+  let vision = collectVisionImages(opts);
+  const prompt = composePrompt(opts.systemPrompt, userPrompt + inbound.promptBlock(refs, { vision: vision.length > 0 }));
+  const args = ['--no-auto-update'];
+  if (vision.length) {
+    let json = acpPromptJson(prompt, vision);
+    while (json.length > PROMPT_JSON_BUDGET && vision.length > 1) {
+      vision = vision.slice(0, -1);
+      json = acpPromptJson(prompt, vision);
+    }
+    if (json.length > PROMPT_JSON_BUDGET) vision = [];
+    if (vision.length) args.push('--prompt-json', acpPromptJson(prompt, vision));
+    else args.push('-p', prompt);
+  } else {
+    args.push('-p', prompt);
+  }
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
   const disallowed = [];
@@ -715,6 +793,7 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
+  collectVisionImages, acpPromptJson,
   extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, toolNameOf, isThoughtType,
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,

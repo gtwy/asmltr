@@ -12,7 +12,7 @@ const grok = require('../core/src/engines/grok');
 
 const PNG = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  Buffer.from('payload'),
+  Buffer.from('payload-for-vision-min-bytes'),
 ]);
 
 test('classify accepts png magic and refuses scripts/html/elf', () => {
@@ -60,14 +60,26 @@ test('grok prompt gets CHANNEL MEDIA paths for image_edit, not as bash', () => {
   const pic = path.join(tmp, 'ref.png');
   fs.writeFileSync(pic, PNG);
   const args = grok.buildArgs({
-    prompt: 'make it night',
-    mediaFiles: [{ kind: 'image', path: pic, name: 'ref.png' }],
+    prompt: 'what is this from',
+    mediaFiles: [{ kind: 'image', path: pic, name: 'ref.png', mime: 'image/png' }],
   });
-  const p = args[args.indexOf('-p') + 1];
-  assert.match(p, /CHANNEL MEDIA/);
-  assert.ok(p.includes(pic));
-  assert.match(p, /LOOK at these files/);
-  assert.match(p, /not gen-only/);
-  assert.match(p, /Do not execute/);
-  assert.match(p, /Do not echo filesystem paths/);
+  assert.ok(args.includes('--prompt-json'), 'native vision uses --prompt-json, not -p');
+  assert.equal(args.includes('-p'), false);
+  const body = JSON.parse(args[args.indexOf('--prompt-json') + 1]);
+  assert.equal(body.type, 'acp');
+  const text = body.content.find((c) => c.type === 'text').text;
+  const img = body.content.find((c) => c.type === 'image');
+  assert.ok(img && img.data && img.mimeType === 'image/png');
+  assert.match(text, /CHANNEL MEDIA/);
+  assert.match(text, /attached as images/);
+  assert.match(text, /web-search to confirm/);
+  assert.match(text, /Do not lock a first guess/);
+  assert.ok(text.includes(pic));
+  assert.match(text, /Do not echo filesystem paths/);
+});
+
+test('text-only turns still use -p (no prompt-json file)', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.ok(args.includes('-p'));
+  assert.equal(args.includes('--prompt-file'), false);
 });
