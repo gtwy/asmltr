@@ -131,6 +131,14 @@ test('buildArgs denyVideo strips image_to_video and reference_to_video', () => {
   assert.ok(denies.includes('reference_to_video'));
 });
 
+test('buildArgs denyImage strips image_gen and image_edit', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyImage: true });
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.ok(args[i + 1].includes('image_gen'));
+  assert.ok(args[i + 1].includes('image_edit'));
+});
+
 test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
   const env = grok.launchEnv({ PATH: '/bin', XAI_API_KEY: 'xai-should-never-leak', HOME: '/tmp' });
   assert.equal(env.PATH, '/bin');

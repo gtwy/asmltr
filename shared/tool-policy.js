@@ -3,8 +3,8 @@
  * V31: per-turn tool policy. Restricted Discord cannot shell/streams/send/cwd-write.
  * Silo read/write is not part of that deny (James 21 Aug 2026). Do not fold
  * silo denies into a V31 PR — privacy.md is the silo safeguard.
- * Video gen (image_to_video / reference_to_video) is owner/bypass unless
- * tool-policy.json videoAllow names a principal or Discord id.
+ * Video/image gen and writing programs for a caller are owner/bypass unless
+ * tool-policy.json videoAllow / imageAllow / mediaAllow / codeAllow names them.
  */
 const fs = require('fs');
 const path = require('path');
@@ -21,14 +21,24 @@ function loadAllowlist(file) {
     const j = JSON.parse(fs.readFileSync(p, 'utf8'));
     const silo = (j && j.siloAllow) || {};
     const video = (j && j.videoAllow) || {};
+    const image = (j && j.imageAllow) || {};
+    const media = (j && j.mediaAllow) || {};
+    const code = (j && j.codeAllow) || {};
+    const ids = (a, k) => ((a && a[k]) || []).map(String);
     return {
       guilds: (silo.guilds || []).map(String),
       channels: (silo.channels || []).map(String),
-      videoPrincipals: (video.principals || []).map(String),
-      videoDiscordIds: (video.discordIds || []).map(String),
+      videoPrincipals: ids(video, 'principals').concat(ids(media, 'principals'), ids(image, 'principals')),
+      videoDiscordIds: ids(video, 'discordIds').concat(ids(media, 'discordIds'), ids(image, 'discordIds')),
+      codePrincipals: ids(code, 'principals'),
+      codeDiscordIds: ids(code, 'discordIds'),
     };
   } catch {
-    return { guilds: [], channels: [], videoPrincipals: [], videoDiscordIds: [] };
+    return {
+      guilds: [], channels: [],
+      videoPrincipals: [], videoDiscordIds: [],
+      codePrincipals: [], codeDiscordIds: [],
+    };
   }
 }
 
@@ -64,24 +74,54 @@ function senderRawId(envelope) {
   return String((s && (s.raw_id || s.id)) || '');
 }
 
-/** Video gen is owner/bypass unless videoAllow names this principal or Discord id. */
-function videoAuthorized(envelope, resolved, allow) {
-  if (resolved && (resolved.bypass_moderation || resolved.user_key === 'owner')) return true;
-  const a = allow || loadAllowlist();
+function ownerish(resolved) {
+  return !!(resolved && (resolved.bypass_moderation || resolved.user_key === 'owner'));
+}
+
+function listed(envelope, resolved, principals, discordIds) {
   const key = String((resolved && resolved.user_key) || '');
-  if (key && (a.videoPrincipals || []).includes(key)) return true;
+  if (key && (principals || []).includes(key)) return true;
   const did = senderRawId(envelope);
-  if (did && (a.videoDiscordIds || []).includes(did)) return true;
+  if (did && (discordIds || []).includes(did)) return true;
   return false;
 }
 
+/** Stills + video: owner/bypass, or videoAllow / imageAllow / mediaAllow. */
+function mediaAuthorized(envelope, resolved, allow) {
+  if (ownerish(resolved)) return true;
+  const a = allow || loadAllowlist();
+  return listed(envelope, resolved, a.videoPrincipals, a.videoDiscordIds);
+}
+
+function videoAuthorized(envelope, resolved, allow) {
+  return mediaAuthorized(envelope, resolved, allow);
+}
+
+/** Write-a-program for this caller: owner/bypass or codeAllow. */
+function codeAuthorized(envelope, resolved, allow) {
+  if (ownerish(resolved)) return true;
+  const a = allow || loadAllowlist();
+  return listed(envelope, resolved, a.codePrincipals, a.codeDiscordIds);
+}
+
 function emptyDeny() {
-  return { shell: false, streams: false, send: false, silo: false, write: false, siloWrite: false, video: false };
+  return {
+    shell: false, streams: false, send: false, silo: false,
+    write: false, siloWrite: false, video: false, image: false, code: false,
+  };
 }
 
 function policyFor(envelope, resolved, allow) {
   const deny = emptyDeny();
-  if (!videoAuthorized(envelope, resolved, allow)) deny.video = true;
+  if (!mediaAuthorized(envelope, resolved, allow)) {
+    deny.video = true;
+    deny.image = true;
+  }
+  if (!codeAuthorized(envelope, resolved, allow)) {
+    deny.code = true;
+    deny.shell = true;
+    deny.write = true;
+  }
   if (!isRestricted(envelope, resolved)) return { deny, restricted: false };
   deny.shell = true;
   deny.streams = true;
@@ -91,7 +131,8 @@ function policyFor(envelope, resolved, allow) {
 }
 
 function denyToolsEnv(deny) {
-  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video'].filter((k) => deny && deny[k]).join(',');
+  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code']
+    .filter((k) => deny && deny[k]).join(',');
 }
 
 function parseDenyEnv(raw) {
@@ -104,6 +145,8 @@ function parseDenyEnv(raw) {
     write: set.has('write'),
     siloWrite: set.has('siloWrite'),
     video: set.has('video'),
+    image: set.has('image'),
+    code: set.has('code'),
   };
 }
 
@@ -118,5 +161,6 @@ function exitIfDenied(kind) {
 
 module.exports = {
   policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
-  videoAuthorized, denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
+  videoAuthorized, mediaAuthorized, codeAuthorized,
+  denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
 };

@@ -21,6 +21,8 @@ function buildToolbeltPrompt({
     silo: !!deny.silo,
     siloWrite: !!deny.siloWrite,
     video: !!deny.video,
+    image: !!deny.image,
+    code: !!deny.code,
   };
   const via = d.shell
     ? 'Key cross-session ops (Bash is off this turn — use MCP tools where listed):\n'
@@ -77,7 +79,13 @@ function buildToolbeltPrompt({
     s += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${channel} ${chTarget} --file <abs-path>\`.`;
   }
   if (d.video) {
-    s += '\n\nVIDEO GENERATION is off this turn (`image_to_video` / `reference_to_video` are disabled). Do not offer to make, animate, or generate video. Still images are unchanged. If they want video, they need the operator to authorize it first.';
+    s += '\n\nVIDEO GENERATION is off this turn (`image_to_video` / `reference_to_video` are disabled). Do not offer to make, animate, or generate video. If they want video, they need the operator to authorize it first.';
+  }
+  if (d.image) {
+    s += '\n\nIMAGE GENERATION is off this turn (`image_gen` / `image_edit` are disabled). Do not offer to generate, draw, or edit images. If they want stills, they need the operator to authorize it first.';
+  }
+  if (d.code) {
+    s += '\n\nWRITING PROGRAMS is off this turn. Do not write a program, script, patch, or runnable source for this speaker (no fenced code they could run as a program). You may talk about programming in the abstract. If they want you to write software, they need the operator to authorize it first.';
   }
   return s;
 }
