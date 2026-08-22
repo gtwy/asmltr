@@ -446,13 +446,48 @@ function acpPromptJson(text, vision) {
 }
 
 function visionPromptDir() {
-  return process.env.ASMLTR_GROK_PROMPT_DIR || os.tmpdir();
+  if (process.env.ASMLTR_GROK_PROMPT_DIR) return process.env.ASMLTR_GROK_PROMPT_DIR;
+  return path.join(os.tmpdir(), 'asmltr-vis-prompt');
+}
+
+function ensureVisionPromptDir() {
+  const dir = visionPromptDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch (_) {}
+  return dir;
+}
+
+/** Drop crash leftovers. Own prefix only; default dir is 0700 under tmp. */
+function gcVisionPromptFiles(maxAgeMs) {
+  const age = maxAgeMs == null ? 60 * 60 * 1000 : Number(maxAgeMs);
+  const cutoff = Date.now() - age;
+  const dir = visionPromptDir();
+  let removed = 0;
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (_) { return 0; }
+  for (const name of names) {
+    if (!name.startsWith('asmltr-vis-prompt-') || !name.endsWith('.json')) continue;
+    const p = path.join(dir, name);
+    try {
+      const st = fs.statSync(p);
+      if (!st.isFile() || st.mtimeMs > cutoff) continue;
+      fs.unlinkSync(p);
+      removed++;
+    } catch (_) {}
+  }
+  return removed;
+}
+
+let _visionPromptGc = false;
+function gcVisionPromptFilesOnce() {
+  if (_visionPromptGc) return;
+  _visionPromptGc = true;
+  try { gcVisionPromptFiles(); } catch (_) {}
 }
 
 /** 0600 ACP JSON for `--prompt-file`. Caller unlinks. Never log the body (stills). */
 function writeVisionPromptFile(json) {
-  const dir = visionPromptDir();
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = ensureVisionPromptDir();
   const p = path.join(dir, 'asmltr-vis-prompt-' + crypto.randomBytes(8).toString('hex') + '.json');
   fs.writeFileSync(p, json, { encoding: 'utf8', mode: 0o600 });
   try { fs.chmodSync(p, 0o600); } catch (_) {}
@@ -754,6 +789,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   if (conversationKey) extra.ASMLTR_ATTACH_CONVERSATION_KEY = String(conversationKey);
   if (cwd) extra.ASMLTR_ATTACH_INGEST_CWD = String(cwd);
   const childEnv = launchEnv(Object.assign({}, process.env, extra));
+  gcVisionPromptFilesOnce();
   const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image, images, mediaFiles });
   const visionFile = args.visionPromptFile || null;
   let stderr = '';
@@ -836,7 +872,7 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  collectVisionImages, acpPromptJson, writeVisionPromptFile,
+  collectVisionImages, acpPromptJson, writeVisionPromptFile, gcVisionPromptFiles,
   extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, toolNameOf, isThoughtType,
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,

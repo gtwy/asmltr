@@ -372,8 +372,11 @@ async function handle(envelope, opts = {}) {
       'If they ask what a picture is and this turn has no attached still, do not guess from Recent uploads or another room; say you do not have the picture on this message. ' +
       'To look at another room on purpose: `asmltr uploads` (also `asmltr uploads <search>`, `--channel discord`, `--since <2h|1d>`), then Read the path it prints.';
     try {
-      const recent = require('../../shared/uploads').recentSummary(6, { conversationKey: e.conversation_key });
-      if (recent) pUploadsList = `Recent uploads in THIS conversation (newest first):\n${recent}`;
+      // No conversation_key → no list (fail closed). An empty key used to mean "all rooms".
+      if (e.conversation_key) {
+        const recent = require('../../shared/uploads').recentSummary(6, { conversationKey: e.conversation_key });
+        if (recent) pUploadsList = `Recent uploads in THIS conversation (newest first):\n${recent}`;
+      }
     } catch (_) {}
   }
 

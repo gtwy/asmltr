@@ -112,6 +112,22 @@ test('same still via images[] and mediaFiles is one vision block, no second save
   assert.equal(fs.readdirSync(tmp).length, before, 'must not saveRef a second copy');
 });
 
+test('gcVisionPromptFiles only removes own prefix and old files', () => {
+  const keep = path.join(tmp, 'asmltr-vis-prompt-keep.json');
+  const stale = path.join(tmp, 'asmltr-vis-prompt-stale.json');
+  const other = path.join(tmp, 'notes.json');
+  fs.writeFileSync(keep, '{}');
+  fs.writeFileSync(stale, '{}');
+  fs.writeFileSync(other, '{}');
+  const old = Date.now() - 2 * 60 * 60 * 1000;
+  fs.utimesSync(stale, old / 1000, old / 1000);
+  const n = grok.gcVisionPromptFiles(60 * 60 * 1000);
+  assert.equal(n, 1);
+  assert.equal(fs.existsSync(keep), true);
+  assert.equal(fs.existsSync(stale), false);
+  assert.equal(fs.existsSync(other), true);
+});
+
 test('vision skips non-image bytes even if kind says image', () => {
   const fake = path.join(tmp, 'notes.bin');
   fs.writeFileSync(fake, Buffer.from('this is not an image file at all!!'));
