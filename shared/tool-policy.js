@@ -119,6 +119,7 @@ function emptyDeny() {
   return {
     shell: false, streams: false, send: false, silo: false,
     write: false, siloWrite: false, video: false, image: false, code: false, attach: false,
+    uploads: false,
   };
 }
 
@@ -139,11 +140,12 @@ function policyFor(envelope, resolved, allow) {
   deny.streams = true;
   deny.send = true;
   deny.write = true;
+  deny.uploads = true;
   return { deny, restricted: true };
 }
 
 function denyToolsEnv(deny) {
-  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach']
+  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads']
     .filter((k) => deny && deny[k]).join(',');
 }
 
@@ -160,6 +162,7 @@ function parseDenyEnv(raw) {
     image: set.has('image'),
     code: set.has('code'),
     attach: set.has('attach'),
+    uploads: set.has('uploads'),
   };
 }
 

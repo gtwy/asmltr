@@ -23,7 +23,7 @@ test('public discord denies shell/streams/send/write, not silo', () => {
   assert.equal(p.restricted, true);
   assert.deepEqual(p.deny, {
     shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true, attach: true,
+    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true,
   });
 });
 
@@ -35,7 +35,7 @@ test('allowlisted guild same denies; silo still on', () => {
   }, { bypass_moderation: false });
   assert.deepEqual(p.deny, {
     shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true, attach: true,
+    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true,
   });
 });
 
@@ -47,7 +47,7 @@ test('discord DM + bypass_moderation denies nothing', () => {
   assert.equal(p.restricted, false);
   assert.deepEqual(p.deny, {
     shell: false, streams: false, send: false, silo: false, write: false,
-    siloWrite: false, video: false, image: false, code: false, attach: false,
+    siloWrite: false, video: false, image: false, code: false, attach: false, uploads: false,
   });
 });
 
@@ -192,8 +192,8 @@ test('silo prompt has no NaN; put only when siloWrite is allowed', () => {
 
 test('denyToolsEnv lists denied kinds', () => {
   assert.equal(
-    denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true, video: true, image: true, code: true, attach: true }),
-    'shell,streams,send,silo,write,siloWrite,video,image,code,attach',
+    denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true, video: true, image: true, code: true, attach: true, uploads: true }),
+    'shell,streams,send,silo,write,siloWrite,video,image,code,attach,uploads',
   );
   assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true }), 'shell,streams,send,write,siloWrite');
 });

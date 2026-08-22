@@ -51,7 +51,7 @@ const TOOLS = [
       properties: { text: { type: 'string' }, to: { type: 'string', description: 'optional target scope' }, urgent: { type: 'boolean' } },
       additionalProperties: false },
     argv: (a) => ['announce', a.text, ...(a.to ? ['--to', a.to] : []), ...(a.urgent ? ['--urgent'] : [])] },
-  { name: 'asmltr_uploads', description: 'List recent files uploaded to the shared upload area across channels (newest first); optional search.',
+  { name: 'asmltr_uploads', deny: 'uploads', description: 'List recent files uploaded to the shared upload area across channels (newest first); optional search. Owner/private turns only — not public Discord.',
     inputSchema: { type: 'object', properties: { query: { type: 'string' } }, additionalProperties: false },
     argv: (a) => ['uploads', ...(a.query ? [a.query] : [])] },
   { name: 'asmltr_silo_overview', description: 'Map the Self silo (zones + counts). Use instead of Bash when shell is off.',

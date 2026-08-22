@@ -32,6 +32,12 @@ test('asmltr silo overview refuses when silo denied', () => {
   assert.match(String(r.stderr || r.stdout), /denied: silo/);
 });
 
+test('asmltr uploads refuses when uploads denied', () => {
+  const r = run(['uploads'], 'uploads');
+  assert.notEqual(r.status, 0);
+  assert.match(String(r.stderr || r.stdout), /denied: uploads/);
+});
+
 test('asmltr announce refuses when send denied (send-class)', () => {
   const r = run(['announce', 'hi'], 'send');
   assert.notEqual(r.status, 0);

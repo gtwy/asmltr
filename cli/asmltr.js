@@ -468,6 +468,7 @@ function _parseSince(s) {
 async function cmdUploads(rest) {
   // asmltr uploads [search words] [--channel x] [--sender s] [--since 2h|1d] [--limit N]
   // asmltr uploads get <id>   → print just the stored path (for piping into Read/tools)
+  exitIfDenied('uploads');
   const uploads = require('../shared/uploads');
   if (rest[0] === 'get') {
     const rec = uploads.get(rest[1]);
