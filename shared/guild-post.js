@@ -1,19 +1,30 @@
 'use strict';
 /**
- * Same-guild Discord post (public rooms included). Not asmltr send:
- * no email, no telegram, no other Discord servers.
+ * Same-guild Discord post. Access cards tier 1–5 or owner. Not asmltr send:
+ * no email, no telegram, no other Discord servers, never the same channel
+ * they asked from. Remote body has no thought chips. Ask-channel reply is
+ * a short "Post complete." — not a copy of the post.
  *
  * Connector always prepends: posting on behalf of <@speakerId>
  * then two blank lines, then the body. Forum: target the THREAD
  * to comment; targeting the forum channel starts a NEW post.
  */
 
+const { stripThoughtChrome } = require('./step-public');
+
 function prefaceOnBehalf(speakerId, text) {
   const id = String(speakerId || '').replace(/[^\d]/g, '');
-  const body = String(text || '').replace(/^\s*posting on behalf of\s+<@\d+>\s*/i, '').trim();
+  let body = String(text || '').replace(/^\s*posting on behalf of\s+<@\d+>\s*/i, '');
+  body = stripThoughtChrome(body).trim();
   if (!id) return { ok: false, error: 'on_behalf_of speaker id required' };
   if (!body) return { ok: false, error: 'text required' };
   return { ok: true, text: 'posting on behalf of <@' + id + '>\n\n\n' + body };
+}
+
+function sameChannel(sourceId, destId) {
+  const a = String(sourceId || '').trim();
+  const b = String(destId || '').trim();
+  return !!(a && b && a === b);
 }
 
 function sameGuild(sourceGuild, destGuild) {
@@ -45,4 +56,4 @@ function destGuildId(ch) {
   return '';
 }
 
-module.exports = { prefaceOnBehalf, sameGuild, forumTitle, isForumChannel, destGuildId };
+module.exports = { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId };

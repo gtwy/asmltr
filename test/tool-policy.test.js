@@ -23,7 +23,7 @@ test('public discord denies shell/streams/send/write, not silo', () => {
   assert.equal(p.restricted, true);
   assert.deepEqual(p.deny, {
     shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true, guildPost: false,
+    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true, guildPost: true,
   });
 });
 
@@ -35,7 +35,7 @@ test('allowlisted guild same denies; silo still on', () => {
   }, { bypass_moderation: false });
   assert.deepEqual(p.deny, {
     shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true, guildPost: false,
+    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true, guildPost: true,
   });
 });
 
@@ -154,7 +154,7 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
   });
   assert.equal(text.includes('asmltr send'), false);
   assert.ok(text.includes('asmltr guild-post'));
-  assert.ok(text.includes('asmltr_guild_post'));
+  assert.ok(text.includes('Post complete'));
   assert.equal(text.includes('asmltr streams'), false);
   assert.equal(text.includes('asmltr announce'), false);
   assert.equal(text.includes('SELF SILO'), false);

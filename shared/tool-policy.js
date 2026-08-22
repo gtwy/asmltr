@@ -115,6 +115,13 @@ function codeAuthorized(envelope, resolved, allow) {
   return listed(envelope, resolved, a.codePrincipals, a.codeDiscordIds);
 }
 
+/** Same-guild Discord post: owner, or Access card default_tier 1–5. */
+function guildPostAuthorized(resolved) {
+  if (ownerish(resolved)) return true;
+  const t = Number(resolved && resolved.trust_tier);
+  return t >= 1 && t <= 5;
+}
+
 function emptyDeny() {
   return {
     shell: false, streams: false, send: false, silo: false,
@@ -135,8 +142,8 @@ function policyFor(envelope, resolved, allow) {
     deny.shell = true;
     deny.write = true;
   }
-  // Same-guild Discord post: only when this turn is already in a guild.
-  if (!guildIdFrom(envelope)) deny.guildPost = true;
+  // Same-guild Discord post: in a guild, Access 1–5 or owner.
+  if (!guildIdFrom(envelope) || !guildPostAuthorized(resolved)) deny.guildPost = true;
   if (!isRestricted(envelope, resolved)) return { deny, restricted: false };
   deny.shell = true;
   deny.streams = true;
@@ -180,6 +187,6 @@ function exitIfDenied(kind) {
 
 module.exports = {
   policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
-  videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized,
+  videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
 };

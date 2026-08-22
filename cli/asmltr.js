@@ -299,11 +299,17 @@ async function cmdGuildPost(rest) {
   }
   const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
   const on_behalf_of = process.env.ASMLTR_ATTACH_SENDER || '';
+  const here = process.env.ASMLTR_ATTACH_TARGET || '';
   if (!source_guild) throw new Error('guild-post only from a Discord server channel (no DMs, no email)');
   if (!on_behalf_of) throw new Error('guild-post needs the asker id (ASMLTR_ATTACH_SENDER)');
+  if (here && String(target) === String(here)) {
+    console.log('same channel — skipped guild-post; answer here normally');
+    return;
+  }
   const body = {
     channel: 'discord', target, kind: 'guild_post', text,
-    source_guild, on_behalf_of, title: title || undefined, reply_to: replyTo || undefined,
+    source_guild, on_behalf_of, source_channel: here || undefined,
+    title: title || undefined, reply_to: replyTo || undefined,
     from_session: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || undefined,
   };
   let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -313,7 +319,23 @@ async function cmdGuildPost(rest) {
     if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
     r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   }
-  console.log(r.ok ? A.grn(`✓ guild-post to discord:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('guild-post failed: ' + (r.error || JSON.stringify(r))));
+  if (r && r.skipped && r.reason === 'same_channel') {
+    console.log('same channel — skipped guild-post; answer here normally');
+    return;
+  }
+  if (!r || !r.ok) {
+    console.log(A.red('guild-post failed: ' + ((r && r.error) || JSON.stringify(r))));
+    return;
+  }
+  if (here) {
+    const ack = { channel: 'discord', target: here, kind: 'text', text: 'Post complete.' };
+    await fetch(MANAGER_BASE + '/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(MANAGER_TOKEN ? { Authorization: 'Bearer ' + MANAGER_TOKEN } : {}) },
+      body: JSON.stringify(ack),
+    }).catch(() => null);
+  }
+  console.log('Posted. Reply [[NO_REPLY]] now — do not repeat the body.');
 }
 
 async function deliverFile(channel, target, filePath, caption) {

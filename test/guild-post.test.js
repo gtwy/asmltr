@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { prefaceOnBehalf, sameGuild, forumTitle, isForumChannel, destGuildId } = require('../shared/guild-post');
+const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId } = require('../shared/guild-post');
 const { policyFor } = require('../shared/tool-policy');
 const fs = require('fs');
 const path = require('path');
@@ -15,6 +15,10 @@ test('preface tags asker then two blank lines then body', () => {
   assert.equal(dup.text.includes('<@99>'), false);
   assert.equal(prefaceOnBehalf('', 'hi').ok, false);
   assert.equal(prefaceOnBehalf('1', '  ').ok, false);
+  const chips = prefaceOnBehalf('1', '-# Working\n-# 💭 thinking\nThe addendum.');
+  assert.equal(chips.text.includes('-#'), false);
+  assert.equal(chips.text.includes('💭'), false);
+  assert.match(chips.text, /The addendum/);
 });
 
 test('sameGuild: this server only', () => {
@@ -35,14 +39,19 @@ test('forum parent vs thread', () => {
   assert.equal(destGuildId({ guild: { id: 'g2' } }), 'g2');
 });
 
-test('public guild keeps send denied but guildPost allowed', () => {
-  const p = policyFor({
+test('public guild: send denied; guildPost only Access 1-5 or owner', () => {
+  const env = {
     channel: 'discord', public: true,
     context: { scope_id: 'guild:g1' },
     channel_context: { channelId: 'ch1' },
-  }, { bypass_moderation: false });
-  assert.equal(p.deny.send, true);
-  assert.equal(p.deny.guildPost, false);
+  };
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0 }).deny.guildPost, true);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.send, true);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 6 }).deny.guildPost, true);
+  assert.equal(policyFor(env, { bypass_moderation: true, trust_tier: 0, user_key: 'owner' }).deny.guildPost, false);
+  assert.equal(sameChannel('ch1', 'ch1'), true);
+  assert.equal(sameChannel('ch1', 'ch2'), false);
 });
 
 test('discord /out handles guild_post and forum threads', () => {
@@ -51,6 +60,7 @@ test('discord /out handles guild_post and forum threads', () => {
   assert.match(src, /isForumChannel/);
   assert.match(src, /threads\.create/);
   assert.match(src, /messageReference/);
+  assert.match(src, /same_channel/);
   const cli = fs.readFileSync(path.join(__dirname, '../cli/asmltr.js'), 'utf8');
   assert.match(cli, /cmdGuildPost/);
   const belt = fs.readFileSync(path.join(__dirname, '../mcp/toolbelt-server.js'), 'utf8');

@@ -41,7 +41,7 @@ function buildToolbeltPrompt({
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n';
   }
   if (!d.guildPost) {
-    s += '• `asmltr guild-post <channel-or-thread-id> "<text>"` (MCP `asmltr_guild_post`) — post to another channel or thread in THIS Discord server only. No other servers, no email, no telegram. Always prefixed `posting on behalf of @asker`. Forum boards (e.g. #recipes-board): target the THREAD id to comment on a recipe; targeting the forum channel starts a NEW post (`title` required-ish). Optional `reply_to` = message id in that thread to Discord-reply. COPY: run it, then reply here. REDIRECT: run it, then [[NO_REPLY]].\n';
+    s += '• `asmltr guild-post <channel-or-thread-id> "<text>"` (MCP `asmltr_guild_post`) — post to another channel or thread in THIS Discord server only (Access cards 1–5 or owner). No other servers, no email/telegram, never this same channel (if they asked to post here, skip the tool and answer normally). Always prefixed `posting on behalf of @asker`. No thought chips in the remote post. Forum: THREAD id comments; forum channel id starts a NEW post (`title`). Optional `reply_to`. After it succeeds, your reply in THIS channel is exactly `Post complete.` — do not repeat the posted body.\n';
   }
   if (!d.send) {
     s += '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists pending notes.\n';

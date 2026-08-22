@@ -1277,11 +1277,14 @@ ${referentPromptBlock()}`;
   // stage a safe name, POST here, delete the staged copy only after messageId.
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title } = req.body || {};
+      const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel } = req.body || {};
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
       if (!channel) return res.status(404).json({ ok: false, error: 'channel not found' });
       if (kind === 'guild_post') {
         const gp = require('../../../shared/guild-post');
+        if (gp.sameChannel(source_channel, channel.id) || gp.sameChannel(source_channel, resolveChannel(tg))) {
+          return res.json({ ok: true, skipped: true, reason: 'same_channel' });
+        }
         const same = gp.sameGuild(source_guild, gp.destGuildId(channel));
         if (!same.ok) return res.status(403).json({ ok: false, error: same.error });
         const pref = gp.prefaceOnBehalf(on_behalf_of, text);
