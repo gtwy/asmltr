@@ -1,26 +1,60 @@
 'use strict';
 /**
- * Still-generation ask. Discord Generating-chip and grok xhigh share this.
- * Not a tool allow — display + effort only.
+ * Still-generation ask. Kind-word gate, then a cheap YES/NO classify.
+ * Discord Generating-chip and grok xhigh consume the verdict. Not a tool allow.
  *
- * Forward: generate|make|draw|create|paint … kind (any words in between).
- * Reverse: kind … made|generated|drawn|drew|created|painted.
- * Same sentence only (no . ! ?). At most 12 tokens between so a later
- * "picture" in another clause does not fire.
+ * Gate is the kind list only (picture/photo/image/…). No verb+kind regex —
+ * the classifier decides whether this turn wants image_gen / image_edit.
  */
 
-const VERB = 'generate|make|draw|create|paint';
-const KIND = 'pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?|art';
-const PAST = 'generated|made|drawn|drew|created|painted';
-const MID = '(?:[^\\s.!?]+\\s+){0,12}';
+const KIND_RE = /\b(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?|art)\b/i;
 
-const IMAGE_GEN_ASK_RE = new RegExp(
-  '\\b(?:(?:' + VERB + ')\\s+' + MID + '(?:' + KIND + ')|(?:' + KIND + ')\\s+' + MID + '(?:' + PAST + '))\\b',
-  'i'
-);
-
-function looksLikeImageGen(text) {
-  return IMAGE_GEN_ASK_RE.test(String(text || ''));
+function mentionsImageKind(text) {
+  return KIND_RE.test(String(text || ''));
 }
 
-module.exports = { looksLikeImageGen, IMAGE_GEN_ASK_RE };
+function buildImageGenClassifyPrompt(text) {
+  return [
+    'Decide if the user wants a NEW still generated or an existing still edited this turn',
+    '(draw, make, generate, composite, put someone into a photo, sit him on the bench in a photo, etc.).',
+    'YES = they want image_gen or image_edit now.',
+    'NO = they only mentioned a picture (talk about one, attach one, ask what is in a still,',
+    'generate a report, "I liked the picture you made", "make sure this picture is posted").',
+    'Reply with ONLY YES or NO on the first line.',
+    '',
+    String(text || '').slice(0, 4000),
+  ].join('\n');
+}
+
+/** Fail closed (not a picture request) unless the reply leads with YES. */
+function parseImageGenVerdict(out) {
+  const s = String(out || '').replace(/[*_`#]+/g, ' ').trim();
+  if (!s) return false;
+  const head = s.split(/\n/)[0].trim();
+  if (/^YES\b/i.test(head)) return true;
+  if (/^NO\b/i.test(head)) return false;
+  return false;
+}
+
+/**
+ * @param {string} text
+ * @param {(opts: object) => Promise<string>} completeFn engine.complete — caller supplies it
+ *   so this file never imports an engine (no circular grok require).
+ */
+async function classifyImageGenAsk(text, completeFn) {
+  if (!mentionsImageKind(text)) return false;
+  if (typeof completeFn !== 'function') return false;
+  try {
+    const out = await completeFn({
+      prompt: buildImageGenClassifyPrompt(text),
+      appendSystemPrompt: 'You are ONLY a classifier. Reply YES or NO. No tools. No extra text.',
+    });
+    return parseImageGenVerdict(out);
+  } catch (_) {
+    return false;
+  }
+}
+
+module.exports = {
+  mentionsImageKind, buildImageGenClassifyPrompt, parseImageGenVerdict, classifyImageGenAsk, KIND_RE,
+};

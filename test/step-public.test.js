@@ -5,7 +5,7 @@ const {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
   publicBlockHints, pickPublicReply, thoughtBudget,
-  looksLikeImageGen, isImageGenTool,
+  isImageGenTool,
   stripThoughtChrome, quietReplyFromResult, GENERATING_LINE,
 } = require('../shared/step-public');
 
@@ -49,23 +49,6 @@ test('thoughtBudget: xhigh uncapped; high/medium 2; below medium 0', () => {
   assert.equal(thoughtBudget('high', { publicChannel: false }), 2);
   assert.equal(thoughtBudget('xhigh', { imageGen: true }), 0);
   assert.equal(thoughtBudget('medium', { imageGen: true }), 0);
-});
-
-test('looksLikeImageGen: verb+kind, not reports', () => {
-  assert.equal(looksLikeImageGen('Please generate an image of a corgi'), true);
-  assert.equal(looksLikeImageGen('GENERATE IMAGE'), true);
-  assert.equal(looksLikeImageGen('make a cartoon'), true);
-  assert.equal(looksLikeImageGen('draw me a picture of the shop'), true);
-  assert.equal(looksLikeImageGen('create some photos'), true);
-  assert.equal(looksLikeImageGen('can you make a new picture'), true);
-  assert.equal(looksLikeImageGen('make me a really nice photo of the bun'), true);
-  assert.equal(looksLikeImageGen('the picture you made of Steve'), true);
-  assert.equal(looksLikeImageGen('the photo you generated yesterday'), true);
-  assert.equal(looksLikeImageGen('take the picture you made of Steve yesterday as a puppet in the cape and sit him on the bench in the arboretum photo you made a few lines above'), true);
-  assert.equal(looksLikeImageGen('generate a report'), false);
-  assert.equal(looksLikeImageGen('make a list'), false);
-  assert.equal(looksLikeImageGen('ok thanks'), false);
-  assert.equal(looksLikeImageGen(''), false);
 });
 
 test('isImageGenTool and GENERATING_LINE', () => {
@@ -132,11 +115,12 @@ test('Discord never renderSteps raw thought text', () => {
   assert.match(src, /if \(quietImageGen \|\| maxThoughts <= 0\) return;/);
   assert.match(src, /not xhigh: 💭 only, no tooling/);
   assert.match(src, /no Working filler on medium\/high/);
-  assert.match(src, /looksLikeImageGen/);
+  assert.equal(src.includes('looksLikeImageGen'), false);
   assert.match(src, /GENERATING_LINE/);
   assert.match(src, /isImageGenTool/);
   assert.match(src, /quietImageGen/);
   assert.match(src, /enterImageGenQuiet/);
+  assert.match(src, /meta && meta.imageGen/);
   assert.match(src, /thoughtBudget\(effort, \{ imageGen: quietImageGen \}\)/);
   assert.match(src, /pickPublicReply/);
   assert.match(src, /identityHintsFrom/);

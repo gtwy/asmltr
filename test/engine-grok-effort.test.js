@@ -100,17 +100,6 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
       'Please commit the change and push it',
       'write some code for the picker',
       'patch the code in grok.js',
-      'generate an image of a corgi',
-      'generate image',
-      'generate a photo of the workspace',
-      'generate photo',
-      'generate a picture',
-      'generate drawing',
-      'make a cartoon',
-      'make this graphic',
-      'make a painting',
-      'generate a pic',
-      'make a photograph',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
@@ -119,50 +108,38 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
   }
 });
 
-test('visual generate/make xhigh is verb…kind or kind…made, same sentence', () => {
+test('visual kind words are not xhigh in the sync picker', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     for (const p of [
       'Please generate an image of a corgi',
-      'GENERATE IMAGE',
-      'can you generate a photo',
-      'Generate Photo of the shop',
-      'generate the image',
-      'generate the photo',
-      'generate a picture of the bun',
-      'generate some drawings',
-      'make a cartoon',
-      'make an image',
-      'make this painting',
       'can you make a new picture',
-      'make me a really nice photo of the bun',
       'the picture you made of Steve',
-      'the photo you generated yesterday',
-      'take the picture you made of Steve yesterday as a puppet in the cape and sit him on the bench in the arboretum photo you made a few lines above',
-    ]) {
-      assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
-    }
-    for (const p of [
-      'generate',
-      'make',
       'generate a report',
-      'make a list',
-      'regenerate the list',
-      'image generate',
-      'photo generate',
-      'an image generate',
-      'a photo generate',
       'I attached an image, please generate a report',
-      'here is a photo — generate a list',
-      'generate the illustration',
-      'generate this sketch',
-      'generating a cartoon',
+      'make a list',
     ]) {
       assert.notEqual(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }
   } finally {
     delete process.env.ASMLTR_GROK_EFFORT;
   }
+});
+
+test('raiseForImageGen: Discord yes → xhigh; web/email keep their effort', () => {
+  const med = { effort: 'medium', reason: 'baseline' };
+  assert.deepEqual(grok.raiseForImageGen(med, { imageGen: false, channel: 'discord' }), {
+    effort: 'medium', reason: 'baseline', imageGen: false,
+  });
+  assert.deepEqual(grok.raiseForImageGen(med, { imageGen: true, channel: 'discord' }), {
+    effort: 'xhigh', reason: 'image-gen', imageGen: true,
+  });
+  assert.deepEqual(grok.raiseForImageGen({ effort: 'high', reason: 'web' }, { imageGen: true, channel: 'assistant-web' }), {
+    effort: 'high', reason: 'web', imageGen: true,
+  });
+  assert.deepEqual(grok.raiseForImageGen({ effort: 'xhigh', reason: 'email' }, { imageGen: true, channel: 'email' }), {
+    effort: 'xhigh', reason: 'email', imageGen: true,
+  });
 });
 
 test('bare code is not xhigh; write/patch code still is', () => {

@@ -93,6 +93,20 @@ test('complete() argv uses plain output', () => {
   assert.equal(args[args.indexOf('-m') + 1], 'grok-3');
 });
 
+test('complete() honor effort low and image/video denies for classify', () => {
+  const args = grok.buildArgs({
+    prompt: 'YES or NO', complete: true, effort: 'low',
+    denyShell: true, denyWrite: true, denyImage: true, denyVideo: true,
+  });
+  assert.equal(args[args.indexOf('--effort') + 1], 'low');
+  assert.equal(args[args.indexOf('--output-format') + 1], 'plain');
+  const denies = [];
+  for (let n = 0; n < args.length; n++) if (args[n] === '--deny') denies.push(args[n + 1]);
+  assert.ok(denies.includes('image_gen'));
+  assert.ok(denies.includes('image_edit'));
+  assert.ok(denies.includes('Bash'));
+});
+
 test('buildArgs denyShell adds --disallowed-tools bash,shell,run_terminal_cmd and --deny Bash', () => {
   const args = grok.buildArgs({ prompt: 'hello', denyShell: true });
   assert.ok(args.includes('--always-approve'));

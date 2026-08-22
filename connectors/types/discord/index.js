@@ -33,7 +33,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
-const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, pickPublicReply, thoughtBudget, looksLikeImageGen, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
@@ -599,9 +599,9 @@ ${referentPromptBlock()}`;
         // or a new narration block begins. The block still open at `done` is the final answer.
         let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
         let beatTimer = null;
-        // Image gen stays xhigh in the engine; Discord shows one Generating chip, no 💭 dump.
-        let quietImageGen = looksLikeImageGen(message.cleanContent || message.content || '');
-        let maxThoughts = thoughtBudget('medium', { imageGen: quietImageGen });
+        // Image gen: core classifies first. No chips until effort.imageGen (or image_gen tool).
+        let quietImageGen = false;
+        let maxThoughts = thoughtBudget('medium');
         let thoughtsPosted = 0;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
         const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
@@ -629,7 +629,6 @@ ${referentPromptBlock()}`;
           stopBeat();
           postChip(GENERATING_LINE);
         };
-        if (quietImageGen) postChip(GENERATING_LINE);
         const holdAnswer = (t) => {
           const clean = String(t || '').trim();
           if (!clean) { pending = ''; return; }
@@ -643,7 +642,11 @@ ${referentPromptBlock()}`;
           pending = t;
         };
         actions = await ctx.core.handleStream(envelope, {
-          onEffort: (effort) => {
+          onEffort: (effort, meta) => {
+            if (meta && meta.imageGen) {
+              enterImageGenQuiet();
+              return;
+            }
             maxThoughts = thoughtBudget(effort, { imageGen: quietImageGen });
           },
           onSegment: (t) => { holdAnswer(t); },

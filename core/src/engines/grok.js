@@ -33,7 +33,7 @@ const path = require('path');
 const engines = require('../../../shared/engines');
 const { composePrompt } = require('../../../shared/prompt-compose');
 const gcTemps = require('../../../shared/gc-temps');
-const { looksLikeImageGen } = require('../../../shared/image-gen-ask');
+const { mentionsImageKind, classifyImageGenAsk } = require('../../../shared/image-gen-ask');
 
 const id = 'grok';
 const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
@@ -102,10 +102,9 @@ function isOwnerFromEmail(opts) {
 //           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
 //           Not a coding session. Web channels are always this after one-shot.
 //   xhigh   git or a coding session, or a deep dive (implement, refactor,
-//           write/patch code, commit+push, PR, "deep dive"), or generate|make
-//           [a/an/the/this/some]
-//           picture/image/graphic/cartoon/painting/drawing/photo/photograph/pic.
-//           Bare "code" is not xhigh.
+//           write/patch code, commit+push, PR, "deep dive"), or a still-gen
+//           ask (kind word + cheap YES/NO classify in runTurn, not the sync
+//           word picker). Bare "code" is not xhigh.
 //           Project git cwd that is not $HOME.
 //           Email and MCP are always xhigh (even vs one-shot / +xh).
 //   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
@@ -231,11 +230,31 @@ function commitAndPushSamePost(text) {
 
 function xhighReason(prompt) {
   const s = String(prompt || '');
-  if (looksLikeImageGen(s)) return 'image-gen';
   const m = matchToken(XHIGH_RE, s);
   if (m) return m;
   if (commitAndPushSamePost(s)) return 'commit-push';
   return '';
+}
+
+/** After classifyEffort: picture-request verdict may raise Discord/telegram to xhigh. Web/email/mcp keep their effort. */
+function raiseForImageGen(classified, { imageGen, channel } = {}) {
+  const out = {
+    effort: classified && classified.effort,
+    reason: classified && classified.reason,
+    imageGen: !!imageGen,
+  };
+  if (!imageGen) return out;
+  if (isWebChannel(channel) || isEmailChannel(channel) || isMcpChannel(channel)) return out;
+  if (out.effort !== 'xhigh') {
+    out.effort = 'xhigh';
+    out.reason = 'image-gen';
+  }
+  return out;
+}
+
+function imageGenClassifyOff() {
+  const v = String(process.env.ASMLTR_IMAGE_GEN_CLASSIFY || '').trim().toLowerCase();
+  return v === '0' || v === 'off' || v === 'false' || v === 'no';
 }
 
 function highReason(prompt) {
@@ -297,7 +316,7 @@ function takeNextEffort(conversationKey) {
  */
 function classifyEffort(opts) {
   opts = opts || {};
-  if (opts.complete) return { effort: envEffort(), reason: 'complete' };
+  if (opts.complete) return { effort: normalizeEffort(opts.effort) || envEffort(), reason: 'complete' };
   // Email and MCP are always xhigh. Do not let one-shot / +xh / the word picker
   // drop a mailbox turn to medium. Server must pass opts.channel or this is a no-op.
   if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
@@ -751,13 +770,29 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   // Do not consume ~/.asmltr/next-effort on email/mcp — those channels are always xhigh.
   const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel)) ? null : takeNextEffort(conversationKey);
   const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender };
-  const classified = classifyEffort(effortOpts);
-  const effort = classified.effort;
-  recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
-  try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + ')\n'); } catch (_) {}
-  if (onEvent) { try { onEvent({ type: 'effort', effort }); } catch (_) {} }
   const { denyToolsEnv } = require('../../../shared/tool-policy');
   const deny = denyTools || {};
+  let classified = classifyEffort(effortOpts);
+  const scored = scoringPrompt(effortOpts);
+  let imageGen = false;
+  const skipImageClassify = !!deny.image || isEmailChannel(channel) || isMcpChannel(channel) || imageGenClassifyOff();
+  if (!skipImageClassify && mentionsImageKind(scored)) {
+    try {
+      imageGen = await classifyImageGenAsk(scored, (opts) => complete(Object.assign({
+        effort: 'low',
+        timeoutMs: 20000,
+        denyShell: true,
+        denyWrite: true,
+        denyImage: true,
+        denyVideo: true,
+      }, opts)));
+    } catch (_) { imageGen = false; }
+    classified = raiseForImageGen(classified, { imageGen, channel });
+  }
+  const effort = classified.effort;
+  recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
+  try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + (imageGen ? ' imageGen' : '') + ')\n'); } catch (_) {}
+  if (onEvent) { try { onEvent({ type: 'effort', effort, imageGen }); } catch (_) {} }
   const denyEnv = denyToolsEnv(deny);
   const extra = {};
   if (denyEnv) extra.ASMLTR_DENY_TOOLS = denyEnv;
@@ -767,7 +802,15 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   if (cwd) extra.ASMLTR_ATTACH_INGEST_CWD = String(cwd);
   const childEnv = launchEnv(Object.assign({}, process.env, extra));
   gcVisionPromptFilesOnce();
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image, images, mediaFiles });
+  const args = buildArgs({
+    prompt, systemPrompt, resume, cwd, model, sessionId, effortPrompt, channel,
+    senderId, owner, bypass_moderation, user_key, sender,
+    denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image,
+    images, mediaFiles,
+    // If we raised for a picture request, pin --effort so buildArgs does not re-pick medium.
+    nextEffort: classified.reason === 'image-gen' ? undefined : nextEffort,
+    effort: classified.reason === 'image-gen' ? effort : undefined,
+  });
   const visionFile = args.visionPromptFile || null;
   let stderr = '';
   try {
@@ -832,15 +875,26 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   }
 }
 
-async function complete({ prompt, model, appendSystemPrompt = null }) {
+async function complete({ prompt, model, appendSystemPrompt = null, abortController, timeoutMs, effort, denyShell, denyWrite, denyImage, denyVideo }) {
   gcVisionPromptFilesOnce();
-  const args = buildArgs({ prompt, systemPrompt: appendSystemPrompt, model: model || cheapModel, complete: true });
+  const args = buildArgs({
+    prompt, systemPrompt: appendSystemPrompt, model: model || cheapModel, complete: true,
+    effort, denyShell, denyWrite, denyImage, denyVideo,
+  });
   const promptFile = args.visionPromptFile || null;
   try {
     const child = spawn(bin(), args, { env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', (d) => { out += d.toString(); });
-    await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
+    const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
+    if (abortController) abortController.signal.addEventListener('abort', kill);
+    let timer = null;
+    if (timeoutMs > 0) timer = setTimeout(kill, timeoutMs);
+    try {
+      await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     return out.trim();
   } finally {
     if (promptFile) try { fs.unlinkSync(promptFile); } catch (_) {}
@@ -860,7 +914,7 @@ module.exports = {
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
-  classifyEffort, chooseEffort, effortForTurn,
+  classifyEffort, chooseEffort, effortForTurn, raiseForImageGen,
   canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet, commitAndPushSamePost,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };

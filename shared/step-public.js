@@ -19,12 +19,11 @@
  * Below medium (low) → 0: no chips, just the answer.
  * Tool / Working / Still working chips are xhigh only. medium/high are 💭 only.
  * Image gen is Discord DISPLAY only: one Generating chip even when the engine
- * is xhigh (picture quality). Engine effort is unchanged. Ask detect is
- * shared with grok via image-gen-ask.js.
+ * is xhigh (picture quality). Core classifies (kind-word gate + cheap YES/NO);
+ * Discord waits for the effort.imageGen flag and posts no chips during that check.
  */
 
 const { redactSecrets } = require('./redact');
-const { looksLikeImageGen } = require('./image-gen-ask');
 
 const ACP_TYPE = /^(tool_call|tool_call_update|tool_use|function_call)$/i;
 const THINK_HEARTBEAT_MS = 45000;
@@ -354,7 +353,7 @@ module.exports = {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
   publicBlockHints, privacyBlockLine, pickPublicReply, thoughtBudget,
-  looksLikeImageGen, isImageGenTool,
+  isImageGenTool,
   stripThoughtChrome, quietReplyFromResult,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE, THOUGHT_CLAMP,
 };
