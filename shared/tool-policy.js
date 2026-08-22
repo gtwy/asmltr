@@ -21,15 +21,17 @@ function loadAllowlist(file) {
     const j = JSON.parse(fs.readFileSync(p, 'utf8'));
     const silo = (j && j.siloAllow) || {};
     const video = (j && j.videoAllow) || {};
-    const image = (j && j.imageAllow) || {};
+    const image = (j && (j.photoAllow || j.imageAllow)) || {};
     const media = (j && j.mediaAllow) || {};
     const code = (j && j.codeAllow) || {};
     const ids = (a, k) => ((a && a[k]) || []).map(String);
     return {
       guilds: (silo.guilds || []).map(String),
       channels: (silo.channels || []).map(String),
-      videoPrincipals: ids(video, 'principals').concat(ids(media, 'principals'), ids(image, 'principals')),
-      videoDiscordIds: ids(video, 'discordIds').concat(ids(media, 'discordIds'), ids(image, 'discordIds')),
+      videoPrincipals: ids(video, 'principals').concat(ids(media, 'principals')),
+      videoDiscordIds: ids(video, 'discordIds').concat(ids(media, 'discordIds')),
+      imagePrincipals: ids(image, 'principals').concat(ids(media, 'principals'), ids(video, 'principals')),
+      imageDiscordIds: ids(image, 'discordIds').concat(ids(media, 'discordIds'), ids(video, 'discordIds')),
       codePrincipals: ids(code, 'principals'),
       codeDiscordIds: ids(code, 'discordIds'),
     };
@@ -37,6 +39,7 @@ function loadAllowlist(file) {
     return {
       guilds: [], channels: [],
       videoPrincipals: [], videoDiscordIds: [],
+      imagePrincipals: [], imageDiscordIds: [],
       codePrincipals: [], codeDiscordIds: [],
     };
   }
@@ -86,15 +89,23 @@ function listed(envelope, resolved, principals, discordIds) {
   return false;
 }
 
-/** Stills + video: owner/bypass, or videoAllow / imageAllow / mediaAllow. */
-function mediaAuthorized(envelope, resolved, allow) {
+/** Clips: owner/bypass, or videoAllow / mediaAllow. imageAllow / photoAllow do not grant video. */
+function videoAuthorized(envelope, resolved, allow) {
   if (ownerish(resolved)) return true;
   const a = allow || loadAllowlist();
   return listed(envelope, resolved, a.videoPrincipals, a.videoDiscordIds);
 }
 
-function videoAuthorized(envelope, resolved, allow) {
-  return mediaAuthorized(envelope, resolved, allow);
+/** Stills + asmltr post: owner/bypass, photo/image/media lists, or videoAllow (video implies stills). */
+function imageAuthorized(envelope, resolved, allow) {
+  if (ownerish(resolved)) return true;
+  const a = allow || loadAllowlist();
+  return listed(envelope, resolved, a.imagePrincipals, a.imageDiscordIds)
+    || listed(envelope, resolved, a.videoPrincipals, a.videoDiscordIds);
+}
+
+function mediaAuthorized(envelope, resolved, allow) {
+  return imageAuthorized(envelope, resolved, allow);
 }
 
 /** Write-a-program for this caller: owner/bypass or codeAllow. */
@@ -113,8 +124,8 @@ function emptyDeny() {
 
 function policyFor(envelope, resolved, allow) {
   const deny = emptyDeny();
-  if (!mediaAuthorized(envelope, resolved, allow)) {
-    deny.video = true;
+  if (!videoAuthorized(envelope, resolved, allow)) deny.video = true;
+  if (!imageAuthorized(envelope, resolved, allow)) {
     deny.image = true;
     deny.attach = true;
   }
@@ -163,6 +174,6 @@ function exitIfDenied(kind) {
 
 module.exports = {
   policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
-  videoAuthorized, mediaAuthorized, codeAuthorized,
+  videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
 };

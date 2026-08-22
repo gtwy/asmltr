@@ -108,6 +108,23 @@ test('videoAllow discord id may generate video', () => {
   assert.equal(p.restricted, true);
 });
 
+test('imageAllow / photoAllow grants stills and post, not video', () => {
+  const allow = {
+    guilds: [], channels: [],
+    videoPrincipals: [], videoDiscordIds: [],
+    imagePrincipals: ['steve'], imageDiscordIds: ['999000111222333003'],
+  };
+  const p = policyFor(
+    { channel: 'discord', public: true, sender: { raw_id: '999000111222333003' } },
+    { bypass_moderation: false, user_key: 'steve' },
+    allow,
+  );
+  assert.equal(p.deny.image, false);
+  assert.equal(p.deny.attach, false);
+  assert.equal(p.deny.video, true);
+  assert.equal(p.restricted, true);
+});
+
 test('codeAllow may receive programs without bypass; still no video/image', () => {
   const allow = {
     guilds: [], channels: [],
