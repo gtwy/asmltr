@@ -88,12 +88,24 @@ function mentionsSpeaker(text, hints) {
 }
 
 const KIND_RANK = { email: 4, 'last-name': 3, 'first-name': 2, identity: 1 };
+/** Public Discord blocks last names and emails only. First names / handles / principal ids post. */
+const PUBLIC_BLOCK_KINDS = new Set(['email', 'last-name']);
 const KIND_LABEL = {
   email: 'no email',
   'last-name': 'no last name',
-  'first-name': 'no first name',
-  identity: 'no named identity',
 };
+
+function nameParts(raw) {
+  return String(raw || '').trim().split(/[\s._-]+/).filter((p) => p.length >= 4 && !/^\d+$/.test(p));
+}
+
+/** Family name = last long token of a multi-word display (Ada Lovelace → Lovelace even though Ada is < 4). */
+function lastNameFromDisplay(raw) {
+  const rawParts = String(raw || '').trim().split(/[\s._-]+/).filter(Boolean);
+  const parts = nameParts(raw);
+  if (rawParts.length >= 2 && parts.length) return parts[parts.length - 1];
+  return null;
+}
 
 /** Map hint token → kind. Never put the token in a public reply. */
 function identityHintKindMap(records) {
@@ -112,10 +124,15 @@ function identityHintKindMap(records) {
     const dn = String(rec.display_name || '').trim();
     if (dn) {
       set(dn, 'identity');
-      const parts = dn.split(/[\s._-]+/).filter((p) => p.length >= 4 && !/^\d+$/.test(p));
-      if (parts.length) {
-        set(parts[parts.length - 1], 'last-name');
-        for (const p of parts.slice(0, -1)) set(p, 'first-name');
+      const last = lastNameFromDisplay(dn);
+      const parts = nameParts(dn);
+      if (last) {
+        set(last, 'last-name');
+        for (const p of parts) {
+          if (p.toLowerCase() !== last.toLowerCase()) set(p, 'first-name');
+        }
+      } else if (parts.length === 1) {
+        set(parts[0], 'first-name');
       }
     }
     for (const ident of rec.identifiers || []) {
@@ -128,25 +145,53 @@ function identityHintKindMap(records) {
   return map;
 }
 
+/** Last token of a two-or-more-part speaker display name is a last name even if they are not in Access. */
+function mergeSpeakerLastNames(hintKinds, author, member) {
+  const map = hintKinds instanceof Map ? new Map(hintKinds) : new Map();
+  const bags = [author, member];
+  for (const bag of bags) {
+    if (!bag || typeof bag !== 'object') continue;
+    for (const key of ['globalName', 'displayName', 'nickname']) {
+      const last = lastNameFromDisplay(bag[key]);
+      if (!last) continue;
+      const k = last.toLowerCase();
+      const prev = map.get(k);
+      if (!prev || (KIND_RANK['last-name'] || 0) > (KIND_RANK[prev] || 0)) map.set(k, 'last-name');
+    }
+  }
+  return map;
+}
+
+function kindForHint(hint, hintKinds) {
+  if (!hint) return null;
+  if (hintKinds && hintKinds.has(String(hint).toLowerCase())) return hintKinds.get(String(hint).toLowerCase());
+  if (/@/.test(hint)) return 'email';
+  return null;
+}
+
+/** Hints that may trigger a public drop. First names, handles, principal ids are omitted. */
+function publicBlockHints(hints, hintKinds) {
+  return (hints || []).filter((h) => PUBLIC_BLOCK_KINDS.has(kindForHint(h, hintKinds)));
+}
+
 function privacyHitKind(text, hints, hintKinds) {
   const s = String(text || '');
   let best = null;
   let bestRank = 0;
-  for (const h of hints || []) {
+  for (const h of publicBlockHints(hints, hintKinds)) {
     if (!h || String(h).length < 4) continue;
     if (!new RegExp('\\b' + escapeRe(h) + '\\b', 'i').test(s)) continue;
-    let kind = hintKinds && hintKinds.get(String(h).toLowerCase());
-    if (!kind) kind = /@/.test(h) ? 'email' : 'identity';
+    const kind = kindForHint(h, hintKinds);
     const rank = KIND_RANK[kind] || 0;
     if (rank > bestRank) { best = kind; bestRank = rank; }
   }
   return best;
 }
 
-/** Public notice. Never includes the matched token. */
+/** Public notice. Never includes the matched token. Last name or email only. */
 function privacyBlockLine(text, hints, hintKinds) {
   const kind = privacyHitKind(text, hints, hintKinds);
-  const reason = KIND_LABEL[kind] || 'no named identity';
+  const reason = KIND_LABEL[kind] || 'no last name';
   return 'response blocked due to privacy rules: ' + reason;
 }
 
@@ -182,21 +227,22 @@ function identityHintsFrom(records) {
 /**
  * Final Discord reply after streaming. Public guild: never fall back to the
  * raw reply if the held segment was dropped as a leak, and drop answers that
- * name Access identities. DMs keep the raw reply. Vendor emails not in Access
- * still post.
+ * contain a last name or Access email. First names and handles post. DMs keep
+ * the raw reply. Vendor emails not in Access still post.
  */
 function pickPublicReply({ pending, replyText, leakDropped, publicSurface, hints, hintKinds }) {
   const held = String(pending || '').trim();
   const raw = String(replyText || '').trim();
+  const blockHints = publicBlockHints(hints, hintKinds);
   const block = (sample) => privacyBlockLine(sample, hints, hintKinds);
   if (held) {
-    if (publicSurface && mentionsSpeaker(held, hints)) return block(held);
+    if (publicSurface && mentionsSpeaker(held, blockHints)) return block(held);
     return held;
   }
   if (!raw) return '';
   if (!publicSurface) return raw;
-  if (looksLikePromptRestatement(raw) && !mentionsSpeaker(raw, hints)) return '';
-  if (mentionsSpeaker(raw, hints)) return block(raw);
+  if (looksLikePromptRestatement(raw) && !mentionsSpeaker(raw, blockHints)) return '';
+  if (mentionsSpeaker(raw, blockHints)) return block(raw);
   if (leakDropped) return '';
   return raw;
 }
@@ -275,13 +321,14 @@ function quietReplyFromResult(result) {
   return stripThoughtChrome(text);
 }
 
-/** Sanitized Discord thought chip, or '' to drop. Never raw text. */
-function discordThoughtLine(text, hints) {
+/** Sanitized Discord thought chip, or '' to drop. Never raw text. Last names and emails drop; first names stay. */
+function discordThoughtLine(text, hints, hintKinds) {
   const raw = String(text || '').trim();
   if (!raw) return '';
-  if (looksLikePromptLeak(raw) || mentionsSpeaker(raw, hints)) return '';
+  const blockHints = publicBlockHints(hints, hintKinds);
+  if (looksLikePromptLeak(raw) || mentionsSpeaker(raw, blockHints)) return '';
   const cleaned = String(redactSecrets(raw).text || '').trim();
-  if (!cleaned || looksLikePromptLeak(cleaned) || mentionsSpeaker(cleaned, hints)) return '';
+  if (!cleaned || looksLikePromptLeak(cleaned) || mentionsSpeaker(cleaned, blockHints)) return '';
   let body = cleaned.replace(/\s+/g, ' ');
   if (body.length > THOUGHT_CLAMP) body = body.slice(0, THOUGHT_CLAMP - 1) + '…';
   return `-# 💭 ${body}`;
@@ -289,7 +336,8 @@ function discordThoughtLine(text, hints) {
 
 module.exports = {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
-  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, privacyBlockLine, pickPublicReply, thoughtBudget,
+  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
+  publicBlockHints, privacyBlockLine, pickPublicReply, thoughtBudget,
   stripThoughtChrome, quietReplyFromResult,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, THOUGHT_CLAMP,
 };

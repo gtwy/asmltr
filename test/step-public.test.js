@@ -3,7 +3,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
-  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, pickPublicReply, thoughtBudget,
+  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
+  publicBlockHints, pickPublicReply, thoughtBudget,
   stripThoughtChrome, quietReplyFromResult,
 } = require('../shared/step-public');
 
@@ -22,7 +23,9 @@ test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
 });
 
 test('speaker hints are runtime-only; thoughts mentioning them are dropped', () => {
-  const hints = speakerHintsFrom({ username: 'wx412', globalName: 'Ada Lovelace' });
+  const author = { username: 'wx412', globalName: 'Ada Lovelace' };
+  const hints = speakerHintsFrom(author);
+  const hintKinds = mergeSpeakerLastNames(new Map(), author, null);
   assert.ok(hints.includes('wx412'));
   assert.ok(hints.includes('Ada Lovelace'));
   assert.ok(hints.includes('Lovelace'));
@@ -30,8 +33,9 @@ test('speaker hints are runtime-only; thoughts mentioning them are dropped', () 
   assert.equal(mentionsSpeaker('Ada Lovelace asked for ingredients', hints), true);
   assert.equal(mentionsSpeaker('wx412 is waiting', hints), true);
   assert.equal(mentionsSpeaker('Checking the recipe board', hints), false);
-  assert.equal(discordThoughtLine('The user is Ada Lovelace (wx412) asking in #food', hints), '');
-  assert.equal(discordThoughtLine('Let me search more thoroughly', hints), '-# 💭 Let me search more thoroughly');
+  assert.equal(discordThoughtLine('The user is Ada Lovelace (wx412) asking in #food', hints, hintKinds), '');
+  assert.equal(discordThoughtLine('Let me search more thoroughly', hints, hintKinds), '-# 💭 Let me search more thoroughly');
+  assert.equal(discordThoughtLine('James asked about the recipe', hints, hintKinds), '-# 💭 James asked about the recipe');
 });
 
 test('thoughtBudget: xhigh uncapped; high/medium 2; below medium 0', () => {
@@ -100,6 +104,8 @@ test('Discord never renderSteps raw thought text', () => {
   assert.match(src, /no Working filler on medium\/high/);
   assert.match(src, /pickPublicReply/);
   assert.match(src, /identityHintsFrom/);
+  assert.match(src, /publicBlockHints/);
+  assert.match(src, /mergeSpeakerLastNames/);
   assert.match(src, /leakDropped/);
 });
 
@@ -126,9 +132,17 @@ test('identityHintsFrom splits hyphenated principal ids and keeps mailboxes whol
   assert.equal(hints.includes('123456789012345678'), false);
   assert.equal(hints.includes('self'), false);
   assert.equal(hints.includes('IvyBot'), false);
-  assert.equal(discordThoughtLine('Updating principal fixture-person', hints), '');
-  assert.equal(discordThoughtLine('Email Ada Lovelace the links', hints), '');
-  assert.equal(discordThoughtLine('Checking the recipe board', hints), '-# 💭 Checking the recipe board');
+  const hintKinds = identityHintKindMap([{
+    id: 'fixture-person',
+    display_name: 'Ada Lovelace',
+    identifiers: [
+      { surface: 'email', value: 'ada@example.com' },
+      { surface: 'discord', value: '123456789012345678' },
+    ],
+  }, { id: 'self', display_name: 'IvyBot' }]);
+  assert.equal(discordThoughtLine('Updating principal fixture-person', hints, hintKinds), '-# 💭 Updating principal fixture-person');
+  assert.equal(discordThoughtLine('Email Ada Lovelace the links', hints, hintKinds), '');
+  assert.equal(discordThoughtLine('Checking the recipe board', hints, hintKinds), '-# 💭 Checking the recipe board');
 });
 
 test('pickPublicReply: public leak posts a reason, never the raw reply; DMs still do', () => {
@@ -182,7 +196,7 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     leakDropped: false,
     publicSurface: true,
     ...opts,
-  }), 'response blocked due to privacy rules: no named identity');
+  }), 'Updating fixture-person now.');
   const notice = pickPublicReply({
     pending: '',
     replyText: 'Sent to ada@example.com',
@@ -199,5 +213,19 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     publicSurface: true,
     hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
     hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
-  }), 'response blocked due to privacy rules: no first name');
+  }), 'James picked it.');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Yes, Watt is the correct spelling.',
+    leakDropped: false,
+    publicSurface: true,
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
+  }), 'response blocked due to privacy rules: no last name');
+  const kinds = identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]);
+  assert.equal(kinds.get('james'), 'first-name');
+  assert.equal(kinds.get('watt'), 'last-name');
+  assert.equal(identityHintKindMap([{ id: 'solo', display_name: 'Derek' }]).get('derek'), 'first-name');
+  assert.equal(identityHintKindMap([{ id: 'ada', display_name: 'Ada Lovelace' }]).get('lovelace'), 'last-name');
+  assert.deepEqual(publicBlockHints(['James', 'Watt', 'wx412'], kinds).map((h) => h.toLowerCase()), ['watt']);
 });

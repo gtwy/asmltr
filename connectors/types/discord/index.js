@@ -33,7 +33,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
-const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
@@ -590,6 +590,8 @@ ${referentPromptBlock()}`;
       let leakDropped = false;
       let actions = [];
       const hints = [...new Set([...speakerHintsFrom(message.author, message.member), ...(await loadIdentityHints())])];
+      const hintKinds = mergeSpeakerLastNames(identityHintKinds, message.author, message.member);
+      const blockHints = publicBlockHints(hints, hintKinds);
       if (streamSteps && addressed) {
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
         // boundary closes — either a tool call starts (the common case: post immediately, no lag)
@@ -622,7 +624,7 @@ ${referentPromptBlock()}`;
           const clean = String(t || '').trim();
           if (!clean) { pending = ''; return; }
           if (isSilence(clean)) { sawNoReply = true; pending = ''; stopBeat(); return; }
-          if (looksLikePromptRestatement(clean) || (envelope.public && mentionsSpeaker(clean, hints))) {
+          if (looksLikePromptRestatement(clean) || (envelope.public && mentionsSpeaker(clean, blockHints))) {
             pending = '';
             leakDropped = true;
             return;
@@ -647,7 +649,7 @@ ${referentPromptBlock()}`;
           onThinking: (t) => {
             if (sawNoReply) return;
             if (maxThoughts <= 0) return;
-            const line = discordThoughtLine(t, hints);
+            const line = discordThoughtLine(t, hints, hintKinds);
             if (line && thoughtsPosted < maxThoughts) {
               thoughtsPosted += 1;
               postChip(line);
@@ -667,7 +669,7 @@ ${referentPromptBlock()}`;
           leakDropped,
           publicSurface: !!envelope.public,
           hints,
-          hintKinds: identityHintKinds,
+          hintKinds,
         });
       } else {
         actions = await ctx.core.handle(envelope);
@@ -678,7 +680,7 @@ ${referentPromptBlock()}`;
           leakDropped: false,
           publicSurface: !!envelope.public,
           hints,
-          hintKinds: identityHintKinds,
+          hintKinds,
         });
       }
       const color = parseReact(replyText);
