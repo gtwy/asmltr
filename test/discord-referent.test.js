@@ -9,8 +9,9 @@ const {
 
 test('ask text is the operator wording', () => {
   assert.match(ASK_MISSING_MEDIA, /forget to attach the media/i);
+  assert.match(referentPromptBlock(), /RECENT context in THIS channel/);
   assert.match(referentPromptBlock(), /AFTER that question/);
-  assert.match(referentPromptBlock(), /only when they point at earlier context/);
+  assert.match(referentPromptBlock(), /only AFTER they elaborate/);
   assert.match(referentPromptBlock(), /Do not stall/);
 });
 

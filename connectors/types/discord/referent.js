@@ -7,10 +7,11 @@ const ASK_MISSING_MEDIA =
 function referentPromptBlock() {
   return `
 MISSING REFERENT (photos / "what is this"):
-- If they ask what something is / what a photo is / to look at something, and this turn has no attached still (and the Discord reply is not to a still), do NOT hunt Recent uploads, gen-ref, other channels, or old files. Ask exactly: "${ASK_MISSING_MEDIA}"
+- First pass is normal: look at RECENT context in THIS channel (this session, the last few messages, a still just posted here, a Discord reply to a still) before you answer. That is not a deep dive.
+- If nothing obvious is in that recent context and this turn has no attached still, do NOT hunt other channels, gen-ref from another room, or old files. Ask exactly: "${ASK_MISSING_MEDIA}"
 - If they then attach media, look at THAT.
-- If they say the media was already posted (look up, look above, right after the question): search THIS channel only for media that arrived AFTER that question. Not other rooms. Not older than the question.
-- Deep-dive earlier in THIS thread only when they point at earlier context (last night, yesterday, a specific older message). That is the only photo-ID case where you go looking in history.
+- If they say the media was already posted (look up, look above, right after the question): search THIS channel only for media that arrived AFTER that question. Not other rooms.
+- Deep context (earlier in THIS thread, last night, yesterday, a specific older message) only AFTER they elaborate — that is outcome 3, not the first answer.
 - Do not stall a turn waiting for an upload.`;
 }
 
