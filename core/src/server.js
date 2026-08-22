@@ -363,19 +363,17 @@ async function handle(envelope, opts = {}) {
       bypassModeration: !!(resolved && resolved.bypass_moderation),
     });
   }
-  // Cross-channel file uploads: every file a user sends on ANY channel is saved to one shared
-  // area (see shared/uploads.js), so "find the thing I sent" works even when it arrived on a
-  // different channel/app. Trust-gated: only full-trust (owner) sessions are told about the
-  // upload area + shown the recent file list — don't leak the owner's files to lesser callers.
+  // Shared upload store; the in-prompt list is THIS conversation only so a photo ID in
+  // one Discord channel does not grab last night's still from another room. Other rooms
+  // stay available on purpose via `asmltr uploads`. Trust-gated: owner sessions only.
   if (resolved.bypass_moderation) {
-    pUploadsInstr = 'FILE UPLOADS (shared across ALL channels): every file a user sends on any channel ' +
-      '(Telegram, Discord, …) is saved to ONE shared upload area, tagged with its origin channel. When the user ' +
-      'refers to a file they sent/uploaded/shared — even "on Telegram" or from another app — DO NOT claim you ' +
-      'can\'t find it before checking here: run `asmltr uploads` (newest first; also `asmltr uploads <search>`, ' +
-      '`--channel <name>`, `--since <2h|1d>`), then Read the file at the path it prints.';
+    pUploadsInstr = 'FILE UPLOADS: every file a user sends on any channel (Telegram, Discord, …) is saved to ONE shared area. ' +
+      'The list below is THIS conversation only — do not treat a file from another Discord channel or app as the picture they just asked about. ' +
+      'If they ask what a picture is and this turn has no attached still, do not guess from Recent uploads or another room; say you do not have the picture on this message. ' +
+      'To look at another room on purpose: `asmltr uploads` (also `asmltr uploads <search>`, `--channel discord`, `--since <2h|1d>`), then Read the path it prints.';
     try {
-      const recent = require('../../shared/uploads').recentSummary(6);
-      if (recent) pUploadsList = `Recent uploads (newest first):\n${recent}`;
+      const recent = require('../../shared/uploads').recentSummary(6, { conversationKey: e.conversation_key });
+      if (recent) pUploadsList = `Recent uploads in THIS conversation (newest first):\n${recent}`;
     } catch (_) {}
   }
 

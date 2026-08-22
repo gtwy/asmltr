@@ -12,7 +12,7 @@
  *
  * Extra opts (images, mediaFiles, denyTools, attachChannel, attachTarget, …) are
  * ignored by engines that do not read them. Vision is per-engine, not in this
- * dispatcher: Claude uses SDK image blocks; Grok uses ACP `--prompt-json`.
+ * dispatcher: Claude uses SDK image blocks; Grok uses ACP `--prompt-file`.
  */
 const registry = require('../../../shared/engines');
 const CACHE = {};

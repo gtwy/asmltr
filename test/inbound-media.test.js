@@ -7,8 +7,21 @@ const path = require('path');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-genref-'));
 process.env.ASMLTR_GEN_REF = tmp;
+process.env.ASMLTR_GROK_PROMPT_DIR = tmp;
 const inbound = require('../shared/inbound-media');
 const grok = require('../core/src/engines/grok');
+
+function visionJson(args) {
+  assert.ok(args.includes('--prompt-file'), 'native vision uses --prompt-file, not argv --prompt-json');
+  assert.equal(args.includes('--prompt-json'), false);
+  assert.equal(args.includes('-p'), false);
+  const f = args[args.indexOf('--prompt-file') + 1];
+  const body = JSON.parse(fs.readFileSync(f, 'utf8'));
+  const mode = fs.statSync(f).mode & 0o777;
+  assert.equal(mode & 0o077, 0, 'vision prompt file must be 0600');
+  try { fs.unlinkSync(f); } catch (_) {}
+  return body;
+}
 
 const PNG = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -63,17 +76,17 @@ test('grok prompt gets CHANNEL MEDIA paths for image_edit, not as bash', () => {
     prompt: 'what is this from',
     mediaFiles: [{ kind: 'image', path: pic, name: 'ref.png', mime: 'image/png' }],
   });
-  assert.ok(args.includes('--prompt-json'), 'native vision uses --prompt-json, not -p');
-  assert.equal(args.includes('-p'), false);
-  const body = JSON.parse(args[args.indexOf('--prompt-json') + 1]);
+  const body = visionJson(args);
   assert.equal(body.type, 'acp');
   const text = body.content.find((c) => c.type === 'text').text;
   const img = body.content.find((c) => c.type === 'image');
   assert.ok(img && img.data && img.mimeType === 'image/png');
+  assert.equal(args.join(' ').includes(img.data), false, 'base64 must not sit on argv');
   assert.match(text, /CHANNEL MEDIA/);
   assert.match(text, /attached as images/);
   assert.match(text, /web-search to confirm/);
   assert.match(text, /Do not lock a first guess/);
+  assert.match(text, /not Recent uploads/);
   assert.ok(text.includes(pic));
   assert.match(text, /Do not echo filesystem paths/);
 });
@@ -93,7 +106,7 @@ test('same still via images[] and mediaFiles is one vision block, no second save
     images: [{ media_type: 'image/png', data: PNG.toString('base64'), path: pic, name: 'once.png' }],
     mediaFiles: [{ kind: 'image', path: pic, name: 'once.png', mime: 'image/png' }],
   });
-  const body = JSON.parse(args[args.indexOf('--prompt-json') + 1]);
+  const body = visionJson(args);
   const imgs = body.content.filter((c) => c.type === 'image');
   assert.equal(imgs.length, 1);
   assert.equal(fs.readdirSync(tmp).length, before, 'must not saveRef a second copy');
@@ -108,6 +121,7 @@ test('vision skips non-image bytes even if kind says image', () => {
   });
   assert.ok(args.includes('-p'));
   assert.equal(args.includes('--prompt-json'), false);
+  assert.equal(args.includes('--prompt-file'), false);
   const vis = grok.collectVisionImages({
     images: [{ data: Buffer.from('not-a-picture-xx').toString('base64'), media_type: 'image/jpeg', name: 'x.jpg' }],
   });

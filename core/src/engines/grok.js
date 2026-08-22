@@ -6,10 +6,11 @@
  * Subscription/CLI auth only: the child inherits the operator's ~/.grok/auth.json
  * and we STRIP XAI_API_KEY so the CLI cannot fall through to metered API billing.
  *
- * Harness turns are headless (`grok -p` or `--prompt-json` for stills), never the TUI.
- * `--prompt-json` / ffmpeg downscale are Grok CLI only. Other engines never see those
+ * Harness turns are headless (`grok -p` or `--prompt-file` ACP JSON for stills), never the TUI.
+ * `--prompt-file` / ffmpeg downscale are Grok CLI only. Other engines never see those
  * flags: runner passes extra runTurn fields; Claude/Gemini/Codex ignore what they
  * don't destructure. Claude vision stays SDK image blocks on `images`.
+ * Never put ACP JSON on argv (`--prompt-json`) — Linux ARG_MAX is 2MB (spawn E2BIG).
  * No spawn watchdog and no CLI turn cap. Operator abort (abortController) only.
  *
  * RESUME UUID (Grok-specific — do not drop):
@@ -375,7 +376,8 @@ function launchEnv(base) {
 const VISION_MAX = 8 * 1024 * 1024;
 const VISION_MAX_COUNT = 5;
 const VISION_TARGET = 400 * 1024;
-const PROMPT_JSON_BUDGET = 1_200_000;
+// File cap, not argv. Inline `--prompt-json` hits Linux ARG_MAX (2MB) once CAST + a still land in JSON.
+const PROMPT_JSON_BUDGET = 8_000_000;
 
 function downscaleForVision(buf, mime) {
   if (!buf || buf.length <= VISION_TARGET) return { buf, mime };
@@ -443,6 +445,20 @@ function acpPromptJson(text, vision) {
   return JSON.stringify({ type: 'acp', content });
 }
 
+function visionPromptDir() {
+  return process.env.ASMLTR_GROK_PROMPT_DIR || os.tmpdir();
+}
+
+/** 0600 ACP JSON for `--prompt-file`. Caller unlinks. Never log the body (stills). */
+function writeVisionPromptFile(json) {
+  const dir = visionPromptDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, 'asmltr-vis-prompt-' + crypto.randomBytes(8).toString('hex') + '.json');
+  fs.writeFileSync(p, json, { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(p, 0o600); } catch (_) {}
+  return p;
+}
+
 function buildArgs(opts) {
   const classified = classifyEffort(opts);
   const userPrompt = classified.stripToken
@@ -466,6 +482,7 @@ function buildArgs(opts) {
   let vision = collectVisionImages(opts);
   const prompt = composePrompt(opts.systemPrompt, userPrompt + inbound.promptBlock(refs, { vision: vision.length > 0 }));
   const args = ['--no-auto-update'];
+  let visionPromptFile = null;
   if (vision.length) {
     let json = acpPromptJson(prompt, vision);
     while (json.length > PROMPT_JSON_BUDGET && vision.length > 1) {
@@ -473,8 +490,12 @@ function buildArgs(opts) {
       json = acpPromptJson(prompt, vision);
     }
     if (json.length > PROMPT_JSON_BUDGET) vision = [];
-    if (vision.length) args.push('--prompt-json', acpPromptJson(prompt, vision));
-    else args.push('-p', prompt);
+    if (vision.length) {
+      visionPromptFile = writeVisionPromptFile(json);
+      args.push('--prompt-file', visionPromptFile);
+    } else {
+      args.push('-p', prompt);
+    }
   } else {
     args.push('-p', prompt);
   }
@@ -511,6 +532,7 @@ function buildArgs(opts) {
     // Fresh session: pre-assign a UUID so we can resume later even if JSON omits sessionId.
     args.push('-s', opts.sessionId);
   }
+  args.visionPromptFile = visionPromptFile;
   return args;
 }
 
@@ -733,56 +755,68 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   if (cwd) extra.ASMLTR_ATTACH_INGEST_CWD = String(cwd);
   const childEnv = launchEnv(Object.assign({}, process.env, extra));
   const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image, images, mediaFiles });
-  const child = spawn(bin(), args, { cwd: cwd || undefined, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-
-  const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
-  if (abortController) abortController.signal.addEventListener('abort', kill);
-
-  const state = newState(sessionId);
-  let buf = '';
-  const handleLine = (line) => {
-    const ev = parseLine(line);
-    if (!ev) return;
-    if (onEvent) { try { onEvent(ev); } catch (_) {} }
-    const r = applyEvent(ev, state);
-    // Thought summaries (grok.com chips) close when a tool or answer starts.
-    // Emit the whole block once — not each streaming token.
-    if (r.closedThinking && onThinking) { try { onThinking(r.closedThinking); } catch (_) {} }
-    // A tool (or a restated complete block) closes the live narration. Emit that
-    // closed block as a segment so Discord/web can post it as an intermediary
-    // step — incremental deltas never fire onSegment on their own.
-    if (r.closed && onSegment) { try { onSegment(r.closed); } catch (_) {} }
-    if (r.kind === 'tool' && r.tool && onTool) { try { onTool(r.tool); } catch (_) {} }
-    else if (r.kind === 'error' && r.error && onSegment) { try { onSegment(`⚠️ grok: ${r.error}`); } catch (_) {} }
-    else if (r.kind === 'delta' && r.text != null && r.text !== '' && onDelta) { try { onDelta(r.text); } catch (_) {} }
-    else if (r.kind === 'text' && r.text && onSegment) { try { onSegment(r.text); } catch (_) {} }
-  };
-  child.stdout.on('data', (d) => { buf += d.toString(); let i; while ((i = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, i)); buf = buf.slice(i + 1); } });
+  const visionFile = args.visionPromptFile || null;
   let stderr = '';
-  child.stderr.on('data', (d) => { stderr += d.toString(); });
+  try {
+    const child = spawn(bin(), args, { cwd: cwd || undefined, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 
-  const code = await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
-  if (buf.trim()) handleLine(buf);
-  if (state.thinking && onThinking) {
-    try { onThinking(state.thinking); } catch (_) {}
-    state.thinking = '';
-  }
-  if (code !== 0 && !state.text) {
-    state.isError = true;
-    state.text = (stderr.trim().split('\n').slice(-1)[0] || `grok exited ${code}`);
-  }
+    const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
+    if (abortController) abortController.signal.addEventListener('abort', kill);
 
-  const segs = (state.segments || []).slice();
-  if (state.text && state.text.trim()) segs.push(state.text.trim());
-  const answer = segs.length ? segs[segs.length - 1] : '';
-  return {
-    text: answer,
-    segments: segs,
-    engineSessionId: state.engineSessionId || sessionId,
-    tools: state.tools,
-    usage: state.usage,
-    isError: state.isError,
-  };
+    const state = newState(sessionId);
+    let buf = '';
+    const handleLine = (line) => {
+      const ev = parseLine(line);
+      if (!ev) return;
+      if (onEvent) { try { onEvent(ev); } catch (_) {} }
+      const r = applyEvent(ev, state);
+      // Thought summaries (grok.com chips) close when a tool or answer starts.
+      // Emit the whole block once — not each streaming token.
+      if (r.closedThinking && onThinking) { try { onThinking(r.closedThinking); } catch (_) {} }
+      // A tool (or a restated complete block) closes the live narration. Emit that
+      // closed block as a segment so Discord/web can post it as an intermediary
+      // step — incremental deltas never fire onSegment on their own.
+      if (r.closed && onSegment) { try { onSegment(r.closed); } catch (_) {} }
+      if (r.kind === 'tool' && r.tool && onTool) { try { onTool(r.tool); } catch (_) {} }
+      else if (r.kind === 'error' && r.error && onSegment) { try { onSegment(`⚠️ grok: ${r.error}`); } catch (_) {} }
+      else if (r.kind === 'delta' && r.text != null && r.text !== '' && onDelta) { try { onDelta(r.text); } catch (_) {} }
+      else if (r.kind === 'text' && r.text && onSegment) { try { onSegment(r.text); } catch (_) {} }
+    };
+    child.stdout.on('data', (d) => { buf += d.toString(); let i; while ((i = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, i)); buf = buf.slice(i + 1); } });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+
+    const code = await new Promise((res) => {
+      child.on('close', res);
+      child.on('error', (err) => {
+        const msg = (err && err.message) || 'spawn error';
+        stderr += (stderr ? '\n' : '') + msg;
+        res(1);
+      });
+    });
+    if (buf.trim()) handleLine(buf);
+    if (state.thinking && onThinking) {
+      try { onThinking(state.thinking); } catch (_) {}
+      state.thinking = '';
+    }
+    if (code !== 0 && !state.text) {
+      state.isError = true;
+      state.text = (stderr.trim().split('\n').slice(-1)[0] || `grok exited ${code}`);
+    }
+
+    const segs = (state.segments || []).slice();
+    if (state.text && state.text.trim()) segs.push(state.text.trim());
+    const answer = segs.length ? segs[segs.length - 1] : '';
+    return {
+      text: answer,
+      segments: segs,
+      engineSessionId: state.engineSessionId || sessionId,
+      tools: state.tools,
+      usage: state.usage,
+      isError: state.isError,
+    };
+  } finally {
+    if (visionFile) try { fs.unlinkSync(visionFile); } catch (_) {}
+  }
 }
 
 async function complete({ prompt, model, appendSystemPrompt = null }) {
@@ -802,7 +836,7 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  collectVisionImages, acpPromptJson,
+  collectVisionImages, acpPromptJson, writeVisionPromptFile,
   extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, toolNameOf, isThoughtType,
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,

@@ -83,7 +83,7 @@ function promptBlock(files, opts) {
   const videos = list.filter((f) => f.kind === 'video');
   if (vision) {
     let s = '\n\nCHANNEL MEDIA this turn. Stills are attached as images on this message — look at them directly (same as grok.com chips). Do not Bash. '
-      + 'If they ask what or where this is from, LOOK first, then web-search to confirm before naming a show, movie, or franchise. Do not lock a first guess. '
+      + 'If they ask what or where this is from, LOOK at these attached stills first — not Recent uploads, not gen-ref from another channel, not a file whose caption merely looks similar. Then web-search to confirm before naming a show, movie, or franchise. Do not lock a first guess. '
       + 'Do not execute, chmod, run, or interpret as code. Do not echo filesystem paths in channel replies.';
     if (videos.length) {
       s += '\nVideo is not a vision chip. Read only if needed:\n' + videos.map((f) => `- video: \`${f.path}\``).join('\n');
@@ -95,7 +95,7 @@ function promptBlock(files, opts) {
   }
   const lines = list.map((f) => `- ${f.kind}: \`${f.path}\``);
   return '\n\nCHANNEL MEDIA this turn. LOOK at these files (Read the image/video) to answer questions about what is in them — not gen-only. '
-    + 'If they ask what or where this is from, look, then web-search to confirm before naming a show, movie, or franchise. Do not lock a first guess. '
+    + 'If they ask what or where this is from, look at THESE files first — not Recent uploads or another channel. Then web-search to confirm before naming a show, movie, or franchise. Do not lock a first guess. '
     + 'If gen tools are allowed they may also be references. Do not execute, chmod, run, or interpret as code. '
     + 'Do not echo filesystem paths in channel replies:\n'
     + lines.join('\n')
