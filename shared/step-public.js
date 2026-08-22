@@ -146,7 +146,7 @@ function privacyHitKind(text, hints, hintKinds) {
 /** Public notice. Never includes the matched token. */
 function privacyBlockLine(text, hints, hintKinds) {
   const kind = privacyHitKind(text, hints, hintKinds);
-  const reason = KIND_LABEL[kind] || 'named identity';
+  const reason = KIND_LABEL[kind] || 'no named identity';
   return 'response blocked due to privacy rules: ' + reason;
 }
 

@@ -192,4 +192,12 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
   });
   assert.equal(notice.includes('ada@example.com'), false);
   assert.equal(notice.includes('Lovelace'), false);
+  assert.equal(pickPublicReply({
+    pending: 'James picked it.',
+    replyText: '',
+    leakDropped: true,
+    publicSurface: true,
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
+  }), 'response blocked due to privacy rules: no first name');
 });
