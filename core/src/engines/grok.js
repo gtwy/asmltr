@@ -798,7 +798,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     child.stderr.on('data', (d) => { stderr += d.toString(); });
 
     const code = await new Promise((res) => {
-      child.on('close', res);
+      child.on('close', (c, sig) => res(c == null && sig ? sig : c));
       child.on('error', (err) => {
         const msg = (err && err.message) || 'spawn error';
         stderr += (stderr ? '\n' : '') + msg;
@@ -812,7 +812,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     }
     if (code !== 0 && !state.text) {
       state.isError = true;
-      state.text = (stderr.trim().split('\n').slice(-1)[0] || `grok exited ${code}`);
+      state.text = (stderr.trim().split('\n').slice(-1)[0] || `grok exited ${code == null ? 'unknown' : code}`);
     }
 
     const segs = (state.segments || []).slice();
