@@ -7,7 +7,7 @@
  * the classifier decides whether this turn wants image_gen / image_edit.
  */
 
-const KIND_RE = /\b(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?|art)\b/i;
+const KIND_RE = /\b(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?)\b/i;
 
 function mentionsImageKind(text) {
   return KIND_RE.test(String(text || ''));

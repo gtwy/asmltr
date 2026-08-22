@@ -14,6 +14,8 @@ test('mentionsImageKind: kind list only, not verb+kind', () => {
   assert.equal(mentionsImageKind('generate a report'), false);
   assert.equal(mentionsImageKind('make a list'), false);
   assert.equal(mentionsImageKind('ok thanks'), false);
+  assert.equal(mentionsImageKind('state of the art'), false);
+  assert.equal(mentionsImageKind('the art of cooking'), false);
   assert.equal(mentionsImageKind(''), false);
 });
 
