@@ -119,7 +119,7 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
   }
 });
 
-test('visual generate/make xhigh is verb+optional filler+kind only', () => {
+test('visual generate/make xhigh is verb…kind or kind…made, same sentence', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     for (const p of [
@@ -134,6 +134,11 @@ test('visual generate/make xhigh is verb+optional filler+kind only', () => {
       'make a cartoon',
       'make an image',
       'make this painting',
+      'can you make a new picture',
+      'make me a really nice photo of the bun',
+      'the picture you made of Steve',
+      'the photo you generated yesterday',
+      'take the picture you made of Steve yesterday as a puppet in the cape and sit him on the bench in the arboretum photo you made a few lines above',
     ]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit }), 'xhigh', p);
     }

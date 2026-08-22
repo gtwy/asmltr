@@ -33,6 +33,7 @@ const path = require('path');
 const engines = require('../../../shared/engines');
 const { composePrompt } = require('../../../shared/prompt-compose');
 const gcTemps = require('../../../shared/gc-temps');
+const { looksLikeImageGen } = require('../../../shared/image-gen-ask');
 
 const id = 'grok';
 const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
@@ -143,7 +144,6 @@ const XHIGH_PARTS = [
   'codebase',
   'write(?:ing)?\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:code|patch|function|module|helper|adapter)',
   'patch(?:ing)?\\s+(?:the\\s+|this\\s+|some\\s+|a\\s+)?(?:code|file|module|function|repo|branch)',
-  '(?:generate|make)\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?)',
 ];
 const XHIGH_RE = new RegExp('\\b(?:' + XHIGH_PARTS.join('|') + ')\\b', 'i');
 // high: find / read / recall. Not a coding session.
@@ -231,6 +231,7 @@ function commitAndPushSamePost(text) {
 
 function xhighReason(prompt) {
   const s = String(prompt || '');
+  if (looksLikeImageGen(s)) return 'image-gen';
   const m = matchToken(XHIGH_RE, s);
   if (m) return m;
   if (commitAndPushSamePost(s)) return 'commit-push';

@@ -19,10 +19,12 @@
  * Below medium (low) → 0: no chips, just the answer.
  * Tool / Working / Still working chips are xhigh only. medium/high are 💭 only.
  * Image gen is Discord DISPLAY only: one Generating chip even when the engine
- * is xhigh (picture quality). Engine effort is unchanged.
+ * is xhigh (picture quality). Engine effort is unchanged. Ask detect is
+ * shared with grok via image-gen-ask.js.
  */
 
 const { redactSecrets } = require('./redact');
+const { looksLikeImageGen } = require('./image-gen-ask');
 
 const ACP_TYPE = /^(tool_call|tool_call_update|tool_use|function_call)$/i;
 const THINK_HEARTBEAT_MS = 45000;
@@ -30,9 +32,6 @@ const WORKING_LINE = '-# Working';
 const STILL_WORKING_LINE = '-# Still working';
 const GENERATING_LINE = '-# Generating - this takes a while. Please be patient.';
 const THOUGHT_CLAMP = 280;
-// Display detect only — same verb+kind shape grok uses for xhigh image gen,
-// plus draw/create/paint so the Generating chip posts before the first tool.
-const IMAGE_GEN_ASK_RE = /(?:generate|make|draw|create|paint)\s+(?:(?:me|us|some|the|this|a|an)\s+)*(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?|art)\b/i;
 const IMAGE_GEN_TOOL_RE = /^(imagegen|imageedit)$/i;
 
 function looksLikePromptRestatement(text) {
@@ -252,11 +251,6 @@ function pickPublicReply({ pending, replyText, leakDropped, publicSurface, hints
   if (mentionsSpeaker(raw, blockHints)) return block(raw);
   if (leakDropped) return '';
   return raw;
-}
-
-/** User ask looks like still generation. Discord display only — not engine effort. */
-function looksLikeImageGen(text) {
-  return IMAGE_GEN_ASK_RE.test(String(text || ''));
 }
 
 /** image_gen / image_edit (string name or tool object). */

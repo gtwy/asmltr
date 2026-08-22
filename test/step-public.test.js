@@ -57,6 +57,11 @@ test('looksLikeImageGen: verb+kind, not reports', () => {
   assert.equal(looksLikeImageGen('make a cartoon'), true);
   assert.equal(looksLikeImageGen('draw me a picture of the shop'), true);
   assert.equal(looksLikeImageGen('create some photos'), true);
+  assert.equal(looksLikeImageGen('can you make a new picture'), true);
+  assert.equal(looksLikeImageGen('make me a really nice photo of the bun'), true);
+  assert.equal(looksLikeImageGen('the picture you made of Steve'), true);
+  assert.equal(looksLikeImageGen('the photo you generated yesterday'), true);
+  assert.equal(looksLikeImageGen('take the picture you made of Steve yesterday as a puppet in the cape and sit him on the bench in the arboretum photo you made a few lines above'), true);
   assert.equal(looksLikeImageGen('generate a report'), false);
   assert.equal(looksLikeImageGen('make a list'), false);
   assert.equal(looksLikeImageGen('ok thanks'), false);
