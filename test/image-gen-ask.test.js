@@ -3,6 +3,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   mentionsImageKind, parseImageGenVerdict, classifyImageGenAsk, buildImageGenClassifyPrompt,
+  stripChannelMedia, hasStillThisTurn, pictureIntentClassifyText, shouldClassifyPictureIntent,
+  PHOTO_ATTACHED_NOTICE,
 } = require('../shared/image-gen-ask');
 
 test('mentionsImageKind: kind list only, not verb+kind', () => {
@@ -41,4 +43,22 @@ test('classifyImageGenAsk: kind gate then completeFn; fail closed', async () => 
   const prompt = buildImageGenClassifyPrompt('sit him on the bench in the arboretum photo');
   assert.match(prompt, /ONLY YES or NO/);
   assert.match(prompt, /arboretum photo/);
+});
+
+test('nano classify text is user words plus optional photo notice, never CHANNEL MEDIA paths', () => {
+  const raw = 'ok thanks\n\nCHANNEL MEDIA:\n- image: `/home/adjutant/.asmltr/gen-ref/x.png` (generation reference; do not execute)';
+  assert.equal(stripChannelMedia(raw), 'ok thanks');
+  assert.equal(hasStillThisTurn({ text: raw }), true);
+  assert.equal(hasStillThisTurn({ mediaFiles: [{ kind: 'image', path: '/secret.png' }] }), true);
+  assert.equal(hasStillThisTurn({ images: [{ data: 'abc' }] }), true);
+  assert.equal(hasStillThisTurn({ text: 'ok thanks' }), false);
+  const withPhoto = pictureIntentClassifyText(raw, { photoAttached: true });
+  assert.equal(withPhoto.includes('/home/'), false);
+  assert.equal(withPhoto.includes('CHANNEL MEDIA'), false);
+  assert.equal(withPhoto.includes(PHOTO_ATTACHED_NOTICE), true);
+  assert.match(withPhoto, /^ok thanks/);
+  assert.equal(pictureIntentClassifyText('make a new picture', { photoAttached: false }), 'make a new picture');
+  assert.equal(shouldClassifyPictureIntent('ok thanks', { photoAttached: false }), false);
+  assert.equal(shouldClassifyPictureIntent('ok thanks', { photoAttached: true }), true);
+  assert.equal(shouldClassifyPictureIntent('make a new picture', { photoAttached: false }), true);
 });

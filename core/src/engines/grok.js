@@ -33,7 +33,7 @@ const path = require('path');
 const engines = require('../../../shared/engines');
 const { composePrompt } = require('../../../shared/prompt-compose');
 const gcTemps = require('../../../shared/gc-temps');
-const { mentionsImageKind, buildImageGenClassifyPrompt, parseImageGenVerdict } = require('../../../shared/image-gen-ask');
+const { buildImageGenClassifyPrompt, parseImageGenVerdict, hasStillThisTurn, pictureIntentClassifyText, shouldClassifyPictureIntent } = require('../../../shared/image-gen-ask');
 
 const id = 'grok';
 const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
@@ -777,15 +777,17 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   let imageGen = false;
   let classifyUsage = null;
   const skipImageClassify = !!deny.image || isEmailChannel(channel) || isMcpChannel(channel) || imageGenClassifyOff();
-  if (!skipImageClassify && mentionsImageKind(scored)) {
-    // Picture-intent: gpt-5-nano on the moderation OpenAI key. If that key is
-    // missing, classifyRaw logs once and returns skipped — we do NOT fall back
-    // to a grok complete() spawn. image_gen still works (tool path).
+  const photoAttached = hasStillThisTurn({ images, mediaFiles, text: scored });
+  const classifyText = pictureIntentClassifyText(scored, { photoAttached });
+  if (!skipImageClassify && shouldClassifyPictureIntent(scored, { photoAttached })) {
+    // Picture-intent: gpt-5-nano on the moderation OpenAI key. Text only — never
+    // still bytes, never CHANNEL MEDIA paths. A still this turn → one notice line.
+    // Missing key: classifyRaw logs once and skipped. No grok complete() fallback.
     try {
       const moderation = require('../moderation');
       const r = await moderation.classifyRaw(
-        'You are ONLY a classifier. Reply YES or NO. No extra text.',
-        buildImageGenClassifyPrompt(scored)
+        'You are ONLY a classifier. Reply YES or NO. No extra text. You are not shown any photo.',
+        buildImageGenClassifyPrompt(classifyText)
       );
       if (r && !r.skipped) {
         classifyUsage = r.usage || null;

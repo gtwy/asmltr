@@ -326,6 +326,9 @@ test('runTurn picture classify uses moderation.classifyRaw not grok complete', (
   assert.match(src, /moderation\.classifyRaw/);
   assert.match(src, /parseImageGenVerdict/);
   assert.match(src, /r\.skipped/);
+  assert.match(src, /pictureIntentClassifyText/);
+  assert.match(src, /shouldClassifyPictureIntent/);
+  assert.match(src, /You are not shown any photo/);
   assert.equal(src.includes('complete(Object.assign'), false);
   const server = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'server.js'), 'utf8');
   assert.match(server, /image-gen-classify/);
