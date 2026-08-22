@@ -43,8 +43,18 @@ const TYPES_DIR = path.join(__dirname, '..', 'types');
 function loadTypes() {
   const out = {};
   for (const t of fs.readdirSync(TYPES_DIR)) {
+    const dir = path.join(TYPES_DIR, t);
+    let st;
+    try { st = fs.statSync(dir); } catch (_) { continue; }
+    if (!st.isDirectory()) continue;
+    // Node connector plugin = index.js + meta. Hook-only dirs (claude-code/hook.py) are
+    // not plugins — skip silent (was: "type 'claude-code' failed to load" every boot).
+    // Interactive CLIs are not types/ folders: `asmltr grok` → grok, `asmltr gemini` →
+    // gemini, `asmltr codex` → codex (cli/asmltr-engine.js). Native Stop/SessionStart
+    // hooks for Gemini/Codex would live next to this as their own hook script, not here.
+    if (!fs.existsSync(path.join(dir, 'index.js'))) continue;
     try {
-      const mod = require(path.join(TYPES_DIR, t));
+      const mod = require(dir);
       if (mod && mod.meta) out[mod.meta.type] = mod.meta;
     } catch (e) { console.error(`[manager] type '${t}' failed to load:`, e.message); }
   }
