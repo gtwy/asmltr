@@ -202,7 +202,7 @@ Do **not** put harness flags in the connector or the dispatcher. Ingest is share
 | `shared/outbound-stage.js` | `asmltr post` ingest/stage | No |
 | **`engines/grok.js`** | ACP JSON via `--prompt-file` (never argv `--prompt-json` — ARG_MAX / spawn E2BIG) + ffmpeg downscale. Re-magics before ffmpeg. | **Yes — Grok CLI only** |
 | **`engines/claude.js`** | SDK `{ type: 'image', source: { type: 'base64', … } }` from `images` | **Yes — Claude SDK only** |
-| Gemini / Codex | No vision serialize yet. They still get the envelope; they just don't attach chips. | Wire here later |
+| Gemini / Codex | No vision serialize yet (intentional). Envelope fields are there; adapters ignore them. **This is where a Gemini or Codex implementer should program that harness's image payload** — not Grok `--prompt-file` and not Claude SDK blocks. Comments in `engines/gemini.js` and `engines/codex.js` `runTurn`. | Wire here later |
 
 To add another engine: keep ingest/core as-is; in that engine's `runTurn`, turn `opts.images` / `opts.mediaFiles` into **that harness's** vision payload (same job grok.js `collectVisionImages` + `acpPromptJson` do for Grok). Do not call `--prompt-json` / `--prompt-file` or the Claude SDK from a third adapter.
 
