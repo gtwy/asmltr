@@ -119,6 +119,18 @@ test('buildArgs without denyShell does not pass --disallowed-tools', () => {
   assert.equal(args.includes('--disallowed-tools'), false);
 });
 
+test('buildArgs denyVideo strips image_to_video and reference_to_video', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyVideo: true });
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.ok(args[i + 1].includes('image_to_video'));
+  assert.ok(args[i + 1].includes('reference_to_video'));
+  const denies = [];
+  for (let n = 0; n < args.length; n++) if (args[n] === '--deny') denies.push(args[n + 1]);
+  assert.ok(denies.includes('image_to_video'));
+  assert.ok(denies.includes('reference_to_video'));
+});
+
 test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
   const env = grok.launchEnv({ PATH: '/bin', XAI_API_KEY: 'xai-should-never-leak', HOME: '/tmp' });
   assert.equal(env.PATH, '/bin');

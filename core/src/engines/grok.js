@@ -388,6 +388,11 @@ function buildArgs(opts) {
     args.push('--deny', 'Edit');
     args.push('--deny', 'Write');
   }
+  if (opts.denyVideo) {
+    disallowed.push('image_to_video', 'reference_to_video');
+    args.push('--deny', 'image_to_video');
+    args.push('--deny', 'reference_to_video');
+  }
   if (disallowed.length) args.push('--disallowed-tools', disallowed.join(','));
   args.push('--effort', classified.effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
@@ -614,7 +619,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const deny = denyTools || {};
   const denyEnv = denyToolsEnv(deny);
   const childEnv = launchEnv(Object.assign({}, process.env, denyEnv ? { ASMLTR_DENY_TOOLS: denyEnv } : {}));
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write });
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };

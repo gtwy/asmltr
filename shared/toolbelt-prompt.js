@@ -20,6 +20,7 @@ function buildToolbeltPrompt({
     send: !!deny.send,
     silo: !!deny.silo,
     siloWrite: !!deny.siloWrite,
+    video: !!deny.video,
   };
   const via = d.shell
     ? 'Key cross-session ops (Bash is off this turn — use MCP tools where listed):\n'
@@ -74,6 +75,9 @@ function buildToolbeltPrompt({
   }
   if (attachments && !d.send) {
     s += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${channel} ${chTarget} --file <abs-path>\`.`;
+  }
+  if (d.video) {
+    s += '\n\nVIDEO GENERATION is off this turn (`image_to_video` / `reference_to_video` are disabled). Do not offer to make, animate, or generate video. Still images are unchanged. If they want video, they need the operator to authorize it first.';
   }
   return s;
 }

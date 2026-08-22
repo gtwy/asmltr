@@ -21,7 +21,7 @@ test('public discord denies shell/streams/send/write, not silo', () => {
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
   assert.equal(p.restricted, true);
-  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: false });
+  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: false, video: true });
 });
 
 test('allowlisted guild same denies; silo still on', () => {
@@ -30,7 +30,7 @@ test('allowlisted guild same denies; silo still on', () => {
     context: { scope_id: 'guild:guild-allow-1' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
-  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: false });
+  assert.deepEqual(p.deny, { shell: true, streams: true, send: true, silo: false, write: true, siloWrite: false, video: true });
 });
 
 test('discord DM + bypass_moderation denies nothing', () => {
@@ -39,7 +39,7 @@ test('discord DM + bypass_moderation denies nothing', () => {
     context: { scope_id: 'dm:someone' },
   }, { bypass_moderation: true });
   assert.equal(p.restricted, false);
-  assert.deepEqual(p.deny, { shell: false, streams: false, send: false, silo: false, write: false, siloWrite: false });
+  assert.deepEqual(p.deny, { shell: false, streams: false, send: false, silo: false, write: false, siloWrite: false, video: false });
 });
 
 test('discord DM without bypass is restricted', () => {
@@ -52,12 +52,42 @@ test('discord DM without bypass is restricted', () => {
   assert.equal(p.deny.send, true);
 });
 
-test('email and mcp deny nothing', () => {
+test('email and mcp are not Discord-restricted but still deny video without authorization', () => {
   for (const ch of ['email', 'mcp', 'core', 'assistant-web']) {
     const p = policyFor({ channel: ch, public: false }, { bypass_moderation: false });
     assert.equal(p.restricted, false, ch);
-    assert.deepEqual(p.deny, { shell: false, streams: false, send: false, silo: false, write: false, siloWrite: false }, ch);
+    assert.equal(p.deny.shell, false, ch);
+    assert.equal(p.deny.video, true, ch);
   }
+});
+
+test('videoAllow principal may generate video without bypass', () => {
+  const allow = {
+    guilds: [], channels: [],
+    videoPrincipals: ['dave-graham'],
+    videoDiscordIds: [],
+  };
+  const p = policyFor(
+    { channel: 'email', public: false },
+    { bypass_moderation: false, user_key: 'dave-graham' },
+    allow,
+  );
+  assert.equal(p.deny.video, false);
+});
+
+test('videoAllow discord id may generate video', () => {
+  const allow = {
+    guilds: [], channels: [],
+    videoPrincipals: [],
+    videoDiscordIds: ['999000111222333005'],
+  };
+  const p = policyFor(
+    { channel: 'discord', public: true, sender: { raw_id: '999000111222333005' } },
+    { bypass_moderation: false, user_key: 'dave-graham' },
+    allow,
+  );
+  assert.equal(p.deny.video, false);
+  assert.equal(p.restricted, true);
 });
 
 test('restricted prompt omits send/streams/silo/bash-silo', () => {
@@ -106,6 +136,13 @@ test('silo prompt has no NaN; put only when siloWrite is allowed', () => {
 });
 
 test('denyToolsEnv lists denied kinds', () => {
-  assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true }), 'shell,streams,send,silo,write,siloWrite');
+  assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true, video: true }), 'shell,streams,send,silo,write,siloWrite,video');
   assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true }), 'shell,streams,send,write,siloWrite');
+});
+
+test('restricted prompt names video off when deny.video', () => {
+  const text = buildToolbeltPrompt({ deny: { video: true } });
+  assert.ok(text.includes('VIDEO GENERATION is off this turn'));
+  const on = buildToolbeltPrompt({ deny: {} });
+  assert.equal(on.includes('VIDEO GENERATION is off this turn'), false);
 });
