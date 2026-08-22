@@ -33,7 +33,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
-const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, pickPublicReply, thoughtBudget, looksLikeImageGen, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
@@ -599,12 +599,14 @@ ${referentPromptBlock()}`;
         // or a new narration block begins. The block still open at `done` is the final answer.
         let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
         let beatTimer = null;
-        let maxThoughts = thoughtBudget('medium');
+        // Image gen stays xhigh in the engine; Discord shows one Generating chip, no 💭 dump.
+        let quietImageGen = looksLikeImageGen(message.cleanContent || message.content || '');
+        let maxThoughts = thoughtBudget('medium', { imageGen: quietImageGen });
         let thoughtsPosted = 0;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
         const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
         const armBeat = () => {
-          if (maxThoughts !== Infinity) return; // medium/high: 💭 only, no Still working
+          if (quietImageGen || maxThoughts !== Infinity) return; // medium/high/image-gen: no Still working
           stopBeat();
           beatTimer = setTimeout(() => {
             beatTimer = null;
@@ -621,6 +623,13 @@ ${referentPromptBlock()}`;
           armBeat();
           return true;
         };
+        const enterImageGenQuiet = () => {
+          quietImageGen = true;
+          maxThoughts = 0;
+          stopBeat();
+          postChip(GENERATING_LINE);
+        };
+        if (quietImageGen) postChip(GENERATING_LINE);
         const holdAnswer = (t) => {
           const clean = String(t || '').trim();
           if (!clean) { pending = ''; return; }
@@ -635,12 +644,17 @@ ${referentPromptBlock()}`;
         };
         actions = await ctx.core.handleStream(envelope, {
           onEffort: (effort) => {
-            maxThoughts = thoughtBudget(effort);
+            maxThoughts = thoughtBudget(effort, { imageGen: quietImageGen });
           },
           onSegment: (t) => { holdAnswer(t); },
           onTool: (tool) => {
             pending = '';
             if (sawNoReply) return;
+            if (isImageGenTool(tool)) {
+              enterImageGenQuiet();
+              return;
+            }
+            if (quietImageGen) return;
             if (maxThoughts !== Infinity) return; // not xhigh: 💭 only, no tooling
             const line = discordToolLine(streamTools, tool);
             if (!line) return;
@@ -649,7 +663,7 @@ ${referentPromptBlock()}`;
           // Engine-agnostic: Claude/Grok/Gemini/Codex all use onThinking. No-op if none.
           onThinking: (t) => {
             if (sawNoReply) return;
-            if (maxThoughts <= 0) return;
+            if (quietImageGen || maxThoughts <= 0) return;
             const line = discordThoughtLine(t, hints, hintKinds);
             if (line && thoughtsPosted < maxThoughts) {
               thoughtsPosted += 1;

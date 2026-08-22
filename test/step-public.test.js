@@ -5,7 +5,8 @@ const {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
   publicBlockHints, pickPublicReply, thoughtBudget,
-  stripThoughtChrome, quietReplyFromResult,
+  looksLikeImageGen, isImageGenTool,
+  stripThoughtChrome, quietReplyFromResult, GENERATING_LINE,
 } = require('../shared/step-public');
 
 test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
@@ -46,6 +47,30 @@ test('thoughtBudget: xhigh uncapped; high/medium 2; below medium 0', () => {
   assert.equal(thoughtBudget(''), 2); // default before onEffort = medium
   assert.equal(thoughtBudget('high', { publicChannel: true }), 2);
   assert.equal(thoughtBudget('high', { publicChannel: false }), 2);
+  assert.equal(thoughtBudget('xhigh', { imageGen: true }), 0);
+  assert.equal(thoughtBudget('medium', { imageGen: true }), 0);
+});
+
+test('looksLikeImageGen: verb+kind, not reports', () => {
+  assert.equal(looksLikeImageGen('Please generate an image of a corgi'), true);
+  assert.equal(looksLikeImageGen('GENERATE IMAGE'), true);
+  assert.equal(looksLikeImageGen('make a cartoon'), true);
+  assert.equal(looksLikeImageGen('draw me a picture of the shop'), true);
+  assert.equal(looksLikeImageGen('create some photos'), true);
+  assert.equal(looksLikeImageGen('generate a report'), false);
+  assert.equal(looksLikeImageGen('make a list'), false);
+  assert.equal(looksLikeImageGen('ok thanks'), false);
+  assert.equal(looksLikeImageGen(''), false);
+});
+
+test('isImageGenTool and GENERATING_LINE', () => {
+  assert.equal(isImageGenTool('image_gen'), true);
+  assert.equal(isImageGenTool({ name: 'image_edit' }), true);
+  assert.equal(isImageGenTool('image-gen'), true);
+  assert.equal(isImageGenTool('Read'), false);
+  assert.equal(isImageGenTool('Bash'), false);
+  assert.equal(isImageGenTool({ name: 'web_search' }), false);
+  assert.equal(GENERATING_LINE, '-# Generating - this takes a while. Please be patient.');
 });
 
 test('human chips: start only, no paths or ACP type names', () => {
@@ -99,9 +124,15 @@ test('Discord never renderSteps raw thought text', () => {
   assert.equal(src.includes("renderStep('💭 '"), false);
   assert.match(src, /discordThoughtLine/);
   assert.match(src, /onThinking:/);
-  assert.match(src, /if \(maxThoughts <= 0\) return;/);
+  assert.match(src, /if \(quietImageGen \|\| maxThoughts <= 0\) return;/);
   assert.match(src, /not xhigh: 💭 only, no tooling/);
   assert.match(src, /no Working filler on medium\/high/);
+  assert.match(src, /looksLikeImageGen/);
+  assert.match(src, /GENERATING_LINE/);
+  assert.match(src, /isImageGenTool/);
+  assert.match(src, /quietImageGen/);
+  assert.match(src, /enterImageGenQuiet/);
+  assert.match(src, /thoughtBudget\(effort, \{ imageGen: quietImageGen \}\)/);
   assert.match(src, /pickPublicReply/);
   assert.match(src, /identityHintsFrom/);
   assert.match(src, /publicBlockHints/);

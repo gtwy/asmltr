@@ -18,6 +18,8 @@
  * Thought volume: xhigh uncapped. high and medium → 2 💭 chips (public and DM).
  * Below medium (low) → 0: no chips, just the answer.
  * Tool / Working / Still working chips are xhigh only. medium/high are 💭 only.
+ * Image gen is Discord DISPLAY only: one Generating chip even when the engine
+ * is xhigh (picture quality). Engine effort is unchanged.
  */
 
 const { redactSecrets } = require('./redact');
@@ -26,7 +28,12 @@ const ACP_TYPE = /^(tool_call|tool_call_update|tool_use|function_call)$/i;
 const THINK_HEARTBEAT_MS = 45000;
 const WORKING_LINE = '-# Working';
 const STILL_WORKING_LINE = '-# Still working';
+const GENERATING_LINE = '-# Generating - this takes a while. Please be patient.';
 const THOUGHT_CLAMP = 280;
+// Display detect only — same verb+kind shape grok uses for xhigh image gen,
+// plus draw/create/paint so the Generating chip posts before the first tool.
+const IMAGE_GEN_ASK_RE = /(?:generate|make|draw|create|paint)\s+(?:(?:me|us|some|the|this|a|an)\s+)*(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?|art)\b/i;
+const IMAGE_GEN_TOOL_RE = /^(imagegen|imageedit)$/i;
 
 function looksLikePromptRestatement(text) {
   const s = String(text || '');
@@ -247,8 +254,23 @@ function pickPublicReply({ pending, replyText, leakDropped, publicSurface, hints
   return raw;
 }
 
+/** User ask looks like still generation. Discord display only — not engine effort. */
+function looksLikeImageGen(text) {
+  return IMAGE_GEN_ASK_RE.test(String(text || ''));
+}
+
+/** image_gen / image_edit (string name or tool object). */
+function isImageGenTool(tool) {
+  const raw = typeof tool === 'string'
+    ? tool
+    : (tool && (tool.name || tool.title || tool.kind)) || '';
+  const t = String(raw || '').trim().toLowerCase().replace(/[\s._-]+/g, '');
+  return IMAGE_GEN_TOOL_RE.test(t);
+}
+
 /** How many 💭 chips to post. Infinity = no cap. 0 = none (go straight to the answer). */
-function thoughtBudget(effort) {
+function thoughtBudget(effort, opts) {
+  if (opts && opts.imageGen) return 0;
   const e = String(effort || 'medium').toLowerCase();
   if (e === 'xhigh') return Infinity;
   if (e === 'high' || e === 'medium') return 2;
@@ -338,6 +360,7 @@ module.exports = {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
   publicBlockHints, privacyBlockLine, pickPublicReply, thoughtBudget,
+  looksLikeImageGen, isImageGenTool,
   stripThoughtChrome, quietReplyFromResult,
-  THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, THOUGHT_CLAMP,
+  THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE, THOUGHT_CLAMP,
 };
