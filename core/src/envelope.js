@@ -49,6 +49,7 @@ function inbound(e) {
     content: {
       text: e.content.text,
       attachments: Array.isArray(e.content.attachments) ? e.content.attachments : [],
+      media_files: Array.isArray(e.content.media_files) ? e.content.media_files : [],
     },
     capabilities: capabilities(e.capabilities || {}),
     delivery: e.delivery === 'async' ? 'async' : 'sync',

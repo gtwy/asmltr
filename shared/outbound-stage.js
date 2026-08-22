@@ -125,6 +125,7 @@ function ingestRoots() {
     roots.push(path.join(cwd, 'videos'));
   }
   roots.push(path.join(os.homedir(), '.grok'));
+  roots.push(path.join(os.homedir(), '.asmltr', 'gen-ref'));
   return roots;
 }
 

@@ -517,6 +517,7 @@ async function handle(envelope, opts = {}) {
       denyTools: toolPolicy.deny,
       attachChannel: e.channel,
       attachTarget: (e.channel_context && (e.channel_context.channelId || e.channel_context.channel_id || e.channel_context.chatId || e.channel_context.target)) || '',
+      mediaFiles: (e.content && e.content.media_files) || [],
       abortController,
       images,
       onDelta: opts.onText ? _pushDelta : undefined,
@@ -2141,6 +2142,10 @@ if (require.main === module) {
       const gc = require('../../shared/outbound-stage').gc();
       if (gc.removed && gc.removed.length) console.log('attach-stage gc: removed ' + gc.removed.length);
     } catch (e) { console.log('attach-stage gc: ' + e.message); }
+    try {
+      const g2 = require('../../shared/inbound-media').gc();
+      if (g2.removed && g2.removed.length) console.log('gen-ref gc: removed ' + g2.removed.length);
+    } catch (e) { console.log('gen-ref gc: ' + e.message); }
   });
   // Agent turns (research, tool loops) can run many minutes. Node's default 5-min
   // server.requestTimeout would cut the connector→core call mid-turn (surfacing as

@@ -483,40 +483,45 @@ RESPONSE RULES:
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
       let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
       text = (await replyRef(message)) + text; // if this is a Discord reply, tell the model WHAT it answers (multi-agent threading)
-      // Vision: download supported image attachments and pass them as real image
-      // content (base64) so the assistant actually SEES them — not a CDN URL it can't open.
-      // Non-image / oversized / unsupported attachments stay as a text URL mention.
-      const SUPPORTED_IMG = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-      const MAX_IMG_BYTES = 5 * 1024 * 1024;
+      // Image/video only. Magic bytes win. Never persist or open exe/html/js/pdf/zip.
+      const inboundMedia = require('../../../shared/inbound-media');
       const imageAttachments = [];
+      const mediaFiles = [];
       if (message.attachments.size > 0) {
         const savedNotes = [];
-        // Register every inbound attachment on the shared, channel-agnostic upload surface so
-        // it's findable from any channel — and so non-image files survive Discord's expiring
-        // CDN URLs (we keep the bytes on disk, not just a link).
-        const register = (buf, a, kind) => {
-          try {
-            const rec = ctx.uploads.save({
-              channel: 'discord', instance: ctx.instanceId, buffer: buf,
-              filename: a.name, mime: (a.contentType || '').split(';')[0].trim() || 'application/octet-stream', kind,
-              caption: message.content || '', sender: message.author.username, senderId: message.author.id,
-              conversationKey,
-            });
-            savedNotes.push(`- ${kind || 'file'}: ${rec.filename} (${rec.mime}, ${ctx.uploads.humanSize(rec.size)}) → ${rec.path}`);
-          } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
-        };
         for (const a of message.attachments.values()) {
           const mt = (a.contentType || '').split(';')[0].trim();
-          const isImg = SUPPORTED_IMG.includes(mt);
           try {
             const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
-            register(buf, a, isImg ? 'image' : 'file');
-            if (isImg && imageAttachments.length < 5 && (a.size || 0) <= MAX_IMG_BYTES) {
-              imageAttachments.push({ type: 'image', media_type: mt, data: buf.toString('base64'), name: a.name });
+            const cls = inboundMedia.classify(buf, mt, a.name);
+            if (!cls.kind) {
+              savedNotes.push(`- ignored ${a.name} (${mt || 'unknown'}): not a still image or video — not opened`);
+              continue;
             }
-          } catch (e) { ctx.log(`[att] download failed ${a.name}: ${e.message}`); savedNotes.push(`- ${a.name} (${a.contentType}): ${a.url} (couldn't download — link only)`); }
+            const saved = inboundMedia.saveRef(buf, { name: a.name, mime: mt });
+            if (!saved.ok) {
+              savedNotes.push(`- ignored ${a.name}: ${saved.error}`);
+              continue;
+            }
+            try {
+              ctx.uploads.save({
+                channel: 'discord', instance: ctx.instanceId, buffer: buf,
+                filename: a.name, mime: saved.mime, kind: saved.kind,
+                caption: message.content || '', sender: message.author.username, senderId: message.author.id,
+                conversationKey,
+              });
+            } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
+            mediaFiles.push({ kind: saved.kind, path: saved.path, mime: saved.mime, name: saved.name });
+            if (saved.kind === 'image' && imageAttachments.length < 5) {
+              imageAttachments.push({ type: 'image', media_type: saved.mime, data: buf.toString('base64'), name: a.name, path: saved.path });
+            }
+            savedNotes.push(`- ${saved.kind}: ${saved.name} → ${saved.path} (generation reference; do not execute)`);
+          } catch (e) {
+            ctx.log(`[att] download failed ${a.name}: ${e.message}`);
+            savedNotes.push(`- ${a.name}: could not download`);
+          }
         }
-        if (savedNotes.length) text += '\n\nATTACHMENTS (saved to the shared asmltr upload area, findable via `asmltr uploads`; Read a path to use it):\n' + savedNotes.join('\n');
+        if (savedNotes.length) text += '\n\nCHANNEL MEDIA:\n' + savedNotes.join('\n');
       }
       // server + channel names ride in channel_context → the core records them on the inbound
       // event (and the collector stores them on the session) so the dashboard shows where a
@@ -526,7 +531,7 @@ RESPONSE RULES:
         conversation_key: conversationKey,
         message_id: String(message.id),
         sender: { raw_id: String(message.author.id), raw_username: message.author.username },
-        content: { text, attachments: imageAttachments },
+        content: { text, attachments: imageAttachments, media_files: mediaFiles },
         delivery: 'sync',
         capabilities: meta.capabilities,
         public: message.channel.type !== 1, // guild channel = public; DM (type 1) = private

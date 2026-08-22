@@ -374,7 +374,22 @@ function buildArgs(opts) {
   const userPrompt = classified.stripToken
     ? stripElevateToken(opts.prompt, classified.stripToken)
     : opts.prompt;
-  const prompt = composePrompt(opts.systemPrompt, userPrompt);
+  const inbound = require('../../../shared/inbound-media');
+  const refs = [];
+  for (const f of opts.mediaFiles || []) {
+    if (f && f.path && (f.kind === 'image' || f.kind === 'video')) refs.push(f);
+  }
+  for (const img of opts.images || []) {
+    if (img && img.path && refs.every((r) => r.path !== img.path)) {
+      refs.push({ kind: 'image', path: img.path, mime: img.media_type, name: img.name });
+    } else if (img && img.data && !img.path) {
+      try {
+        const saved = inbound.saveRef(Buffer.from(img.data, 'base64'), { name: img.name, mime: img.media_type });
+        if (saved.ok) refs.push(saved);
+      } catch (_) {}
+    }
+  }
+  const prompt = composePrompt(opts.systemPrompt, userPrompt + inbound.promptBlock(refs));
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
@@ -608,7 +623,7 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools, attachChannel, attachTarget }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools, attachChannel, attachTarget, images, mediaFiles }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
@@ -629,7 +644,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   if (attachTarget) extra.ASMLTR_ATTACH_TARGET = String(attachTarget);
   if (cwd) extra.ASMLTR_ATTACH_INGEST_CWD = String(cwd);
   const childEnv = launchEnv(Object.assign({}, process.env, extra));
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image });
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image, images, mediaFiles });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
