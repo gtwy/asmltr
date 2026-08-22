@@ -369,7 +369,8 @@ async function handle(envelope, opts = {}) {
   if (resolved.bypass_moderation) {
     pUploadsInstr = 'FILE UPLOADS: every file a user sends on any channel (Telegram, Discord, …) is saved to ONE shared area. ' +
       'The list below is THIS conversation only — do not treat a file from another Discord channel or app as the picture they just asked about. ' +
-      'If they ask what a picture is and this turn has no attached still, do not guess from Recent uploads or another room; say you do not have the picture on this message. ' +
+      'If they ask what something is / what a photo is and this turn has no attached still, do not hunt this list or another room. Ask: "Did you forget to attach the media, or could you be more specific about what you want me to look at?" ' +
+      'If they say look up / look above / it was right after the question: only media in THIS conversation that arrived AFTER that question. Deep-dive older thread history only when they point at earlier context. ' +
       'To look at another room on purpose: `asmltr uploads` (also `asmltr uploads <search>`, `--channel discord`, `--since <2h|1d>`), then Read the path it prints.';
     try {
       // No conversation_key → no list (fail closed). An empty key used to mean "all rooms".

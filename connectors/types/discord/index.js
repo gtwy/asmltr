@@ -36,6 +36,7 @@ const { parseReact } = require('../../../shared/react-token');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
+const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
 const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
@@ -143,6 +144,7 @@ async function start(ctx) {
   // --- state ---
   let memory = { servers: {}, globalTimeline: [] };
   const processing = new Map();
+  const lateMedia = new Map(); // cid -> message (same-author upload during a turn; run after)
   const pendingReply = new Map(); // cid -> { timer, message, forced } — the reply-debounce quiet-window
   let silenced = false;
   let lastResponseTime = 0;
@@ -238,6 +240,7 @@ async function start(ctx) {
   function shouldRespondTo(message) {
     if (message.channel.type === 1) return message.author.id === dmUser; // DM: only the owner
     if (message.mentions.has(client.user)) return true;
+    if (isReplyToUs(message, client.user && client.user.id)) return true;
     if (message.attachments.size > 0) return true;
     const now = Date.now();
     if (now - lastResponseTime < minInterval) return false;
@@ -284,6 +287,7 @@ async function start(ctx) {
   function isAddressed(message, forced) {
     if (forced || message.channel.type === 1) return true;
     if (message.mentions.has(client.user)) return true;
+    if (isReplyToUs(message, client.user && client.user.id)) return true;
     const botMember = message.guild ? (message.guild.members.me || message.guild.members.cache.get(client.user.id)) : null;
     return !!botMember && message.mentions.roles.some((r) => botMember.roles.cache.has(r.id));
   }
@@ -414,7 +418,8 @@ RESPONSE RULES:
 2. Output ONLY your conversational response — no summary/narration afterward.
 3. Keep it conversational and substantive (under ~1500 chars ideally).
 4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the literal token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token. Do NOT paraphrase it: writing "No response requested", "No reply needed", "N/A", or any prose instead of the exact token will get POSTED to the channel as spam. The verbatim token ${NO_REPLY} is the only way to stay silent.
-5. Sparse color reaction (not every post): if THIS message is extra — extra funny, outrageous, a Homer d'oh / facepalm, genuinely wild, or a rare salute — you MAY add a single line \`[[REACT:😂]]\` using one of: 😂 🤣 💀 🤯 🫠 🤡 😳 🤦 😬 😅 🔥 🫡 🙌 💯 🤨 🙄. Do NOT react to ordinary chat. At most one. React and reply are NOT mutually exclusive: if the conversation is ongoing, react AND write the reply (REACT line + your text). If there is really nothing else to say, react-only is enough (REACT line, and ${NO_REPLY} so no message posts). Never use 👀 (mid-turn steer) or 🛑 (stop).`;
+5. Sparse color reaction (not every post): if THIS message is extra — extra funny, outrageous, a Homer d'oh / facepalm, genuinely wild, or a rare salute — you MAY add a single line \`[[REACT:😂]]\` using one of: 😂 🤣 💀 🤯 🫠 🤡 😳 🤦 😬 😅 🔥 🫡 🙌 💯 🤨 🙄. Do NOT react to ordinary chat. At most one. React and reply are NOT mutually exclusive: if the conversation is ongoing, react AND write the reply (REACT line + your text). If there is really nothing else to say, react-only is enough (REACT line, and ${NO_REPLY} so no message posts). Never use 👀 (mid-turn steer) or 🛑 (stop).
+${referentPromptBlock()}`;
   }
 
   function formatCodeBlocks(text) {
@@ -450,6 +455,54 @@ RESPONSE RULES:
     return chunks;
   }
 
+  async function persistInboundMedia(message, conversationKey) {
+    const inboundMedia = require('../../../shared/inbound-media');
+    const imageAttachments = [];
+    const mediaFiles = [];
+    const savedNotes = [];
+    if (!message || !message.attachments || message.attachments.size === 0) {
+      return { imageAttachments, mediaFiles, savedNotes };
+    }
+    for (const a of message.attachments.values()) {
+      const mt = (a.contentType || '').split(';')[0].trim();
+      const claimed = Number(a.size) || 0;
+      if (claimed > inboundMedia.MAX_VIDEO) {
+        savedNotes.push(`- ignored ${a.name}: too large`);
+        continue;
+      }
+      try {
+        const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
+        const cls = inboundMedia.classify(buf, mt, a.name);
+        if (!cls.kind) {
+          savedNotes.push(`- ignored ${a.name} (${mt || 'unknown'}): not a still image or video — not opened`);
+          continue;
+        }
+        const saved = inboundMedia.saveRef(buf, { name: a.name, mime: mt });
+        if (!saved.ok) {
+          savedNotes.push(`- ignored ${a.name}: ${saved.error}`);
+          continue;
+        }
+        try {
+          ctx.uploads.save({
+            channel: 'discord', instance: ctx.instanceId, buffer: buf,
+            filename: a.name, mime: saved.mime, kind: saved.kind,
+            caption: message.content || '', sender: message.author && message.author.username, senderId: message.author && message.author.id,
+            conversationKey,
+          });
+        } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
+        mediaFiles.push({ kind: saved.kind, path: saved.path, mime: saved.mime, name: saved.name });
+        if (saved.kind === 'image' && imageAttachments.length < 5) {
+          imageAttachments.push({ type: 'image', media_type: saved.mime, data: buf.toString('base64'), name: a.name, path: saved.path });
+        }
+        savedNotes.push(`- ${saved.kind}: ${saved.name} → ${saved.path} (generation reference; do not execute)`);
+      } catch (e) {
+        ctx.log(`[att] download failed ${a.name}: ${e.message}`);
+        savedNotes.push(`- ${a.name}: could not download`);
+      }
+    }
+    return { imageAttachments, mediaFiles, savedNotes };
+  }
+
   async function handleMessage(message, forced) {
     const cid = message.channel.id;
     if (processing.get(cid)) {
@@ -458,6 +511,14 @@ RESPONSE RULES:
       // don't start a concurrent turn. The core folds it into the work in progress and continues; its
       // reply comes back out to the channel via the stored outbound route. Non-addressed chatter is still
       // ignored so idle channel noise can't derail the work. (`@handle stop` interrupts — handled earlier.)
+      // Same-author uploads during the turn are SAVED (so "look up" can find them) and run as their
+      // own turn after this one — not a look-ahead wait.
+      const slot = processing.get(cid);
+      if (message.attachments && message.attachments.size > 0) {
+        try { await persistInboundMedia(message, convKeyFor(message)); }
+        catch (e) { ctx.log('late media save failed: ' + e.message); }
+        if (shouldQueueLateMedia(slot, message)) lateMedia.set(cid, message);
+      }
       if (isAddressed(message, forced)) {
         const guidance = String(message.content || '').replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim();
         if (guidance) {
@@ -486,49 +547,18 @@ RESPONSE RULES:
       let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
       text = (await replyRef(message)) + text; // if this is a Discord reply, tell the model WHAT it answers (multi-agent threading)
       // Image/video only. Magic bytes win. Never persist or open exe/html/js/pdf/zip.
-      const inboundMedia = require('../../../shared/inbound-media');
-      const imageAttachments = [];
-      const mediaFiles = [];
-      if (message.attachments.size > 0) {
-        const savedNotes = [];
-        for (const a of message.attachments.values()) {
-          const mt = (a.contentType || '').split(';')[0].trim();
-          const claimed = Number(a.size) || 0;
-          if (claimed > inboundMedia.MAX_VIDEO) {
-            savedNotes.push(`- ignored ${a.name}: too large`);
-            continue;
-          }
-          try {
-            const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
-            const cls = inboundMedia.classify(buf, mt, a.name);
-            if (!cls.kind) {
-              savedNotes.push(`- ignored ${a.name} (${mt || 'unknown'}): not a still image or video — not opened`);
-              continue;
-            }
-            const saved = inboundMedia.saveRef(buf, { name: a.name, mime: mt });
-            if (!saved.ok) {
-              savedNotes.push(`- ignored ${a.name}: ${saved.error}`);
-              continue;
-            }
-            try {
-              ctx.uploads.save({
-                channel: 'discord', instance: ctx.instanceId, buffer: buf,
-                filename: a.name, mime: saved.mime, kind: saved.kind,
-                caption: message.content || '', sender: message.author.username, senderId: message.author.id,
-                conversationKey,
-              });
-            } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
-            mediaFiles.push({ kind: saved.kind, path: saved.path, mime: saved.mime, name: saved.name });
-            if (saved.kind === 'image' && imageAttachments.length < 5) {
-              imageAttachments.push({ type: 'image', media_type: saved.mime, data: buf.toString('base64'), name: a.name, path: saved.path });
-            }
-            savedNotes.push(`- ${saved.kind}: ${saved.name} → ${saved.path} (generation reference; do not execute)`);
-          } catch (e) {
-            ctx.log(`[att] download failed ${a.name}: ${e.message}`);
-            savedNotes.push(`- ${a.name}: could not download`);
-          }
-        }
-        if (savedNotes.length) text += '\n\nCHANNEL MEDIA:\n' + savedNotes.join('\n');
+      // If this message has no still but replies to one, that still IS the referent — pull it in.
+      let mediaSource = message;
+      if ((!message.attachments || message.attachments.size === 0) && message.reference) {
+        const ref = await message.fetchReference().catch(() => null);
+        if (ref && ref.attachments && ref.attachments.size > 0) mediaSource = ref;
+      }
+      const persisted = await persistInboundMedia(mediaSource, conversationKey);
+      const imageAttachments = persisted.imageAttachments;
+      const mediaFiles = persisted.mediaFiles;
+      if (persisted.savedNotes.length) {
+        const viaReply = mediaSource !== message ? ' (from the message this replies to)' : '';
+        text += '\n\nCHANNEL MEDIA' + viaReply + ':\n' + persisted.savedNotes.join('\n');
       }
       // server + channel names ride in channel_context → the core records them on the inbound
       // event (and the collector stores them on the session) so the dashboard shows where a
@@ -671,6 +701,13 @@ RESPONSE RULES:
     } finally {
       if (typingInterval) clearInterval(typingInterval);
       processing.delete(cid);
+      const queued = lateMedia.get(cid);
+      if (queued) {
+        lateMedia.delete(cid);
+        setImmediate(() => {
+          handleMessage(queued, true).catch((e) => ctx.log('late media turn failed: ' + e.message));
+        });
+      }
     }
   }
 
