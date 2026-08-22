@@ -190,6 +190,22 @@ works in asmltr's own *normalized* feature model, and three pieces bridge the ga
 3. **The adapter serializes** the negotiated request into valid harness commands. That's the **only** place
    harness-specific flags exist (the anti-corruption layer).
 
+### Vision today (Grok is carved here — other engines plug in the same way)
+
+Do **not** put harness flags in the connector or the dispatcher. Ingest is shared; serialize in the adapter.
+
+| Layer | What | Engine-specific? |
+| --- | --- | --- |
+| Discord/Telegram/… | Magic-classify stills/video, save gen-ref, put `content.attachments` (base64 stills) + `content.media_files` (paths) on the envelope | No |
+| `server.js` `runTurn` | Passes `images` + `mediaFiles` through. Extra fields are ignored by engines that don't read them | No |
+| `shared/inbound-media.js` | `classify` / `saveRef` / `promptBlock` | No |
+| `shared/outbound-stage.js` | `asmltr post` ingest/stage | No |
+| **`engines/grok.js`** | ACP `--prompt-json` image blocks + ffmpeg downscale. Re-magics before ffmpeg. | **Yes — Grok CLI only** |
+| **`engines/claude.js`** | SDK `{ type: 'image', source: { type: 'base64', … } }` from `images` | **Yes — Claude SDK only** |
+| Gemini / Codex | No vision serialize yet. They still get the envelope; they just don't attach chips. | Wire here later |
+
+To add another engine: keep ingest/core as-is; in that engine's `runTurn`, turn `opts.images` / `opts.mediaFiles` into **that harness's** vision payload (same job grok.js `collectVisionImages` + `acpPromptJson` do for Grok). Do not call `--prompt-json` or the Claude SDK from a third adapter.
+
 The runtime is "aware" because the manifest is **machine-readable**: the GUI hides the image-`detail`
 control on a session whose engine has `detail: false`; the core can warn ("this engine caps images at 8 —
 3 dropped") or route an image-rich task to a vision-strong engine. For genuinely irreducible harness-specific
