@@ -9,10 +9,11 @@ const path = require('path');
 test('preface tags asker then two blank lines then body', () => {
   const r = prefaceOnBehalf('999000111222333002', '1½ inch addendum');
   assert.equal(r.ok, true);
-  assert.equal(r.text, 'posting on behalf of <@999000111222333002>\n\n\n1½ inch addendum');
+  assert.equal(r.text, 'Posting on behalf of <@999000111222333002>\n\n\n1½ inch addendum');
   const dup = prefaceOnBehalf('1', 'posting on behalf of <@99>\n\nhello');
-  assert.equal(dup.text.startsWith('posting on behalf of <@1>\n\n\n'), true);
+  assert.equal(dup.text.startsWith('Posting on behalf of <@1>\n\n\n'), true);
   assert.equal(dup.text.includes('<@99>'), false);
+  assert.equal(dup.body, 'hello');
   assert.equal(prefaceOnBehalf('', 'hi').ok, false);
   assert.equal(prefaceOnBehalf('1', '  ').ok, false);
   const chips = prefaceOnBehalf('1', '-# Working\n-# 💭 thinking\nThe addendum.');

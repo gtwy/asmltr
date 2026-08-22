@@ -5,7 +5,7 @@
  * they asked from. Remote body has no thought chips. Ask-channel reply is
  * a short "Post complete." — not a copy of the post.
  *
- * Connector always prepends: posting on behalf of <@speakerId>
+ * Connector always prepends: Posting on behalf of <@speakerId>
  * then two blank lines, then the body. Forum: target the THREAD
  * to comment; targeting the forum channel starts a NEW post.
  */
@@ -18,7 +18,7 @@ function prefaceOnBehalf(speakerId, text) {
   body = stripThoughtChrome(body).trim();
   if (!id) return { ok: false, error: 'on_behalf_of speaker id required' };
   if (!body) return { ok: false, error: 'text required' };
-  return { ok: true, text: 'posting on behalf of <@' + id + '>\n\n\n' + body };
+  return { ok: true, body, text: 'Posting on behalf of <@' + id + '>\n\n\n' + body };
 }
 
 function sameChannel(sourceId, destId) {

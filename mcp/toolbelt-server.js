@@ -34,7 +34,7 @@ const TOOLS = [
       properties: { channel: { type: 'string', description: 'discord | telegram | email | …' }, target: { type: 'string', description: 'channel id / chat id / email address' }, text: { type: 'string' }, subject: { type: 'string', description: 'email subject (email only)' } },
       additionalProperties: false },
     argv: (a) => ['send', a.channel, a.target, a.text, ...(a.subject ? ['--subject', a.subject] : [])] },
-  { name: 'asmltr_guild_post', deny: 'guildPost', description: 'Post to another channel or thread in THIS Discord server only (Access 1–5 or owner). No other servers, no email/telegram, never this same channel (skip the tool and answer here). Prefixed posting on behalf of the asker. No thought chips remotely. Forum: THREAD id comments; forum channel id starts a new post (pass title). Optional reply_to. After success, THIS channel gets "Post complete." — then reply [[NO_REPLY]].',
+  { name: 'asmltr_guild_post', deny: 'guildPost', description: 'Post to another channel or thread in THIS Discord server only (Access 1–5 or owner). No other servers, no email/telegram, never this same channel (skip the tool and answer here). Prefixed Posting on behalf of the asker. No thought chips remotely. Forum: THREAD id comments; forum channel id starts a new post (pass title). Optional reply_to. After success, THIS channel gets "Post complete." — then reply [[NO_REPLY]].',
     inputSchema: { type: 'object', required: ['target', 'text'],
       properties: {
         target: { type: 'string', description: 'channel id or thread id in this server' },

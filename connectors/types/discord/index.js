@@ -1291,7 +1291,7 @@ ${referentPromptBlock()}`;
         if (!pref.ok) return res.status(400).json({ ok: false, error: pref.error });
         if (gp.isForumChannel(channel)) {
           const thread = await channel.threads.create({
-            name: gp.forumTitle(title, String(text || '')),
+            name: gp.forumTitle(title, pref.body || String(text || '')),
             message: { content: pref.text },
           });
           return res.json({ ok: true, messageId: thread.id, threadId: thread.id,
