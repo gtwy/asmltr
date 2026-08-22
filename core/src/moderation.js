@@ -9,6 +9,8 @@
  *
  * Decision: bypass for bypass_moderation; otherwise gpt-5-nano risk score,
  * 0-6 allow / 7-10 block. Fail-secure (block + alert) on error.
+ * classifyRaw is a separate YES/NO helper (picture-intent today) on the same
+ * key/model. Do not fold intent into moderate() — every inbound path would change.
  * OpenAI calls omit reasoning_effort by default (API default, pre-PR 122).
  * Set ASMLTR_MODERATION_REASONING_EFFORT=minimal later to cap gpt-5-nano latency.
  */
@@ -133,6 +135,29 @@ async function providerRaw(systemPrompt, userPrompt, jsonMode) {
 
 // Run the classifier; returns the parsed assessment. Deterministic JSON on OpenAI + a single
 // retry so an occasional malformed reply no longer fail-secure-blocks a legitimate request.
+/**
+ * Lightweight YES/NO (or short text) classify on the moderation key/model.
+ * Fail-closed at the caller. Does not block, does not alert, does not JSON-mode.
+ * Not part of moderate() so connectors do not have to change.
+ */
+async function classifyRaw(systemPrompt, userPrompt, { timeoutMs = 15000 } = {}) {
+  const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : 15000;
+  let timer = null;
+  try {
+    const work = providerRaw(systemPrompt, userPrompt, false);
+    const r = await Promise.race([
+      work,
+      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('classify timeout')), ms); }),
+    ]);
+    return {
+      text: r.text,
+      usage: { tokens_in: r.usage.tokens_in, tokens_out: r.usage.tokens_out, model: MOD_MODEL, provider: MOD_PROVIDER },
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function runModeration(systemPrompt, userPrompt) {
   let jsonMode = MOD_PROVIDER !== 'anthropic';
   const usage = { tokens_in: 0, tokens_out: 0 }; // accumulate across retries — every call still costs
@@ -306,4 +331,4 @@ async function notifyBlock(resolved, userMessage, moderation, platform) {
   adminAlert(body);
 }
 
-module.exports = { moderate, notifyBlock, logModerationEvent, buildOpenAIParams, parseReasoningEffort };
+module.exports = { moderate, notifyBlock, logModerationEvent, buildOpenAIParams, parseReasoningEffort, classifyRaw };

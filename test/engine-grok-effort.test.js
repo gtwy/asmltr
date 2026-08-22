@@ -321,6 +321,15 @@ test('buildArgs never includes a turn-cap flag and always includes --effort', ()
   }
 });
 
+test('runTurn picture classify uses moderation.classifyRaw not grok complete', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  assert.match(src, /moderation\.classifyRaw/);
+  assert.match(src, /parseImageGenVerdict/);
+  assert.equal(src.includes('complete(Object.assign'), false);
+  const server = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'server.js'), 'utf8');
+  assert.match(server, /image-gen-classify/);
+});
+
 test('runTurn source does not arm a kill timer', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
   const run = src.match(/async function runTurn\([\s\S]*?\n\}/);

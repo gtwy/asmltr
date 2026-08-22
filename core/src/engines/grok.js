@@ -33,7 +33,7 @@ const path = require('path');
 const engines = require('../../../shared/engines');
 const { composePrompt } = require('../../../shared/prompt-compose');
 const gcTemps = require('../../../shared/gc-temps');
-const { mentionsImageKind, classifyImageGenAsk } = require('../../../shared/image-gen-ask');
+const { mentionsImageKind, buildImageGenClassifyPrompt, parseImageGenVerdict } = require('../../../shared/image-gen-ask');
 
 const id = 'grok';
 const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
@@ -103,8 +103,8 @@ function isOwnerFromEmail(opts) {
 //           Not a coding session. Web channels are always this after one-shot.
 //   xhigh   git or a coding session, or a deep dive (implement, refactor,
 //           write/patch code, commit+push, PR, "deep dive"), or a still-gen
-//           ask (kind word + cheap YES/NO classify in runTurn, not the sync
-//           word picker). Bare "code" is not xhigh.
+//           ask (kind word + gpt-5-nano YES/NO on the moderation key in
+//           runTurn, not the sync word picker). Bare "code" is not xhigh.
 //           Project git cwd that is not $HOME.
 //           Email and MCP are always xhigh (even vs one-shot / +xh).
 //   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
@@ -775,24 +775,24 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   let classified = classifyEffort(effortOpts);
   const scored = scoringPrompt(effortOpts);
   let imageGen = false;
+  let classifyUsage = null;
   const skipImageClassify = !!deny.image || isEmailChannel(channel) || isMcpChannel(channel) || imageGenClassifyOff();
   if (!skipImageClassify && mentionsImageKind(scored)) {
     try {
-      imageGen = await classifyImageGenAsk(scored, (opts) => complete(Object.assign({
-        effort: 'low',
-        timeoutMs: 20000,
-        denyShell: true,
-        denyWrite: true,
-        denyImage: true,
-        denyVideo: true,
-      }, opts)));
+      const moderation = require('../moderation');
+      const r = await moderation.classifyRaw(
+        'You are ONLY a classifier. Reply YES or NO. No extra text.',
+        buildImageGenClassifyPrompt(scored)
+      );
+      classifyUsage = r.usage || null;
+      imageGen = parseImageGenVerdict(r.text);
     } catch (_) { imageGen = false; }
     classified = raiseForImageGen(classified, { imageGen, channel });
   }
   const effort = classified.effort;
   recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
   try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + (imageGen ? ' imageGen' : '') + ')\n'); } catch (_) {}
-  if (onEvent) { try { onEvent({ type: 'effort', effort, imageGen }); } catch (_) {} }
+  if (onEvent) { try { onEvent({ type: 'effort', effort, imageGen, classifyUsage }); } catch (_) {} }
   const denyEnv = denyToolsEnv(deny);
   const extra = {};
   if (denyEnv) extra.ASMLTR_DENY_TOOLS = denyEnv;

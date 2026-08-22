@@ -1,10 +1,10 @@
 'use strict';
 /**
- * Still-generation ask. Kind-word gate, then a cheap YES/NO classify.
- * Discord Generating-chip and grok xhigh consume the verdict. Not a tool allow.
+ * Still-generation ask. Kind-word gate, then a YES/NO classify on the
+ * moderation key (gpt-5-nano). Discord Generating-chip and grok xhigh consume
+ * the verdict. Not a tool allow. Intent is NOT folded into moderate() today.
  *
- * Gate is the kind list only (picture/photo/image/…). No verb+kind regex —
- * the classifier decides whether this turn wants image_gen / image_edit.
+ * Gate is the kind list only (picture/photo/image/…). No verb+kind regex.
  */
 
 const KIND_RE = /\b(?:pictures?|images?|graphics?|cartoons?|paintings?|drawings?|photos?|photographs?|pics?)\b/i;

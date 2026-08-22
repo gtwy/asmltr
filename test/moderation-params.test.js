@@ -54,3 +54,15 @@ test('reasoning_effort is omitted for non-gpt-5 OpenAI models', () => {
   assert.equal('reasoning_effort' in p, false);
   assert.equal(p.model, 'gpt-4o-mini');
 });
+
+test('classifyRaw is a separate helper; moderate() is unchanged', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../core/src/moderation.js'), 'utf8');
+  const { classifyRaw, moderate } = require('../core/src/moderation');
+  assert.equal(typeof classifyRaw, 'function');
+  assert.equal(typeof moderate, 'function');
+  assert.match(src, /async function classifyRaw/);
+  assert.match(src, /Do not fold intent into moderate/);
+  assert.match(src, /jsonMode = MOD_PROVIDER !== 'anthropic'/);
+});
