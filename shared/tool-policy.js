@@ -107,7 +107,7 @@ function codeAuthorized(envelope, resolved, allow) {
 function emptyDeny() {
   return {
     shell: false, streams: false, send: false, silo: false,
-    write: false, siloWrite: false, video: false, image: false, code: false,
+    write: false, siloWrite: false, video: false, image: false, code: false, attach: false,
   };
 }
 
@@ -116,6 +116,7 @@ function policyFor(envelope, resolved, allow) {
   if (!mediaAuthorized(envelope, resolved, allow)) {
     deny.video = true;
     deny.image = true;
+    deny.attach = true;
   }
   if (!codeAuthorized(envelope, resolved, allow)) {
     deny.code = true;
@@ -131,7 +132,7 @@ function policyFor(envelope, resolved, allow) {
 }
 
 function denyToolsEnv(deny) {
-  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code']
+  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach']
     .filter((k) => deny && deny[k]).join(',');
 }
 
@@ -147,6 +148,7 @@ function parseDenyEnv(raw) {
     video: set.has('video'),
     image: set.has('image'),
     code: set.has('code'),
+    attach: set.has('attach'),
   };
 }
 

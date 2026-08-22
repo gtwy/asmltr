@@ -34,7 +34,7 @@ const TOOLS = [
       properties: { channel: { type: 'string', description: 'discord | telegram | email | …' }, target: { type: 'string', description: 'channel id / chat id / email address' }, text: { type: 'string' }, subject: { type: 'string', description: 'email subject (email only)' } },
       additionalProperties: false },
     argv: (a) => ['send', a.channel, a.target, a.text, ...(a.subject ? ['--subject', a.subject] : [])] },
-  { name: 'asmltr_post', description: 'Post an image/video/file to THIS channel without Bash. Stages a safe filename, uploads, deletes the staged copy only after the connector confirms. If they did not receive it: retry=true. Does not post to other channels when send is denied.',
+  { name: 'asmltr_post', deny: 'attach', description: 'Post a generated image/video to THIS channel without Bash. Same right as image/video gen — no extra grant. Only generator output or files already in attach-stage. Stages a safe name, posts, deletes after confirm. Missed delivery: retry=true.',
     inputSchema: { type: 'object', properties: {
       file: { type: 'string', description: 'absolute path of the file to post' },
       caption: { type: 'string' },

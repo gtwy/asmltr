@@ -23,6 +23,7 @@ function buildToolbeltPrompt({
     video: !!deny.video,
     image: !!deny.image,
     code: !!deny.code,
+    attach: !!deny.attach,
   };
   const via = d.shell
     ? 'Key cross-session ops (Bash is off this turn — use MCP tools where listed):\n'
@@ -75,8 +76,8 @@ function buildToolbeltPrompt({
       'user the vault is locked and ask them to unlock it (`asmltr vault unseal` or the dashboard Vault page) — do NOT ' +
       'guess, hardcode, or work around a missing secret.';
   }
-  if (attachments) {
-    s += '\n\nTHIS channel can take a file. To post an image/video/file HERE without Bash: produce it, then `asmltr post --file <abs-path> [--caption "…"]` (MCP `asmltr_post`). It copies to a staging dir under a safe name (lowercase, no spaces, one extension), posts, and deletes the staged copy only after the connector confirms. If they say they did not get it: `asmltr post retry`. Do not use Bash to attach. '
+  if (attachments && !d.attach) {
+    s += '\n\nTHIS channel can take a generated image/video HERE without Bash: after the gen tool saves a file, `asmltr post --file <that-path> [--caption "…"]` (MCP `asmltr_post`). Same right as image/video gen — no extra grant. Only generator output or files already in attach-stage; never other files on this machine. Safe staged name, delete after confirm. Missed delivery: `asmltr post retry`. Do not use Bash to attach. '
       + (d.send
         ? `File post is this channel only (${channel} ${chTarget}).`
         : `Cross-channel send still uses \`asmltr send ${channel} ${chTarget} --file <abs-path>\`.`);

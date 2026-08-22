@@ -44,6 +44,12 @@ test('asmltr post is not send-class — still callable when send denied', () => 
   assert.equal(String(r.stderr || r.stdout).includes('denied: send'), false);
 });
 
+test('asmltr post refuses when attach denied (no image/video rights)', () => {
+  const r = run(['post', '--file', '/tmp/x.png'], 'attach');
+  assert.notEqual(r.status, 0);
+  assert.match(String(r.stderr || r.stdout), /denied: attach/);
+});
+
 test('asmltr silo put refuses when siloWrite denied even if silo allowed', () => {
   const r = run(['silo', 'put', 'x', '/etc/hosts'], 'siloWrite');
   assert.notEqual(r.status, 0);

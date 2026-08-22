@@ -317,6 +317,7 @@ async function postStaged(rec, channel, target, caption) {
 }
 
 async function cmdPost(rest) {
+  exitIfDenied('attach');
   const fs = require('fs');
   const path = require('path');
   const stage = require('../shared/outbound-stage');
@@ -350,7 +351,8 @@ async function cmdPost(rest) {
         console.log(A.yel('skip ' + rec.name + ' — not a complete unposted file'));
         continue;
       }
-      code = Math.max(code, await postStaged(rec, rec.channel || channel, rec.target || target, rest[2]));
+      rec.path = stage.assertStagedPath(rec.path);
+      code = Math.max(code, await postStaged(rec, channel, target, rest[2]));
     }
     return code;
   }
@@ -375,7 +377,8 @@ async function cmdPost(rest) {
       '  Stages a safe filename, posts to THIS channel, deletes the staged copy only after Discord confirms.');
   }
   if (!channel || !target) throw new Error('no this-channel bind (ASMLTR_ATTACH_CHANNEL / ASMLTR_ATTACH_TARGET) — grok turns set these');
-  const rec = stage.stageFile(file, { name: path.basename(file), channel, target });
+  const rec = stage.preparePost(file, { name: path.basename(file), channel, target });
+  rec.path = stage.assertStagedPath(rec.path);
   return await postStaged(rec, channel, target, caption);
 }
 async function cmdMap() {

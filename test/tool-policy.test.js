@@ -23,7 +23,7 @@ test('public discord denies shell/streams/send/write, not silo', () => {
   assert.equal(p.restricted, true);
   assert.deepEqual(p.deny, {
     shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true,
+    siloWrite: false, video: true, image: true, code: true, attach: true,
   });
 });
 
@@ -35,7 +35,7 @@ test('allowlisted guild same denies; silo still on', () => {
   }, { bypass_moderation: false });
   assert.deepEqual(p.deny, {
     shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true,
+    siloWrite: false, video: true, image: true, code: true, attach: true,
   });
 });
 
@@ -47,7 +47,7 @@ test('discord DM + bypass_moderation denies nothing', () => {
   assert.equal(p.restricted, false);
   assert.deepEqual(p.deny, {
     shell: false, streams: false, send: false, silo: false, write: false,
-    siloWrite: false, video: false, image: false, code: false,
+    siloWrite: false, video: false, image: false, code: false, attach: false,
   });
 });
 
@@ -68,6 +68,7 @@ test('email and mcp are not Discord-restricted but deny video/image/code without
     assert.equal(p.deny.send, false, ch);
     assert.equal(p.deny.video, true, ch);
     assert.equal(p.deny.image, true, ch);
+    assert.equal(p.deny.attach, true, ch);
     assert.equal(p.deny.code, true, ch);
     assert.equal(p.deny.shell, true, ch);
     assert.equal(p.deny.write, true, ch);
@@ -87,6 +88,7 @@ test('videoAllow principal may generate video without bypass', () => {
   );
   assert.equal(p.deny.video, false);
   assert.equal(p.deny.image, false);
+  assert.equal(p.deny.attach, false);
   assert.equal(p.deny.code, true);
 });
 
@@ -122,11 +124,12 @@ test('codeAllow may receive programs without bypass; still no video/image', () =
   assert.equal(p.deny.write, false);
   assert.equal(p.deny.video, true);
   assert.equal(p.deny.image, true);
+  assert.equal(p.deny.attach, true);
 });
 
 test('restricted prompt omits send/streams/silo/bash-silo', () => {
   const text = buildToolbeltPrompt({
-    deny: { shell: true, streams: true, send: true, silo: true },
+    deny: { shell: true, streams: true, send: true, silo: true, attach: true },
     selfSiloDir: '/tmp/self',
     attachments: true,
     channel: 'discord',
@@ -139,7 +142,7 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
   assert.equal(text.includes('asmltr silo'), false);
   assert.equal(/use the Bash tool/.test(text), false);
   assert.ok(text.includes('asmltr ls'));
-  assert.ok(text.includes('asmltr post --file'));
+  assert.equal(text.includes('asmltr post --file'), false);
 });
 
 test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
@@ -172,8 +175,8 @@ test('silo prompt has no NaN; put only when siloWrite is allowed', () => {
 
 test('denyToolsEnv lists denied kinds', () => {
   assert.equal(
-    denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true, video: true, image: true, code: true }),
-    'shell,streams,send,silo,write,siloWrite,video,image,code',
+    denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true, video: true, image: true, code: true, attach: true }),
+    'shell,streams,send,silo,write,siloWrite,video,image,code,attach',
   );
   assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true }), 'shell,streams,send,write,siloWrite');
 });
