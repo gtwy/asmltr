@@ -49,5 +49,7 @@ test('grok prompt gets CHANNEL MEDIA paths for image_edit, not as bash', () => {
   const p = args[args.indexOf('-p') + 1];
   assert.match(p, /CHANNEL MEDIA/);
   assert.ok(p.includes(pic));
+  assert.match(p, /LOOK at these files/);
+  assert.match(p, /not gen-only/);
   assert.match(p, /Do not execute/);
 });

@@ -642,6 +642,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   if (denyEnv) extra.ASMLTR_DENY_TOOLS = denyEnv;
   if (attachChannel) extra.ASMLTR_ATTACH_CHANNEL = String(attachChannel);
   if (attachTarget) extra.ASMLTR_ATTACH_TARGET = String(attachTarget);
+  if (conversationKey) extra.ASMLTR_ATTACH_CONVERSATION_KEY = String(conversationKey);
   if (cwd) extra.ASMLTR_ATTACH_INGEST_CWD = String(cwd);
   const childEnv = launchEnv(Object.assign({}, process.env, extra));
   const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image, images, mediaFiles });

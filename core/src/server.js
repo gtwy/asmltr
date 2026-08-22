@@ -453,6 +453,10 @@ async function handle(envelope, opts = {}) {
       effectiveSystemPrompt += '\n\nPRIOR CONTEXT — this is a FRESH engine session and the Self silo has no prior turns yet. Do NOT grep events-*.jsonl for prior conversation.';
     }
   }
+  try {
+    const posted = require('../../shared/media-log').recall(e.conversation_key);
+    if (posted) effectiveSystemPrompt += '\n\n' + posted;
+  } catch (_) {}
 
   // Remember where an out-of-band operator inject should reply (via the manager's /send):
   // instance id = 2nd segment of the conversation_key; target = the channel/chat id.

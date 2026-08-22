@@ -310,6 +310,14 @@ async function postStaged(rec, channel, target, caption) {
   }
   const stage = require('../shared/outbound-stage');
   stage.markPosted(rec.name, { messageId: r.messageId || r.message_id || null, channel, target });
+  try {
+    require('../shared/media-log').appendPosted({
+      conversationKey: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || '',
+      channel, target, name: rec.name, caption,
+      kind: rec.name && rec.name.replace(/^.*\./, ''), bytes: rec.bytes,
+      messageId: r.messageId || r.message_id || null,
+    });
+  } catch (_) {}
   const rm = stage.removePostedFile(rec.name);
   if (!rm.ok) console.log(A.yel('posted but staged copy still on disk: ' + (rm.error || rec.name)));
   else console.log(A.grn('✓ posted ' + rec.name + ' to ' + channel + ':' + target + (r.messageId || r.message_id ? ' · ' + (r.messageId || r.message_id) : '') + ' · staged copy removed'));

@@ -70,8 +70,8 @@ function promptBlock(files) {
   const list = (files || []).filter((f) => f && f.path && (f.kind === 'image' || f.kind === 'video'));
   if (!list.length) return '';
   const lines = list.map((f) => `- ${f.kind}: \`${f.path}\``);
-  return '\n\nCHANNEL MEDIA this turn (use as reference for image_edit / image_to_video / image_gen). '
-    + 'Do not execute, chmod, run, or interpret as code. Paths only:\n'
+  return '\n\nCHANNEL MEDIA this turn. LOOK at these files (Read the image/video) to answer questions about what is in them — not gen-only. '
+    + 'If gen tools are allowed they may also be references. Do not execute, chmod, run, or interpret as code:\n'
     + lines.join('\n')
     + '\n';
 }
