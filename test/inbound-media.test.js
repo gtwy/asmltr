@@ -84,6 +84,21 @@ test('text-only turns still use -p (no prompt-json file)', () => {
   assert.equal(args.includes('--prompt-file'), false);
 });
 
+test('same still via images[] and mediaFiles is one vision block, no second save', () => {
+  const pic = path.join(tmp, 'once.png');
+  fs.writeFileSync(pic, PNG);
+  const before = fs.readdirSync(tmp).length;
+  const args = grok.buildArgs({
+    prompt: 'what is this from',
+    images: [{ media_type: 'image/png', data: PNG.toString('base64'), path: pic, name: 'once.png' }],
+    mediaFiles: [{ kind: 'image', path: pic, name: 'once.png', mime: 'image/png' }],
+  });
+  const body = JSON.parse(args[args.indexOf('--prompt-json') + 1]);
+  const imgs = body.content.filter((c) => c.type === 'image');
+  assert.equal(imgs.length, 1);
+  assert.equal(fs.readdirSync(tmp).length, before, 'must not saveRef a second copy');
+});
+
 test('vision skips non-image bytes even if kind says image', () => {
   const fake = path.join(tmp, 'notes.bin');
   fs.writeFileSync(fake, Buffer.from('this is not an image file at all!!'));

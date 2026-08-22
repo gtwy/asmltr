@@ -500,7 +500,7 @@ async function handle(envelope, opts = {}) {
     // image attachments → vision (runner builds SDK image content blocks)
     const images = (e.content.attachments || [])
       .filter((a) => a && a.type === 'image' && a.data && a.media_type)
-      .map((a) => ({ media_type: a.media_type, data: a.data }));
+      .map((a) => ({ media_type: a.media_type, data: a.data, path: a.path, name: a.name }));
     // User-turn preamble, in channel-chronology framing the model trusts: (1) messages this session
     // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2)
     // observed-but-not-replied activity from others. Both buffers are drained + cleared each turn.

@@ -411,9 +411,10 @@ function collectVisionImages(opts) {
     if (raw.length < 12 || raw.length > VISION_MAX) return;
     const classified = inbound.classify(raw, mime, name || 'vision.bin');
     if (!classified.kind || classified.kind !== 'image') return;
-    const k = key || raw.slice(0, 24).toString('hex');
-    if (seen.has(k)) return;
-    seen.add(k);
+    const fp = raw.length + ':' + raw.subarray(0, 32).toString('hex') + ':' + raw.subarray(-16).toString('hex');
+    if ((key && seen.has('p:' + key)) || seen.has(fp)) return;
+    seen.add(fp);
+    if (key) seen.add('p:' + key);
     const scaled = downscaleForVision(raw, classified.mime || mime);
     raw = scaled.buf;
     const mimeType = (String(scaled.mime || classified.mime || '').startsWith('image/')
