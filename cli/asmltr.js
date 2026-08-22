@@ -751,6 +751,8 @@ function cmdHelp() {
   asmltr announcements                 list live announcements (with timestamps)
   asmltr uploads [search]              files users sent on ANY channel (--channel --since 2h|1d --sender --limit)
        uploads get <id>                print the stored path of one upload
+  asmltr gc-temps                      drop attach-stage / gen-ref / vis-prompt leftovers older than 1 day
+                                       (same as core bounce; also run by Sunday 03:00 timer)
   asmltr drafts                        replies held for your approval (any connector)
        drafts show <id> · send <id> · discard <id>
   asmltr mail [list]                   browse the mailbox (-n N, --unseen)
@@ -1020,6 +1022,11 @@ async function cmdVault(rest, f) {
       case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();
       case 'uploads': return await cmdUploads(rest);
+      case 'gc-temps': {
+        const g = require('../shared/gc-temps').run();
+        console.log(A.dim(`temp gc: attach=${g.attach} gen-ref=${g.genRef} vis-prompt=${g.visPrompt} tmp=${g.tmpLeftover}`));
+        return;
+      }
       case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);

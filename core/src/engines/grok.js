@@ -32,6 +32,7 @@ const os = require('os');
 const path = require('path');
 const engines = require('../../../shared/engines');
 const { composePrompt } = require('../../../shared/prompt-compose');
+const gcTemps = require('../../../shared/gc-temps');
 
 const id = 'grok';
 const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
@@ -384,8 +385,9 @@ function downscaleForVision(buf, mime) {
   const ffmpeg = '/usr/bin/ffmpeg';
   if (!fs.existsSync(ffmpeg)) return { buf, mime };
   const id = crypto.randomBytes(4).toString('hex');
-  const inp = path.join(os.tmpdir(), 'asmltr-vis-in-' + id);
-  const outp = path.join(os.tmpdir(), 'asmltr-vis-out-' + id + '.jpg');
+  const dir = ensureVisionPromptDir();
+  const inp = path.join(dir, 'asmltr-vis-in-' + id);
+  const outp = path.join(dir, 'asmltr-vis-out-' + id + '.jpg');
   try {
     fs.writeFileSync(inp, buf, { mode: 0o600 });
     try { fs.chmodSync(inp, 0o600); } catch (_) {}
@@ -445,37 +447,11 @@ function acpPromptJson(text, vision) {
   return JSON.stringify({ type: 'acp', content });
 }
 
-function visionPromptDir() {
-  if (process.env.ASMLTR_GROK_PROMPT_DIR) return process.env.ASMLTR_GROK_PROMPT_DIR;
-  return path.join(os.tmpdir(), 'asmltr-vis-prompt');
-}
-
-function ensureVisionPromptDir() {
-  const dir = visionPromptDir();
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  try { fs.chmodSync(dir, 0o700); } catch (_) {}
-  return dir;
-}
-
-/** Drop crash leftovers. Own prefix only; default dir is 0700 under tmp. */
+function visionPromptDir() { return gcTemps.visPromptDir(); }
+function ensureVisionPromptDir() { return gcTemps.ensureVisPromptDir(); }
+/** Crash leftovers in ~/.asmltr/vis-prompt (0700). Own prefix only. */
 function gcVisionPromptFiles(maxAgeMs) {
-  const age = maxAgeMs == null ? 60 * 60 * 1000 : Number(maxAgeMs);
-  const cutoff = Date.now() - age;
-  const dir = visionPromptDir();
-  let removed = 0;
-  let names = [];
-  try { names = fs.readdirSync(dir); } catch (_) { return 0; }
-  for (const name of names) {
-    if (!name.startsWith('asmltr-vis-prompt-') || !name.endsWith('.json')) continue;
-    const p = path.join(dir, name);
-    try {
-      const st = fs.statSync(p);
-      if (!st.isFile() || st.mtimeMs > cutoff) continue;
-      fs.unlinkSync(p);
-      removed++;
-    } catch (_) {}
-  }
-  return removed;
+  return gcTemps.gcVisionPromptFiles(maxAgeMs == null ? 60 * 60 * 1000 : maxAgeMs);
 }
 
 let _visionPromptGc = false;
@@ -878,7 +854,7 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  collectVisionImages, acpPromptJson, writeVisionPromptFile, gcVisionPromptFiles,
+  collectVisionImages, acpPromptJson, writeVisionPromptFile, gcVisionPromptFiles, visionPromptDir,
   extractText, extractUsage, joinText, isCompleteBlock, closeThinking, newState, toolNameOf, isThoughtType,
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,

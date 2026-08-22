@@ -2151,13 +2151,10 @@ if (require.main === module) {
     console.log(`idle_policy=${sessions.idlePolicyFromEnv()} assistant=${process.env.ASSISTANT_NAME || 'the assistant'} engine=${require('../../shared/engines').getDefault()}`);
     console.log('substrate: configured reasoning engine (grok = subscription CLI; no XAI_API_KEY)');
     try {
-      const gc = require('../../shared/outbound-stage').gc();
-      if (gc.removed && gc.removed.length) console.log('attach-stage gc: removed ' + gc.removed.length);
-    } catch (e) { console.log('attach-stage gc: ' + e.message); }
-    try {
-      const g2 = require('../../shared/inbound-media').gc();
-      if (g2.removed && g2.removed.length) console.log('gen-ref gc: removed ' + g2.removed.length);
-    } catch (e) { console.log('gen-ref gc: ' + e.message); }
+      const g = require('../../shared/gc-temps').run();
+      const n = g.attach + g.genRef + g.visPrompt + g.tmpLeftover;
+      if (n) console.log('temp gc: attach=' + g.attach + ' gen-ref=' + g.genRef + ' vis-prompt=' + g.visPrompt + ' tmp=' + g.tmpLeftover);
+    } catch (e) { console.log('temp gc: ' + e.message); }
     try {
       require('../../shared/media-log').ensureDir();
     } catch (e) { console.log('media-out mkdir: ' + e.message); }
