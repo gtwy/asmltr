@@ -63,6 +63,8 @@ test('discord and telegram /out use requireConnectorToken; manager send attaches
   assert.ok(discord.includes('requireConnectorToken'));
   assert.ok(telegram.includes('requireConnectorToken'));
   assert.match(discord, /app\.post\('\/out',\s*requireConnectorToken/);
+  assert.match(discord, /outboundFileAllowed/);
+  assert.match(telegram, /outboundFileAllowed/);
   assert.match(discord, /app\.post\('\/send-message',\s*requireConnectorToken/);
   assert.match(telegram, /app\.post\('\/out',\s*requireConnectorToken/);
   assert.match(telegram, /app\.post\('\/send',\s*requireConnectorToken/);

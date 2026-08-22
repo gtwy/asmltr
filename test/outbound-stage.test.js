@@ -118,6 +118,13 @@ test('ingests a real png from a generator images/ dir', () => {
   delete process.env.ASMLTR_ATTACH_INGEST_CWD;
 });
 
+test('outboundFileAllowed is attach-stage / uploads / gen-ref / silo only', () => {
+  const rec = stage.stageFile(touchSrc('ok.png'), { name: 'ok.png' });
+  assert.equal(stage.outboundFileAllowed(rec.path), true);
+  assert.equal(stage.outboundFileAllowed('/etc/passwd'), false);
+  assert.equal(stage.outboundFileAllowed(path.join(os.homedir(), '.ssh', 'id_ed25519')), false);
+});
+
 test('resolveStagedName rejects path traversal', () => {
   assert.throws(() => stage.resolveStagedName('../shot.png'), /staged name only/);
   assert.throws(() => stage.resolveStagedName(tmp + '/shot.png'), /staged name only/);

@@ -1265,6 +1265,12 @@ ${referentPromptBlock()}`;
       // any file kind (photo/file/attachment/document/image) → send as a Discord attachment
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
       if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
+      if (isFile) {
+        const stage = require('../../../shared/outbound-stage');
+        if (!stage.outboundFileAllowed(filePath)) {
+          return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
+        }
+      }
       const m = isFile ? await channel.send({ content: caption || text || '', files: [filePath] }) : await channel.send(text);
       // Report the conversation_key this target maps to (matches an inbound from the same place), so a
       // core-mediated send can ASSIMILATE this message into that session's context (it was posted from

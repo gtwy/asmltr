@@ -185,6 +185,22 @@ function assertStagedPath(p) {
   return abs;
 }
 
+/** Discord/Telegram /out file posts: attach-stage, gen-ref, uploads, silos. Not /etc, not $HOME. */
+function outboundFileRoots() {
+  const roots = [stageDir()];
+  try { roots.push(require('./uploads').baseDir()); } catch (_) {}
+  try { roots.push(require('./inbound-media').refDir()); } catch (_) {}
+  try { roots.push(require('./silo').silosRoot()); } catch (_) {}
+  return roots.filter(Boolean);
+}
+
+function outboundFileAllowed(p) {
+  if (!p || String(p).split(/[/\\]/).includes('..')) return false;
+  let abs;
+  try { abs = real(p); } catch (_) { return false; }
+  return outboundFileRoots().some((root) => inside(root, abs));
+}
+
 function resolveStagedName(name) {
   const base = path.basename(String(name || ''));
   if (!base || base !== String(name).replace(/^.*[/\\]/, '') || base.includes('..') || /[/\\]/.test(String(name))) {
@@ -323,6 +339,6 @@ function gc(maxAgeMs) {
 
 module.exports = {
   DAY_MS, MAX_BYTES, stageDir, ensureDir, sanitizeFilename, uniqueName, stageFile,
-  preparePost, ingestAllowed, assertStagedPath, resolveStagedName,
+  preparePost, ingestAllowed, assertStagedPath, resolveStagedName, outboundFileAllowed, outboundFileRoots,
   get, listUnposted, markPosted, removePostedFile, gc, isMediaExt, mediaKind,
 };

@@ -225,6 +225,13 @@ async function start(ctx) {
       // 'file' is the standard attachment kind: route by MIME — an image/* goes as a Telegram photo
       // (inline preview), anything else as a document. Previously 'file' fell through to sendMessage
       // with an undefined body → "message text is empty". 'photo'/'document' force a specific send.
+      if (kind === 'file' || kind === 'photo' || kind === 'document') {
+        if (!filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
+        const stage = require('../../../shared/outbound-stage');
+        if (!stage.outboundFileAllowed(filePath)) {
+          return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
+        }
+      }
       if (kind === 'file') {
         m = isImage(filePath)
           ? await bot.sendPhoto(to, filePath, { caption: caption || '' })
