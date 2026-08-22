@@ -87,6 +87,69 @@ function mentionsSpeaker(text, hints) {
   return false;
 }
 
+const KIND_RANK = { email: 4, 'last-name': 3, 'first-name': 2, identity: 1 };
+const KIND_LABEL = {
+  email: 'no email',
+  'last-name': 'no last name',
+  'first-name': 'no first name',
+  identity: 'no named identity',
+};
+
+/** Map hint token → kind. Never put the token in a public reply. */
+function identityHintKindMap(records) {
+  const map = new Map();
+  const set = (raw, kind) => {
+    const s = String(raw || '').trim();
+    if (s.length < 4 || /^\d+$/.test(s)) return;
+    const k = s.toLowerCase();
+    const prev = map.get(k);
+    if (!prev || (KIND_RANK[kind] || 0) > (KIND_RANK[prev] || 0)) map.set(k, kind);
+  };
+  for (const rec of records || []) {
+    if (!rec || rec.id === 'self') continue;
+    set(rec.id, 'identity');
+    for (const p of String(rec.id || '').split(/[\s._-]+/)) set(p, 'identity');
+    const dn = String(rec.display_name || '').trim();
+    if (dn) {
+      set(dn, 'identity');
+      const parts = dn.split(/[\s._-]+/).filter((p) => p.length >= 4 && !/^\d+$/.test(p));
+      if (parts.length) {
+        set(parts[parts.length - 1], 'last-name');
+        for (const p of parts.slice(0, -1)) set(p, 'first-name');
+      }
+    }
+    for (const ident of rec.identifiers || []) {
+      const v = ident && ident.value != null ? String(ident.value).trim() : '';
+      if (!v || /^\d+$/.test(v)) continue;
+      if (/@/.test(v)) set(v, 'email');
+      else set(v, 'identity');
+    }
+  }
+  return map;
+}
+
+function privacyHitKind(text, hints, hintKinds) {
+  const s = String(text || '');
+  let best = null;
+  let bestRank = 0;
+  for (const h of hints || []) {
+    if (!h || String(h).length < 4) continue;
+    if (!new RegExp('\\b' + escapeRe(h) + '\\b', 'i').test(s)) continue;
+    let kind = hintKinds && hintKinds.get(String(h).toLowerCase());
+    if (!kind) kind = /@/.test(h) ? 'email' : 'identity';
+    const rank = KIND_RANK[kind] || 0;
+    if (rank > bestRank) { best = kind; bestRank = rank; }
+  }
+  return best;
+}
+
+/** Public notice. Never includes the matched token. */
+function privacyBlockLine(text, hints, hintKinds) {
+  const kind = privacyHitKind(text, hints, hintKinds);
+  const reason = KIND_LABEL[kind] || 'named identity';
+  return 'response blocked due to privacy rules: ' + reason;
+}
+
 /**
  * Access principal tokens at runtime: id (`fixture-person` → also `person`),
  * display name (`Ada Lovelace` → also `Lovelace`), non-numeric identifiers.
@@ -122,17 +185,19 @@ function identityHintsFrom(records) {
  * name Access identities. DMs keep the raw reply. Vendor emails not in Access
  * still post.
  */
-function pickPublicReply({ pending, replyText, leakDropped, publicSurface, hints }) {
+function pickPublicReply({ pending, replyText, leakDropped, publicSurface, hints, hintKinds }) {
   const held = String(pending || '').trim();
+  const raw = String(replyText || '').trim();
+  const block = (sample) => privacyBlockLine(sample, hints, hintKinds);
   if (held) {
-    if (publicSurface && mentionsSpeaker(held, hints)) return '';
+    if (publicSurface && mentionsSpeaker(held, hints)) return block(held);
     return held;
   }
-  const raw = String(replyText || '').trim();
   if (!raw) return '';
   if (!publicSurface) return raw;
+  if (looksLikePromptRestatement(raw) && !mentionsSpeaker(raw, hints)) return '';
+  if (mentionsSpeaker(raw, hints)) return block(raw);
   if (leakDropped) return '';
-  if (looksLikePromptRestatement(raw) || mentionsSpeaker(raw, hints)) return '';
   return raw;
 }
 
@@ -224,7 +289,7 @@ function discordThoughtLine(text, hints) {
 
 module.exports = {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
-  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget,
+  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, privacyBlockLine, pickPublicReply, thoughtBudget,
   stripThoughtChrome, quietReplyFromResult,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, THOUGHT_CLAMP,
 };

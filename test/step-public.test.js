@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
-  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget,
+  speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, pickPublicReply, thoughtBudget,
   stripThoughtChrome, quietReplyFromResult,
 } = require('../shared/step-public');
 
@@ -131,52 +131,65 @@ test('identityHintsFrom splits hyphenated principal ids and keeps mailboxes whol
   assert.equal(discordThoughtLine('Checking the recipe board', hints), '-# 💭 Checking the recipe board');
 });
 
-test('pickPublicReply: public leak does not fall back to raw reply; DMs still do', () => {
-  const hints = identityHintsFrom([{
+test('pickPublicReply: public leak posts a reason, never the raw reply; DMs still do', () => {
+  const records = [{
     id: 'fixture-person',
     display_name: 'Ada Lovelace',
     identifiers: [{ surface: 'email', value: 'ada@example.com' }],
-  }]);
+  }];
+  const hints = identityHintsFrom(records);
+  const hintKinds = identityHintKindMap(records);
+  const opts = { hints, hintKinds };
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Sent to ada@example.com',
     leakDropped: true,
     publicSurface: true,
-    hints,
-  }), '');
+    ...opts,
+  }), 'response blocked due to privacy rules: no email');
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Sent to ada@example.com',
     leakDropped: true,
     publicSurface: false,
-    hints,
+    ...opts,
   }), 'Sent to ada@example.com');
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'Sent to ada@example.com',
+    replyText: 'James picked Watt as a last name.',
     leakDropped: false,
     publicSurface: true,
-    hints,
-  }), '');
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
+  }), 'response blocked due to privacy rules: no last name');
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Use vendor@example.com for the catalog.',
     leakDropped: false,
     publicSurface: true,
-    hints,
+    ...opts,
   }), 'Use vendor@example.com for the catalog.');
   assert.equal(pickPublicReply({
     pending: 'Sent. Same pack, to the address on file.',
     replyText: 'Sent to ada@example.com',
     leakDropped: false,
     publicSurface: true,
-    hints,
+    ...opts,
   }), 'Sent. Same pack, to the address on file.');
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Updating fixture-person now.',
     leakDropped: false,
     publicSurface: true,
-    hints,
-  }), '');
+    ...opts,
+  }), 'response blocked due to privacy rules: no named identity');
+  const notice = pickPublicReply({
+    pending: '',
+    replyText: 'Sent to ada@example.com',
+    leakDropped: true,
+    publicSurface: true,
+    ...opts,
+  });
+  assert.equal(notice.includes('ada@example.com'), false);
+  assert.equal(notice.includes('Lovelace'), false);
 });

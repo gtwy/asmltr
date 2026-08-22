@@ -33,7 +33,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
-const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
@@ -152,12 +152,14 @@ async function start(ctx) {
   const recentReplies = new Map(); // cid -> last few reply texts (dedup verbatim repeats)
   // Access principal ids / names / mailboxes for public 💭 + reply drop. Runtime, not a git denylist.
   let identityHints = [];
+  let identityHintKinds = new Map();
   let identityHintsAt = 0;
   async function loadIdentityHints() {
     if (Date.now() - identityHintsAt < 60 * 1000) return identityHints;
     try {
       const list = ctx.core.trustPrincipals ? await ctx.core.trustPrincipals() : [];
       identityHints = identityHintsFrom(list || []);
+      identityHintKinds = identityHintKindMap(list || []);
     } catch (e) { ctx.log('identity hints failed: ' + e.message); }
     identityHintsAt = Date.now();
     return identityHints;
@@ -665,6 +667,7 @@ ${referentPromptBlock()}`;
           leakDropped,
           publicSurface: !!envelope.public,
           hints,
+          hintKinds: identityHintKinds,
         });
       } else {
         actions = await ctx.core.handle(envelope);
@@ -675,6 +678,7 @@ ${referentPromptBlock()}`;
           leakDropped: false,
           publicSurface: !!envelope.public,
           hints,
+          hintKinds: identityHintKinds,
         });
       }
       const color = parseReact(replyText);
