@@ -35,6 +35,7 @@ test('discord connector wires referent, late-media save, no look-ahead complete(
   assert.match(src, /shouldQueueLateMedia/);
   assert.match(src, /isReplyToUs/);
   assert.match(src, /lateMedia/);
+  assert.match(src, /if \(shouldQueueLateMedia\(slot, message\)\) \{/);
   assert.equal(src.includes('complete('), false);
   assert.equal(src.includes('→ ${saved.path}'), false, 'O1: do not put gen-ref paths in Discord user text');
 });

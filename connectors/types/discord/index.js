@@ -514,12 +514,13 @@ ${referentPromptBlock()}`;
       // reply comes back out to the channel via the stored outbound route. Non-addressed chatter is still
       // ignored so idle channel noise can't derail the work. (`@handle stop` interrupts — handled earlier.)
       // Same-author uploads during the turn are SAVED (so "look up" can find them) and run as their
-      // own turn after this one — not a look-ahead wait.
+      // own turn after this one — not a look-ahead wait. Bystander attachments are not persisted
+      // into this conversation's uploads while the lock is held.
       const slot = processing.get(cid);
-      if (message.attachments && message.attachments.size > 0) {
+      if (shouldQueueLateMedia(slot, message)) {
         try { await persistInboundMedia(message, convKeyFor(message)); }
         catch (e) { ctx.log('late media save failed: ' + e.message); }
-        if (shouldQueueLateMedia(slot, message)) lateMedia.set(cid, message);
+        lateMedia.set(cid, message);
       }
       if (isAddressed(message, forced)) {
         const guidance = String(message.content || '').replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim();
