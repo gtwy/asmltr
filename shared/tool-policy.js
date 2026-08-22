@@ -119,7 +119,7 @@ function emptyDeny() {
   return {
     shell: false, streams: false, send: false, silo: false,
     write: false, siloWrite: false, video: false, image: false, code: false, attach: false,
-    uploads: false,
+    uploads: false, guildPost: false,
   };
 }
 
@@ -135,6 +135,8 @@ function policyFor(envelope, resolved, allow) {
     deny.shell = true;
     deny.write = true;
   }
+  // Same-guild Discord post: only when this turn is already in a guild.
+  if (!guildIdFrom(envelope)) deny.guildPost = true;
   if (!isRestricted(envelope, resolved)) return { deny, restricted: false };
   deny.shell = true;
   deny.streams = true;
@@ -145,7 +147,7 @@ function policyFor(envelope, resolved, allow) {
 }
 
 function denyToolsEnv(deny) {
-  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads']
+  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost']
     .filter((k) => deny && deny[k]).join(',');
 }
 
@@ -163,6 +165,7 @@ function parseDenyEnv(raw) {
     code: set.has('code'),
     attach: set.has('attach'),
     uploads: set.has('uploads'),
+    guildPost: set.has('guildPost'),
   };
 }
 

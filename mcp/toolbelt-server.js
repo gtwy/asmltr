@@ -34,6 +34,15 @@ const TOOLS = [
       properties: { channel: { type: 'string', description: 'discord | telegram | email | …' }, target: { type: 'string', description: 'channel id / chat id / email address' }, text: { type: 'string' }, subject: { type: 'string', description: 'email subject (email only)' } },
       additionalProperties: false },
     argv: (a) => ['send', a.channel, a.target, a.text, ...(a.subject ? ['--subject', a.subject] : [])] },
+  { name: 'asmltr_guild_post', deny: 'guildPost', description: 'Post to another channel or thread in THIS Discord server only (no other servers, no email/telegram). Prefixed posting on behalf of the asker. Forum: target the THREAD id to comment; forum channel id starts a new post (pass title). Optional reply_to = message id in that thread.',
+    inputSchema: { type: 'object', required: ['target', 'text'],
+      properties: {
+        target: { type: 'string', description: 'channel id or thread id in this server' },
+        text: { type: 'string' },
+        title: { type: 'string', description: 'new forum post title when target is the forum channel' },
+        reply_to: { type: 'string', description: 'optional message id in that thread to Discord-reply' },
+      }, additionalProperties: false },
+    argv: (a) => ['guild-post', a.target, a.text, ...(a.title ? ['--title', a.title] : []), ...(a.reply_to ? ['--reply-to', a.reply_to] : [])] },
   { name: 'asmltr_post', deny: 'attach', description: 'Post a generated image/video to THIS channel without Bash. Same right as image/video gen — no extra grant. Only generator output or files already in attach-stage. Stages a safe name, posts, deletes after confirm. Missed delivery: retry=true.',
     inputSchema: { type: 'object', properties: {
       file: { type: 'string', description: 'absolute path of the file to post' },

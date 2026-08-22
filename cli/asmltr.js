@@ -283,6 +283,39 @@ async function cmdSend(rest) {
   console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 
+async function cmdGuildPost(rest) {
+  exitIfDenied('guildPost');
+  let title = null, replyTo = null;
+  const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--title') title = rest[++i];
+    else if (t === '--reply-to') replyTo = rest[++i];
+    else words.push(t);
+  }
+  const target = words[0], text = words.slice(1).join(' ');
+  if (!target || !text) {
+    throw new Error('usage: asmltr guild-post <channel-or-thread-id> "<text>" [--title "forum title"] [--reply-to <messageId>]');
+  }
+  const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
+  const on_behalf_of = process.env.ASMLTR_ATTACH_SENDER || '';
+  if (!source_guild) throw new Error('guild-post only from a Discord server channel (no DMs, no email)');
+  if (!on_behalf_of) throw new Error('guild-post needs the asker id (ASMLTR_ATTACH_SENDER)');
+  const body = {
+    channel: 'discord', target, kind: 'guild_post', text,
+    source_guild, on_behalf_of, title: title || undefined, reply_to: replyTo || undefined,
+    from_session: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || undefined,
+  };
+  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => null);
+  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+  console.log(r.ok ? A.grn(`✓ guild-post to discord:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('guild-post failed: ' + (r.error || JSON.stringify(r))));
+}
+
 async function deliverFile(channel, target, filePath, caption) {
   const body = { channel, target, kind: 'file', path: filePath, caption: caption || undefined };
   let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -740,6 +773,8 @@ function cmdHelp() {
        [--title T] [--force] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
+  asmltr guild-post <id> "<text>"      same Discord server only (channel or thread id).
+       [--title T] [--reply-to id]     forum: thread id = comment; forum id = new post. on-behalf-of prefix.
   asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
        [--caption T]                   delete only after Discord confirms. retry / list / gc
        ... --subject "<subj>"           set the subject (email)
@@ -1017,6 +1052,7 @@ async function cmdVault(rest, f) {
       case 'watch': return liveStream(rest[0]);
       case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
+      case 'guild-post': return await cmdGuildPost(rest);
       case 'post': return await cmdPost(rest);
       case 'announce': return await cmdAnnounce(rest);
       case 'notify': return await cmdNotify(rest);

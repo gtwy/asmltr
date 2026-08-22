@@ -1277,9 +1277,33 @@ ${referentPromptBlock()}`;
   // stage a safe name, POST here, delete the staged copy only after messageId.
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
+      const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title } = req.body || {};
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
-      if (!channel || !channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
+      if (!channel) return res.status(404).json({ ok: false, error: 'channel not found' });
+      if (kind === 'guild_post') {
+        const gp = require('../../../shared/guild-post');
+        const same = gp.sameGuild(source_guild, gp.destGuildId(channel));
+        if (!same.ok) return res.status(403).json({ ok: false, error: same.error });
+        const pref = gp.prefaceOnBehalf(on_behalf_of, text);
+        if (!pref.ok) return res.status(400).json({ ok: false, error: pref.error });
+        if (gp.isForumChannel(channel)) {
+          const thread = await channel.threads.create({
+            name: gp.forumTitle(title, String(text || '')),
+            message: { content: pref.text },
+          });
+          return res.json({ ok: true, messageId: thread.id, threadId: thread.id,
+            conversation_key: `discord:${ctx.instanceId}:channel:${thread.id}` });
+        }
+        if (!channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
+        const opts = { content: pref.text };
+        if (reply_to) opts.reply = { messageReference: String(reply_to) };
+        const posted = await channel.send(opts);
+        const conversation_key = channel.type === 1
+          ? `discord:${ctx.instanceId}:dm:${(channel.recipient && channel.recipient.id) || tg}`
+          : `discord:${ctx.instanceId}:channel:${channel.id}`;
+        return res.json({ ok: true, messageId: posted.id, conversation_key });
+      }
+      if (!channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
       // any file kind (photo/file/attachment/document/image) → send as a Discord attachment
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
       if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });

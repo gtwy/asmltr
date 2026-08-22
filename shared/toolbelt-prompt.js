@@ -18,6 +18,7 @@ function buildToolbeltPrompt({
     shell: !!deny.shell,
     streams: !!deny.streams,
     send: !!deny.send,
+    guildPost: !!deny.guildPost,
     silo: !!deny.silo,
     siloWrite: !!deny.siloWrite,
     video: !!deny.video,
@@ -38,6 +39,9 @@ function buildToolbeltPrompt({
     s += '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
       'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here. ' +
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n';
+  }
+  if (!d.guildPost) {
+    s += '• `asmltr guild-post <channel-or-thread-id> "<text>"` (MCP `asmltr_guild_post`) — post to another channel or thread in THIS Discord server only. No other servers, no email, no telegram. Always prefixed `posting on behalf of @asker`. Forum boards (e.g. #recipes-board): target the THREAD id to comment on a recipe; targeting the forum channel starts a NEW post (`title` required-ish). Optional `reply_to` = message id in that thread to Discord-reply. COPY: run it, then reply here. REDIRECT: run it, then [[NO_REPLY]].\n';
   }
   if (!d.send) {
     s += '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists pending notes.\n';

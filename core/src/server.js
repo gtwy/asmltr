@@ -524,6 +524,8 @@ async function handle(envelope, opts = {}) {
       denyTools: toolPolicy.deny,
       attachChannel: e.channel,
       attachTarget: (e.channel_context && (e.channel_context.channelId || e.channel_context.channel_id || e.channel_context.chatId || e.channel_context.target)) || '',
+      attachGuild: (e.context && String(e.context.scope_id || '').startsWith('guild:')) ? String(e.context.scope_id).slice(6) : '',
+      attachSender: (e.sender && e.sender.raw_id) || '',
       mediaFiles: (e.content && e.content.media_files) || [],
       abortController,
       images,
