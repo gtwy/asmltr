@@ -32,6 +32,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
+const { parseReact } = require('../../../shared/react-token');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, pickPublicReply, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
@@ -412,7 +413,8 @@ RESPONSE RULES:
 1. Your text output IS the Discord message — do NOT call any external send/notify tool; just output the text.
 2. Output ONLY your conversational response — no summary/narration afterward.
 3. Keep it conversational and substantive (under ~1500 chars ideally).
-4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the literal token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token. Do NOT paraphrase it: writing "No response requested", "No reply needed", "N/A", or any prose instead of the exact token will get POSTED to the channel as spam. The verbatim token ${NO_REPLY} is the only way to stay silent.`;
+4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the literal token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token. Do NOT paraphrase it: writing "No response requested", "No reply needed", "N/A", or any prose instead of the exact token will get POSTED to the channel as spam. The verbatim token ${NO_REPLY} is the only way to stay silent.
+5. Sparse color reaction (not every post): if THIS message is extra — extra funny, outrageous, a Homer d'oh / facepalm, genuinely wild, or a rare salute — you MAY add a single line \`[[REACT:😂]]\` using one of: 😂 🤣 💀 🤯 🫠 🤡 😳 🤦 😬 😅 🔥 🫡 🙌 💯 🤨 🙄. Do NOT react to ordinary chat. At most one. You can react AND reply, or react-only (${NO_REPLY} plus the REACT line). Never use 👀 (mid-turn steer) or 🛑 (stop).`;
   }
 
   function formatCodeBlocks(text) {
@@ -554,6 +556,7 @@ RESPONSE RULES:
         || addressesName(message.cleanContent || message.content || '');
       let replyText = '';
       let leakDropped = false;
+      let actions = [];
       const hints = [...new Set([...speakerHintsFrom(message.author, message.member), ...(await loadIdentityHints())])];
       if (streamSteps && addressed) {
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
@@ -595,7 +598,7 @@ RESPONSE RULES:
           leakDropped = false;
           pending = t;
         };
-        const actions = await ctx.core.handleStream(envelope, {
+        actions = await ctx.core.handleStream(envelope, {
           onEffort: (effort) => {
             maxThoughts = thoughtBudget(effort);
           },
@@ -634,7 +637,7 @@ RESPONSE RULES:
           hints,
         });
       } else {
-        const actions = await ctx.core.handle(envelope);
+        actions = await ctx.core.handle(envelope);
         const reply = actions.find(a => a.type === 'reply');
         replyText = pickPublicReply({
           pending: '',
@@ -644,6 +647,11 @@ RESPONSE RULES:
           hints,
         });
       }
+      const color = parseReact(replyText);
+      replyText = color.text;
+      const fromCore = actions.find((a) => a && a.type === 'react');
+      const reactEmoji = color.emoji || (fromCore && fromCore.emoji) || '';
+      if (reactEmoji) await message.react(reactEmoji).catch((e) => ctx.log('react failed: ' + e.message));
       // Self-gated suppression: the model decided this message wasn't for it (multi-agent
       // channel), or there's nothing to say. Drop it — don't post to the channel.
       if (isSilence(replyText)) { ctx.log(`suppressed reply (not addressed to ${NAME})`); return; }

@@ -85,9 +85,10 @@ function inbound(e) {
 
 // --- Outbound action constructors (semantic; adapters render them) -----------
 const reply = (text, opts = {}) => ({ type: 'reply', text: String(text), ...opts });
+const react = (emoji) => ({ type: 'react', emoji: String(emoji) });
 const notify = (text, severity = 'info', target = 'admin') => ({ type: 'notify', text: String(text), severity, target });
 const status = (text) => ({ type: 'status', text: String(text) });
 const toolEffect = (summary, detail) => ({ type: 'tool_effect', summary: String(summary), detail });
 const suppress = () => ({ type: 'suppress' });
 
-module.exports = { capabilities, inbound, reply, notify, status, toolEffect, suppress };
+module.exports = { capabilities, inbound, reply, react, notify, status, toolEffect, suppress };

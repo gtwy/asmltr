@@ -70,6 +70,7 @@ const integrations = require('../../integrations/registry'); // third-party serv
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
 const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path (ask/grok turns)
 const { isNoReplySentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
+const { parseReact } = require('../../shared/react-token'); // Discord [[REACT:😂]] — strip before silence/post
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 let SELF_SILO_DIR = null;
 try { SELF_SILO_DIR = silo.ensureSelf(identity.name()).dir; } catch (_) { /* non-fatal */ }
@@ -650,6 +651,10 @@ async function handle(envelope, opts = {}) {
       auth_mode: authMode, billed, estimated: noReal || undefined,
       principal: resolved.user_key !== usageIdentity ? resolved.user_key : undefined } });
 
+  const reacted = parseReact(result.text);
+  result.text = reacted.text;
+  const reactAction = reacted.emoji ? env.react(reacted.emoji) : null;
+
   // Universal silence sentinel: if the turn IS or ENDS WITH [[NO_REPLY]] (e.g. the agent rerouted
   // its answer to another channel via `asmltr send` and doesn't want to post here), emit no action
   // so EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
@@ -657,7 +662,7 @@ async function handle(envelope, opts = {}) {
   if (isNoReplySentinel(result.text)) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });
-    return [];
+    return reactAction ? [reactAction] : [];
   }
 
   // Fallback silence: the model decided this wasn't for it but prose-refused instead of emitting
@@ -666,7 +671,7 @@ async function handle(envelope, opts = {}) {
   if (looksLikeNonReply(result.text)) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'no-reply', via: 'refusal-prose', text: truncate(result.text, 200) } });
-    return [];
+    return reactAction ? [reactAction] : [];
   }
 
   // Empty turn (interrupted mid-reply, tool-only, or the agent chose not to speak) → post NOTHING.
@@ -675,7 +680,7 @@ async function handle(envelope, opts = {}) {
   if (!(result.text || '').trim()) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'empty-no-reply' } });
-    return [];
+    return reactAction ? [reactAction] : [];
   }
 
   const quietCh = String(e.channel || '').toLowerCase();
@@ -690,6 +695,7 @@ async function handle(envelope, opts = {}) {
   }
 
   const actions = [env.reply(result.text, { segments: result.segments || [] })];
+  if (reactAction) actions.push(reactAction);
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'outbound',
     identity: resolved.user_key, source: 'core', payload: { text: truncate(result.text, CONVO_TEXT_MAX), chars: (result.text || '').length } });
 
