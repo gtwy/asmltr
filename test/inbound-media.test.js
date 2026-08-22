@@ -23,6 +23,8 @@ test('classify accepts png magic and refuses scripts/html/elf', () => {
   const elf = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   assert.equal(inbound.classify(elf, 'application/octet-stream', 'a.bin').kind, null);
   assert.equal(inbound.classify(PNG, 'application/javascript', 'x.js').kind, null);
+  assert.equal(inbound.classify(PNG, 'application/octet-stream', 'pic.png').kind, 'image');
+  assert.equal(inbound.classify(PNG, '', 'pic.png').kind, 'image');
 });
 
 test('saveRef writes 0644 under gen-ref and never +x', () => {
@@ -52,4 +54,5 @@ test('grok prompt gets CHANNEL MEDIA paths for image_edit, not as bash', () => {
   assert.match(p, /LOOK at these files/);
   assert.match(p, /not gen-only/);
   assert.match(p, /Do not execute/);
+  assert.match(p, /Do not echo filesystem paths/);
 });

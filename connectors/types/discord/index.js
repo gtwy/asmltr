@@ -491,6 +491,11 @@ RESPONSE RULES:
         const savedNotes = [];
         for (const a of message.attachments.values()) {
           const mt = (a.contentType || '').split(';')[0].trim();
+          const claimed = Number(a.size) || 0;
+          if (claimed > inboundMedia.MAX_VIDEO) {
+            savedNotes.push(`- ignored ${a.name}: too large`);
+            continue;
+          }
           try {
             const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
             const cls = inboundMedia.classify(buf, mt, a.name);

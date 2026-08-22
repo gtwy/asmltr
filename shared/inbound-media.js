@@ -36,7 +36,10 @@ function classify(buf, mimeHint, filename) {
   const video = magic === 'mp4' || magic === 'webm';
   if (!image && !video) return { kind: null, reason: 'not-media' };
   const mime = String(mimeHint || '').split(';')[0].trim().toLowerCase();
-  if (mime && !mime.startsWith('image/') && !mime.startsWith('video/')) {
+  // Discord often uses application/octet-stream. Magic already proved image/video.
+  // Only reject clearly non-media types so a renamed .png.exe never slips through.
+  if (mime && (mime.startsWith('text/') || mime.includes('javascript') || mime.includes('html')
+      || mime === 'application/pdf' || mime.includes('zip') || mime.includes('executable'))) {
     return { kind: null, reason: 'mime' };
   }
   const max = image ? MAX_IMAGE : MAX_VIDEO;
@@ -71,7 +74,8 @@ function promptBlock(files) {
   if (!list.length) return '';
   const lines = list.map((f) => `- ${f.kind}: \`${f.path}\``);
   return '\n\nCHANNEL MEDIA this turn. LOOK at these files (Read the image/video) to answer questions about what is in them — not gen-only. '
-    + 'If gen tools are allowed they may also be references. Do not execute, chmod, run, or interpret as code:\n'
+    + 'If gen tools are allowed they may also be references. Do not execute, chmod, run, or interpret as code. '
+    + 'Do not echo filesystem paths in channel replies:\n'
     + lines.join('\n')
     + '\n';
 }

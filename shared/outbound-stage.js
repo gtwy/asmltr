@@ -121,8 +121,13 @@ function ingestRoots() {
   }
   const cwd = process.env.ASMLTR_ATTACH_INGEST_CWD;
   if (cwd) {
-    roots.push(path.join(cwd, 'images'));
-    roots.push(path.join(cwd, 'videos'));
+    let resolved = path.resolve(cwd);
+    try { resolved = fs.realpathSync(cwd); } catch (_) {}
+    const home = os.homedir();
+    if (resolved !== home && resolved !== path.resolve(home)) {
+      roots.push(path.join(cwd, 'images'));
+      roots.push(path.join(cwd, 'videos'));
+    }
   }
   roots.push(path.join(os.homedir(), '.grok'));
   roots.push(path.join(os.homedir(), '.asmltr', 'gen-ref'));
