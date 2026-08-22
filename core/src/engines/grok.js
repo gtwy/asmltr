@@ -6,11 +6,11 @@
  * Subscription/CLI auth only: the child inherits the operator's ~/.grok/auth.json
  * and we STRIP XAI_API_KEY so the CLI cannot fall through to metered API billing.
  *
- * Harness turns are headless (`grok -p` or `--prompt-file` ACP JSON for stills), never the TUI.
+ * Harness turns are headless (`--prompt-file` ACP JSON), never the TUI and never `-p` /
+ * `--prompt-json` on argv (CAST + stills would land in `ps`; Linux ARG_MAX is 2MB / spawn E2BIG).
  * `--prompt-file` / ffmpeg downscale are Grok CLI only. Other engines never see those
  * flags: runner passes extra runTurn fields; Claude/Gemini/Codex ignore what they
  * don't destructure. Claude vision stays SDK image blocks on `images`.
- * Never put ACP JSON on argv (`--prompt-json`) — Linux ARG_MAX is 2MB (spawn E2BIG).
  * No spawn watchdog and no CLI turn cap. Operator abort (abortController) only.
  *
  * RESUME UUID (Grok-specific — do not drop):
@@ -518,20 +518,20 @@ function buildArgs(opts) {
   const prompt = composePrompt(opts.systemPrompt, userPrompt + inbound.promptBlock(refs, { vision: vision.length > 0 }));
   const args = ['--no-auto-update'];
   let visionPromptFile = null;
-  if (vision.length) {
-    let json = acpPromptJson(prompt, vision);
-    while (json.length > PROMPT_JSON_BUDGET && vision.length > 1) {
-      vision = vision.slice(0, -1);
-      json = acpPromptJson(prompt, vision);
-    }
-    if (json.length > PROMPT_JSON_BUDGET) vision = [];
-    if (vision.length) {
-      visionPromptFile = writeVisionPromptFile(json);
-      args.push('--prompt-file', visionPromptFile);
-    } else {
-      args.push('-p', prompt);
-    }
+  let json = acpPromptJson(prompt, vision);
+  while (json.length > PROMPT_JSON_BUDGET && vision.length > 1) {
+    vision = vision.slice(0, -1);
+    json = acpPromptJson(prompt, vision);
+  }
+  if (json.length > PROMPT_JSON_BUDGET) {
+    vision = [];
+    json = acpPromptJson(prompt, []);
+  }
+  if (json.length <= PROMPT_JSON_BUDGET) {
+    visionPromptFile = writeVisionPromptFile(json);
+    args.push('--prompt-file', visionPromptFile);
   } else {
+    // Pathological size: text-only still over budget. Last resort — prompt on argv.
     args.push('-p', prompt);
   }
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
@@ -856,12 +856,18 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
 }
 
 async function complete({ prompt, model, appendSystemPrompt = null }) {
+  gcVisionPromptFilesOnce();
   const args = buildArgs({ prompt, systemPrompt: appendSystemPrompt, model: model || cheapModel, complete: true });
-  const child = spawn(bin(), args, { env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '';
-  child.stdout.on('data', (d) => { out += d.toString(); });
-  await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
-  return out.trim();
+  const promptFile = args.visionPromptFile || null;
+  try {
+    const child = spawn(bin(), args, { env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
+    return out.trim();
+  } finally {
+    if (promptFile) try { fs.unlinkSync(promptFile); } catch (_) {}
+  }
 }
 
 // See file header: flip to true after live-verifying `-r` replays the first-turn system block.

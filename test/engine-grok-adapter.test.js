@@ -1,8 +1,14 @@
 'use strict';
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const promptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-grok-args-'));
+process.env.ASMLTR_GROK_PROMPT_DIR = promptDir;
 const engines = require('../shared/engines');
 const grok = require('../core/src/engines/grok');
+after(() => { try { fs.rmSync(promptDir, { recursive: true, force: true }); } catch (_) {} });
 
 test('grok is a known subscription-only engine with no npm package', () => {
   assert.equal(engines.known('grok'), true);
@@ -53,10 +59,11 @@ test('isUuid / resumeArgs: -r for a UUID, never -s or -c', () => {
   assert.deepEqual(grok.resumeArgs('latest'), []);
 });
 
-test('buildArgs is headless -p, streaming-json, no CLI turn cap, no TUI', () => {
+test('buildArgs is headless --prompt-file, streaming-json, no CLI turn cap, no TUI', () => {
   const args = grok.buildArgs({ prompt: 'hello', systemPrompt: 'IDENTITY', sessionId: '01234567-89ab-cdef-0123-456789abcdef' });
   assert.equal(args[0], '--no-auto-update');
-  assert.ok(args.includes('-p'));
+  assert.ok(args.includes('--prompt-file'));
+  assert.equal(args.includes('-p'), false);
   assert.ok(args.includes('--output-format'));
   assert.equal(args[args.indexOf('--output-format') + 1], 'streaming-json');
   assert.ok(args.includes('--always-approve'));
@@ -64,7 +71,10 @@ test('buildArgs is headless -p, streaming-json, no CLI turn cap, no TUI', () => 
   assert.ok(args.includes('--effort'));
   assert.ok(args.includes('-s'));
   assert.ok(!args.includes('-r'));
-  const p = args[args.indexOf('-p') + 1];
+  const f = args[args.indexOf('--prompt-file') + 1];
+  const body = JSON.parse(require('fs').readFileSync(f, 'utf8'));
+  try { require('fs').unlinkSync(f); } catch (_) {}
+  const p = body.content.find((c) => c.type === 'text').text;
   assert.ok(p.includes('IDENTITY'));
   assert.ok(p.includes('hello'));
   assert.ok(p.includes('<system-instructions>'));

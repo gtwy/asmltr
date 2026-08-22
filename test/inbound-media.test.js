@@ -91,10 +91,12 @@ test('grok prompt gets CHANNEL MEDIA paths for image_edit, not as bash', () => {
   assert.match(text, /Do not echo filesystem paths/);
 });
 
-test('text-only turns still use -p (no prompt-json file)', () => {
+test('text-only turns use --prompt-file (prompt off argv)', () => {
   const args = grok.buildArgs({ prompt: 'hello' });
-  assert.ok(args.includes('-p'));
-  assert.equal(args.includes('--prompt-file'), false);
+  const body = visionJson(args);
+  assert.equal(body.type, 'acp');
+  assert.equal(body.content[0].type, 'text');
+  assert.match(body.content[0].text, /hello/);
 });
 
 test('same still via images[] and mediaFiles is one vision block, no second save', () => {
@@ -135,9 +137,9 @@ test('vision skips non-image bytes even if kind says image', () => {
     prompt: 'what is this',
     mediaFiles: [{ kind: 'image', path: fake, name: 'notes.bin', mime: 'image/png' }],
   });
-  assert.ok(args.includes('-p'));
+  const body = visionJson(args);
+  assert.equal(body.content.some((c) => c.type === 'image'), false);
   assert.equal(args.includes('--prompt-json'), false);
-  assert.equal(args.includes('--prompt-file'), false);
   const vis = grok.collectVisionImages({
     images: [{ data: Buffer.from('not-a-picture-xx').toString('base64'), media_type: 'image/jpeg', name: 'x.jpg' }],
   });

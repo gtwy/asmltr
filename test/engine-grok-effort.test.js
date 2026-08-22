@@ -10,6 +10,8 @@ require('../core/src/sqlite-stmt-keep');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-effort-'));
 const nextFile = path.join(tmp, 'next-effort');
 process.env.ASMLTR_GROK_NEXT_EFFORT_FILE = nextFile;
+process.env.ASMLTR_GROK_PROMPT_DIR = path.join(tmp, 'prompts');
+fs.mkdirSync(process.env.ASMLTR_GROK_PROMPT_DIR, { recursive: true });
 process.env.ASMLTR_CORE_DB = path.join(tmp, 'sess.db');
 delete process.env.ASMLTR_GROK_EFFORT;
 delete process.env.ASMLTR_GROK_MAX_TURNS;
@@ -514,9 +516,10 @@ test('email xhigh wins over one-shot next-effort', () => {
 
 
 function promptOf(args) {
-  const i = args.indexOf('-p');
-  assert.ok(i >= 0, 'buildArgs must include -p');
-  return args[i + 1];
+  const i = args.indexOf('--prompt-file');
+  assert.ok(i >= 0, 'buildArgs must include --prompt-file');
+  const body = JSON.parse(fs.readFileSync(args[i + 1], 'utf8'));
+  return body.content.find((c) => c.type === 'text').text;
 }
 
 test('owner +xh → xhigh and token stripped', () => {
