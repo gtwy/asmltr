@@ -34,10 +34,10 @@ const TOOLS = [
       properties: { channel: { type: 'string', description: 'discord | telegram | email | …' }, target: { type: 'string', description: 'channel id / chat id / email address' }, text: { type: 'string' }, subject: { type: 'string', description: 'email subject (email only)' } },
       additionalProperties: false },
     argv: (a) => ['send', a.channel, a.target, a.text, ...(a.subject ? ['--subject', a.subject] : [])] },
-  { name: 'asmltr_guild_post', deny: 'guildPost', description: 'Post to another channel or thread in THIS Discord server only (Access 1–5 or owner). No other servers, no email/telegram, never this same channel (skip the tool and answer here). Prefixed Posting on behalf of the asker. No thought chips remotely. Forum: THREAD id comments; forum channel id starts a new post (pass title). Optional reply_to. After success, THIS channel gets "Post complete." — then reply [[NO_REPLY]].',
+  { name: 'asmltr_guild_post', deny: 'guildPost', description: 'Post to another channel or thread in THIS Discord server only (Access 1–5 or owner). Target may be a name ("666 degree steak thread") or a snowflake. Names NEVER post — they return best-guess matches; ask the person to confirm, THEN call again with the id. Normal channels post in the channel (not a thread). Forum: thread = comment, forum channel = new post (pass title). Never this same channel. Prefixed Posting on behalf of the asker. After a real post: Post complete. then [[NO_REPLY]].',
     inputSchema: { type: 'object', required: ['target', 'text'],
       properties: {
-        target: { type: 'string', description: 'channel id or thread id in this server' },
+        target: { type: 'string', description: 'channel/thread id, or a name to look up (lookup does not post)' },
         text: { type: 'string' },
         title: { type: 'string', description: 'new forum post title when target is the forum channel' },
         reply_to: { type: 'string', description: 'optional message id in that thread to Discord-reply' },

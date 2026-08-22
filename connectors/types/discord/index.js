@@ -1277,7 +1277,40 @@ ${referentPromptBlock()}`;
   // stage a safe name, POST here, delete the staged copy only after messageId.
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel } = req.body || {};
+      const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
+      if (kind === 'guild_resolve') {
+        const gp = require('../../../shared/guild-post');
+        const q = String(query || tg || '').trim();
+        if (!source_guild) return res.status(400).json({ ok: false, error: 'source guild required' });
+        if (!q) return res.status(400).json({ ok: false, error: 'query required' });
+        const guild = await client.guilds.fetch(String(source_guild));
+        await guild.channels.fetch();
+        const rows = [];
+        for (const ch of guild.channels.cache.values()) {
+          const t = ch.type;
+          if (t === 0 || t === 5) rows.push({ id: String(ch.id), name: ch.name, kind: 'channel' });
+          if (t === 15 || gp.isForumChannel(ch)) {
+            rows.push({ id: String(ch.id), name: ch.name, kind: 'forum' });
+            try {
+              if (ch.threads && ch.threads.fetchActive) {
+                const active = await ch.threads.fetchActive();
+                for (const th of (active.threads || active).values()) {
+                  rows.push({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
+                }
+              }
+            } catch (_) {}
+            try {
+              if (ch.threads && ch.threads.fetchArchived) {
+                const arch = await ch.threads.fetchArchived({ limit: 100 });
+                for (const th of (arch.threads || arch).values()) {
+                  rows.push({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
+                }
+              }
+            } catch (_) {}
+          }
+        }
+        return res.json({ ok: true, posted: false, matches: gp.rankTargets(q, rows) });
+      }
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
       if (!channel) return res.status(404).json({ ok: false, error: 'channel not found' });
       if (kind === 'guild_post') {

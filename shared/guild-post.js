@@ -56,4 +56,46 @@ function destGuildId(ch) {
   return '';
 }
 
-module.exports = { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId };
+function looksLikeSnowflake(s) {
+  return /^\d{17,22}$/.test(String(s || '').trim());
+}
+
+function normName(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[#]/g, '')
+    .replace(/[°]/g, ' ')
+    .replace(/\b(degree|degrees|thread|the|in|on|at|to|board|channel|forum|post|this)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function matchScore(query, name) {
+  const q = normName(query);
+  const n = normName(name);
+  if (!q || !n) return 0;
+  if (n === q) return 100;
+  if (n.includes(q)) return 90;
+  if (q.includes(n) && n.length >= 3) return 80;
+  const qt = q.split(' ').filter(Boolean);
+  const nt = n.split(' ').filter(Boolean);
+  if (!qt.length) return 0;
+  let hit = 0;
+  for (const t of qt) {
+    if (nt.some((x) => x === t || x.includes(t) || t.includes(x))) hit += 1;
+  }
+  return Math.round((100 * hit) / qt.length);
+}
+
+function rankTargets(query, rows) {
+  const scored = (rows || []).map((row) => ({ ...row, score: matchScore(query, row.name) }))
+    .filter((row) => row.score >= 50)
+    .sort((a, b) => b.score - a.score || String(a.name).localeCompare(String(b.name)));
+  return scored.slice(0, 5);
+}
+
+module.exports = {
+  prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId,
+  looksLikeSnowflake, normName, matchScore, rankTargets,
+};

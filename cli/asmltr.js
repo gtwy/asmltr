@@ -294,14 +294,38 @@ async function cmdGuildPost(rest) {
     else words.push(t);
   }
   const target = words[0], text = words.slice(1).join(' ');
-  if (!target || !text) {
-    throw new Error('usage: asmltr guild-post <channel-or-thread-id> "<text>" [--title "forum title"] [--reply-to <messageId>]');
+  if (!target) {
+    throw new Error('usage: asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>]');
   }
+  const gp = require('../shared/guild-post');
   const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
   const on_behalf_of = process.env.ASMLTR_ATTACH_SENDER || '';
   const here = process.env.ASMLTR_ATTACH_TARGET || '';
   if (!source_guild) throw new Error('guild-post only from a Discord server channel (no DMs, no email)');
   if (!on_behalf_of) throw new Error('guild-post needs the asker id (ASMLTR_ATTACH_SENDER)');
+  if (!gp.looksLikeSnowflake(target)) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    const r = await fetch(MANAGER_BASE + '/send', {
+      method: 'POST', headers,
+      body: JSON.stringify({ channel: 'discord', target, kind: 'guild_resolve', query: target, source_guild, text }),
+    }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+    if (!r || !r.ok) {
+      console.log(A.red('guild-resolve failed: ' + ((r && r.error) || JSON.stringify(r))));
+      return;
+    }
+    const matches = r.matches || [];
+    if (!matches.length) {
+      console.log('No channel/thread matched ' + JSON.stringify(target) + '. Ask them to be more specific. NOT POSTED.');
+      return;
+    }
+    console.log('NOT POSTED — confirm with them first, then guild-post <id> with the same text.');
+    for (const m of matches) {
+      const where = m.kind === 'thread' ? ('thread in #' + (m.parent || '?')) : m.kind === 'forum' ? 'forum (new post)' : 'channel (not a thread)';
+      console.log((m.score || 0) + '  ' + m.id + '  ' + (m.name || '') + '  [' + where + ']');
+    }
+    return;
+  }
   if (here && String(target) === String(here)) {
     console.log('same channel — skipped guild-post; answer here normally');
     return;
@@ -795,8 +819,8 @@ function cmdHelp() {
        [--title T] [--force] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
-  asmltr guild-post <id> "<text>"      same Discord server only (channel or thread id).
-       [--title T] [--reply-to id]     forum: thread id = comment; forum id = new post. on-behalf-of prefix.
+  asmltr guild-post <id-or-name> "<text>"  same Discord server. A name looks up (does not post)
+       [--title T] [--reply-to id]         until they confirm; then post with the id.
   asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
        [--caption T]                   delete only after Discord confirms. retry / list / gc
        ... --subject "<subj>"           set the subject (email)

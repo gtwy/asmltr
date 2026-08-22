@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId } = require('../shared/guild-post');
+const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName } = require('../shared/guild-post');
 const { policyFor } = require('../shared/tool-policy');
 const fs = require('fs');
 const path = require('path');
@@ -55,6 +55,20 @@ test('public guild: send denied; guildPost only Access 1-5 or owner', () => {
   assert.equal(sameChannel('ch1', 'ch2'), false);
 });
 
+test('names are not snowflakes; 666 steak matches a thread title', () => {
+  assert.equal(looksLikeSnowflake('999000111222333001'), true);
+  assert.equal(looksLikeSnowflake('666 degree steak thread'), false);
+  assert.equal(normName('666 degree steak thread'), '666 steak');
+  assert.ok(matchScore('666 degree steak thread', '666 Degree Steak') >= 90);
+  const ranked = rankTargets('666 degree steak', [
+    { id: '1', name: 'recipes-board', kind: 'forum' },
+    { id: '2', name: '666 Degree Steak', kind: 'thread', parent: 'recipes-board' },
+    { id: '3', name: 'arboretum', kind: 'channel' },
+  ]);
+  assert.equal(ranked[0].id, '2');
+  assert.equal(ranked[0].kind, 'thread');
+});
+
 test('discord /out handles guild_post and forum threads', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   assert.match(src, /kind === 'guild_post'/);
@@ -62,6 +76,8 @@ test('discord /out handles guild_post and forum threads', () => {
   assert.match(src, /threads\.create/);
   assert.match(src, /messageReference/);
   assert.match(src, /same_channel/);
+  assert.match(src, /guild_resolve/);
+  assert.match(src, /fetchArchived/);
   const cli = fs.readFileSync(path.join(__dirname, '../cli/asmltr.js'), 'utf8');
   assert.match(cli, /cmdGuildPost/);
   const belt = fs.readFileSync(path.join(__dirname, '../mcp/toolbelt-server.js'), 'utf8');
