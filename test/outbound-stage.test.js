@@ -57,6 +57,24 @@ test('listUnposted skips posted rows; retry candidate stays until post', () => {
   assert.ok(fs.existsSync(rec.path), 'bytes remain until removePostedFile');
 });
 
+test('gc creates attach-stage and empty index on first run', () => {
+  const d = path.join(os.tmpdir(), 'asmltr-stage-first-' + process.pid);
+  const prev = process.env.ASMLTR_ATTACH_STAGE;
+  process.env.ASMLTR_ATTACH_STAGE = d;
+  try {
+    fs.rmSync(d, { recursive: true, force: true });
+    assert.equal(fs.existsSync(d), false);
+    const r = stage.gc();
+    assert.equal(r.ok, true);
+    assert.ok(fs.existsSync(d));
+    const idx = JSON.parse(fs.readFileSync(path.join(d, 'index.json'), 'utf8'));
+    assert.deepEqual(idx.items, {});
+  } finally {
+    process.env.ASMLTR_ATTACH_STAGE = prev;
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('gc removes files older than a day and leaves fresh ones', () => {
   const rec = stage.stageFile(touchSrc('old.png'), { name: 'old.png' });
   const idxPath = path.join(tmp, 'index.json');

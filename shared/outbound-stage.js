@@ -22,7 +22,11 @@ function indexPath() {
 }
 
 function ensureDir() {
-  fs.mkdirSync(stageDir(), { recursive: true });
+  fs.mkdirSync(stageDir(), { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(stageDir(), 0o700); } catch (_) {}
+  if (!fs.existsSync(indexPath())) {
+    fs.writeFileSync(indexPath(), JSON.stringify({ items: {} }, null, 2), { mode: 0o600 });
+  }
 }
 
 function loadIndex() {
@@ -318,7 +322,7 @@ function gc(maxAgeMs) {
 }
 
 module.exports = {
-  DAY_MS, MAX_BYTES, stageDir, sanitizeFilename, uniqueName, stageFile,
+  DAY_MS, MAX_BYTES, stageDir, ensureDir, sanitizeFilename, uniqueName, stageFile,
   preparePost, ingestAllowed, assertStagedPath, resolveStagedName,
   get, listUnposted, markPosted, removePostedFile, gc, isMediaExt, mediaKind,
 };

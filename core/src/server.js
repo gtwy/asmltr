@@ -2150,6 +2150,9 @@ if (require.main === module) {
       const g2 = require('../../shared/inbound-media').gc();
       if (g2.removed && g2.removed.length) console.log('gen-ref gc: removed ' + g2.removed.length);
     } catch (e) { console.log('gen-ref gc: ' + e.message); }
+    try {
+      require('../../shared/media-log').ensureDir();
+    } catch (e) { console.log('media-out mkdir: ' + e.message); }
   });
   // Agent turns (research, tool loops) can run many minutes. Node's default 5-min
   // server.requestTimeout would cut the connector→core call mid-turn (surfacing as

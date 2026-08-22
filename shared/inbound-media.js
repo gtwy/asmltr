@@ -52,11 +52,17 @@ function classify(buf, mimeHint, filename) {
   };
 }
 
+function ensureDir() {
+  const dir = refDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch (_) {}
+  return dir;
+}
+
 function saveRef(buf, opts) {
   const c = classify(buf, opts && opts.mime, opts && opts.name);
   if (!c.kind) return { ok: false, error: c.reason };
-  const dir = refDir();
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const dir = ensureDir();
   const suggested = (opts && opts.name) || ('ref.' + c.ext);
   const safe = sanitizeFilename(suggested, c.ext);
   const lastDot = safe.lastIndexOf('.');
@@ -83,8 +89,7 @@ function promptBlock(files) {
 function gc(maxAgeMs) {
   const age = maxAgeMs == null ? 24 * 60 * 60 * 1000 : Number(maxAgeMs);
   const cutoff = Date.now() - age;
-  const dir = refDir();
-  if (!fs.existsSync(dir)) return { ok: true, removed: [] };
+  const dir = ensureDir();
   const removed = [];
   for (const f of fs.readdirSync(dir)) {
     const p = path.join(dir, f);
@@ -98,4 +103,4 @@ function gc(maxAgeMs) {
   return { ok: true, removed, dir };
 }
 
-module.exports = { classify, saveRef, promptBlock, gc, refDir, MAX_IMAGE, MAX_VIDEO };
+module.exports = { classify, saveRef, promptBlock, gc, ensureDir, refDir, MAX_IMAGE, MAX_VIDEO };

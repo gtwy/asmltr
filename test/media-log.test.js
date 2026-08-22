@@ -10,6 +10,13 @@ process.env.ASMLTR_SILOS_ROOT = tmp;
 
 const log = require('../shared/media-log');
 
+test('ensureDir creates memory/media-out on first run', () => {
+  const dir = log.ensureDir();
+  assert.ok(fs.existsSync(dir));
+  assert.equal(fs.statSync(dir).isDirectory(), true);
+  assert.match(dir, /media-out/);
+});
+
 test('appendPosted is text-only and recall is this-conversation', () => {
   const key = 'discord:inst:channel:1';
   log.appendPosted({

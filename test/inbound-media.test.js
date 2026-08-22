@@ -36,6 +36,21 @@ test('saveRef writes 0644 under gen-ref and never +x', () => {
   assert.equal(mode & 0o111, 0);
 });
 
+test('gc creates gen-ref on first run when the dir is missing', () => {
+  const d = path.join(tmp, 'first-run-ref');
+  assert.equal(fs.existsSync(d), false);
+  const prev = process.env.ASMLTR_GEN_REF;
+  process.env.ASMLTR_GEN_REF = d;
+  try {
+    const r = inbound.gc();
+    assert.equal(r.ok, true);
+    assert.ok(fs.existsSync(d));
+    assert.equal(fs.statSync(d).isDirectory(), true);
+  } finally {
+    process.env.ASMLTR_GEN_REF = prev;
+  }
+});
+
 test('saveRef refuses non-media', () => {
   const r = inbound.saveRef(Buffer.from('echo pwned'), { name: 'pwn.sh', mime: 'text/x-shellscript' });
   assert.equal(r.ok, false);
