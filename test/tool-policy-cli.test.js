@@ -38,6 +38,12 @@ test('asmltr announce refuses when send denied (send-class)', () => {
   assert.match(String(r.stderr || r.stdout), /denied: send/);
 });
 
+test('asmltr post is not send-class — still callable when send denied', () => {
+  const r = run(['post'], 'send');
+  assert.match(String(r.stderr || r.stdout), /usage: asmltr post|this-channel bind|no this-channel/);
+  assert.equal(String(r.stderr || r.stdout).includes('denied: send'), false);
+});
+
 test('asmltr silo put refuses when siloWrite denied even if silo allowed', () => {
   const r = run(['silo', 'put', 'x', '/etc/hosts'], 'siloWrite');
   assert.notEqual(r.status, 0);

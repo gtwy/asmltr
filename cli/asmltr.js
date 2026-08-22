@@ -282,6 +282,102 @@ async function cmdSend(rest) {
   }
   console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
+
+async function deliverFile(channel, target, filePath, caption) {
+  const body = { channel, target, kind: 'file', path: filePath, caption: caption || undefined };
+  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => null);
+  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+  return r || { ok: false, error: 'no response' };
+}
+
+function attachHere() {
+  const channel = process.env.ASMLTR_ATTACH_CHANNEL;
+  const target = process.env.ASMLTR_ATTACH_TARGET;
+  const sendDenied = require('../shared/tool-policy').parseDenyEnv(process.env.ASMLTR_DENY_TOOLS).send;
+  return { channel, target, sendDenied };
+}
+
+async function postStaged(rec, channel, target, caption) {
+  const r = await deliverFile(channel, target, rec.path, caption);
+  if (!r.ok) {
+    console.log(A.red('post failed: ' + (r.error || JSON.stringify(r)) + ' — staged as ' + rec.name + ' (asmltr post retry ' + rec.name + ')'));
+    return 1;
+  }
+  const stage = require('../shared/outbound-stage');
+  stage.markPosted(rec.name, { messageId: r.messageId || r.message_id || null, channel, target });
+  const rm = stage.removePostedFile(rec.name);
+  if (!rm.ok) console.log(A.yel('posted but staged copy still on disk: ' + (rm.error || rec.name)));
+  else console.log(A.grn('✓ posted ' + rec.name + ' to ' + channel + ':' + target + (r.messageId || r.message_id ? ' · ' + (r.messageId || r.message_id) : '') + ' · staged copy removed'));
+  return 0;
+}
+
+async function cmdPost(rest) {
+  const fs = require('fs');
+  const path = require('path');
+  const stage = require('../shared/outbound-stage');
+  const verb = rest[0];
+  if (verb === 'list') {
+    const rows = stage.listUnposted();
+    if (!rows.length) return console.log(A.dim('no unposted staged files'));
+    for (const r of rows) console.log(r.name + '  ' + r.bytes + 'b  ' + r.path);
+    return;
+  }
+  if (verb === 'gc') {
+    const r = stage.gc();
+    console.log(A.dim('gc ' + r.dir + ' removed ' + r.removed.length));
+    return;
+  }
+  if (verb === 'retry') {
+    const { channel, target, sendDenied } = attachHere();
+    if (!channel || !target) throw new Error('asmltr post retry needs this-channel env (ASMLTR_ATTACH_CHANNEL + ASMLTR_ATTACH_TARGET)');
+    if (sendDenied && (!process.env.ASMLTR_ATTACH_CHANNEL || !process.env.ASMLTR_ATTACH_TARGET)) {
+      throw new Error('send is denied this turn — post is this channel only');
+    }
+    const want = rest[1];
+    const rows = want ? [stage.get(want)].filter(Boolean) : stage.listUnposted();
+    if (!rows.length) {
+      console.log(A.yel(want ? 'not staged or already posted: ' + want : 'nothing unposted to retry'));
+      return 1;
+    }
+    let code = 0;
+    for (const rec of rows) {
+      if (!rec.complete || rec.posted || !rec.path || !fs.existsSync(rec.path)) {
+        console.log(A.yel('skip ' + rec.name + ' — not a complete unposted file'));
+        continue;
+      }
+      code = Math.max(code, await postStaged(rec, rec.channel || channel, rec.target || target, rest[2]));
+    }
+    return code;
+  }
+  let file = null, caption = null, channel = process.env.ASMLTR_ATTACH_CHANNEL, target = process.env.ASMLTR_ATTACH_TARGET;
+  const { sendDenied } = attachHere();
+  const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--file') file = rest[++i];
+    else if (t === '--caption') caption = rest[++i];
+    else if (t === '--channel' || t === '--target') {
+      if (sendDenied) throw new Error('send is denied this turn — cannot redirect; posting to this channel only');
+      if (t === '--channel') channel = rest[++i];
+      else target = rest[++i];
+    } else words.push(t);
+  }
+  if (!file && words[0] && words[0] !== 'retry') file = words[0];
+  if (!file) {
+    throw new Error('usage: asmltr post --file <path> [--caption "<text>"]\n' +
+      '       asmltr post retry [name]\n' +
+      '       asmltr post list · asmltr post gc\n' +
+      '  Stages a safe filename, posts to THIS channel, deletes the staged copy only after Discord confirms.');
+  }
+  if (!channel || !target) throw new Error('no this-channel bind (ASMLTR_ATTACH_CHANNEL / ASMLTR_ATTACH_TARGET) — grok turns set these');
+  const rec = stage.stageFile(file, { name: path.basename(file), channel, target });
+  return await postStaged(rec, channel, target, caption);
+}
 async function cmdMap() {
   // WHAT each currently-active agent is doing + WHERE — grouped by repo (collision radar).
   const r = await api('/api/map');
@@ -632,6 +728,8 @@ function cmdHelp() {
        [--title T] [--force] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
+  asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
+       [--caption T]                   delete only after Discord confirms. retry / list / gc
        ... --subject "<subj>"           set the subject (email)
        ... --cc "<addr>"                Cc (email; comma-separated ok)
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
@@ -905,6 +1003,7 @@ async function cmdVault(rest, f) {
       case 'watch': return liveStream(rest[0]);
       case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
+      case 'post': return await cmdPost(rest);
       case 'announce': return await cmdAnnounce(rest);
       case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();

@@ -515,6 +515,8 @@ async function handle(envelope, opts = {}) {
       cwd,
       conversationKey: e.conversation_key,
       denyTools: toolPolicy.deny,
+      attachChannel: e.channel,
+      attachTarget: (e.channel_context && (e.channel_context.channelId || e.channel_context.channel_id || e.channel_context.chatId || e.channel_context.target)) || '',
       abortController,
       images,
       onDelta: opts.onText ? _pushDelta : undefined,
@@ -2135,6 +2137,10 @@ if (require.main === module) {
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
     console.log(`idle_policy=${sessions.idlePolicyFromEnv()} assistant=${process.env.ASSISTANT_NAME || 'the assistant'} engine=${require('../../shared/engines').getDefault()}`);
     console.log('substrate: configured reasoning engine (grok = subscription CLI; no XAI_API_KEY)');
+    try {
+      const gc = require('../../shared/outbound-stage').gc();
+      if (gc.removed && gc.removed.length) console.log('attach-stage gc: removed ' + gc.removed.length);
+    } catch (e) { console.log('attach-stage gc: ' + e.message); }
   });
   // Agent turns (research, tool loops) can run many minutes. Node's default 5-min
   // server.requestTimeout would cut the connector→core call mid-turn (surfacing as

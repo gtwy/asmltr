@@ -608,7 +608,7 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools, attachChannel, attachTarget }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
@@ -623,7 +623,11 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const { denyToolsEnv } = require('../../../shared/tool-policy');
   const deny = denyTools || {};
   const denyEnv = denyToolsEnv(deny);
-  const childEnv = launchEnv(Object.assign({}, process.env, denyEnv ? { ASMLTR_DENY_TOOLS: denyEnv } : {}));
+  const extra = {};
+  if (denyEnv) extra.ASMLTR_DENY_TOOLS = denyEnv;
+  if (attachChannel) extra.ASMLTR_ATTACH_CHANNEL = String(attachChannel);
+  if (attachTarget) extra.ASMLTR_ATTACH_TARGET = String(attachTarget);
+  const childEnv = launchEnv(Object.assign({}, process.env, extra));
   const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 

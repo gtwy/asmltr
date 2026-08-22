@@ -75,8 +75,11 @@ function buildToolbeltPrompt({
       'user the vault is locked and ask them to unlock it (`asmltr vault unseal` or the dashboard Vault page) — do NOT ' +
       'guess, hardcode, or work around a missing secret.';
   }
-  if (attachments && !d.send) {
-    s += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${channel} ${chTarget} --file <abs-path>\`.`;
+  if (attachments) {
+    s += '\n\nTHIS channel can take a file. To post an image/video/file HERE without Bash: produce it, then `asmltr post --file <abs-path> [--caption "…"]` (MCP `asmltr_post`). It copies to a staging dir under a safe name (lowercase, no spaces, one extension), posts, and deletes the staged copy only after the connector confirms. If they say they did not get it: `asmltr post retry`. Do not use Bash to attach. '
+      + (d.send
+        ? `File post is this channel only (${channel} ${chTarget}).`
+        : `Cross-channel send still uses \`asmltr send ${channel} ${chTarget} --file <abs-path>\`.`);
   }
   if (d.video) {
     s += '\n\nVIDEO GENERATION is off this turn (`image_to_video` / `reference_to_video` are disabled). Do not offer to make, animate, or generate video. If they want video, they need the operator to authorize it first.';

@@ -1194,6 +1194,8 @@ RESPONSE RULES:
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
   });
   // Unified outbound endpoint (manager /send router → here). Resolves aliases.
+  // File posts (`kind: file` + path) are how `asmltr post` attaches without Bash:
+  // stage a safe name, POST here, delete the staged copy only after messageId.
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
       const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};

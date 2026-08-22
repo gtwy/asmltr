@@ -139,6 +139,7 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
   assert.equal(text.includes('asmltr silo'), false);
   assert.equal(/use the Bash tool/.test(text), false);
   assert.ok(text.includes('asmltr ls'));
+  assert.ok(text.includes('asmltr post --file'));
 });
 
 test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
