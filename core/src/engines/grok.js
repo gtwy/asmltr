@@ -6,7 +6,10 @@
  * Subscription/CLI auth only: the child inherits the operator's ~/.grok/auth.json
  * and we STRIP XAI_API_KEY so the CLI cannot fall through to metered API billing.
  *
- * Harness turns are headless (`grok -p`), never the interactive TUI (bare `grok`).
+ * Harness turns are headless (`grok -p` or `--prompt-json` for stills), never the TUI.
+ * `--prompt-json` / ffmpeg downscale are Grok CLI only. Other engines never see those
+ * flags: runner passes extra runTurn fields; Claude/Gemini/Codex ignore what they
+ * don't destructure. Claude vision stays SDK image blocks on `images`.
  * No spawn watchdog and no CLI turn cap. Operator abort (abortController) only.
  *
  * RESUME UUID (Grok-specific — do not drop):
@@ -382,10 +385,12 @@ function downscaleForVision(buf, mime) {
   const inp = path.join(os.tmpdir(), 'asmltr-vis-in-' + id);
   const outp = path.join(os.tmpdir(), 'asmltr-vis-out-' + id + '.jpg');
   try {
-    fs.writeFileSync(inp, buf);
+    fs.writeFileSync(inp, buf, { mode: 0o600 });
+    try { fs.chmodSync(inp, 0o600); } catch (_) {}
     execFileSync(ffmpeg, ['-y', '-i', inp, '-vf', "scale='min(1600,iw)':-1", '-q:v', '5', outp], {
       timeout: 20000, stdio: 'ignore',
     });
+    try { fs.chmodSync(outp, 0o600); } catch (_) {}
     const out = fs.readFileSync(outp);
     if (out.length >= 12 && out.length < buf.length) return { buf: out, mime: 'image/jpeg' };
   } catch (_) {
@@ -397,30 +402,33 @@ function downscaleForVision(buf, mime) {
 }
 
 function collectVisionImages(opts) {
+  const inbound = require('../../../shared/inbound-media');
   const out = [];
   const seen = new Set();
-  const add = (data, mime, key) => {
+  const add = (data, mime, key, name) => {
     if (!data || out.length >= VISION_MAX_COUNT) return;
     let raw = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'base64');
     if (raw.length < 12 || raw.length > VISION_MAX) return;
+    const classified = inbound.classify(raw, mime, name || 'vision.bin');
+    if (!classified.kind || classified.kind !== 'image') return;
     const k = key || raw.slice(0, 24).toString('hex');
     if (seen.has(k)) return;
     seen.add(k);
-    const scaled = downscaleForVision(raw, mime);
+    const scaled = downscaleForVision(raw, classified.mime || mime);
     raw = scaled.buf;
-    const mimeType = (String(scaled.mime || mime || '').startsWith('image/')
-      ? String(scaled.mime || mime).split(';')[0].trim() : '') || 'image/jpeg';
+    const mimeType = (String(scaled.mime || classified.mime || '').startsWith('image/')
+      ? String(scaled.mime || classified.mime).split(';')[0].trim() : '') || 'image/jpeg';
     out.push({ type: 'image', mimeType, data: raw.toString('base64') });
   };
   for (const img of opts.images || []) {
-    if (img && img.data) add(img.data, img.media_type, img.path || null);
+    if (img && img.data) add(img.data, img.media_type, img.path || null, img.name);
   }
   for (const f of opts.mediaFiles || []) {
     if (!f || f.kind !== 'image' || !f.path) continue;
     try {
       const st = fs.statSync(f.path);
       if (!st.isFile() || st.size > VISION_MAX) continue;
-      add(fs.readFileSync(f.path), f.mime, f.path);
+      add(fs.readFileSync(f.path), f.mime, f.path, f.name);
     } catch (_) {}
   }
   return out;

@@ -83,3 +83,18 @@ test('text-only turns still use -p (no prompt-json file)', () => {
   assert.ok(args.includes('-p'));
   assert.equal(args.includes('--prompt-file'), false);
 });
+
+test('vision skips non-image bytes even if kind says image', () => {
+  const fake = path.join(tmp, 'notes.bin');
+  fs.writeFileSync(fake, Buffer.from('this is not an image file at all!!'));
+  const args = grok.buildArgs({
+    prompt: 'what is this',
+    mediaFiles: [{ kind: 'image', path: fake, name: 'notes.bin', mime: 'image/png' }],
+  });
+  assert.ok(args.includes('-p'));
+  assert.equal(args.includes('--prompt-json'), false);
+  const vis = grok.collectVisionImages({
+    images: [{ data: Buffer.from('not-a-picture-xx').toString('base64'), media_type: 'image/jpeg', name: 'x.jpg' }],
+  });
+  assert.equal(vis.length, 0);
+});
