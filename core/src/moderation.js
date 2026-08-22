@@ -174,8 +174,8 @@ async function classifyRaw(systemPrompt, userPrompt, { timeoutMs = 15000 } = {})
   }
   const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : 15000;
   let timer = null;
+  const work = providerRaw(systemPrompt, userPrompt, false);
   try {
-    const work = providerRaw(systemPrompt, userPrompt, false);
     const r = await Promise.race([
       work,
       new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('classify timeout')), ms); }),
@@ -185,6 +185,9 @@ async function classifyRaw(systemPrompt, userPrompt, { timeoutMs = 15000 } = {})
       skipped: false,
       usage: { tokens_in: r.usage.tokens_in, tokens_out: r.usage.tokens_out, model: MOD_MODEL, provider: MOD_PROVIDER },
     };
+  } catch (err) {
+    work.catch(() => {});
+    throw err;
   } finally {
     if (timer) clearTimeout(timer);
   }
