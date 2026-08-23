@@ -163,9 +163,18 @@ test('buildArgs denyImage strips image_gen and image_edit', () => {
   assert.ok(args[i + 1].includes('image_edit'));
 });
 
+test('runTurn env marks the child as inside a turn and prepends bounce-guard', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  assert.match(src, /ASMLTR_INSIDE_TURN: '1'/);
+  assert.match(src, /ASMLTR_TURN_KEY/);
+  assert.match(src, /withGuardPath/);
+});
+
 test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
+  const bounce = require('../shared/bounce');
   const env = grok.launchEnv({ PATH: '/bin', XAI_API_KEY: 'xai-should-never-leak', HOME: '/tmp' });
-  assert.equal(env.PATH, '/bin');
+  assert.equal(env.PATH.startsWith(bounce.guardDir() + require('path').delimiter), true);
+  assert.ok(env.PATH.includes('/bin'));
   assert.ok(!('XAI_API_KEY' in env));
 });
 

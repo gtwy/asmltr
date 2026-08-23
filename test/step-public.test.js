@@ -115,6 +115,8 @@ test('Discord never renderSteps raw thought text', () => {
   assert.match(src, /if \(quietImageGen \|\| maxThoughts <= 0\) return;/);
   assert.match(src, /not xhigh: 💭 only, no tooling/);
   assert.match(src, /no Working filler on medium\/high/);
+  assert.match(src, /let stopBeat = \(\) => \{\};/);
+  assert.match(src, /try \{ stopBeat\(\); \} catch/);
   assert.equal(src.includes('looksLikeImageGen'), false);
   assert.match(src, /GENERATING_LINE/);
   assert.match(src, /isImageGenTool/);

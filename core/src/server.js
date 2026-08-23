@@ -777,7 +777,10 @@ function dispatch(envelope, opts) {
   return withKeyLock(key, async () => {
     await acquireSlot();
     try { return await handle(envelope, opts); }
-    finally { releaseSlot(); }
+    finally {
+      releaseSlot();
+      try { require('../../shared/bounce').onTurnEnded(key); } catch (_) {}
+    }
   });
 }
 
@@ -1968,6 +1971,22 @@ app.post('/v2/abort', (req, res) => {
   ctrl.abort();
   record({ surface: 'core', session_id: key, event_type: 'control', identity: 'operator', source: 'core', payload: { action: 'abort' } });
   res.json({ ok: true, aborted: key });
+});
+
+// Queue a host bounce (core+manager+collector) until THIS turn ends, then delay so the
+// connector can post the reply. Inline systemctl/pm2 restart from a live Discord turn
+// leaves "-# Working" stuck forever. See shared/bounce.js.
+app.post('/v2/bounce', (req, res) => {
+  try {
+    const bounce = require('../../shared/bounce');
+    const b = req.body || {};
+    const delayMs = b.delay_ms == null ? bounce.DEFAULT_DELAY_MS : Number(b.delay_ms);
+    const conversationKey = b.conversation_key ? String(b.conversation_key) : null;
+    const r = bounce.queueAfterTurn({ conversationKey, delayMs, from: b.from || 'cli' });
+    record({ surface: 'core', session_id: conversationKey, event_type: 'control', identity: 'operator', source: 'core',
+      payload: { action: 'bounce-queued', delay_ms: r.delayMs, after_turn: true } });
+    res.json({ ok: true, queued: true, after_turn: true, delay_ms: r.delayMs, conversation_key: conversationKey });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // STEER: inject a message into a live session, then route the reply back to the origin

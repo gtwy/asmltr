@@ -853,6 +853,10 @@ function cmdHelp() {
   asmltr version         installed + per-service versions; whether an update is available
   asmltr update          pull + install the latest & restart (deterministic; verifies, auto-rolls-back)
        [--dry-run] [--channel stable|edge] [--force] [--agent]
+  asmltr bounce          restart core+manager+collector AFTER this turn (never inline)
+       [--delay SEC]     extra wait after the turn so the reply can post (default 20)
+       [--now]           human terminal only — refused inside a live turn
+       [--dry-run]       print the plan, do not queue
   asmltr help
 
   collector: ${BASE}   core: ${CORE_BASE}   ${TOKEN ? '(token set)' : A.dim('(no token — dev mode)')}`);
@@ -872,6 +876,22 @@ async function cmdVersion() {
     if (u && u.available) console.log(A.yel(`\n  update available: ${u.behind} commit(s) behind on ${u.channel} (${u.target}) — run: asmltr update`));
     else if (u && u.ok) console.log(A.dim(`\n  up to date on the ${u.channel} channel`));
   } catch (_) {}
+}
+
+async function cmdBounce(rest) {
+  const bounce = require('../shared/bounce');
+  const r = await bounce.runCli(rest, {
+    coreBase: CORE_BASE,
+    isTTY: !!(process.stdout && process.stdout.isTTY),
+  });
+  const line = r.message || (r.dryRun ? 'dry-run' : (r.queued ? 'queued' : 'ok'));
+  console.log((r.ok === false ? A.red(line) : A.grn(line)));
+  if (r.command || r.supervisor) {
+    console.log(A.dim('  ' + (r.command || (r.supervisor + ' ' + (r.services || []).join(' ')))));
+  }
+  if (r.afterTurn || r.queued) {
+    console.log(A.dim('  bounce is LAST — finish the reply; do not systemctl/pm2 restart asmltr from this turn.'));
+  }
 }
 
 async function cmdUpdate(rest, f) {
@@ -1119,6 +1139,7 @@ async function cmdVault(rest, f) {
       case 'stop': return await cmdStop(rest[0]);
       case 'diff': return await cmdDiff(rest[0]);
       case 'update': return await cmdUpdate(rest, f);
+      case 'bounce': return await cmdBounce(rest);
       case 'silo': return await cmdSilo(rest, f);
       case 'backup': return await cmdBackup(rest, f);
       case 'vault': return await cmdVault(rest, f);

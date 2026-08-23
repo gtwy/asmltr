@@ -538,6 +538,7 @@ ${referentPromptBlock()}`;
     // 8s so the "…is typing" shows for the ENTIRE (possibly multi-minute)
     // processing time, not just the first few seconds. Cleared in finally.
     let typingInterval = null;
+    let stopBeat = () => {};
     try {
       await message.channel.sendTyping();
       typingInterval = setInterval(() => { message.channel.sendTyping().catch(() => {}); }, 8000);
@@ -604,7 +605,7 @@ ${referentPromptBlock()}`;
         let maxThoughts = thoughtBudget('medium');
         let thoughtsPosted = 0;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
-        const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
+        stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
         const armBeat = () => {
           if (quietImageGen || maxThoughts !== Infinity) return; // medium/high/image-gen: no Still working
           stopBeat();
@@ -723,6 +724,7 @@ ${referentPromptBlock()}`;
       ctx.log('handle error: ' + e.message);
       await message.channel.send('⚠️ I hit an error processing that. Recalibrating...').catch(() => {});
     } finally {
+      try { stopBeat(); } catch (_) {}
       if (typingInterval) clearInterval(typingInterval);
       processing.delete(cid);
       const queued = lateMedia.get(cid);

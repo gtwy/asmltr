@@ -46,6 +46,9 @@ function buildToolbeltPrompt({
   if (!d.send) {
     s += '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists pending notes.\n';
   }
+  if (!d.shell) {
+    s += '• `asmltr bounce` — restart core+manager+collector. ALWAYS last. Queue it, then reply, then stop. NEVER `systemctl restart` / `pm2 restart` asmltr-* from a live turn: that hangs Discord on Working. If bounce is in a checklist, do everything else first; nothing after bounce that needs the new process (that is the next turn).\n';
+  }
   s += 'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
   if (meshSteer) {
     s += '\n• `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]` — push guidance ' +

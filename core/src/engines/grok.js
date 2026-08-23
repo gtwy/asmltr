@@ -387,7 +387,7 @@ function bin() {
 function launchEnv(base) {
   const env = { ...(base || process.env) };
   delete env.XAI_API_KEY;
-  return env;
+  try { return require('../../../shared/bounce').withGuardPath(env); } catch (_) { return env; }
 }
 
 /**
@@ -801,7 +801,8 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + (imageGen ? ' imageGen' : '') + ')\n'); } catch (_) {}
   if (onEvent) { try { onEvent({ type: 'effort', effort, imageGen, classifyUsage }); } catch (_) {} }
   const denyEnv = denyToolsEnv(deny);
-  const extra = {};
+  const extra = { ASMLTR_INSIDE_TURN: '1' };
+  if (conversationKey) extra.ASMLTR_TURN_KEY = String(conversationKey);
   if (denyEnv) extra.ASMLTR_DENY_TOOLS = denyEnv;
   if (attachChannel) extra.ASMLTR_ATTACH_CHANNEL = String(attachChannel);
   if (attachTarget) extra.ASMLTR_ATTACH_TARGET = String(attachTarget);

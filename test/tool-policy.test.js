@@ -161,6 +161,7 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
   assert.equal(text.includes('asmltr silo'), false);
   assert.equal(/use the Bash tool/.test(text), false);
   assert.ok(text.includes('asmltr ls'));
+  assert.equal(text.includes('asmltr bounce'), false);
   assert.equal(text.includes('asmltr post --file'), false);
 });
 
@@ -184,6 +185,8 @@ test('silo prompt has no NaN; put only when siloWrite is allowed', () => {
   const owner = buildToolbeltPrompt({ deny: {}, selfSiloDir: '/tmp/self', bypassModeration: true });
   assert.equal(owner.includes('NaN'), false);
   assert.ok(owner.includes('asmltr silo put'));
+  assert.ok(owner.includes('asmltr bounce'));
+  assert.ok(owner.includes('ALWAYS last'));
   const ro = buildToolbeltPrompt({
     deny: { siloWrite: true },
     selfSiloDir: '/tmp/self',
