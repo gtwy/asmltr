@@ -179,7 +179,24 @@ function publicBlockHints(hints, hintKinds) {
   return (hints || []).filter((h) => PUBLIC_BLOCK_KINDS.has(kindForHint(h, hintKinds)));
 }
 
-/** True when every \bhint\b hit is a unit/measure (60 Watt, watt-equivalent, watts), not a surname. */
+/**
+ * Ordinary English that also occurs as surnames. Not a family-name list:
+ * these tokens only block when the message is about identity (names, spelling,
+ * customers). 60 Watt / the color black / "may I" must post.
+ */
+const LANGUAGE_OVERLAP = new Set([
+  'black', 'white', 'brown', 'green', 'gray', 'grey', 'blue', 'gold', 'silver', 'red',
+  'watt',
+  'may', 'june', 'july', 'april', 'march', 'august',
+  'king', 'stone', 'wood', 'hill', 'park', 'west', 'east', 'north', 'south',
+  'long', 'young', 'little', 'short', 'good', 'best', 'rich', 'fair', 'true',
+  'baker', 'miller', 'smith', 'cook', 'porter', 'ward', 'hall', 'lane', 'ford',
+  'rose', 'daisy', 'ivy',
+]);
+
+const IDENTITY_TALK_RE = /\b(last\s+names?|surnames?|family\s+names?|first\s+names?|given\s+names?|spell(?:ed|ing|s)?|who(?:'s|\s+is|\s+are)|identit(?:y|ies)|customers?|clients?|\bnamed\b|mr\.?|mrs\.?|ms\.?|dr\.?)\b/i;
+
+/** True when every \bhint\b hit is a unit/measure (60 Watt, watt-equivalent, watts). */
 function lastNameOnlyUnitUses(text, hint) {
   const h = String(hint || '');
   const s = String(text || '');
@@ -199,6 +216,25 @@ function lastNameOnlyUnitUses(text, hint) {
   return saw;
 }
 
+function textHasFirstName(text, hintKinds) {
+  if (!hintKinds || typeof hintKinds.entries !== 'function') return false;
+  const s = String(text || '');
+  for (const [tok, kind] of hintKinds.entries()) {
+    if (kind !== 'first-name' || String(tok).length < 4) continue;
+    if (new RegExp('\\b' + escapeRe(tok) + '\\b', 'i').test(s)) return true;
+  }
+  return false;
+}
+
+/** Skip a last-name token when it is language, not a person. Rare surnames still always block. */
+function lastNameIsLanguageUse(text, hint, hintKinds) {
+  if (lastNameOnlyUnitUses(text, hint)) return true;
+  if (!LANGUAGE_OVERLAP.has(String(hint || '').toLowerCase())) return false;
+  if (IDENTITY_TALK_RE.test(text)) return false;
+  if (textHasFirstName(text, hintKinds)) return false;
+  return true;
+}
+
 function privacyHitKind(text, hints, hintKinds) {
   const s = String(text || '');
   let best = null;
@@ -207,7 +243,7 @@ function privacyHitKind(text, hints, hintKinds) {
     if (!h || String(h).length < 4) continue;
     if (!new RegExp('\\b' + escapeRe(h) + '\\b', 'i').test(s)) continue;
     const kind = kindForHint(h, hintKinds);
-    if (kind === 'last-name' && lastNameOnlyUnitUses(s, h)) continue;
+    if (kind === 'last-name' && lastNameIsLanguageUse(s, h, hintKinds)) continue;
     const rank = KIND_RANK[kind] || 0;
     if (rank > bestRank) { best = kind; bestRank = rank; }
   }
@@ -372,7 +408,7 @@ function discordThoughtLine(text, hints, hintKinds) {
 module.exports = {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
-  publicBlockHints, privacyBlockLine, privacyHitKind, lastNameOnlyUnitUses, pickPublicReply, thoughtBudget,
+  publicBlockHints, privacyBlockLine, privacyHitKind, lastNameOnlyUnitUses, lastNameIsLanguageUse, pickPublicReply, thoughtBudget,
   isImageGenTool,
   stripThoughtChrome, quietReplyFromResult,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE, THOUGHT_CLAMP,
