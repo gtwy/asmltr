@@ -3,7 +3,7 @@
  * asmltr connector type: DISCORD — full-feature Discord adapter.
  *
  * All Discord-specific behavior stays HERE (the plugin): hierarchical memory,
- * autonomous-participation logic, control commands, code-block reformat +
+ * autonomous-participation logic, control commands, fenced-block split +
  * chunking, and the /send-message HTTP endpoint (message-discord depends on it).
  * The LLM turn goes through asmltr-core: the rich Discord context + server-aware
  * authorization rides as `system_prompt_extra`; content.text is the clean user
@@ -35,6 +35,7 @@ const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
+const { splitResponse } = require('../../../shared/discord-split');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
@@ -68,7 +69,7 @@ const meta = {
   type: 'discord',
   displayName: 'Discord',
   supportsMultiple: true,
-  capabilities: { max_message_chars: 2000, supports_markdown: true, supports_code_blocks: false, supports_attachments_out: true },
+  capabilities: { max_message_chars: 2000, supports_markdown: true, supports_code_blocks: true, supports_attachments_out: true },
   credentialKeys: ['bot_token_bws_key'],
   // How the Access page presents identifiers for this surface (trust framework).
   identifierFormats: [{ surface: 'discord', label: 'Discord User ID', placeholder: '000000000000000000', pattern: '^\\d+$' }],
@@ -424,37 +425,12 @@ RESPONSE RULES:
 ${referentPromptBlock()}`;
   }
 
-  function formatCodeBlocks(text) {
-    return text.replace(/```(?:\w+)?\n([\s\S]*?)```/g, (m, code) => '\n' + code.split('\n').map(l => '    ' + l).join('\n') + '\n');
-  }
   // Subdued Discord line helper. Tool chips are built in shared/step-public (not raw thoughts).
   const streamSteps = cfg.stream_steps !== false;
   const streamTools = cfg.stream_tools === true;
   function renderStep(t) {
     const clamped = t.length > 700 ? t.slice(0, 700) + '…' : t;
     return clamped.split('\n').map(l => '-# ' + (l.trim() ? l : '​')).join('\n').slice(0, 1900);
-  }
-  function splitResponse(text, max = 1900) {
-    // Pack paragraphs into <=max chunks AND hard-split any single paragraph longer than max
-    // (e.g. a big code block with no blank lines) — otherwise it goes out as one >2000-char
-    // message and Discord rejects it with "Invalid Form Body".
-    const chunks = []; let cur = '';
-    const flush = () => { const t = cur.trim(); if (t) chunks.push(t); cur = ''; };
-    for (let para of String(text || '').split('\n\n')) {
-      while (para.length > max) {
-        flush();
-        let cut = para.lastIndexOf('\n', max);          // prefer a line boundary
-        if (cut <= 0) cut = para.lastIndexOf(' ', max);  // else a word boundary
-        if (cut <= 0) cut = max;                         // else a hard cut
-        const piece = para.slice(0, cut).trim();
-        if (piece) chunks.push(piece);
-        para = para.slice(cut);
-      }
-      if ((cur + '\n\n' + para).length > max) flush();
-      cur += (cur ? '\n\n' : '') + para;
-    }
-    flush();
-    return chunks;
   }
 
   async function persistInboundMedia(message, conversationKey) {
@@ -715,7 +691,7 @@ ${referentPromptBlock()}`;
       const recents = recentReplies.get(cid) || [];
       if (recents.includes(replyText)) { ctx.log('suppressed duplicate reply (verbatim repeat of a recent message)'); return; }
       recents.push(replyText); if (recents.length > 6) recents.shift(); recentReplies.set(cid, recents);
-      for (const chunk of splitResponse(formatCodeBlocks(replyText))) await message.channel.send(chunk);
+      for (const chunk of splitResponse(replyText)) await message.channel.send(chunk);
       saveMemory(message, NAME, replyText);
       lastResponseTime = Date.now();
       responseCount.set(cid, (responseCount.get(cid) || 0) + 1);
