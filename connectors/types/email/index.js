@@ -110,6 +110,30 @@ function isAutomatedSender(addr) {
   return /(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(String(addr || ''));
 }
 
+/**
+ * Vacation / out-of-office auto-reply (James 23 Aug 2026).
+ * RFC 3834 `auto-replied` only — `auto-generated` is Microsoft alerts and DSNs, not OOO.
+ * Subject prefixes cover Exchange/Gmail vacation even when Auto-Submitted is missing.
+ */
+function isAutoReply(parsed, subject, body) {
+  const autoSub = String(headerLine(parsed, 'auto-submitted') || '').toLowerCase();
+  if (/\bauto-replied\b/.test(autoSub)) return true;
+  const xar = String(
+    headerLine(parsed, 'x-autoreply')
+    || headerLine(parsed, 'x-autorespond')
+    || headerLine(parsed, 'x-auto-reply')
+    || '',
+  ).toLowerCase();
+  if (xar && !/^(no|false|0)$/.test(xar.trim())) return true;
+  const prec = String(headerLine(parsed, 'precedence') || '').toLowerCase().trim();
+  if (prec === 'auto_reply' || prec === 'autoreply') return true;
+  const subj = String(subject || '');
+  if (/^\s*(automatic reply|autoreply|auto-reply|auto reply)\s*:/i.test(subj)) return true;
+  if (/^\s*(out of office|out of the office)\b/i.test(subj)) return true;
+  if (/^\s*ooo\s*:/i.test(subj)) return true;
+  return false;
+}
+
 function ownerFromEmail() {
   return String(process.env.ASMLTR_OWNER_FROM_EMAIL || '').trim().toLowerCase();
 }
@@ -554,6 +578,11 @@ async function start(ctx) {
       ctx.log(`skip automated sender ${fromAddr}`);
       return { handled: false };
     }
+    // Vendor matchers still win. OOO is an intercept: turn (even unknown), never owner-forward, never SMTP-reply.
+    const hit = opsHit || (isAutoReply(parsed, subject, body)
+      ? { id: 'out-of-office', noreply_ok: true, reply_to_sender: false }
+      : null);
+    if (hit && hit.id === 'out-of-office') ctx.log(`out-of-office from=${fromAddr} subject=${subject}`);
     const messageId = parsed.messageId || null;
     const refs = parsed.references ? (Array.isArray(parsed.references) ? parsed.references : [parsed.references]) : [];
     const inReplyTo = parsed.inReplyTo || null;
@@ -586,7 +615,7 @@ async function start(ctx) {
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
     // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
     // Ops allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
-    if (!known && !opsHit) {
+    if (!known && !hit) {
       if (ownerForward && ownerForward !== fromAddr) {
         const fwd = `${NAME} forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
         await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd });
@@ -598,7 +627,7 @@ async function start(ctx) {
     }
 
     const sendPolicy = policy;
-    const suppressReply = isAutomatedSender(fromAddr) || !!(opsHit && opsHit.reply_to_sender === false);
+    const suppressReply = isAutomatedSender(fromAddr) || !!(hit && hit.reply_to_sender === false);
     let extra =
       `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
       `Do not type a name or signature block — "${fromName}" and the rest of the signature are appended automatically. NEVER sign as the operator/owner or impersonate a human. ` +
@@ -606,8 +635,11 @@ async function start(ctx) {
       `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
-    if (opsHit) {
-      extra += ` This message matched ops matcher '${opsHit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
+    if (hit) {
+      extra += ` This message matched ops matcher '${hit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
+      if (hit.id === 'out-of-office') {
+        extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. @example.com is always silent. Customer we already emailed on an open ticket: one notice to Example Co staff only.';
+      }
     }
     const actions = await ctx.core.handle({
       channel: 'email',
@@ -619,7 +651,7 @@ async function start(ctx) {
       capabilities: meta.capabilities,
       public: false, // 1:1 mail; redaction still applies unless the sender is full-trust
       channel_context: {
-        from: fromAddr, subject, ops_matcher: opsHit ? (opsHit.id || true) : undefined,
+        from: fromAddr, subject, ops_matcher: hit ? (hit.id || true) : undefined,
         auth: { present: auth.present, passed: auth.passed, failed: auth.failed, dkim: auth.results.dkim, spf: auth.results.spf, dmarc: auth.results.dmarc },
       },
       approval: { policy: sendPolicy, recipient: fromAddr, subject: replySubject },
@@ -856,4 +888,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
