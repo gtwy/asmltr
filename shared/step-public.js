@@ -179,6 +179,26 @@ function publicBlockHints(hints, hintKinds) {
   return (hints || []).filter((h) => PUBLIC_BLOCK_KINDS.has(kindForHint(h, hintKinds)));
 }
 
+/** True when every \bhint\b hit is a unit/measure (60 Watt, watt-equivalent, watts), not a surname. */
+function lastNameOnlyUnitUses(text, hint) {
+  const h = String(hint || '');
+  const s = String(text || '');
+  if (!h) return false;
+  const re = new RegExp('\\b' + escapeRe(h) + '\\b', 'gi');
+  let m;
+  let saw = false;
+  while ((m = re.exec(s))) {
+    saw = true;
+    const before = s.slice(Math.max(0, m.index - 20), m.index);
+    const after = s.slice(m.index + h.length, m.index + h.length + 24);
+    const unit = /\d[\s./-]*$/i.test(before)
+      || /^-/.test(after)
+      || /^(s|age)\b/i.test(after);
+    if (!unit) return false;
+  }
+  return saw;
+}
+
 function privacyHitKind(text, hints, hintKinds) {
   const s = String(text || '');
   let best = null;
@@ -187,6 +207,7 @@ function privacyHitKind(text, hints, hintKinds) {
     if (!h || String(h).length < 4) continue;
     if (!new RegExp('\\b' + escapeRe(h) + '\\b', 'i').test(s)) continue;
     const kind = kindForHint(h, hintKinds);
+    if (kind === 'last-name' && lastNameOnlyUnitUses(s, h)) continue;
     const rank = KIND_RANK[kind] || 0;
     if (rank > bestRank) { best = kind; bestRank = rank; }
   }
@@ -241,13 +262,13 @@ function pickPublicReply({ pending, replyText, leakDropped, publicSurface, hints
   const blockHints = publicBlockHints(hints, hintKinds);
   const block = (sample) => privacyBlockLine(sample, hints, hintKinds);
   if (held) {
-    if (publicSurface && mentionsSpeaker(held, blockHints)) return block(held);
+    if (publicSurface && privacyHitKind(held, hints, hintKinds)) return block(held);
     return held;
   }
   if (!raw) return '';
   if (!publicSurface) return raw;
-  if (looksLikePromptRestatement(raw) && !mentionsSpeaker(raw, blockHints)) return '';
-  if (mentionsSpeaker(raw, blockHints)) return block(raw);
+  if (looksLikePromptRestatement(raw) && !privacyHitKind(raw, hints, hintKinds)) return '';
+  if (privacyHitKind(raw, hints, hintKinds)) return block(raw);
   if (leakDropped) return '';
   return raw;
 }
@@ -340,10 +361,9 @@ function quietReplyFromResult(result) {
 function discordThoughtLine(text, hints, hintKinds) {
   const raw = String(text || '').trim();
   if (!raw) return '';
-  const blockHints = publicBlockHints(hints, hintKinds);
-  if (looksLikePromptLeak(raw) || mentionsSpeaker(raw, blockHints)) return '';
+  if (looksLikePromptLeak(raw) || privacyHitKind(raw, hints, hintKinds)) return '';
   const cleaned = String(redactSecrets(raw).text || '').trim();
-  if (!cleaned || looksLikePromptLeak(cleaned) || mentionsSpeaker(cleaned, blockHints)) return '';
+  if (!cleaned || looksLikePromptLeak(cleaned) || privacyHitKind(cleaned, hints, hintKinds)) return '';
   let body = cleaned.replace(/\s+/g, ' ');
   if (body.length > THOUGHT_CLAMP) body = body.slice(0, THOUGHT_CLAMP - 1) + '…';
   return `-# 💭 ${body}`;
@@ -352,7 +372,7 @@ function discordThoughtLine(text, hints, hintKinds) {
 module.exports = {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
-  publicBlockHints, privacyBlockLine, pickPublicReply, thoughtBudget,
+  publicBlockHints, privacyBlockLine, privacyHitKind, lastNameOnlyUnitUses, pickPublicReply, thoughtBudget,
   isImageGenTool,
   stripThoughtChrome, quietReplyFromResult,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE, THOUGHT_CLAMP,

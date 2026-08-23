@@ -242,6 +242,31 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
     hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
   }), 'response blocked due to privacy rules: no last name');
+  const wattOwner = {
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
+  };
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Don’t get a regular 60 Watt bulb — look for A19 LED.',
+    leakDropped: false,
+    publicSurface: true,
+    ...wattOwner,
+  }), 'Don’t get a regular 60 Watt bulb — look for A19 LED.');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'The industry mixed base, shape, watt-equivalent, and color temp.',
+    leakDropped: false,
+    publicSurface: true,
+    ...wattOwner,
+  }), 'The industry mixed base, shape, watt-equivalent, and color temp.');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'A 50/100/150 Watt 3-way. Real watts, not equivalent.',
+    leakDropped: false,
+    publicSurface: true,
+    ...wattOwner,
+  }).startsWith('response blocked'), false);
   const kinds = identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]);
   assert.equal(kinds.get('james'), 'first-name');
   assert.equal(kinds.get('watt'), 'last-name');

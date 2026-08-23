@@ -33,7 +33,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
-const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
@@ -633,7 +633,7 @@ ${referentPromptBlock()}`;
           const clean = String(t || '').trim();
           if (!clean) { pending = ''; return; }
           if (isSilence(clean)) { sawNoReply = true; pending = ''; stopBeat(); return; }
-          if (looksLikePromptRestatement(clean) || (envelope.public && mentionsSpeaker(clean, blockHints))) {
+          if (looksLikePromptRestatement(clean) || (envelope.public && privacyHitKind(clean, hints, hintKinds))) {
             pending = '';
             leakDropped = true;
             return;
