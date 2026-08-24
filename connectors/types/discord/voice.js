@@ -84,7 +84,7 @@ function meaningful(t) {
 // Stream one speaker's audio into a persistent realtime STT session (#140). Opened lazily, kept open
 // across short pauses so server-VAD segments turns; flushed with trailing silence when a burst ends;
 // idle-closed after prolonged silence. onFinal → onUtterance; deltas → onPartial (live captions).
-function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model, live, log }) {
+function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model, live, endpointMs, log }) {
   const { EndBehaviorType } = lib();
   const prism = require('prism-media');
   const key = rtKey(guildId, userId);
@@ -106,7 +106,7 @@ function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPa
   entry.subscribed = true;
   entry.burstFrames = 0;
   clearTimeout(entry.idleTimer);
-  const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 800 } });
+  const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: Number.isFinite(endpointMs) ? endpointMs : 800 } });
   const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
   opus.on('error', (e) => log(`realtime opus err: ${e.message}`)); decoder.on('error', (e) => log(`realtime decode err: ${e.message}`));
   opus.pipe(decoder);
@@ -135,13 +135,17 @@ function closeRealtime(guildId) {
 // onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply.
 // onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
 // realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
-function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, realtimeModel, realtimeLive, log = () => {} }) {
+function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, realtimeModel, realtimeLive, vad = {}, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;
   const { EndBehaviorType } = lib();
   const prism = require('prism-media');
   const receiver = conn.receiver;
   const active = new Set(); // userIds mid-capture (avoid double-subscribe)
+  // Shared VAD tunables (#141): end-of-speech silence + the near-silent RMS gate come from stt.config
+  // (Settings → Voice), so Discord turn-taking tunes identically to the app instead of a hard-coded 1s.
+  const endpointMs = Number.isFinite(vad.endpointMs) ? vad.endpointMs : 1000;
+  const rmsGate = Number.isFinite(vad.rmsGate) ? vad.rmsGate : 300;
   listening.add(guildId);
 
   receiver.speaking.on('start', (userId) => {
@@ -149,10 +153,10 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
     // Barge-in: the bot only ever RECEIVES other humans (never its own playback), so any speech that
     // starts while a reply is playing is someone talking over it → interrupt. The handler debounces.
     if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
-    if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model: realtimeModel || 'gpt-live-transcribe', live: realtimeLive !== false, log }); return; }
+    if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model: realtimeModel || 'gpt-live-transcribe', live: realtimeLive !== false, endpointMs, log }); return; }
     if (active.has(userId)) return;
     active.add(userId);
-    const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 } });
+    const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: endpointMs } });
     const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
     const chunks = [];
     opus.on('error', () => {}); decoder.on('error', () => {});
@@ -162,7 +166,7 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
       active.delete(userId);
       const pcm = Buffer.concat(chunks);
       if (pcm.length < 48000 * 2 * 2 * 0.3) return; // < ~0.3s → too short (still keeps a crisp wake word)
-      if (rmsInt16(pcm) < 300) return;              // near-silent → skip (kills STT silence-hallucinations)
+      if (rmsInt16(pcm) < rmsGate) return;          // near-silent → skip (shared vad_sensitivity gate)
       try {
         const res = await transcribe(pcmToWav(pcm));
         const text = ((typeof res === 'string' ? res : (res && res.text)) || '').trim();

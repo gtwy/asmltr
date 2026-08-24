@@ -9,8 +9,10 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Persistent voice mute (P2).** Eve can now be muted from *inside* voice — say "<name>, mute" (or `@bot mute-voice` from text) and she keeps transcribing but never speaks/replies until "<name>, unmute" (or `@bot unmute-voice`). Voice parity with the text disable; distinct from the transient `stop`. Clears on leaving voice.
 
 ### Changed
+- **Discord voice turn-taking honors the shared VAD tunables (#141).** End-of-speech silence and the near-silent gate now come from `stt.config` (`vad_endpoint_ms` / `vad_sensitivity`) instead of a hard-coded 1s, so Discord tunes identically to the app from Settings → Voice. Closes epic #135.
 
 ### Fixed
 
