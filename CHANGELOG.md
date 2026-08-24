@@ -13,6 +13,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
+
+## [0.14.1] - 2026-08-24
+
+### Added
+
+### Changed
+
+### Fixed
 - **CI green again — pinned CI to Node 24.18.0.** Node 24.19.0 has a teardown regression that trips `Assertion failed: (env) != nullptr` in `RemoveEnvironmentCleanupHook` when better-sqlite3's native Statement finalizers run on process exit, crashing `session-resume-recovery.test.js` (every assertion passed — only the exit crashed; red on `main` since PR #114). The `test` workflow now pins `node-version: 24.18.0`; the test also closes its sqlite handle in an `after` hook as hygiene.
 
 ## [0.14.0] - 2026-08-24
