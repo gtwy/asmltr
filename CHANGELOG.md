@@ -10,6 +10,25 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **Chunked file uploads.** `POST /v2/upload/init`, `PUT /v2/upload/:id/:index` (raw
+  `application/octet-stream`), `GET /v2/upload/:id`, `POST /v2/upload/:id/finish`, and
+  `DELETE /v2/upload/:id`, backed by `beginChunked` / `putChunk` / `chunkStatus` / `finishChunked` /
+  `abortChunked` / `sweepPartials` in `shared/uploads.js`. The wire unit is a chunk instead of the
+  file, so upload size is no longer bounded by a body limit anywhere on the path. Chunks stage under
+  `<staging>/<id>/` and are assembled one at a time, so the server holds one chunk rather
+  than the whole file; nothing is written to the manifest until `finish` verifies the assembled
+  length against both the declared size and the bytes that actually reached the disk, so `list()` can
+  never hand the agent a path to a half-written file. Content is verified per chunk via
+  `X-Chunk-Sha256`, which keeps the integrity check honest without hashing the whole file (hashing
+  the whole file would mean holding it, the thing chunking exists to avoid); a whole-file `sha256` is
+  still accepted from clients that know it. Retried chunks are idempotent, a chunk index that is not
+  a plain integer is rejected before it reaches a path, and staging left by abandoned uploads is
+  swept hourly past a 24 hour TTL. Tuning: `ASMLTR_UPLOAD_CHUNK_SIZE` (default 8 MiB),
+  `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb), `ASMLTR_UPLOAD_MAX_SIZE` (default 128 GiB).
+- **`uploads.saveFrom({ tempPath, … })`.** Registers a file already on disk by moving it into the
+  shared area, so a file no longer has to fit in a Buffer to be registered. `save()` is unchanged for
+  connectors, which already hold Buffers.
+
 - **File routes take raw bytes, not only base64 in a JSON body.** `POST /v2/upload`,
   `POST /v2/silos/:id/file` and `POST /v2/transcribe` now accept the file as the request body with
   its metadata in the query string, the shape `POST /v2/recordings` and `POST /v2/backups/import`
@@ -19,6 +38,26 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Changed
 
+- **The composer uploads in chunks, with real progress.** `webChat.upload(file, key, { onProgress })`
+  sends `file.slice()` chunks over XHR (fetch exposes no upload progress event) and retries a failed
+  chunk with backoff instead of failing the whole file. Each file in a multi-file pick gets its own
+  progress row; previously one shared `notice` meant five files with three failures showed a single
+  message about the last one.
+- **Chunks stage outside the Self silo.** `ASMLTR_UPLOAD_STAGING_DIR`, default
+  `~/.asmltr/uploads-partial`, replaces the old `<uploads>/.partial`. Since uploads moved into the Self
+  silo, staging under the upload area put in-flight partials inside the tree `scripts/backup.js` copies
+  wholesale, so an upload abandoned mid-transfer rode into every snapshot taken before the 24 hour
+  sweep reaped it, at full file size, and showed up in the Silos GUI as a half-written blob. Backups
+  now skip the staging directory as well as `backups/`. Staging belongs on the same filesystem as the
+  upload area: `finish` renames the assembled file into place, and across a mount boundary `saveFrom()`
+  falls back to copy-then-unlink. Second effect: the silo now sees exactly one raw-path write per
+  upload (the move-in) rather than one per chunk, which is the whole surface the artifacts-via-driver
+  follow-up has to convert to `Silo.put`.
+- **`/rd/` keeps its own 1 MiB body limit.** The remote-desktop signaling broker is deliberately not
+  behind the session `auth_request`, and it would otherwise inherit the server-level `1024m` this
+  release adds, handing an unauthenticated route a 1 GiB body budget as a side effect of an upload
+  change. Pinned to the limit it already ran under. Signaling frames are SDP and ICE candidates.
+
 - **The dashboard sends files as bytes.** The Silos browser's upload button and the voice
   transcription path both posted base64 inside a JSON body, which `express.json({ limit: '10mb' })`
   capped near 7.5 MiB of actual file: measured against that parser, 7,864,000 bytes is accepted and
@@ -26,6 +65,79 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   size named anywhere the user could see it. Both now send the file itself.
 
 ### Fixed
+
+- **Uploads were capped at 767.9 KiB, not the 10 MB the core advertised.** `client_max_body_size` was
+  absent from `insights/dashboard/nginx.conf.template`, so nginx applied its 1 MiB default, and the
+  base64 JSON body spent a third of that on encoding: 786,327 bytes uploaded and 786,522 failed. An
+  ordinary 3 MB phone photo returned `413 Request Entity Too Large` with no size named anywhere in the
+  UI or the docs. The same default capped `POST /v2/backups/import` at 1 MiB despite its `limit:
+  '1024mb'`, making GUI backup import fail for any real archive. The directive is now set to `1024m`
+  at **server** level. Both parts matter: scoping it to `location /v2/` is not enough, because
+  `auth_request` runs its check as a subrequest against `location = /_asmltr_authz`, which applied its
+  own inherited 1 MiB limit and turned every chunk into a 500; and the value has to match the core's
+  own ceiling for `/v2/backups/import`, because that route is not chunked and posts its archive as a
+  single body, so whatever is set here is the real backup-import cap.
+  ([#91](https://github.com/jarethmt/asmltr/issues/91))
+
+- **Upload failures are no longer silent or misreported.** A manifest append that fails now logs
+  instead of being swallowed, so a file that lands on disk without an index says so. Server-side
+  faults (`ENOSPC`, `EACCES`) are logged with the upload id and answered with a generic message
+  rather than a 400 or an absolute host path in the response body. A `readdir` failure on a staging
+  dir is no longer reported as "every chunk is missing", a corrupt `meta.json` is no longer reported
+  as "unknown upload", an oversized chunk returns JSON rather than an Express stack trace, and a
+  sweep that fails on every directory no longer looks identical to a sweep with nothing to do.
+
+## [0.16.1] - 2026-08-24
+
+### Added
+
+### Changed
+
+### Fixed
+- **Voice speaker identity (#148).** In a multi-person voice call Eve addressed everyone as one person and applied the wrong trust tier, because the voice path passed the speaker's display name as `sender.raw_id` (matches no identity mapping → resolved `default`/tier 0). The speaker's immutable Discord user ID now rides through to `sender.raw_id` (same key the text path uses), so each turn resolves the correct principal + trust — the person who said her name. Verified: user ID → the real principal (tier 1); display name → default (tier 0).
+- **"Eve, stop" now actually halts an in-flight realtime reply (#149).** Stop/barge-in fired and aborted, but the reply still spoke ~10s later when the LLM turn finished after the abort. `speak()` now requires a live speech session, and a per-guild reply generation (bumped on stop) makes the in-flight reply bail before synthesizing/speaking/posting even if generation completes after the abort.
+
+## [0.16.0] - 2026-08-24
+
+### Added
+- **Persistent voice mute (P2).** Eve can now be muted from *inside* voice — say "<name>, mute" (or `@bot mute-voice` from text) and she keeps transcribing but never speaks/replies until "<name>, unmute" (or `@bot unmute-voice`). Voice parity with the text disable; distinct from the transient `stop`. Clears on leaving voice.
+
+### Changed
+- **Discord voice turn-taking honors the shared VAD tunables (#141).** End-of-speech silence and the near-silent gate now come from `stt.config` (`vad_endpoint_ms` / `vad_sensitivity`) instead of a hard-coded 1s, so Discord tunes identically to the app from Settings → Voice. Closes epic #135.
+
+### Fixed
+
+## [0.15.0] - 2026-08-24
+
+### Added
+- **Realtime streaming transcription for Discord voice (#140).** Discord voice streams each speaker's audio into the shared OpenAI GA Realtime STT over a WebSocket (`shared/speech/realtime-stt.js`) using the **live streaming model** (`gpt-live-transcribe`), so captions fill in **as you speak** rather than after you stop. Each turn is finalized on Discord's end-of-speech by committing the audio buffer, which flushes the tail and yields a clean per-turn transcript — so overlapping speakers thread by who-started-first. The sliding-window partials are reconstructed into a running transcript (`mergeWindow`). No new dependency (Node's global WebSocket + the ephemeral-token subprotocol). Per-speaker sessions persist across short pauses and idle-close after prolonged silence. Toggle with `voice_realtime` (batch per-utterance STT remains the fallback).
+
+### Changed
+- **Discord realtime STT is wired through the `realtime_transcribe` voice-engine role** (#113/#140), not a hard-coded model — Settings picks the engine, with a guard that falls back to the live streaming model if the bound engine isn't realtime-capable (e.g. a diarize model). `openai-live-transcribe` is now marked implemented and is the default `realtime_transcribe` binding.
+
+### Fixed
+- **Realtime audio was silently garbled by a downsampler byte-offset bug** (audio flowed to the API but nothing came back). The 48k-stereo→24k-mono conversion stepped 4 bytes per output sample instead of 8, feeding the transcriber time-distorted samples from only the first half of each buffer. Pinned with a regression test.
+
+## [0.14.1] - 2026-08-24
+
+### Added
+
+### Changed
+
+### Fixed
+- **CI green again — pinned CI to Node 24.18.0.** Node 24.19.0 has a teardown regression that trips `Assertion failed: (env) != nullptr` in `RemoveEnvironmentCleanupHook` when better-sqlite3's native Statement finalizers run on process exit, crashing `session-resume-recovery.test.js` (every assertion passed — only the exit crashed; red on `main` since PR #114). The `test` workflow now pins `node-version: 24.18.0`; the test also closes its sqlite handle in an `after` hook as hygiene.
+
+## [0.14.0] - 2026-08-24
+
+### Added
+- **Shared, confidence-gated wake matcher (`shared/speech/wake.js`).** One deterministic wake/direct-address matcher for every voice surface, with a confidence gate that refuses to fire a turn on a low-confidence or bare-lone-name match — killing the false-trigger bug where a mis-transcribed word made the assistant reply when its name wasn't actually said. Confidence derives from STT token logprobs; the bar scales with `wake_sensitivity`. (#136)
+- **Cross-surface interrupt / barge-in for Discord voice.** One hard-stop primitive behind three entry points (#138): a spoken "<name>, stop" (or any configured stop phrase), talking over a reply (low-latency barge-in, no STT round-trip), and text `@bot stop` — which now fans the stop through to a live voice session joined from that channel. Barge-in is toggleable (`voice_barge_in`) and has a short grace window so the asker's own trailing words don't cut off the reply.
+
+### Changed
+- **Discord voice STT now routes through the pluggable voice-engine role layer** (`voice-engines.resolve('transcribe')`) instead of a hard-wired model, so a Settings change swaps the engine with no connector edit — with a safe fallback when the bound engine needs a different endpoint shape (e.g. diarize). (#139)
+
+### Fixed
+- **Scaffolding/classifier text no longer leaks into voice transcripts** (#137). Dropped the name-priming STT prompt on the Discord path (it biased the decoder toward mis-hearing the wake word *and* got echoed into transcripts on near-silent audio) and added shared prompt-echo suppression in `shared/speech/stt.js` for any surface that still passes a prompt.
 
 ## [0.13.1] - 2026-08-18
 
