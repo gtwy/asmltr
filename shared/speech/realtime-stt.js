@@ -16,14 +16,34 @@
  */
 const stt = require('./stt');
 
+// The live streaming model (gpt-live-transcribe) emits each delta as a SLIDING WINDOW of the most
+// recent words (it drops words off the front as it advances), not an incremental token — and never
+// sends a `completed` event. Reconstruct the full running transcript by appending only the part of the
+// new window that isn't already the tail of what we have (largest word-overlap).
+function mergeWindow(full, window) {
+  const fw = full ? full.trim().split(/\s+/).filter(Boolean) : [];
+  const ww = (window || '').trim().split(/\s+/).filter(Boolean);
+  if (!ww.length) return full || '';
+  if (!fw.length) return ww.join(' ');
+  const norm = (w) => w.toLowerCase().replace(/[.,!?;:]+$/, '');
+  const maxK = Math.min(fw.length, ww.length);
+  let best = 0;
+  for (let k = maxK; k >= 1; k--) {
+    let ok = true;
+    for (let i = 0; i < k; i++) { if (norm(fw[fw.length - k + i]) !== norm(ww[i])) { ok = false; break; } }
+    if (ok) { best = k; break; }
+  }
+  return fw.concat(ww.slice(best)).join(' ');
+}
+
 // Downsample 48kHz stereo s16le → 24kHz mono s16le (average L+R, then 2-tap average + decimate by 2).
 function pcm48StereoToPcm24Mono(buf) {
   const frames = buf.length >> 2;          // 4 bytes per stereo frame (L16 + R16)
   const outSamples = frames >> 1;          // 48k→24k halves the rate
   const out = Buffer.allocUnsafe(outSamples * 2);
   for (let j = 0; j < outSamples; j++) {
-    const a = j << 2;                       // stereo frame 2j  → byte offset 2j*4
-    const b = a + 4;                        // stereo frame 2j+1
+    const a = j << 3;                       // stereo frame 2j  → byte offset 2j*4 = 8j
+    const b = a + 4;                        // stereo frame 2j+1 → byte 8j+4
     const m0 = (buf.readInt16LE(a) + buf.readInt16LE(a + 2)) >> 1; // L+R → mono
     const m1 = (buf.readInt16LE(b) + buf.readInt16LE(b + 2)) >> 1;
     let s = (m0 + m1) >> 1;                  // 2-tap lowpass + decimate
@@ -69,7 +89,8 @@ function openSession(handlers = {}, opts = {}) {
       let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
       switch (m.type) {
         case 'conversation.item.input_audio_transcription.delta':
-          if (m.delta) { cur += m.delta; if (h.onPartial) { try { h.onPartial(cur); } catch (_) {} } }
+          // live model → each delta is a sliding window (merge); batch model → incremental (append).
+          if (m.delta) { cur = opts.live ? mergeWindow(cur, m.delta) : (cur + m.delta); if (h.onPartial) { try { h.onPartial(cur); } catch (_) {} } }
           break;
         case 'conversation.item.input_audio_transcription.completed': {
           const text = (m.transcript || cur || '').trim(); cur = '';
@@ -96,8 +117,14 @@ function openSession(handlers = {}, opts = {}) {
       if (open && ws) { try { ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 })); } catch (_) {} }
       else if (queue.length < 400) queue.push(b64); // cap the pre-connect backlog (~8s @ 20ms frames)
     },
+    // Finalize the current turn for the live model (no server-VAD): commit the audio buffer, which
+    // flushes the model's trailing words AND makes it emit a `completed` event with the clean full
+    // transcript (→ onFinal). The caller commits on its own end-of-speech signal (Discord VAD).
+    commit() { if (open && ws) { try { ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' })); } catch (_) {} } },
+    // Fallback finalize from the reconstructed partial (used if a commit path isn't available).
+    endTurn() { const t = (cur || '').trim(); cur = ''; if (t && h.onFinal) { try { h.onFinal(t); } catch (_) {} } },
     close() { closed = true; open = false; try { ws && ws.close(); } catch (_) {} },
   };
 }
 
-module.exports = { openSession, pcm48StereoToPcm24Mono };
+module.exports = { openSession, pcm48StereoToPcm24Mono, mergeWindow };

@@ -885,6 +885,7 @@ RESPONSE RULES:
   // command (@mention driven, in handleControlCommands).
   async function doJoinVoice(message) {
     if (!message.guild) return;
+    ctx.log(`[voice] join-voice requested by ${message.author && message.author.username} in #${message.channel && message.channel.name} — caller vc=${(message.member && message.member.voice && message.member.voice.channel && message.member.voice.channel.name) || 'NONE'}`);
     let voice;
     try { voice = require('./voice'); } catch (e) { ctx.log(`voice module load failed: ${e.message}`); message.channel.send('⚠️ Voice module unavailable.').catch(() => {}); return; }
     const vc = message.member?.voice?.channel;
@@ -893,9 +894,23 @@ RESPONSE RULES:
       await voice.joinChannel(vc);
       await voice.playChime(message.guild.id);
       voiceText.set(message.guild.id, message.channel);
+      // Resolve the realtime_transcribe ROLE (voice-engine layer, #113/#140) instead of hard-wiring a
+      // model, so Settings picks the engine. `live` = a streaming model (partials during speech + we
+      // finalize on commit); otherwise a server-VAD model (finalizes per turn on the server's VAD).
+      let rtModel = 'gpt-live-transcribe';
+      try {
+        const c = voiceEngines.resolve('realtime_transcribe').capabilities;
+        // Diarize models need the batch diarized_json endpoint — not usable as a realtime session model;
+        // fall back to the live streaming model if the role resolves to one.
+        if (c && c.provider === 'openai' && c.model && !/diarize/i.test(c.model)) rtModel = c.model;
+      } catch (_) {}
+      const rtLive = /live-transcribe/i.test(rtModel);
+      ctx.log(`[voice] realtime role → ${rtModel} (live=${rtLive})`);
       voice.startListening(message.guild.id, client, {
         transcribe: sttTranscribe,
-        realtime: cfg.voice_realtime !== false, // streaming STT + server-VAD turn-taking (batch fallback if off)
+        realtime: cfg.voice_realtime !== false, // streaming STT + turn-taking (batch fallback if off)
+        realtimeModel: rtModel,
+        realtimeLive: rtLive,
         onUtterance: (name, text, meta) => handleVoiceUtterance(message.guild.id, name, text, meta),
         onPartial: (name, text) => onVoicePartial(message.guild.id, name, text),
         onBargeIn: () => {
@@ -908,6 +923,7 @@ RESPONSE RULES:
         },
         log: (m) => ctx.log(`[voice] ${m}`),
       });
+      ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${voicePostTranscript})`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const transcriptNote = voicePostTranscript
         ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `transcript-off`).'
