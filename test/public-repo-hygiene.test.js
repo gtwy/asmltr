@@ -32,6 +32,7 @@ const HOME_ALLOW = new Set([
   '/home/foo',
   '/home/bar',
   '/home/recents',
+  '/home/asmltr-test-user',
 ]);
 
 function trackedFiles() {
