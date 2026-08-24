@@ -319,7 +319,7 @@ async function moderate(userMessage, resolved, meta = {}) {
   } catch (err) {
     console.error('[moderation] error (failing secure):', err.message);
     // Fail-secure: block + alert the owner (reuse the existing primitive).
-    adminAlert(`⚠️ asmltr moderation error - blocking request from ${resolved.display_name}`);
+    adminAlert(`⚠️ asmltr moderation error - blocking request from ${resolved.display_name}`, { cmd: 'moderation error' });
     return { allowed: false, riskLevel: 10, concerns: ['moderation_error'], reasoning: 'Moderation failure - failing secure' };
   }
 }
@@ -340,9 +340,25 @@ function parseAlertRoute(s) {
 // Deliver an admin/security alert via ANY configured sink (each set one fires):
 //   1. ASMLTR_ADMIN_ALERT_SEND — route through a connector (any that advertises `outbound`)
 //      using the manager's /send. This reuses the channels you've already configured.
-//   2. ASMLTR_ADMIN_ALERT_CMD — a shell command ({msg} = text); good for email/webhooks/etc.
+//      SEND may include inbound detail (not a shell).
+//   2. ASMLTR_ADMIN_ALERT_CMD — a shell command. {msg} (or a trailing quoted arg) is ONLY a
+//      fixed label: "moderation block" or "moderation error". Never inbound text, display_name,
+//      concerns, or reasoning.
 // No-op when neither is set.
-function adminAlert(text) {
+const CMD_LABELS = new Set(['moderation block', 'moderation error']);
+
+function cmdAlertLabel(label) {
+  const s = String(label || '').trim();
+  return CMD_LABELS.has(s) ? s : 'moderation block';
+}
+
+function buildAdminAlertCmd(tmpl, label) {
+  const safe = cmdAlertLabel(label);
+  if (String(tmpl).includes('{msg}')) return String(tmpl).replace(/\{msg\}/g, `'${safe}'`);
+  return `${tmpl} '${safe}'`;
+}
+
+function adminAlert(text, opts) {
   const route = parseAlertRoute(process.env.ASMLTR_ADMIN_ALERT_SEND);
   if (route) {
     const mgr = (process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024').replace(/\/$/, '');
@@ -354,8 +370,7 @@ function adminAlert(text) {
   const tmpl = process.env.ASMLTR_ADMIN_ALERT_CMD;
   if (tmpl) {
     try {
-      const safe = String(text).replace(/'/g, "'\\''");
-      const cmd = tmpl.includes('{msg}') ? tmpl.replace(/\{msg\}/g, `'${safe}'`) : `${tmpl} '${safe}'`;
+      const cmd = buildAdminAlertCmd(tmpl, opts && opts.cmd);
       execFile('sh', ['-c', cmd], () => {});
     } catch (_) { /* best-effort */ }
   }
@@ -365,10 +380,10 @@ function adminAlert(text) {
 async function notifyBlock(resolved, userMessage, moderation, platform) {
   const platformInfo = platform ? ` via ${platform.toUpperCase()}` : '';
   const body = `🚨 BLOCKED unauthorized request from ${resolved.display_name}${platformInfo}\n\nMessage: ${String(userMessage).substring(0, 200)}\n\nRisk: ${moderation.riskLevel}/10\nConcerns: ${(moderation.concerns || []).join(', ')}\n\nReason: ${moderation.reasoning}`;
-  adminAlert(body);
+  adminAlert(body, { cmd: 'moderation block' });
 }
 
 module.exports = {
-  moderate, notifyBlock, logModerationEvent, buildOpenAIParams, parseReasoningEffort,
+  moderate, notifyBlock, adminAlert, buildAdminAlertCmd, cmdAlertLabel, logModerationEvent, buildOpenAIParams, parseReasoningEffort,
   classifyRaw, pictureIntentOffLog, moderationKeyPresent,
 };
