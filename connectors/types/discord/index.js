@@ -22,6 +22,8 @@ const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder, St
 const sharedTts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const sharedStt = require('../../../shared/speech/stt');
+const sharedWake = require('../../../shared/speech/wake');            // shared confidence-gated wake matcher (#136)
+const voiceEngines = require('../../../shared/speech/voice-engines'); // pluggable STT/TTS role layer (#113/#139)
 
 // Assistant identity — the display name AND the spoken wake word for voice.
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -85,6 +87,7 @@ const meta = {
       voice_followup_ms: { type: 'integer', title: 'Voice follow-up window (ms) after being addressed, during which follow-ups need no wake word. 0 = STRICT: only respond when directly addressed by name (recommended for meetings).', default: 0 },
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
       voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
+      voice_barge_in: { type: 'boolean', title: 'Voice: barge-in — let someone interrupt a spoken reply by talking over it (off = quieter in noisy/cross-talk meetings)', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
       stream_steps: { type: 'boolean', title: 'Post intermediary narration steps to the thread live as they land (only when directly addressed)', default: true },
       stream_tools: { type: 'boolean', title: 'Also post a subdued line for each tool call while streaming steps', default: false },
@@ -303,14 +306,22 @@ async function start(ctx) {
         await doUpdateAsmltr(message); return true;
       case 'leave-voice': case 'leave voice': case 'leave vc': case 'leave the voice':
         await doLeaveVoice(message); return true;
-      case 'stop': case 'cancel': case 'abort': case 'halt':
-        // Interrupt the running turn for THIS channel. The session survives and stays resumable —
-        // your next message continues it. No-op (🤷) if nothing is running.
+      case 'stop': case 'cancel': case 'abort': case 'halt': {
+        // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
+        // joined from this channel (#138). The session survives and stays resumable. 🤷 if nothing ran.
+        const gid = message.guild?.id;
+        let voice; try { voice = require('./voice'); } catch (_) {}
+        const originCh = gid ? voiceText.get(gid) : null;
+        const voiceHere = !!(gid && voice && voice.isConnected(gid) && (!originCh || originCh.id === message.channel.id));
+        let acted = false;
+        if (voiceHere) { const s = await stopVoiceReply(gid, { chime: false }); acted = acted || s; }
         if (processing.get(cid)) {
-          try { await ctx.core.abort(convKeyFor(message)); await message.react('🛑').catch(() => {}); }
+          try { await ctx.core.abort(convKeyFor(message)); acted = true; }
           catch (e) { ctx.log('abort failed: ' + e.message); await message.channel.send('⚠ Couldn\'t stop the current turn.'); }
-        } else { await message.react('🤷').catch(() => {}); }
+        }
+        await message.react(acted ? '🛑' : '🤷').catch(() => {});
         return true;
+      }
       case 'status':
         await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})`); return true;
       case 'help': case 'commands':
@@ -610,29 +621,38 @@ RESPONSE RULES:
   // --- voice transcription helper: per-utterance WAV → OpenAI STT → text --------
   const voiceText = new Map(); // guildId -> text channel to post the live transcript
   async function sttTranscribe(wav) {
-    // Unified STT (shared/speech/stt). Per-instance language + wake-word prompt bias; model/key follow
-    // the shared config (Settings > Voice) unless overridden. lang '' = auto-detect.
+    // Unified STT through the pluggable voice-engine ROLE layer (#113/#139): resolve the engine bound to
+    // `transcribe` instead of hard-wiring a model, so a Settings change swaps Discord's STT with no code edit.
+    // NO name-priming prompt: it both biased the decoder toward mis-hearing the wake word AND got echoed
+    // into transcripts on near-silent audio (#137). We recover recognition via a confidence gate instead.
     const language = cfg.stt_language === undefined ? 'en' : cfg.stt_language;
+    // Use the role-bound engine's model ONLY when it's a plain OpenAI transcribe model. The per-utterance
+    // clip path uses transcribe() (json+logprobs); the diarize model needs the diarized_json shape and a
+    // single-speaker command clip doesn't need diarization anyway → fall back to the STT config default.
+    let model;
+    try {
+      const cap = voiceEngines.resolve('transcribe').capabilities;
+      if (cap && cap.provider === 'openai' && cap.model && !/diarize/i.test(cap.model)) model = cap.model;
+    } catch (_) {}
     const out = await sharedStt.transcribe(wav, {
-      mime: 'audio/wav', filename: 'utt.wav', language,
-      prompt: `Casual voice-chat speech; the speaker may address an assistant named ${NAME}.`,
+      mime: 'audio/wav', filename: 'utt.wav', language, model, logprobs: true,
     });
     // Aux cost: STT runs on a metered key. Price by audio seconds (est. from clip size when the model
     // doesn't report duration) so the Discord voice bridge's transcription cost lands in the Billed total.
     const seconds = out.duration || estimateAudioSeconds(out.bytes, 'audio/wav');
     ctx.emit(auxUsage({ surface: 'discord', feature: 'stt', provider: 'openai', model: out.model, seconds }));
-    return out.text || '';
+    return { text: out.text || '', confidence: out.confidence };
   }
 
-  // --- gatekeeper: does this spoken utterance ADDRESS the assistant? (heuristic v1) --------
-  // Cheap/free/instant — no per-utterance model call. Upgrade path: a Haiku confirm
-  // for ambiguous "the assistant" mentions. Conservative on purpose to avoid interrupting.
-  function addressesName(text) {
-    const t = text.trim().toLowerCase();
-    return new RegExp(`^(hey |hi |ok |okay |yo |so |well |um+ |uh+ |,|\\s)*${WAKE}\\b`).test(t) // LEADS with the name ("<name>, do X")
-        || new RegExp(`\\b(hey|ok|okay|hi|yo) ${WAKE}\\b`).test(t)                              // "hey <name>" anywhere
-        || new RegExp(`\\b${WAKE}\\s*[,?!.]`).test(t)                                           // "<name>," / "<name>?" / "<name>!"
-        || new RegExp(`\\b${WAKE}\\b[\\s.?!,]*$`).test(t);                                      // TRAILS with the name ("do X, <name>")
+  // --- gatekeeper: does this spoken utterance ADDRESS the assistant? --------------------------
+  // Delegates to the SHARED wake matcher (shared/speech/wake) so Discord, the app, and the PWA agree.
+  // `addressesName` is the pure "is it addressed?" test (used by leave/dismiss checks). The FIRE decision
+  // (does it dispatch a turn?) goes through `wakeDecision`, which adds the confidence gate that kills the
+  // false-"<name>" trigger (#136): a fuzzy STT artifact that merely looks like the name won't respond.
+  function addressesName(text) { return sharedWake.addresses(text, NAME); }
+  function wakeDecision(text, confidence) {
+    const sensitivity = sharedStt.config().wake_sensitivity;
+    return sharedWake.evaluate({ text, wakeWord: NAME, sensitivity, confidence });
   }
 
   const VOICE_GUIDANCE = [
@@ -660,6 +680,8 @@ RESPONSE RULES:
 
   const voiceBusy = new Set();   // guildIds mid-reply (one spoken reply at a time)
   const voiceActive = new Map(); // guildId -> expiry ts of the "answering mode" follow-up window
+  const voiceReplyStart = new Map(); // guildId -> ts a reply began (barge-in grace window)
+  const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after a reply starts (don't cut off on the asker's own trailing words)
   // 0 (default) = STRICT: respond ONLY when directly addressed by name, then go passive. A positive
   // value opens a "keep answering follow-ups without the wake word" window for that many ms.
   const VOICE_WINDOW_MS = Number.isFinite(Number(cfg.voice_followup_ms)) ? Number(cfg.voice_followup_ms) : 0;
@@ -699,17 +721,45 @@ RESPONSE RULES:
   }
   const LEAVE_RE = /\b(leave (the )?(voice|call|channel)|disconnect|drop (from )?(the )?(voice|call))\b/;
   const DISMISS_RE = /\b(that'?s (enough|all|it)( for now)?|we'?re (good|done|all set)|stop (answering|talking|responding|for now)|(just|go back to) (listen|transcrib)|you can (stop|relax)|stand down|dismiss(ed)?)\b/;
+  const VOICE_STOP_RE = /\b(stop|cancel|hush|shush|be quiet|shut up|enough|nevermind|never mind|hold on|wait)\b/;
+
+  // The conversation_key a spoken reply runs under (must match handleVoiceUtterance's handleStream call).
+  const voiceConvKey = (guildId) => `discord-voice:${ctx.instanceId}:guild:${guildId}`;
+
+  // ONE hard-stop primitive behind spoken-"stop", barge-in, and text `@bot stop` fan-out (#138): cancel
+  // playback + queued sentences, kill the drone, abort the in-flight core turn, free the busy latch.
+  async function stopVoiceReply(guildId, { chime = false } = {}) {
+    let voice; try { voice = require('./voice'); } catch (_) { return false; }
+    const wasBusy = voiceBusy.has(guildId);
+    voice.stopSpeech(guildId); voice.stopDrone(guildId);
+    voiceBusy.delete(guildId); voiceReplyStart.delete(guildId);
+    try { await ctx.core.abort(voiceConvKey(guildId)); } catch (_) {}
+    setVoiceStatus(null);
+    if (chime && wasBusy) { try { await voice.playChime(guildId); } catch (_) {} }
+    return wasBusy;
+  }
 
   // Called for EVERY transcribed utterance. Posts the live transcript, then decides if it's for
   // the assistant — addressed by name OR we're inside an active follow-up window (so follow-ups
   // need no wake word). A dismissal phrase exits answering mode back to transcription-only.
-  async function handleVoiceUtterance(guildId, name, text) {
+  async function handleVoiceUtterance(guildId, name, text, meta = {}) {
     const ch = voiceText.get(guildId);
     logTranscript(guildId, name, text); // always captured for the end-of-session file
     if (ch && voicePostTranscript) ch.send(`🗣️ **${name}:** ${text}`).catch(() => {}); // live flood (toggleable)
     let voice; try { voice = require('./voice'); } catch (_) { return; }
     const lc = text.toLowerCase();
     const active = (voiceActive.get(guildId) || 0) > Date.now();
+
+    // SPOKEN STOP (#138) — highest priority, works mid-reply, before the busy latch. "<name>, stop"
+    // (addressed + a stop word) or any configured stop phrase → hard-cancel whatever's speaking/generating.
+    const stopPhrases = String(sharedStt.config().stop_phrases || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const isStop = (addressesName(text) && VOICE_STOP_RE.test(lc)) || stopPhrases.some((p) => p && lc.includes(p));
+    if (isStop) {
+      const stopped = await stopVoiceReply(guildId, { chime: true });
+      voiceActive.delete(guildId);
+      if (ch && stopped) ch.send('🛑 Stopped.').catch(() => {});
+      return;
+    }
 
     // spoken "leave voice" → actually disconnect from the voice channel
     if ((addressesName(text) || active) && LEAVE_RE.test(lc)) {
@@ -726,11 +776,23 @@ RESPONSE RULES:
       return;
     }
 
-    // For me? addressed by name, or inside an active follow-up window. Otherwise just transcribe.
-    if (!addressesName(text) && !active) return;
+    // For me? Inside the follow-up window, OR the shared wake matcher fires WITH enough confidence (#136).
+    // A low-confidence / bare-name mis-hear is rejected here and logged, so false triggers are visible.
+    if (!active) {
+      const d = wakeDecision(text, meta.confidence);
+      if (!d.addressed) {
+        if (d.reason === 'low-confidence' || d.reason === 'bare-name-no-confidence-signal') {
+          ctx.log(`[voice] wake REJECTED (${d.reason}; conf=${d.confidence == null ? 'n/a' : d.confidence}, thr=${d.threshold == null ? 'n/a' : d.threshold}): "${text.slice(0, 80)}"`);
+        }
+        return;
+      }
+      ctx.log(`[voice] wake fired (${d.reason}; conf=${d.confidence == null ? 'n/a' : d.confidence}): "${text.slice(0, 80)}"`);
+    }
 
     if (voiceBusy.has(guildId)) return; // don't stack replies
     voiceBusy.add(guildId);
+    voice.startSpeech(guildId);              // open a cancellable reply session (barge-in / stop can interrupt)
+    voiceReplyStart.set(guildId, Date.now()); // start the barge-in grace window
     try {
       if (!active) { await voice.playChime(guildId); await new Promise((r) => setTimeout(r, 600)); } // "I heard you" — only when ENTERING a conversation
       setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
@@ -777,7 +839,7 @@ RESPONSE RULES:
       }
       if (VOICE_WINDOW_MS > 0) voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open the follow-up window (strict mode: never)
     } catch (e) { voice.stopDrone(guildId); ctx.log(`[voice] reply failed: ${e.message}`); if (ch) ch.send(`⚠️ voice reply failed: ${e.message}`).catch(() => {}); }
-    finally { voiceBusy.delete(guildId); setVoiceStatus(null); } // back to listening/idle
+    finally { voice.endSpeech(guildId); voiceReplyStart.delete(guildId); voiceBusy.delete(guildId); setVoiceStatus(null); } // back to listening/idle
   }
 
   // Voice commands: "the assistant, join" (joins the author's voice channel + chimes + listens) / "the assistant, leave".
@@ -796,7 +858,15 @@ RESPONSE RULES:
       voiceText.set(message.guild.id, message.channel);
       voice.startListening(message.guild.id, client, {
         transcribe: sttTranscribe,
-        onUtterance: (name, text) => handleVoiceUtterance(message.guild.id, name, text),
+        onUtterance: (name, text, meta) => handleVoiceUtterance(message.guild.id, name, text, meta),
+        onBargeIn: () => {
+          const gid = message.guild.id;
+          if (cfg.voice_barge_in === false) return;        // disabled for noisy/cross-talk meetings
+          if (!voiceBusy.has(gid)) return;                 // nothing speaking → nothing to interrupt
+          if (Date.now() - (voiceReplyStart.get(gid) || 0) < BARGE_GRACE_MS) return; // let the reply get going
+          ctx.log('[voice] barge-in: user spoke over the reply → cancelling');
+          stopVoiceReply(gid, { chime: false });
+        },
         log: (m) => ctx.log(`[voice] ${m}`),
       });
       setVoiceStatus(`🎧 listening · ${vc.name}`);
