@@ -96,7 +96,7 @@ function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPa
     const session = rt.openSession({
       onOpen: () => log(`realtime: session OPEN for ${name}`),
       onPartial: (t) => { if (onPartial) { try { onPartial(name, t); } catch (_) {} } },
-      onFinal: (t) => { log(`realtime FINAL(${name}): ${String(t).slice(0, 60)}`); if (t && onUtterance) { try { onUtterance(name, t, { confidence: 1, realtime: true }); } catch (_) {} } },
+      onFinal: (t) => { log(`realtime FINAL(${name}): ${String(t).slice(0, 60)}`); if (t && onUtterance) { try { onUtterance(name, t, { confidence: 1, realtime: true, userId }); } catch (_) {} } },
       onError: (e) => log(`realtime stt ERROR: ${e}`),
     }, { model, live }); // live streaming model → partials during speech + commit finalizes; else server-VAD
     entry = { session, name, live, subscribed: false, idleTimer: null, burstFrames: 0 };
@@ -174,7 +174,7 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
         if (!meaningful(text)) return;              // drop ".", single chars, empty
         const u = client.users.cache.get(userId);
         const name = (u && (u.globalName || u.username)) || userId;
-        onUtterance(name, text, { confidence });
+        onUtterance(name, text, { confidence, userId });
       } catch (e) { log(`stt failed: ${e.message}`); }
     });
   });
@@ -200,7 +200,7 @@ async function speak(guildId, mp3Buffer) {
   const conn = connections.get(guildId);
   if (!conn) return null;
   const s = speech.get(guildId);
-  if (s && s.cancelled) return null; // barge-in/stop already fired — don't start the next sentence
+  if (!s || s.cancelled) return null; // no active reply session (stopped/deleted) or cancelled → don't play
   const { createAudioPlayer, createAudioResource, NoSubscriberBehavior, entersState, AudioPlayerStatus } = lib();
   const { Readable } = require('stream');
   const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
