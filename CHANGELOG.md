@@ -9,11 +9,13 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
-- **Realtime streaming transcription for Discord voice (#140).** Discord voice now streams each speaker's audio into the shared OpenAI GA Realtime STT over a WebSocket (`shared/speech/realtime-stt.js`), with **server-VAD deciding turn boundaries** instead of a fixed 1s silence timer, and **live captions** that grow as you speak and settle into the final line. No new dependency (Node's global WebSocket + the existing ephemeral-token path). Per-speaker sessions persist across short pauses and idle-close after prolonged silence. Toggle with `voice_realtime` (batch per-utterance STT remains the fallback).
+- **Realtime streaming transcription for Discord voice (#140).** Discord voice streams each speaker's audio into the shared OpenAI GA Realtime STT over a WebSocket (`shared/speech/realtime-stt.js`) using the **live streaming model** (`gpt-live-transcribe`), so captions fill in **as you speak** rather than after you stop. Each turn is finalized on Discord's end-of-speech by committing the audio buffer, which flushes the tail and yields a clean per-turn transcript — so overlapping speakers thread by who-started-first. The sliding-window partials are reconstructed into a running transcript (`mergeWindow`). No new dependency (Node's global WebSocket + the ephemeral-token subprotocol). Per-speaker sessions persist across short pauses and idle-close after prolonged silence. Toggle with `voice_realtime` (batch per-utterance STT remains the fallback).
 
 ### Changed
+- **Discord realtime STT is wired through the `realtime_transcribe` voice-engine role** (#113/#140), not a hard-coded model — Settings picks the engine, with a guard that falls back to the live streaming model if the bound engine isn't realtime-capable (e.g. a diarize model). `openai-live-transcribe` is now marked implemented and is the default `realtime_transcribe` binding.
 
 ### Fixed
+- **Realtime audio was silently garbled by a downsampler byte-offset bug** (audio flowed to the API but nothing came back). The 48k-stereo→24k-mono conversion stepped 4 bytes per output sample instead of 8, feeding the transcriber time-distorted samples from only the first half of each buffer. Pinned with a regression test.
 
 ## [0.14.1] - 2026-08-24
 
