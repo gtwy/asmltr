@@ -82,8 +82,12 @@ turns the model's final text into a `reply` action for that connector. `asmltr s
 
 ### Copy — post here **and** there
 
-Run `asmltr send`, then reply normally. The `send` delivers to the other channel; the normal
-reply still posts on the origin channel.
+Run `asmltr send`, then reply normally **immediately and end the turn**. The `send` delivers
+to the other channel; the origin-channel reply is the confirmation the person is staring at
+(Discord "email sent", not a six-minute Working spinner). Do not wait on another session to
+compose the mail. Do not poll. Do not send the same email again to "make sure" — if you are
+unsure it arrived, say so here and wait for them to tell you. `--force` is only for "I never
+got it." Same To + subject inside 30 minutes is refused as `already sent`.
 
 ```text
 User (in Discord): "let the team channel know the build passed"

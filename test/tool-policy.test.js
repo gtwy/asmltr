@@ -187,6 +187,8 @@ test('silo prompt has no NaN; put only when siloWrite is allowed', () => {
   assert.ok(owner.includes('asmltr silo put'));
   assert.ok(owner.includes('asmltr bounce'));
   assert.ok(owner.includes('ALWAYS last'));
+  assert.ok(owner.includes('Do not wait on another session to write the mail'));
+  assert.ok(owner.includes('--force'));
   const ro = buildToolbeltPrompt({
     deny: { siloWrite: true },
     selfSiloDir: '/tmp/self',

@@ -37,7 +37,8 @@ function buildToolbeltPrompt({
   }
   if (!d.send) {
     s += '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
-      'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here. ' +
+      'COPY (here + there): run it, then reply normally on THIS channel immediately and END the turn. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here. ' +
+      'Do not wait on another session to write the mail. Do not poll for delivery. Do not hunt for proof after compaction. A ✓ send or “already sent” IS the proof — do not send the same email again. If you are unsure it arrived, say so here and wait; they will tell you. Only resend when they say it never arrived (`asmltr send … --force`). ' +
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n';
   }
   if (!d.guildPost) {

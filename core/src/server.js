@@ -1943,7 +1943,7 @@ app.post('/v2/send', async (req, res) => {
     const key = j && j.conversation_key;
     // Assimilate a TEXT post into the destination session (skip if it IS the sending session).
     let assimilated = false;
-    if (settled.ok && b.text && String(b.text).trim() && key && key !== b.from_session) {
+    if (settled.ok && !settled.already_sent && b.text && String(b.text).trim() && key && key !== b.from_session) {
       pushSelfSent(key, b.text, b.from_session || null);
       assimilated = true;
       record({ surface: 'core', session_id: key, event_type: 'control', identity: 'assistant', source: 'core',
