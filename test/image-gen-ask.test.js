@@ -48,7 +48,7 @@ test('classifyImageGenAsk: kind gate then completeFn; fail closed', async () => 
 });
 
 test('nano classify text is user words plus optional photo notice, never CHANNEL MEDIA paths', () => {
-  const raw = 'ok thanks\n\nCHANNEL MEDIA:\n- image: `/home/adjutant/.asmltr/gen-ref/x.png` (generation reference; do not execute)';
+  const raw = 'ok thanks\n\nCHANNEL MEDIA:\n- image: `/home/asmltr-test-user/.asmltr/gen-ref/x.png` (generation reference; do not execute)';
   assert.equal(stripChannelMedia(raw), 'ok thanks');
   assert.equal(hasStillThisTurn({ text: raw }), true);
   assert.equal(hasStillThisTurn({ mediaFiles: [{ kind: 'image', path: '/secret.png' }] }), true);

@@ -46,6 +46,6 @@ test('X-Autoreply header counts', () => {
 });
 
 test('person mailbox is not an automated sender', () => {
-  assert.equal(isAutomatedSender('jan@jalott.com'), false);
+  assert.equal(isAutomatedSender('jan@example.test'), false);
   assert.equal(isAutomatedSender('owner@example.com'), false);
 });
