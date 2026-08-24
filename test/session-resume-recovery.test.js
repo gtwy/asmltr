@@ -15,7 +15,7 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 
 // Point the session store at a throwaway DB before it is required (it opens on import).
@@ -24,6 +24,13 @@ process.env.ASMLTR_CORE_DB = TMP_DB;
 
 const engines = require('../core/src/engines');
 const sessions = require('../core/src/sessions');
+
+// Close the sqlite handle deterministically when the file's tests finish (good hygiene). NOTE: the
+// actual CI crash — `Assertion failed: (env) != nullptr` in RemoveEnvironmentCleanupHook when
+// better-sqlite3's native Statement finalizers run on process exit — is a Node 24.19.0 teardown
+// REGRESSION (24.18.0 is fine), so closing the db doesn't prevent it; CI pins Node to 24.18.0 in
+// .github/workflows/test.yml. This close stays as correct cleanup regardless.
+after(() => { try { sessions.db.close(); } catch (_) {} });
 
 // ── recognizing a vanished session ────────────────────────────────────────────
 test('the exact claude SDK phrasing is recognized as a vanished session', () => {
