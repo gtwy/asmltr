@@ -9,11 +9,18 @@
  */
 const path = require('path');
 
+const rt = require('../../../shared/speech/realtime-stt'); // shared streaming STT (server-VAD turn-taking, #140)
+
 const CHIME = path.join(__dirname, 'assets', 'chime.ogg');
 const DRONE = path.join(__dirname, 'assets', 'drone.ogg');
 let V = null;
 const lib = () => (V || (V = require('@discordjs/voice')));
 const connections = new Map(); // guildId -> VoiceConnection
+// Realtime STT sessions, one per speaker: '<guildId>:<userId>' -> { session, name, subscribed, idleTimer }.
+// Kept open across short pauses (server-VAD segments turns); idle-closed after prolonged silence.
+const rtSessions = new Map();
+const rtKey = (g, u) => g + ':' + u;
+const SILENCE_700MS = Buffer.alloc(Math.round(24000 * 0.7) * 2); // trailing silence to flush a pending turn
 const dronePlayers = new Map(); // guildId -> looping "working" drone player
 // Active spoken-reply session per guild → makes a reply CANCELLABLE (barge-in / spoken "stop", #138).
 // { cancelled:bool, player:AudioPlayer|null }. speak() no-ops once cancelled, so queued sentences after a
@@ -74,10 +81,52 @@ function meaningful(t) {
   return t.replace(/[\s\p{P}\p{S}]/gu, '').length >= 2;
 }
 
+// Stream one speaker's audio into a persistent realtime STT session (#140). Opened lazily, kept open
+// across short pauses so server-VAD segments turns; flushed with trailing silence when a burst ends;
+// idle-closed after prolonged silence. onFinal → onUtterance; deltas → onPartial (live captions).
+function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, log }) {
+  const { EndBehaviorType } = lib();
+  const prism = require('prism-media');
+  const key = rtKey(guildId, userId);
+  let entry = rtSessions.get(key);
+  if (!entry) {
+    const u = client.users.cache.get(userId);
+    const name = (u && (u.globalName || u.username)) || userId;
+    const session = rt.openSession({
+      onPartial: (t) => { if (onPartial) { try { onPartial(name, t); } catch (_) {} } },
+      onFinal: (t) => { if (t && onUtterance) { try { onUtterance(name, t, { confidence: 1, realtime: true }); } catch (_) {} } },
+      onError: (e) => log(`realtime stt: ${e}`),
+    });
+    entry = { session, name, subscribed: false, idleTimer: null };
+    rtSessions.set(key, entry);
+  }
+  if (entry.subscribed) return; // already streaming this burst
+  entry.subscribed = true;
+  clearTimeout(entry.idleTimer);
+  const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 800 } });
+  const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
+  opus.on('error', () => {}); decoder.on('error', () => {});
+  opus.pipe(decoder);
+  decoder.on('data', (c) => { try { entry.session.pushPcm24(rt.pcm48StereoToPcm24Mono(c)); } catch (_) {} });
+  decoder.on('end', () => {
+    entry.subscribed = false;
+    try { entry.session.pushPcm24(SILENCE_700MS); } catch (_) {} // flush the pending turn (server-VAD needs trailing silence)
+    entry.idleTimer = setTimeout(() => { try { entry.session.close(); } catch (_) {} rtSessions.delete(key); }, 25000);
+  });
+}
+
+// Close + drop every realtime session for a guild (on stop-listening / leave).
+function closeRealtime(guildId) {
+  for (const [k, e] of rtSessions) {
+    if (k.startsWith(guildId + ':')) { try { clearTimeout(e.idleTimer); e.session.close(); } catch (_) {} rtSessions.delete(k); }
+  }
+}
+
 // transcribe = async (wavBuffer) -> text | { text, confidence } ; onUtterance = (name, text, meta) => {}
-// onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply,
-// so the caller can hard-cancel (low latency, no STT round-trip). Optional.
-function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, log = () => {} }) {
+// onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply.
+// onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
+// realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
+function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;
   const { EndBehaviorType } = lib();
@@ -91,6 +140,7 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, l
     // Barge-in: the bot only ever RECEIVES other humans (never its own playback), so any speech that
     // starts while a reply is playing is someone talking over it → interrupt. The handler debounces.
     if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
+    if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, log }); return; }
     if (active.has(userId)) return;
     active.add(userId);
     const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 } });
@@ -153,7 +203,7 @@ async function speak(guildId, mp3Buffer) {
   return player;
 }
 
-function stopListening(guildId) { listening.delete(guildId); }
+function stopListening(guildId) { listening.delete(guildId); closeRealtime(guildId); }
 
 // Soft looping "I'm working on it" drone — played while a turn is being generated, so the
 // speaker knows something is happening between the chime and the spoken reply.
