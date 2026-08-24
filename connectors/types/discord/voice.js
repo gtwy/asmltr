@@ -15,6 +15,10 @@ let V = null;
 const lib = () => (V || (V = require('@discordjs/voice')));
 const connections = new Map(); // guildId -> VoiceConnection
 const dronePlayers = new Map(); // guildId -> looping "working" drone player
+// Active spoken-reply session per guild → makes a reply CANCELLABLE (barge-in / spoken "stop", #138).
+// { cancelled:bool, player:AudioPlayer|null }. speak() no-ops once cancelled, so queued sentences after a
+// barge-in never play; stopSpeech() also stops the sentence playing right now.
+const speech = new Map(); // guildId -> { cancelled, player }
 
 async function joinChannel(voiceChannel) {
   const { joinVoiceChannel, entersState, VoiceConnectionStatus } = lib();
@@ -70,8 +74,10 @@ function meaningful(t) {
   return t.replace(/[\s\p{P}\p{S}]/gu, '').length >= 2;
 }
 
-// transcribe = async (wavBuffer) -> text ; onUtterance = (speakerName, text) => {}
-function startListening(guildId, client, { transcribe, onUtterance, log = () => {} }) {
+// transcribe = async (wavBuffer) -> text | { text, confidence } ; onUtterance = (name, text, meta) => {}
+// onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply,
+// so the caller can hard-cancel (low latency, no STT round-trip). Optional.
+function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;
   const { EndBehaviorType } = lib();
@@ -81,7 +87,11 @@ function startListening(guildId, client, { transcribe, onUtterance, log = () => 
   listening.add(guildId);
 
   receiver.speaking.on('start', (userId) => {
-    if (!listening.has(guildId) || active.has(userId)) return;
+    if (!listening.has(guildId)) return;
+    // Barge-in: the bot only ever RECEIVES other humans (never its own playback), so any speech that
+    // starts while a reply is playing is someone talking over it → interrupt. The handler debounces.
+    if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
+    if (active.has(userId)) return;
     active.add(userId);
     const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 } });
     const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
@@ -95,24 +105,43 @@ function startListening(guildId, client, { transcribe, onUtterance, log = () => 
       if (pcm.length < 48000 * 2 * 2 * 0.3) return; // < ~0.3s → too short (still keeps a crisp wake word)
       if (rmsInt16(pcm) < 300) return;              // near-silent → skip (kills STT silence-hallucinations)
       try {
-        const text = (await transcribe(pcmToWav(pcm)) || '').trim();
+        const res = await transcribe(pcmToWav(pcm));
+        const text = ((typeof res === 'string' ? res : (res && res.text)) || '').trim();
+        const confidence = (res && typeof res === 'object' && typeof res.confidence === 'number') ? res.confidence : undefined;
         if (!meaningful(text)) return;              // drop ".", single chars, empty
         const u = client.users.cache.get(userId);
         const name = (u && (u.globalName || u.username)) || userId;
-        onUtterance(name, text);
+        onUtterance(name, text, { confidence });
       } catch (e) { log(`stt failed: ${e.message}`); }
     });
   });
   return true;
 }
 
-// speak an mp3 (e.g. ElevenLabs TTS) into the channel; resolves when playback ends
+// Mark the start of a cancellable spoken reply. Call before streaming sentences into speak().
+function startSpeech(guildId) { speech.set(guildId, { cancelled: false, player: null }); }
+// Is a (non-cancelled) reply currently speaking? Used to decide barge-in.
+function isSpeaking(guildId) { const s = speech.get(guildId); return !!(s && !s.cancelled); }
+// Hard-cancel the current reply: stop the sentence playing now AND make queued sentences no-op.
+function stopSpeech(guildId) {
+  const s = speech.get(guildId);
+  if (s) { s.cancelled = true; try { s.player && s.player.stop(true); } catch (_) {} }
+  speech.delete(guildId);
+}
+// Normal end of a reply (all sentences spoken) — clear the session without cancelling.
+function endSpeech(guildId) { speech.delete(guildId); }
+
+// speak an mp3 (e.g. ElevenLabs TTS) into the channel; resolves when playback ends. Honors the
+// cancellable speech session: if the reply was barged-in/stopped, this no-ops so the queue drains silently.
 async function speak(guildId, mp3Buffer) {
   const conn = connections.get(guildId);
   if (!conn) return null;
+  const s = speech.get(guildId);
+  if (s && s.cancelled) return null; // barge-in/stop already fired — don't start the next sentence
   const { createAudioPlayer, createAudioResource, NoSubscriberBehavior, entersState, AudioPlayerStatus } = lib();
   const { Readable } = require('stream');
   const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+  if (s) s.player = player;
   player.play(createAudioResource(Readable.from(mp3Buffer)));
   conn.subscribe(player);
   try {
@@ -120,6 +149,7 @@ async function speak(guildId, mp3Buffer) {
     await entersState(player, AudioPlayerStatus.Idle, 120000);
   } catch (_) {}
   try { player.stop(); } catch (_) {}
+  if (s && s.player === player) s.player = null;
   return player;
 }
 
@@ -158,4 +188,7 @@ function leave(guildId) {
 
 const isConnected = (guildId) => connections.has(guildId);
 
-module.exports = { joinChannel, playChime, speak, leave, isConnected, startListening, stopListening, startDrone, stopDrone };
+module.exports = {
+  joinChannel, playChime, speak, leave, isConnected, startListening, stopListening, startDrone, stopDrone,
+  startSpeech, stopSpeech, endSpeech, isSpeaking,
+};

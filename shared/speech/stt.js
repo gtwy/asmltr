@@ -66,12 +66,35 @@ function setConfig(partial) {
   return config();
 }
 
+// Prompt-echo suppression (#137): gpt-4o-transcribe regurgitates the biasing `prompt` (a prose hint
+// like "…an assistant named <name>.") into the transcript when handed low-content / near-silent audio.
+// That scaffolding text then leaks into transcripts and — worse — feeds the wake matcher. Strip any
+// verbatim echo of the prompt; if the whole transcript IS the prompt (or a near-total word overlap of a
+// short fragment), return empty. Deterministic + shared so every surface that passes a prompt is covered.
+function stripPromptEcho(text, prompt) {
+  if (!prompt || !text) return text || '';
+  const N = (s) => String(s).toLowerCase().replace(/[\p{P}\p{S}]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const nt = N(text); const np = N(prompt);
+  if (!nt) return '';
+  if (nt === np) return '';
+  const esc = prompt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const out = String(text).replace(new RegExp(esc, 'ig'), ' ').replace(/\s+/g, ' ').trim();
+  const pw = new Set(np.split(' ').filter(Boolean));
+  const ow = N(out).split(' ').filter(Boolean);
+  if (ow.length && ow.length <= 5) {
+    const overlap = ow.filter((w) => pw.has(w)).length / ow.length;
+    if (overlap >= 0.6) return ''; // short leftover that's mostly prompt words → an echo fragment
+  }
+  return out;
+}
+
 /**
- * Transcribe an audio buffer → { text, model }. THE one STT entry point for all of asmltr
+ * Transcribe an audio buffer → { text, model, confidence }. THE one STT entry point for all of asmltr
  * (core /v2/transcribe + connectors like Discord voice). Pass per-call overrides to vary
  * model/language/key/prompt without touching global config.
  * @param {Buffer} buffer  encoded audio (webm/opus, wav, mp4, mp3…)
- * @param {object} [opts]  { filename, mime, model, language, keyName, prompt }
+ * @param {object} [opts]  { filename, mime, model, language, keyName, prompt, logprobs }
+ *   logprobs:true → return a `confidence` ∈ [0,1] (mean token prob) for wake-gating (gpt-4o transcribe only).
  */
 async function transcribe(buffer, opts = {}) {
   const cfg = config();
@@ -80,6 +103,7 @@ async function transcribe(buffer, opts = {}) {
   if (!key) throw new Error(`no STT key (secret '${opts.keyName || cfg.keyName}' is empty)`);
   const model = opts.model || cfg.model;
   const language = opts.language !== undefined ? opts.language : cfg.language;
+  const wantLogprobs = !!opts.logprobs && /^gpt-4o(-mini)?-transcribe$/i.test(model); // logprobs: plain gpt-4o transcribe only (NOT the diarize model, which needs diarized_json)
 
   const fd = new FormData();
   fd.append('file', new Blob([buffer], { type: opts.mime || 'audio/webm' }), opts.filename || 'audio.webm');
@@ -87,15 +111,25 @@ async function transcribe(buffer, opts = {}) {
   if (language) fd.append('language', language);
   if (opts.prompt) fd.append('prompt', opts.prompt); // bias the decoder (e.g. toward a wake word)
   fd.append('response_format', 'json');
+  if (wantLogprobs) fd.append('include[]', 'logprobs');
 
   const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: fd,
   });
   if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`openai stt ${r.status} ${t.slice(0, 200)}`); }
   const j = await r.json().catch(() => ({}));
+  // Confidence from token logprobs: mean(exp(logprob)) ∈ [0,1]. null when not requested/returned. Lets the
+  // caller gate a wake trigger on how sure the model actually was (#136 false-trigger fix).
+  let confidence = null;
+  const lps = Array.isArray(j.logprobs) ? j.logprobs : (j.logprobs && Array.isArray(j.logprobs.content) ? j.logprobs.content : null);
+  if (lps && lps.length) {
+    const ps = lps.map((l) => Math.exp(Number(l.logprob))).filter((p) => Number.isFinite(p));
+    if (ps.length) confidence = +(ps.reduce((a, b) => a + b, 0) / ps.length).toFixed(4);
+  }
+  const text = stripPromptEcho((j.text || '').trim(), opts.prompt);
   // `duration` is only present when the model+format return it (verbose_json / some models). Fall back to
   // the clip byte length so the caller can estimate audio seconds for cost accounting (see shared/usage).
-  return { text: (j.text || '').trim(), model, duration: j.duration, bytes: buffer.length };
+  return { text, model, duration: j.duration, bytes: buffer.length, confidence };
 }
 
 /**
@@ -186,4 +220,4 @@ async function realtimeToken(opts = {}) {
   return { value: j.value, expires_at: j.expires_at, model };
 }
 
-module.exports = { transcribe, transcribeDiarized, config, setConfig, realtimeToken };
+module.exports = { transcribe, transcribeDiarized, config, setConfig, realtimeToken, stripPromptEcho };

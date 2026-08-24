@@ -9,10 +9,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Shared, confidence-gated wake matcher (`shared/speech/wake.js`).** One deterministic wake/direct-address matcher for every voice surface, with a confidence gate that refuses to fire a turn on a low-confidence or bare-lone-name match — killing the false-trigger bug where a mis-transcribed word made the assistant reply when its name wasn't actually said. Confidence derives from STT token logprobs; the bar scales with `wake_sensitivity`. (#136)
+- **Cross-surface interrupt / barge-in for Discord voice.** One hard-stop primitive behind three entry points (#138): a spoken "<name>, stop" (or any configured stop phrase), talking over a reply (low-latency barge-in, no STT round-trip), and text `@bot stop` — which now fans the stop through to a live voice session joined from that channel. Barge-in is toggleable (`voice_barge_in`) and has a short grace window so the asker's own trailing words don't cut off the reply.
 
 ### Changed
+- **Discord voice STT now routes through the pluggable voice-engine role layer** (`voice-engines.resolve('transcribe')`) instead of a hard-wired model, so a Settings change swaps the engine with no connector edit — with a safe fallback when the bound engine needs a different endpoint shape (e.g. diarize). (#139)
 
 ### Fixed
+- **Scaffolding/classifier text no longer leaks into voice transcripts** (#137). Dropped the name-priming STT prompt on the Discord path (it biased the decoder toward mis-hearing the wake word *and* got echoed into transcripts on near-silent audio) and added shared prompt-echo suppression in `shared/speech/stt.js` for any surface that still passes a prompt.
 
 ## [0.13.1] - 2026-08-18
 
