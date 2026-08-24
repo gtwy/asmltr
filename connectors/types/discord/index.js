@@ -699,6 +699,7 @@ RESPONSE RULES:
   const voiceReplyStart = new Map(); // guildId -> ts a reply began (barge-in grace window)
   const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after a reply starts (don't cut off on the asker's own trailing words)
   const voiceMuted = new Set();  // guildIds where Eve is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
+  const voiceGen = new Map();    // guildId -> reply generation. stopVoiceReply bumps it; the in-flight reply checks it and bails, so a stopped turn never speaks even if the LLM finishes after the abort.
   // 0 (default) = STRICT: respond ONLY when directly addressed by name, then go passive. A positive
   // value opens a "keep answering follow-ups without the wake word" window for that many ms.
   const VOICE_WINDOW_MS = Number.isFinite(Number(cfg.voice_followup_ms)) ? Number(cfg.voice_followup_ms) : 0;
@@ -752,6 +753,7 @@ RESPONSE RULES:
   async function stopVoiceReply(guildId, { chime = false } = {}) {
     let voice; try { voice = require('./voice'); } catch (_) { return false; }
     const wasBusy = voiceBusy.has(guildId);
+    voiceGen.set(guildId, (voiceGen.get(guildId) || 0) + 1); // invalidate the in-flight reply so it can't speak
     voice.stopSpeech(guildId); voice.stopDrone(guildId);
     voiceBusy.delete(guildId); voiceReplyStart.delete(guildId);
     try { await ctx.core.abort(voiceConvKey(guildId)); } catch (_) {}
@@ -869,6 +871,8 @@ RESPONSE RULES:
     voiceBusy.add(guildId);
     voice.startSpeech(guildId);              // open a cancellable reply session (barge-in / stop can interrupt)
     voiceReplyStart.set(guildId, Date.now()); // start the barge-in grace window
+    const myGen = voiceGen.get(guildId) || 0; // this reply's generation; stopVoiceReply bumps it to cancel
+    const live = () => (voiceGen.get(guildId) || 0) === myGen; // still the current, un-stopped reply?
     try {
       if (!active) { await voice.playChime(guildId); await new Promise((r) => setTimeout(r, 600)); } // "I heard you" — only when ENTERING a conversation
       setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
@@ -879,11 +883,12 @@ RESPONSE RULES:
       // in parallel; playback is chained so sentences are spoken in order.
       let buf = '', full = '', firstAudio = false, chain = Promise.resolve();
       const speakSentence = (s) => {
-        const t = s.trim(); if (!t) return;
+        const t = s.trim(); if (!t || !live()) return; // stopped/superseded → don't even synthesize
         const ttsP = elevenLabsTTS(t);
         chain = chain.then(async () => {
+          if (!live()) return;             // cancelled before this sentence's turn to play
           const mp3 = await ttsP;
-          if (!mp3) return;
+          if (!mp3 || !live()) return;      // cancelled during TTS
           if (!firstAudio) { firstAudio = true; voice.stopDrone(guildId); setVoiceStatus('🔊 speaking'); }
           await voice.speak(guildId, mp3);
         }).catch((e) => ctx.log(`[voice] speak failed: ${e.message}`));
@@ -898,7 +903,10 @@ RESPONSE RULES:
         channel: 'discord',
         conversation_key: `discord-voice:${ctx.instanceId}:guild:${guildId}`,
         message_id: `voice-${Date.now()}`,
-        sender: { raw_id: name, raw_username: name },
+        // Identity = the SPEAKER who said her name. Pass their immutable Discord user ID as raw_id (same
+        // key the text path uses) so the core resolves the RIGHT principal + trust per turn, instead of a
+        // display name that matches no identity mapping (that's what made Eve address everyone as one person).
+        sender: { raw_id: meta.userId ? String(meta.userId) : name, raw_username: name },
         content: { text },
         delivery: 'sync',
         capabilities: { max_message_chars: 700, supports_markdown: false },
@@ -909,11 +917,12 @@ RESPONSE RULES:
       flush(true);
       await chain; // wait until every sentence has finished speaking
       voice.stopDrone(guildId);
-      if (full.trim()) {
+      // Only record/announce the reply if it wasn't stopped mid-flight (a cancelled turn never really spoke).
+      if (full.trim() && live()) {
         logTranscript(guildId, NAME, full.trim());
         if (ch && voicePostTranscript) ch.send(`🔊 **${NAME}:** ${full.trim().slice(0, 1800)}`).catch(() => {});
       }
-      if (VOICE_WINDOW_MS > 0) voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open the follow-up window (strict mode: never)
+      if (VOICE_WINDOW_MS > 0 && live()) voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open the follow-up window (strict mode: never)
     } catch (e) { voice.stopDrone(guildId); ctx.log(`[voice] reply failed: ${e.message}`); if (ch) ch.send(`⚠️ voice reply failed: ${e.message}`).catch(() => {}); }
     finally { voice.endSpeech(guildId); voiceReplyStart.delete(guildId); voiceBusy.delete(guildId); setVoiceStatus(null); } // back to listening/idle
   }
