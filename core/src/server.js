@@ -39,6 +39,8 @@ const { randomUUID } = require('crypto');
 
 const env = require('./envelope');
 const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
+const deviceStore = require('./devices/store'); // device registry — the machines asmltr drives (docs/DEVICE-REGISTRY.md)
+const deviceEnroll = require('./devices/enroll'); // device credential issuance (vault-backed; replaces keys.json)
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
@@ -225,6 +227,14 @@ function drainObserved(key) {
 /**
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
+// SPEAKER-CHANGED banner state: conversation_key -> { id, name } of the previous turn's sender.
+// A static per-turn CURRENT SPEAKER line gets habituated/skimmed across a long single-speaker
+// stretch, so a mid-thread flip to a different person is easy to miss (the misidentify-by-momentum
+// failure). When THIS turn's sender differs from the prior one we inject a salient change-flag,
+// keyed on the IMMUTABLE id (not the mutable username/display_name). Self-gates to multi-user
+// channels — a single-speaker channel never changes, so it never fires.
+const _lastSpeakerByConv = new Map();
+
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
   const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
@@ -288,7 +298,16 @@ async function handle(envelope, opts = {}) {
   const spkId = (e.sender && (e.sender.raw_id || e.sender.raw_username)) || 'unknown';
   const spkName = (resolved && !resolved.is_default && resolved.display_name)
     || (e.sender && e.sender.raw_username) || 'an unidentified user';
-  const currentSpeaker = 'CURRENT SPEAKER — READ FIRST, TRUST THIS OVER EVERYTHING ELSE:\n'
+  // SPEAKER CHANGED — prepend a salient flag when THIS turn's sender (by immutable id) differs from
+  // the prior turn in this channel. Defeats habituation to the static line below; self-gates to
+  // multi-user channels. See _lastSpeakerByConv above.
+  const _prevSpk = _lastSpeakerByConv.get(e.conversation_key);
+  const speakerChanged = (_prevSpk && _prevSpk.id !== spkId)
+    ? `⚠️ SPEAKER CHANGED — the previous turn in this channel was from ${_prevSpk.name}; THIS turn is from ${spkName}. They are DIFFERENT people. Do NOT carry over whoever you were just addressing — re-read who is speaking NOW.\n\n`
+    : '';
+  _lastSpeakerByConv.set(e.conversation_key, { id: spkId, name: spkName });
+  const currentSpeaker = speakerChanged
+    + 'CURRENT SPEAKER — READ FIRST, TRUST THIS OVER EVERYTHING ELSE:\n'
     + `The message you are answering on THIS turn is from ${spkName} (${e.channel}:${spkId}). `
     + `Treat and address them as ${spkName}. Do NOT assume they are anyone else — not the owner of this machine, `
     + 'not a person from earlier in this conversation, not whoever your base instructions (CLAUDE.md) call "your user". '
@@ -1939,6 +1958,52 @@ app.delete('/trust/relationships/:id', (req, res) => res.json({ ok: trust.relati
 app.get('/trust/engagement', (req, res) => res.json({ engagement: trust.engagement.list() }));
 app.post('/trust/engagement', (req, res) => res.json({ id: trust.engagement.set(req.body || {}) }));
 app.delete('/trust/engagement/:id', (req, res) => res.json({ ok: trust.engagement.remove(Number(req.params.id)) }));
+
+// --- device registry (docs/DEVICE-REGISTRY.md) -------------------------------------------------
+// The machines asmltr drives, and the devices that drive it. Sits beside /trust/* deliberately:
+// device access keys on the same principals, and this is the same control plane one layer out.
+// Exposure follows the existing /v2 convention — core binds localhost and the dashboard fronts it
+// with session auth. The ONE exception is /v2/devices/redeem, which a machine calls for itself and
+// is authenticated by the single-use enrollment code rather than by a session.
+app.get('/v2/devices', (req, res) => res.json({ devices: deviceStore.devices.list({ transport: req.query.transport, status: req.query.status }) }));
+app.get('/v2/devices/:id', (req, res) => { const d = deviceStore.devices.get(req.params.id); return d ? res.json(d) : res.status(404).json({ error: 'not found' }); });
+app.post('/v2/devices', (req, res) => { try { res.status(201).json(deviceStore.devices.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.patch('/v2/devices/:id', (req, res) => { try { const d = deviceStore.devices.update(req.params.id, req.body || {}); return d ? res.json(d) : res.status(404).json({ error: 'not found' }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/devices/:id', (req, res) => res.json({ ok: deviceStore.devices.remove(req.params.id) }));
+
+app.post('/v2/devices/:id/transports', (req, res) => { try { res.status(201).json(deviceStore.transports.upsert(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/devices/:id/transports/:transport', (req, res) => res.json({ ok: deviceStore.transports.remove(req.params.id, req.params.transport) }));
+
+// Mint a one-time enrollment code. The response carries the code; it is not a credential and is
+// useless after one redemption or its TTL, whichever comes first.
+app.post('/v2/devices/:id/enroll', (req, res) => {
+  try { res.json(deviceEnroll.mintCode(req.params.id, (req.body || {}).transport || 'rd', (req.body || {}).ttl_ms)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Rotate/issue directly (operator path) — returns the token ONCE, never retrievable here again.
+app.post('/v2/devices/:id/issue', async (req, res) => {
+  try { res.json(await deviceEnroll.issue(req.params.id, (req.body || {}).transport || 'rd')); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Redeemed BY THE MACHINE. Invalid and expired codes return the same error on purpose.
+app.post('/v2/devices/redeem', async (req, res) => {
+  try { res.json(await deviceEnroll.redeem((req.body || {}).code)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/v2/devices/:id/revoke', async (req, res) => {
+  try { res.json(await deviceEnroll.revoke(req.params.id, (req.body || {}).transport || null)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// THE HOT PATH. The remote-desktop broker calls this on every signaling message, so it stays a
+// single indexed hash lookup — no vault round-trip — and the caller caches it briefly.
+app.post('/v2/devices/auth', (req, res) => {
+  const b = req.body || {};
+  const who = deviceStore.authenticate(b.token, b.transport || null);
+  if (!who) return res.status(401).json({ ok: false, error: 'unknown or revoked device credential' });
+  deviceStore.transports.touch(who.device_id, who.transport);
+  res.json({ ok: true, ...who });
+});
 
 if (require.main === module) {
   const server = app.listen(PORT, HOST, () => {

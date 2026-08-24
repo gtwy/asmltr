@@ -118,6 +118,16 @@ server {
     # (that would 401 the actual RD peers). The dashboard's RD view sends a device-local RD token in the
     # request body. SSE (/rd/stream) needs buffering off so signaling frames flush immediately; no prefix
     # to strip (the broker serves /rd/… at the root).
+    # Injects the RD broker token into the authenticated GUI only (behind the session auth_request), so a
+    # logged-in owner's Remote Desktop view lists hosts without pasting a token. Not under /rd (Traefik
+    # routes /rd straight to the broker), so this stays a dashboard-served, auth-gated file.
+    location = /gui-config.js {
+        auth_request /_asmltr_authz;
+        default_type application/javascript;
+        add_header Cache-Control "no-store";
+        return 200 'window.__RD_TOKEN__="${ASMLTR_RD_TOKEN}";';
+    }
+
     location /rd/ {
         # Pinned back to nginx's own default rather than inheriting the server-level 1024m above. That
         # ceiling exists for chunk PUTs and backup import, both behind the session auth_request; this
