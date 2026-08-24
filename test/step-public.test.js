@@ -92,29 +92,16 @@ test('stripThoughtChrome: email/mcp drop chips and thought preamble, keep the an
 });
 
 
-test('stripThoughtChrome: leading internal plan is dropped only when a letter follows', () => {
+test('stripThoughtChrome: glued plan+letter in one last segment survives (no name/plan cut)', () => {
   const plan = 'Photo is two CyberPower PR2200LCDRT2U units. OEM cartridge is RB1290X4F — I’ll send the Amazon links and flag that you need two, one per unit.';
   const letter = "You're right — those are CyberPower. The model is PR2200LCDRT2U.";
-  const withName = plan + '\n\nJames,\n\n' + letter;
-  const noName = plan + '\n\n' + letter;
-  const outName = stripThoughtChrome(withName);
-  const outBare = stripThoughtChrome(noName);
-  assert.equal(outName.includes('I’ll send'), false);
-  assert.equal(outName.includes('Photo is'), false);
-  assert.ok(outName.includes("You're right"));
-  assert.ok(outName.includes('James,'), outName);
-  assert.equal(outBare.startsWith("You're right"), true, outBare.slice(0, 80));
-  assert.equal(outBare.includes('I’ll send'), false);
+  const glued = plan + '\n\n' + letter;
+  assert.equal(stripThoughtChrome(glued), glued);
+  assert.equal(quietReplyFromResult({ segments: [glued], text: glued }), glued);
   assert.equal(stripThoughtChrome("I'll send the invoice tomorrow."), "I'll send the invoice tomorrow.");
-  assert.equal(stripThoughtChrome(letter), letter);
   const greeted = 'James,\n\n' + letter;
   assert.equal(stripThoughtChrome(greeted), greeted);
-  const withStore = letter + '\n\nAmazon,\nthen the cart.';
-  assert.equal(stripThoughtChrome(withStore), withStore);
-  const signed = "I'll send the invoice tomorrow.\n\nSincerely,\nIvy";
-  assert.equal(stripThoughtChrome(signed), signed);
-  const q = quietReplyFromResult({ segments: [noName], text: noName });
-  assert.equal(q.startsWith("You're right"), true);
+  assert.equal(stripThoughtChrome(letter), letter);
 });
 
 test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 chip', () => {

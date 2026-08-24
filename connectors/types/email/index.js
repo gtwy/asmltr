@@ -641,7 +641,7 @@ async function start(ctx) {
       `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
       `Do not type a name or signature block — "${fromName}" and the rest of the signature are appended automatically. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
-      `Keep it appropriate for email. Mailed body is the letter only — no scratch notes or internal plan above it. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
+      `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
@@ -650,6 +650,7 @@ async function start(ctx) {
         extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. @example.com is always silent. Customer we already emailed on an open ticket: one notice to Example Co staff only.';
       }
     }
+    extra += ' Write the letter only. The first line of the mailed body is the greeting or the first sentence to the reader. No notes-to-self, no photo captions, no I\'ll-send plans above that.';
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,
