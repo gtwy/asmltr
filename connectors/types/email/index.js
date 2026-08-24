@@ -2,6 +2,13 @@
 const { sendPolicyFromConfig } = require('./send-policy');
 const { parseAuthResults: parseAuthResultsAligned, alignsWithFrom } = require('./auth-align');
 const { persistAuthRejectLine } = require('./auth-reject-persist');
+const {
+  escapeHtml,
+  stripDiscordChrome,
+  markdownToHtml,
+  wrapEmailHtml,
+  emailHtmlFromMarkdown,
+} = require('./markdown-html');
 /**
  * asmltr connector type: EMAIL (SMTP send + IMAP receive/watch).
  *
@@ -64,6 +71,15 @@ function shouldExtraFetchPass({ stopped, usable, pendingExists, mailbox, lastUid
   return !!(progressed && moreUidsWaiting(mailbox, lastUid));
 }
 
+// Multipart body for SMTP: text is markdown+signature; html is sanitized conversion.
+// Fail open: convert errors omit html so nodemailer sends text only.
+function buildMailContent(text, signature) {
+  const plain = (text || '') + (signature || '');
+  let html;
+  try { html = emailHtmlFromMarkdown(plain); } catch (_) { html = undefined; }
+  return html ? { text: plain, html } : { text: plain };
+}
+
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
 
 const meta = {
@@ -71,7 +87,7 @@ const meta = {
   displayName: 'Email (SMTP/IMAP)',
   outbound: { kinds: ['text', 'file'], target: { required: true, label: 'Recipient email address' } },
   readable: { ops: ['list', 'read', 'search'] }, // the mailbox can be browsed on demand (agent-facing)
-  capabilities: { max_message_chars: 100000, supports_markdown: false, supports_attachments_out: true },
+  capabilities: { max_message_chars: 100000, supports_markdown: true, supports_attachments_out: true },
   credentialKeys: ['user_bws_key', 'pass_bws_key'],
   configSchema: {
     type: 'object',
@@ -512,11 +528,13 @@ async function start(ctx) {
   const selfAddr = String(address).toLowerCase();
 
   async function sendMail({ to, cc, subject, text, inReplyTo, references, attachments }) {
+    const content = buildMailContent(text, signature);
     const info = await smtp.sendMail({
       from: `"${fromName}" <${address}>`, to,
       cc: cc || undefined,
       subject: subject || `Message from ${fromName}`,
-      text: (text || '') + signature,
+      text: content.text,
+      ...(content.html ? { html: content.html } : {}),
       inReplyTo: inReplyTo || undefined,
       references: references && references.length ? references.join(' ') : undefined,
       attachments: attachments || undefined,
@@ -650,6 +668,7 @@ async function start(ctx) {
         extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. @example.com is always silent. Customer we already emailed on an open ticket: one notice to Example Co staff only.';
       }
     }
+    extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags. Do not use Discord-only markup (-# subtext, 💭 chips) in a letter.';
     extra += ' Write the letter only. The first line of the mailed body is the greeting or the first sentence to the reader. No notes-to-self, no photo captions, no I\'ll-send plans above that.';
     const actions = await ctx.core.handle({
       channel: 'email',
@@ -899,4 +918,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, queueOutboundMail, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { meta, start, queueOutboundMail, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };

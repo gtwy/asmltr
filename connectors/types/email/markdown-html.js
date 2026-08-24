@@ -1,0 +1,243 @@
+'use strict';
+
+/**
+ * Send-time markdown → sanitized email HTML.
+ * Escape first, then apply markdown. Never pass model HTML through.
+ */
+
+const DISCLOSURE_STYLE = 'font-size:12px;font-style:italic;color:#555;';
+const DISCLOSURES = [
+  '(paid link)',
+  'As an Amazon Associate I earn from qualifying purchases.',
+];
+
+const STYLE = {
+  h1: 'font-size:22px;font-weight:bold;margin:16px 0 8px;',
+  h2: 'font-size:18px;font-weight:bold;margin:14px 0 8px;',
+  h3: 'font-size:16px;font-weight:bold;margin:12px 0 6px;',
+  h4: 'font-size:16px;font-weight:bold;margin:12px 0 6px;',
+  p: 'margin:0 0 12px;',
+  ul: 'padding-left:24px;margin:8px 0;',
+  ol: 'padding-left:24px;margin:8px 0;',
+  li: 'margin:4px 0;',
+  code: 'background:#f4f4f4;padding:1px 4px;font-family:Consolas,Monaco,monospace;',
+  pre: 'background:#f4f4f4;padding:12px;font-family:Consolas,Monaco,monospace;white-space:pre-wrap;',
+  a: 'text-decoration:underline;',
+  blockquote: 'margin:8px 0;padding-left:12px;border-left:3px solid #ccc;color:#555;',
+};
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function unescapeHtml(s) {
+  return String(s)
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function normalizeNewlines(s) {
+  return String(s == null ? '' : s).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/** Drop Discord subtext lines (-#) and leftover thought-balloon chips. */
+function stripDiscordChrome(s) {
+  return normalizeNewlines(s)
+    .split('\n')
+    .filter((line) => !/^-\#/.test(line))
+    .join('\n')
+    .replace(/💭/g, '');
+}
+
+function safeHref(escapedUrl) {
+  const raw = unescapeHtml(escapedUrl).trim();
+  if (!/^(https?:|mailto:)/i.test(raw)) return null;
+  return escapeHtml(raw);
+}
+
+function styleDisclosures(s) {
+  let out = s;
+  for (const phrase of DISCLOSURES) {
+    if (!out.includes(phrase)) continue;
+    const wrapped = `<span style="${DISCLOSURE_STYLE}">${phrase}</span>`;
+    out = out.split(phrase).join(wrapped);
+  }
+  return out;
+}
+
+function applyBoldItalic(s) {
+  s = s.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/__([^\n]+?)__/g, '<strong>$1</strong>');
+  s = s.replace(/\*([^\n]+?)\*/g, '<em>$1</em>');
+  s = s.replace(/(?<![A-Za-z0-9])_([^\n_]+?)_(?![A-Za-z0-9])/g, '<em>$1</em>');
+  return s;
+}
+
+function replaceLinks(s, stash) {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const open = s.indexOf('[', i);
+    if (open < 0) { out += s.slice(i); break; }
+    const mid = s.indexOf('](', open);
+    if (mid < 0) { out += s.slice(i); break; }
+    let depth = 1;
+    let j = mid + 2;
+    while (j < s.length && depth > 0) {
+      if (s[j] === '(') depth += 1;
+      else if (s[j] === ')') depth -= 1;
+      j += 1;
+    }
+    if (depth !== 0) { out += s.slice(i); break; }
+    out += s.slice(i, open);
+    const text = s.slice(open + 1, mid);
+    const url = s.slice(mid + 2, j - 1);
+    const href = safeHref(url);
+    const inner = applyBoldItalic(text);
+    out += href ? stash(`<a href="${href}" style="${STYLE.a}">${inner}</a>`) : inner;
+    i = j;
+  }
+  return out;
+}
+
+function applyInline(escaped) {
+  const holes = [];
+  const stash = (html) => {
+    const i = holes.length;
+    holes.push(html);
+    return `\u0000H${i}\u0000`;
+  };
+
+  let s = escaped;
+  s = s.replace(/`([^`]+)`/g, (_, code) => stash(`<code style="${STYLE.code}">${code}</code>`));
+  s = replaceLinks(s, stash);
+  s = applyBoldItalic(s);
+  s = s.replace(/\u0000H(\d+)\u0000/g, (_, i) => holes[Number(i)]);
+  return styleDisclosures(s);
+}
+
+function isBlockStart(line) {
+  if (/^```/.test(line)) return true;
+  if (/^#{1,4} /.test(line)) return true;
+  if (/^&gt;/.test(line)) return true;
+  if (/^[-*+] /.test(line)) return true;
+  if (/^\d+\. /.test(line)) return true;
+  return false;
+}
+
+function tag(name, style, inner) {
+  return `<${name} style="${style}">${inner}</${name}>`;
+}
+
+/** Inner HTML fragment. Escapes first, then applies markdown. */
+function markdownToHtml(md) {
+  const escaped = escapeHtml(normalizeNewlines(md));
+  const lines = escaped.split('\n');
+  const out = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (/^```/.test(line)) {
+      const code = [];
+      i += 1;
+      while (i < lines.length && !/^```/.test(lines[i])) {
+        code.push(lines[i]);
+        i += 1;
+      }
+      if (i < lines.length) i += 1;
+      out.push(`<pre style="${STYLE.pre}"><code style="${STYLE.code}">${code.join('\n')}</code></pre>`);
+      continue;
+    }
+
+    const hm = /^(#{1,4}) (.+)$/.exec(line);
+    if (hm) {
+      const level = hm[1].length;
+      out.push(tag(`h${level}`, STYLE[`h${level}`], applyInline(hm[2].trim())));
+      i += 1;
+      continue;
+    }
+
+    if (/^&gt;/.test(line)) {
+      const quote = [];
+      while (i < lines.length && /^&gt;/.test(lines[i])) {
+        quote.push(lines[i].replace(/^&gt; ?/, ''));
+        i += 1;
+      }
+      const inner = applyInline(quote.join('\n')).replace(/\n/g, '<br>');
+      out.push(tag('blockquote', STYLE.blockquote, inner));
+      continue;
+    }
+
+    if (/^[-*+] /.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[-*+] /.test(lines[i])) {
+        items.push(tag('li', STYLE.li, applyInline(lines[i].replace(/^[-*+] /, ''))));
+        i += 1;
+      }
+      out.push(tag('ul', STYLE.ul, items.join('')));
+      continue;
+    }
+
+    if (/^\d+\. /.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\. /.test(lines[i])) {
+        items.push(tag('li', STYLE.li, applyInline(lines[i].replace(/^\d+\. /, ''))));
+        i += 1;
+      }
+      out.push(tag('ol', STYLE.ol, items.join('')));
+      continue;
+    }
+
+    if (line.trim() === '') {
+      i += 1;
+      continue;
+    }
+
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i])) {
+      para.push(lines[i]);
+      i += 1;
+    }
+    const inner = applyInline(para.join('\n')).replace(/\n/g, '<br>');
+    out.push(tag('p', STYLE.p, inner));
+  }
+
+  return out.join('\n');
+}
+
+function wrapEmailHtml(inner) {
+  return (
+    '<!DOCTYPE html>\n' +
+    '<html>\n' +
+    '<head>\n' +
+    '<meta charset="utf-8">\n' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    '</head>\n' +
+    '<body style="font-family:Georgia,serif;font-size:16px;line-height:1.5;color:#222;margin:0;padding:16px;">\n' +
+    String(inner == null ? '' : inner) + '\n' +
+    '</body>\n' +
+    '</html>'
+  );
+}
+
+function emailHtmlFromMarkdown(md) {
+  return wrapEmailHtml(markdownToHtml(stripDiscordChrome(md)));
+}
+
+module.exports = {
+  escapeHtml,
+  stripDiscordChrome,
+  markdownToHtml,
+  wrapEmailHtml,
+  emailHtmlFromMarkdown,
+};
