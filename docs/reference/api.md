@@ -31,6 +31,33 @@ The pipeline entrypoint plus session takeover/steer primitives and the trust fra
 redact) under a global concurrency slot and a per-`conversation_key` lock. It returns an empty
 `actions` array (connector posts nothing) when the turn is aborted or ends with `[[NO_REPLY]]`.
 
+### Sending a file to the core
+
+Three routes take a file: `POST /v2/upload` (the shared upload surface), `POST /v2/silos/:id/file`
+(write into a silo), and `POST /v2/transcribe` (an audio clip). Each accepts two shapes.
+
+**Raw bytes.** The body IS the file, `Content-Type` is whatever the file is, and the metadata that
+would have sat beside it in a JSON object moves to the query string.
+
+```
+POST /v2/upload?filename=photo.jpg&mime=image/jpeg
+POST /v2/silos/self/file?path=notes/photo.jpg
+POST /v2/transcribe?mime=audio/webm&model=…&language=…
+```
+
+**JSON with base64.** `{ data_base64, … }` with the metadata alongside it, unchanged and still
+supported, so no existing client has to move.
+
+Use raw for anything that is actually a file. The JSON shape is bounded by the core's
+`express.json({ limit: '10mb' })`, and base64 spends 4 bytes per 3, so it caps near 7.5 MiB of file:
+measured against that parser, 7,864,000 bytes is accepted and 7,900,000 is not. It also means the
+browser holds the file as a string while the body holds a second copy and the server a third. A raw
+body is bounded by `ASMLTR_RAW_BODY_LIMIT` (default `1024mb`) and answers a 413 as JSON naming that
+limit. `POST /v2/recordings` and `POST /v2/backups/import` were already raw-only and are unchanged.
+
+Whatever the shape, a reverse proxy in front needs a `client_max_body_size` at least as large, at
+**server** level so an `auth_request` subrequest inherits it too.
+
 ### Titles & announcements
 
 | Method & path | Body | Returns |
