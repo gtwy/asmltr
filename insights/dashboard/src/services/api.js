@@ -537,7 +537,10 @@ export const stt = {
 // like the mobile RD viewer) and send it in the message body.
 const RD_TOKEN_KEY = 'asmltr.rd.token'
 export const rd = {
-  getToken() { try { return localStorage.getItem(RD_TOKEN_KEY) || '' } catch { return '' } },
+  // Prefer a device-local token the owner set; otherwise fall back to the token injected by nginx into
+  // the authenticated GUI (window.__RD_TOKEN__ from /gui-config.js — served only behind the session auth),
+  // so a logged-in owner sees the host list without pasting anything.
+  getToken() { try { return localStorage.getItem(RD_TOKEN_KEY) || (typeof window !== 'undefined' && window.__RD_TOKEN__) || '' } catch { return '' } },
   setToken(t) { try { localStorage.setItem(RD_TOKEN_KEY, t || '') } catch { /* ignore */ } },
   async msg(body) {
     const res = await fetch('/rd/msg', {
