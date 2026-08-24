@@ -89,6 +89,11 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ## [0.16.1] - 2026-08-24
 
+- **CI is back on the Node 24 line, unpinned.** v0.14.1 pinned `node-version: 24.18.0` to dodge the
+  `(env) != nullptr` teardown abort. With better-sqlite3 on 13.x (N-API) that abort cannot fire, and
+  keeping the pin meant nothing ever exercised 24.19 — the version the host will eventually run, which
+  is the exposure the N-API move was for. CI now resolves `24` again.
+
 ### Added
 
 ### Changed
