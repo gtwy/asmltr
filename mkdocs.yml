@@ -115,6 +115,7 @@ nav:
     - Auth & identity provider: AUTH.md
     - Access evolution (roadmap): ACCESS-EVOLUTION.md
   - Vision & roadmap:
+    - Device registry & canvas (roadmap): DEVICE-REGISTRY.md
     - Federation (roadmap): FEDERATION.md
     - Vault · silos · backups (roadmap): ROADMAP-VAULT-SILOS-BACKUP.md
   - Security:
