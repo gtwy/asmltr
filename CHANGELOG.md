@@ -74,6 +74,58 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   as "unknown upload", an oversized chunk returns JSON rather than an Express stack trace, and a
   sweep that fails on every directory no longer looks identical to a sweep with nothing to do.
 
+## [0.16.1] - 2026-08-24
+
+### Added
+
+### Changed
+
+### Fixed
+- **Voice speaker identity (#148).** In a multi-person voice call Eve addressed everyone as one person and applied the wrong trust tier, because the voice path passed the speaker's display name as `sender.raw_id` (matches no identity mapping → resolved `default`/tier 0). The speaker's immutable Discord user ID now rides through to `sender.raw_id` (same key the text path uses), so each turn resolves the correct principal + trust — the person who said her name. Verified: user ID → the real principal (tier 1); display name → default (tier 0).
+- **"Eve, stop" now actually halts an in-flight realtime reply (#149).** Stop/barge-in fired and aborted, but the reply still spoke ~10s later when the LLM turn finished after the abort. `speak()` now requires a live speech session, and a per-guild reply generation (bumped on stop) makes the in-flight reply bail before synthesizing/speaking/posting even if generation completes after the abort.
+
+## [0.16.0] - 2026-08-24
+
+### Added
+- **Persistent voice mute (P2).** Eve can now be muted from *inside* voice — say "<name>, mute" (or `@bot mute-voice` from text) and she keeps transcribing but never speaks/replies until "<name>, unmute" (or `@bot unmute-voice`). Voice parity with the text disable; distinct from the transient `stop`. Clears on leaving voice.
+
+### Changed
+- **Discord voice turn-taking honors the shared VAD tunables (#141).** End-of-speech silence and the near-silent gate now come from `stt.config` (`vad_endpoint_ms` / `vad_sensitivity`) instead of a hard-coded 1s, so Discord tunes identically to the app from Settings → Voice. Closes epic #135.
+
+### Fixed
+
+## [0.15.0] - 2026-08-24
+
+### Added
+- **Realtime streaming transcription for Discord voice (#140).** Discord voice streams each speaker's audio into the shared OpenAI GA Realtime STT over a WebSocket (`shared/speech/realtime-stt.js`) using the **live streaming model** (`gpt-live-transcribe`), so captions fill in **as you speak** rather than after you stop. Each turn is finalized on Discord's end-of-speech by committing the audio buffer, which flushes the tail and yields a clean per-turn transcript — so overlapping speakers thread by who-started-first. The sliding-window partials are reconstructed into a running transcript (`mergeWindow`). No new dependency (Node's global WebSocket + the ephemeral-token subprotocol). Per-speaker sessions persist across short pauses and idle-close after prolonged silence. Toggle with `voice_realtime` (batch per-utterance STT remains the fallback).
+
+### Changed
+- **Discord realtime STT is wired through the `realtime_transcribe` voice-engine role** (#113/#140), not a hard-coded model — Settings picks the engine, with a guard that falls back to the live streaming model if the bound engine isn't realtime-capable (e.g. a diarize model). `openai-live-transcribe` is now marked implemented and is the default `realtime_transcribe` binding.
+
+### Fixed
+- **Realtime audio was silently garbled by a downsampler byte-offset bug** (audio flowed to the API but nothing came back). The 48k-stereo→24k-mono conversion stepped 4 bytes per output sample instead of 8, feeding the transcriber time-distorted samples from only the first half of each buffer. Pinned with a regression test.
+
+## [0.14.1] - 2026-08-24
+
+### Added
+
+### Changed
+
+### Fixed
+- **CI green again — pinned CI to Node 24.18.0.** Node 24.19.0 has a teardown regression that trips `Assertion failed: (env) != nullptr` in `RemoveEnvironmentCleanupHook` when better-sqlite3's native Statement finalizers run on process exit, crashing `session-resume-recovery.test.js` (every assertion passed — only the exit crashed; red on `main` since PR #114). The `test` workflow now pins `node-version: 24.18.0`; the test also closes its sqlite handle in an `after` hook as hygiene.
+
+## [0.14.0] - 2026-08-24
+
+### Added
+- **Shared, confidence-gated wake matcher (`shared/speech/wake.js`).** One deterministic wake/direct-address matcher for every voice surface, with a confidence gate that refuses to fire a turn on a low-confidence or bare-lone-name match — killing the false-trigger bug where a mis-transcribed word made the assistant reply when its name wasn't actually said. Confidence derives from STT token logprobs; the bar scales with `wake_sensitivity`. (#136)
+- **Cross-surface interrupt / barge-in for Discord voice.** One hard-stop primitive behind three entry points (#138): a spoken "<name>, stop" (or any configured stop phrase), talking over a reply (low-latency barge-in, no STT round-trip), and text `@bot stop` — which now fans the stop through to a live voice session joined from that channel. Barge-in is toggleable (`voice_barge_in`) and has a short grace window so the asker's own trailing words don't cut off the reply.
+
+### Changed
+- **Discord voice STT now routes through the pluggable voice-engine role layer** (`voice-engines.resolve('transcribe')`) instead of a hard-wired model, so a Settings change swaps the engine with no connector edit — with a safe fallback when the bound engine needs a different endpoint shape (e.g. diarize). (#139)
+
+### Fixed
+- **Scaffolding/classifier text no longer leaks into voice transcripts** (#137). Dropped the name-priming STT prompt on the Discord path (it biased the decoder toward mis-hearing the wake word *and* got echoed into transcripts on near-silent audio) and added shared prompt-echo suppression in `shared/speech/stt.js` for any surface that still passes a prompt.
+
 ## [0.13.1] - 2026-08-18
 
 Dashboard chat now renders assistant replies as sanitized Markdown (bold, lists, code, links) instead of raw asterisks. Streaming turns stay plain and format on completion.
