@@ -51,6 +51,7 @@ const OWNER_ONLY_CMDS = new Set([
   'drone-on', 'drone on', 'drone-off', 'drone off',
   'transcript-on', 'transcript on', 'transcript-off', 'transcript off',
   'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
+  'mute-voice', 'mute voice', 'voice-mute', 'unmute-voice', 'unmute voice', 'voice-unmute',
   'update-asmltr', 'update asmltr', 'self-update', 'update yourself',
 ]);
 
@@ -323,10 +324,24 @@ async function start(ctx) {
         await message.react(acted ? '🛑' : '🤷').catch(() => {});
         return true;
       }
+      case 'mute-voice': case 'mute voice': case 'voice-mute': {
+        // Persistent voice mute from TEXT (P2 parity): keep transcribing, never speak, until unmuted.
+        const gid = message.guild?.id;
+        if (!gid) { await message.channel.send('That only applies in a server voice channel.'); return true; }
+        voiceMuted.add(gid);
+        let voice; try { voice = require('./voice'); } catch (_) {}
+        if (voice && voice.isConnected(gid)) await stopVoiceReply(gid, { chime: false });
+        await message.channel.send(`🔇 Voice muted — I'll keep transcribing but won't speak until \`@${me} unmute-voice\` (or say "${NAME}, unmute").`); return true;
+      }
+      case 'unmute-voice': case 'unmute voice': case 'voice-unmute': {
+        const gid = message.guild?.id;
+        if (gid) voiceMuted.delete(gid);
+        await message.channel.send('🔊 Voice unmuted — I\'ll respond when addressed again.'); return true;
+      }
       case 'status':
         await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`drone-on\` / \`drone-off\` · \`transcript-on\` / \`transcript-off\` · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`transcript-on\` / \`transcript-off\` · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
@@ -683,6 +698,7 @@ RESPONSE RULES:
   const voiceActive = new Map(); // guildId -> expiry ts of the "answering mode" follow-up window
   const voiceReplyStart = new Map(); // guildId -> ts a reply began (barge-in grace window)
   const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after a reply starts (don't cut off on the asker's own trailing words)
+  const voiceMuted = new Set();  // guildIds where Eve is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
   // 0 (default) = STRICT: respond ONLY when directly addressed by name, then go passive. A positive
   // value opens a "keep answering follow-ups without the wake word" window for that many ms.
   const VOICE_WINDOW_MS = Number.isFinite(Number(cfg.voice_followup_ms)) ? Number(cfg.voice_followup_ms) : 0;
@@ -723,6 +739,10 @@ RESPONSE RULES:
   const LEAVE_RE = /\b(leave (the )?(voice|call|channel)|disconnect|drop (from )?(the )?(voice|call))\b/;
   const DISMISS_RE = /\b(that'?s (enough|all|it)( for now)?|we'?re (good|done|all set)|stop (answering|talking|responding|for now)|(just|go back to) (listen|transcrib)|you can (stop|relax)|stand down|dismiss(ed)?)\b/;
   const VOICE_STOP_RE = /\b(stop|cancel|hush|shush|be quiet|shut up|enough|nevermind|never mind|hold on|wait)\b/;
+  // Persistent voice mute (P2) — distinct from the transient STOP. Explicit "mute" intent so it doesn't
+  // collide with "stop". UNMUTE is checked first ("unmute" has no \bmute\b boundary, but be safe).
+  const VOICE_MUTE_RE = /\b(mute( yourself| your ?self| voice)?|stay (quiet|muted)|keep quiet|go silent|silence yourself|zip it)\b/;
+  const VOICE_UNMUTE_RE = /\b(un-?mute|you can (talk|speak)( again)?|start talking( again)?|come back|resume talking)\b/;
 
   // The conversation_key a spoken reply runs under (must match handleVoiceUtterance's handleStream call).
   const voiceConvKey = (guildId) => `discord-voice:${ctx.instanceId}:guild:${guildId}`;
@@ -798,9 +818,27 @@ RESPONSE RULES:
       return;
     }
 
+    // Persistent voice MUTE / UNMUTE (P2) — spoken, addressed. Muted = keep transcribing but never reply
+    // until unmuted (voice parity with the text disable). Check unmute first.
+    if (addressesName(text)) {
+      if (VOICE_UNMUTE_RE.test(lc)) {
+        voiceMuted.delete(guildId);
+        try { await voice.playChime(guildId); } catch (_) {}
+        if (ch) ch.send(`🔊 Unmuted — I'll respond when addressed again.`).catch(() => {});
+        return;
+      }
+      if (VOICE_MUTE_RE.test(lc)) {
+        voiceMuted.add(guildId);
+        await stopVoiceReply(guildId, { chime: false }); // silence anything mid-reply
+        voiceActive.delete(guildId);
+        if (ch) ch.send(`🔇 Muted — I'll keep transcribing but stay quiet until you say "${NAME}, unmute".`).catch(() => {});
+        return;
+      }
+    }
+
     // spoken "leave voice" → actually disconnect from the voice channel
     if ((addressesName(text) || active) && LEAVE_RE.test(lc)) {
-      voiceActive.delete(guildId); voiceText.delete(guildId); voice.leave(guildId); setVoiceStatus(null);
+      voiceActive.delete(guildId); voiceText.delete(guildId); voiceMuted.delete(guildId); voice.leave(guildId); setVoiceStatus(null);
       if (ch) ch.send('👋 Left the voice channel.').catch(() => {});
       await uploadTranscript(guildId, ch); // ship the full-session .txt to the origin channel
       return;
@@ -826,7 +864,8 @@ RESPONSE RULES:
       ctx.log(`[voice] wake fired (${d.reason}; conf=${d.confidence == null ? 'n/a' : d.confidence}): "${text.slice(0, 80)}"`);
     }
 
-    if (voiceBusy.has(guildId)) return; // don't stack replies
+    if (voiceMuted.has(guildId)) return; // MUTED (P2): addressed, but stay quiet — transcript already posted
+    if (voiceBusy.has(guildId)) return;  // don't stack replies
     voiceBusy.add(guildId);
     voice.startSpeech(guildId);              // open a cancellable reply session (barge-in / stop can interrupt)
     voiceReplyStart.set(guildId, Date.now()); // start the barge-in grace window
@@ -905,12 +944,19 @@ RESPONSE RULES:
         if (c && c.provider === 'openai' && c.model && !/diarize/i.test(c.model)) rtModel = c.model;
       } catch (_) {}
       const rtLive = /live-transcribe/i.test(rtModel);
-      ctx.log(`[voice] realtime role → ${rtModel} (live=${rtLive})`);
+      // Shared VAD tunables (#141) from stt.config → Discord turn-taking tunes with the app in Settings.
+      const vcfg = sharedStt.config();
+      const vad = {
+        endpointMs: Math.max(400, Math.min(4000, Number(vcfg.vad_endpoint_ms) || 1000)),
+        rmsGate: Math.max(80, Math.round(600 - (Number(vcfg.vad_sensitivity) || 50) * 5)), // higher sensitivity → lower gate
+      };
+      ctx.log(`[voice] realtime role → ${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
       voice.startListening(message.guild.id, client, {
         transcribe: sttTranscribe,
         realtime: cfg.voice_realtime !== false, // streaming STT + turn-taking (batch fallback if off)
         realtimeModel: rtModel,
         realtimeLive: rtLive,
+        vad,
         onUtterance: (name, text, meta) => handleVoiceUtterance(message.guild.id, name, text, meta),
         onPartial: (name, text) => onVoicePartial(message.guild.id, name, text),
         onBargeIn: () => {
@@ -937,6 +983,7 @@ RESPONSE RULES:
     let voice; try { voice = require('./voice'); } catch (_) { return; }
     const originCh = voiceText.get(message.guild.id) || message.channel;
     voiceText.delete(message.guild.id);
+    voiceMuted.delete(message.guild.id);
     const left = voice.leave(message.guild.id);
     setVoiceStatus(null); // back to idle/config presence
     message.channel.send(left ? '👋 Left the voice channel.' : "I'm not in a voice channel.").catch(() => {});
