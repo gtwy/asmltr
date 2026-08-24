@@ -9,6 +9,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.16.0] - 2026-08-24
+
+### Added
 - **Persistent voice mute (P2).** Eve can now be muted from *inside* voice — say "<name>, mute" (or `@bot mute-voice` from text) and she keeps transcribing but never speaks/replies until "<name>, unmute" (or `@bot unmute-voice`). Voice parity with the text disable; distinct from the transient `stop`. Clears on leaving voice.
 
 ### Changed
