@@ -726,6 +726,9 @@ if (oidc.enabled()) {
 }
 
 app.use(express.json({ limit: '10mb' }));
+// Routes that take a FILE accept raw bytes as well as base64-in-JSON. The limit above bounds the
+// JSON shape, and base64 costs 4 bytes per 3, so a base64-only route caps near 7.5 MiB of file.
+const { rawBody, fileFrom } = require('./raw-body');
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core', active }));
 // Build identity — the code sha this process is running + when it started. An updater checks this
@@ -967,11 +970,15 @@ app.get('/v2/silos/:id/file', async (req, res) => {
     res.json({ path: p, size: st ? st.size : buf.length, mtime: st && st.mtime, binary: !isText, content: isText ? buf.toString('utf8') : null });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
-app.post('/v2/silos/:id/file', async (req, res) => { // write/upload: { path, content? | data_base64? }
-  try { const b = req.body || {}; if (!b.path) return res.status(400).json({ error: 'path required' });
-    const data = b.data_base64 ? Buffer.from(b.data_base64, 'base64') : Buffer.from(b.content || '', 'utf8');
-    res.json({ ok: true, ...(await openSilo(req.params.id).put(b.path, data)) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+// write/upload. JSON { path, content? | data_base64? }, or the file as a raw body with ?path=.
+app.post('/v2/silos/:id/file', rawBody(), async (req, res) => {
+  try {
+    const { buffer, meta } = fileFrom(req, 'data_base64');
+    if (!meta.path) return res.status(400).json({ error: 'path required' });
+    // A JSON write with neither data_base64 nor content is an empty file, which is what it was before.
+    const data = buffer || Buffer.from(meta.content || '', 'utf8');
+    res.json({ ok: true, ...(await openSilo(req.params.id).put(meta.path, data)) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/v2/silos/:id/mkdir', async (req, res) => { try { await openSilo(req.params.id).mkdir((req.body || {}).path); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/silos/:id/mv', async (req, res) => { try { const b = req.body || {}; await openSilo(req.params.id).mv(b.from, b.to); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -1099,11 +1106,11 @@ function normalizeWebSender(req) {
 // JSON { channel, filename, mime, conversation_key?, data_base64 } — base64 keeps it within the
 // existing express.json body (no multipart dep). Returns the manifest record incl. absolute path,
 // which the chat composer then references in the next message so the agent can Read it.
-app.post('/v2/upload', (req, res) => {
+app.post('/v2/upload', rawBody(), (req, res) => {
   try {
-    const { filename, mime, conversation_key, data_base64 } = req.body || {};
-    if (!data_base64 || typeof data_base64 !== 'string') return res.status(400).json({ error: 'data_base64 required' });
-    const buffer = Buffer.from(data_base64, 'base64');
+    const { buffer, meta } = fileFrom(req, 'data_base64');
+    const { filename, mime, conversation_key } = meta;
+    if (!buffer) return res.status(400).json({ error: 'data_base64 required (or send the file as a raw body with ?filename=&mime=)' });
     if (!buffer.length) return res.status(400).json({ error: 'empty file' });
     const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User') || 'dashboard';
     const rec = require('../../shared/uploads').save({
@@ -1328,11 +1335,11 @@ app.post('/v2/realtime/transcribe-token', async (req, res) => {
 
 // Transcription — audio clip → text via a real STT model (default OpenAI gpt-4o-transcribe). Body is
 // JSON base64 (no multipart dep, mirrors /v2/upload): { data_base64, mime?, filename?, model?, language? }.
-app.post('/v2/transcribe', async (req, res) => {
+app.post('/v2/transcribe', rawBody(), async (req, res) => {
   try {
-    const { data_base64, mime, filename, model, language } = req.body || {};
-    if (!data_base64) return res.status(400).json({ error: 'no audio (data_base64 required)' });
-    const buf = Buffer.from(data_base64, 'base64');
+    const { buffer: buf, meta } = fileFrom(req, 'data_base64');
+    const { mime, filename, model, language } = meta;
+    if (!buf) return res.status(400).json({ error: 'no audio (send data_base64, or the clip as a raw body with ?mime=)' });
     if (!buf.length) return res.status(400).json({ error: 'empty audio' });
     const out = await stt.transcribe(buf, { filename: filename || 'audio.webm', mime: mime || 'audio/webm', model, language });
     // Aux cost: STT runs on a metered key. Use the model's reported duration if any, else estimate from
