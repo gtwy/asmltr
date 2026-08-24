@@ -2,7 +2,6 @@
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
-const sendDedup = require('../../shared/send-dedup'); // email To+subject inside 30m → already_sent, no second SMTP
 const { bearerEqual } = require('../../shared/bearer-equal');
 const { connectorAuthHeaders } = require('../../shared/connector-http-auth');
 /**
@@ -188,8 +187,6 @@ const supportsAttachments = (meta) => !!(meta && meta.outbound && (meta.outbound
 // --- unified outbound: route a message OUT through a connector instance --------
 // POST /send { channel|instance_id, target, kind?, text?, path?, caption?, subject?, cc?, ref?, title?, require_headphones?, force? }
 async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force }) {
-  const dup = sendDedup.check({ channel, target, kind, text, path: filePath, subject, force });
-  if (dup) return { ...dup, status: 200 };
   const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
     : null;
@@ -215,7 +212,6 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
     // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
     // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.
     const settled = settleDelivery(r.ok, j, { via: `${inst.type}:${inst.name}` });
-    if (settled.ok) sendDedup.record({ channel, target, kind, text, path: filePath, subject }, { via: settled.via });
     return settled;
   } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }
 }

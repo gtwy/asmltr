@@ -250,8 +250,8 @@ async function cmdRelease(key) {
 
 async function cmdSend(rest) {
   exitIfDenied('send');
-  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."] [--force]
-  let file = null, caption = null, subject = null, cc = null, force = false;
+  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."]
+  let file = null, caption = null, subject = null, cc = null;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
@@ -259,28 +259,17 @@ async function cmdSend(rest) {
     else if (t === '--caption') caption = rest[++i];
     else if (t === '--subject') subject = rest[++i]; // email subject (ignored by channels without one)
     else if (t === '--cc') cc = rest[++i]; // email Cc (comma-separated ok)
-    else if (t === '--force') force = true; // email: resend the same To+subject; only if they said it never arrived
     else words.push(t);
   }
   const channel = words[0], target = words[1], text = words.slice(2).join(' ');
   if (!channel || !target || (!text && !file)) {
     throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
-      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"] [--force]\n' +
+      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"]\n' +
       '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@example.com "the body" --subject "Hello" --cc "boss@example.com" --file /root/report.pdf');
   }
   const body = file
     ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject, cc }
     : { channel, target, kind: 'text', text, subject, cc };
-  const sendDedup = require('../shared/send-dedup');
-  if (!force) {
-    const hit = sendDedup.check(body);
-    if (hit) {
-      console.log(A.yel(sendDedup.formatAlready(body, hit)));
-      return;
-    }
-  } else {
-    body.force = true;
-  }
   // Route through the CORE (/v2/send) so a cross-channel post is ASSIMILATED into the destination
   // session's context (it learns it "said" this, instead of it looking foreign on the next read).
   // Fall back to the manager's /send if the core is unreachable — delivery still works, just no assimilation.
@@ -291,11 +280,6 @@ async function cmdSend(rest) {
     if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
     r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   }
-  if (r && r.ok && r.already_sent) {
-    console.log(A.yel(sendDedup.formatAlready(body, r)));
-    return;
-  }
-  if (r && r.ok) sendDedup.record(body, { via: r.via });
   console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 
@@ -535,7 +519,7 @@ async function cmdAnnounce(rest) {
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target}  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
 }
-// asmltr notify "<text>" [--title T] [--force] [--silent] [--file <path>]  — proactive read-aloud /
+// asmltr notify "<text>" [--title T] [--silent] [--file <path>]  — proactive read-aloud /
 // delivery ladder (Part A). Any session/schedule calls this to REACH the user (android read-aloud → push
 // → text). --file attaches a file (android → inline media; text fallback → sent as a channel attachment).
 async function cmdNotify(rest) {
@@ -549,7 +533,7 @@ async function cmdNotify(rest) {
     else words.push(t);
   }
   const text = words.join(' ');
-  if (!text && !opts.file) throw new Error('usage: asmltr notify "<text>" [--title <t>] [--force] [--silent] [--file <path>]');
+  if (!text && !opts.file) throw new Error('usage: asmltr notify "<text>" [--title <t>] [--silent] [--file <path>]');
   const r = await fetch(CORE_BASE + '/v2/notify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, ...opts }) })
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   if (r && r.delivered) console.log(A.grn(`✓ notified via ${r.via}`));
@@ -832,10 +816,9 @@ function cmdHelp() {
   asmltr system          current system metrics
   ${A.bold('cross-channel:')}
   asmltr notify "<text>"               REACH the owner out-of-band (read-aloud → push → text ladder;
-       [--title T] [--force] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
+       [--title T] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
-       ... --force                      email: resend the same To+subject (only if they said it never arrived)
   asmltr guild-post <id-or-name> "<text>"  same Discord server. A name looks up (does not post)
        [--title T] [--reply-to id]         until they confirm; then post with the id.
   asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
@@ -865,11 +848,11 @@ function cmdHelp() {
   asmltr claude [args]   launch a monitored, identity-anchored claude session (screen; takeover-able)
   asmltr gemini|codex|grok [args]  same, for those engine CLIs
   asmltr provision-alias create a \`<agent-name>\` → \`asmltr claude\` command (from ASSISTANT_NAME;
-       [name] [--force]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
+       [name]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
   ${A.bold('version & updates:')}
   asmltr version         installed + per-service versions; whether an update is available
   asmltr update          pull + install the latest & restart (deterministic; verifies, auto-rolls-back)
-       [--dry-run] [--channel stable|edge] [--force] [--agent]
+       [--dry-run] [--channel stable|edge] [--agent]
   asmltr bounce          restart core+manager+collector AFTER this turn (never inline)
        [--delay SEC]     extra wait after the turn so the reply can post (default 20)
        [--now]           human terminal only — refused inside a live turn
@@ -1012,7 +995,7 @@ async function cmdBackup(rest, f) {
       return;
     }
     case 'restore': { await backup.restoreBackup(pos[0], { ...opts, dryRun: f['dry-run'] || f.n, activate: f.activate, force: f.force }); return; }
-    default: console.log('asmltr backup <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--activate] [--force] [--out path]');
+    default: console.log('asmltr backup <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--activate] [--out path]');
   }
 }
 

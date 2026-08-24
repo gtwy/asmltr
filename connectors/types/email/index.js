@@ -465,6 +465,15 @@ function persistLogOnlyAlert(hit, rec) {
   return { dir, id };
 }
 
+
+/** Kick SMTP and return immediately. Errors are logged; the HTTP /send caller is already done. */
+function queueOutboundMail(sendMail, payload, log) {
+  Promise.resolve()
+    .then(() => sendMail(payload))
+    .catch((e) => { try { (log || console.error)(`queued outbound mail failed: ${e && e.message || e}`); } catch (_) {} });
+  return { ok: true, queued: true };
+}
+
 async function start(ctx) {
   const cfg = ctx.config || {};
   const PORT = cfg.http_port || 3026;
@@ -861,13 +870,14 @@ async function start(ctx) {
       const subj = subject || tc.subject || `Message from ${fromName}`;
       const attachments = kind === 'file' && filePath ? [{ path: filePath, filename: path.basename(filePath) }] : undefined;
       const refsIn = references == null ? null : (Array.isArray(references) ? references : String(references).split(/\s+/).filter(Boolean));
-      await sendMail({
+      const payload = {
         to: target, cc, subject: subj, text: text || caption || '',
         inReplyTo: inReplyTo || tc.messageId,
         references: refsIn || tc.references,
         attachments,
-      });
-      res.json({ ok: true });
+      };
+      // Fire-and-forget: Discord (and any /send caller) must not block the turn on SMTP.
+      res.json(queueOutboundMail(sendMail, payload, ctx.log));
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   // Mailbox browse (the manager's /read proxies here; op = list | read | search).
@@ -888,4 +898,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { meta, start, queueOutboundMail, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
