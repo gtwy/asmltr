@@ -15,7 +15,7 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 
 // Point the session store at a throwaway DB before it is required (it opens on import).
@@ -24,6 +24,12 @@ process.env.ASMLTR_CORE_DB = TMP_DB;
 
 const engines = require('../core/src/engines');
 const sessions = require('../core/src/sessions');
+
+// Close the sqlite handle deterministically when the file's tests finish. Otherwise better-sqlite3's
+// native Statement finalizers run during Node's environment teardown and, on Node 24 in CI, trip an
+// `Assertion failed: (env) != nullptr` that crashes the test process on exit (every assertion here
+// passes — only the exit crashed, which is what turned CI red since PR #114).
+after(() => { try { sessions.db.close(); } catch (_) {} });
 
 // ── recognizing a vanished session ────────────────────────────────────────────
 test('the exact claude SDK phrasing is recognized as a vanished session', () => {
