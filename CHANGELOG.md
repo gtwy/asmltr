@@ -9,6 +9,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.14.0] - 2026-08-24
+
+### Added
 - **Shared, confidence-gated wake matcher (`shared/speech/wake.js`).** One deterministic wake/direct-address matcher for every voice surface, with a confidence gate that refuses to fire a turn on a low-confidence or bare-lone-name match — killing the false-trigger bug where a mis-transcribed word made the assistant reply when its name wasn't actually said. Confidence derives from STT token logprobs; the bar scales with `wake_sensitivity`. (#136)
 - **Cross-surface interrupt / barge-in for Discord voice.** One hard-stop primitive behind three entry points (#138): a spoken "<name>, stop" (or any configured stop phrase), talking over a reply (low-latency barge-in, no STT round-trip), and text `@bot stop` — which now fans the stop through to a live voice session joined from that channel. Barge-in is toggleable (`voice_barge_in`) and has a short grace window so the asker's own trailing words don't cut off the reply.
 
