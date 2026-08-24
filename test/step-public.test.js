@@ -91,6 +91,34 @@ test('stripThoughtChrome: email/mcp drop chips and thought preamble, keep the an
   assert.equal(q, '**What worked**\nYou did not take $1,000.');
 });
 
+
+test('stripThoughtChrome: plan paragraph above James, is not mailed', () => {
+  const leaked = [
+    'Photo is two CyberPower PR2200LCDRT2U units. OEM cartridge is RB1290X4F — I’ll send the Amazon links and flag that you need two, one per unit.',
+    '',
+    'James,',
+    '',
+    'Those are two CyberPower PR2200LCDRT2U units. Each takes one RB1290X4F.',
+  ].join('\n');
+  const out = stripThoughtChrome(leaked);
+  assert.equal(out.startsWith('James,'), true, out.slice(0, 80));
+  assert.equal(out.includes('I’ll send'), false);
+  assert.equal(out.includes('flag that'), false);
+  assert.ok(out.includes('RB1290X4F'));
+  assert.equal(stripThoughtChrome('James,\n\nThe SPF is fixed.'), 'James,\n\nThe SPF is fixed.');
+  assert.equal(
+    stripThoughtChrome('Working through the photos.\n\nDear Alex,\n\nThe invoice is attached.'),
+    'Dear Alex,\n\nThe invoice is attached.'
+  );
+  const signed = 'The SPF is fixed.\n\nSincerely,\nIvy';
+  assert.equal(stripThoughtChrome(signed), signed);
+  const q = quietReplyFromResult({
+    segments: [leaked],
+    text: leaked,
+  });
+  assert.equal(q.startsWith('James,'), true);
+});
+
 test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 chip', () => {
   assert.equal(discordThoughtLine('CURRENT SPEAKER — READ FIRST, TRUST THIS'), '');
   assert.equal(discordThoughtLine('I should open identity.md next'), '');
