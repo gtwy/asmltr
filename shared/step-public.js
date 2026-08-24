@@ -382,31 +382,51 @@ function stripThoughtChrome(text) {
       s = paras.slice(1).join('\n\n').trim();
     }
   }
-  return stripLeadingLetterStart(s);
+  return stripLeadingInternalPlan(s);
 }
 
-/** Closings that look like "Name," but are not the start of the letter. */
-const LETTER_CLOSE = /^(sincerely|thanks|thank you|best|cheers|regards|respectfully|cordially|warmly|best regards|kind regards),$/i;
-const LETTER_OPEN = /^(?:dear|hi|hello|hey)\s+[A-Za-z][\w .'-]{0,40},$/i;
-const LETTER_NAME = /^[A-Z][a-z]{1,30},$/;
+const PLAN_FUTURE = /\bI['’]ll\s+(send|flag|look|find|check|get|pull|attach)\b/i;
+const PLAN_CAPTION = /^(photos?|images?|pics?|screenshots?|attachments?)\s+(is|are|shows?)\b/i;
+const CLOSING_LINE = /^(sincerely|thanks|thank you|best|cheers|regards|respectfully|cordially|warmly|best regards|kind regards),?$/i;
+
+/** Scratch note-to-self, not a letter to the reader. */
+function looksLikeInternalPlan(para) {
+  const t = String(para || '').trim();
+  if (!t) return false;
+  if (PLAN_CAPTION.test(t)) return true;
+  const n = (t.match(/\bI['’]ll\s+(send|flag|look|find|check|get|pull|attach)\b/gi) || []).length;
+  if (n >= 2) return true;
+  if (n === 1) {
+    if (/\bplease\b/i.test(t)) return false;
+    if (/^(dear|hi|hello|hey)\b/i.test(t)) return false;
+    const compact = t.replace(/\s+/g, ' ');
+    if (/^I['’]ll\s+send\s+[^.?]{1,60}\.?$/i.test(compact)) return false;
+    return true;
+  }
+  return false;
+}
+
+function looksLikeClosingOnly(text) {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return true;
+  if (!CLOSING_LINE.test(lines[0])) return false;
+  return lines.length <= 3;
+}
 
 /**
- * Email/MCP: if grok glued a plan/thought paragraph above the salutation
- * ("James," / "Dear …,"), mail from the greeting only. Closings stay.
+ * Drop leading internal-plan paragraphs when a distinct letter follows.
+ * Never cut on a name or Dear. One-paragraph letters stay.
  */
-function stripLeadingLetterStart(text) {
-  const lines = String(text || '').split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (!t) continue;
-    if (LETTER_CLOSE.test(t)) continue;
-    if (LETTER_OPEN.test(t) || LETTER_NAME.test(t)) {
-      const before = lines.slice(0, i).join('\n').trim();
-      if (!before) return String(text || '').trim();
-      return lines.slice(i).join('\n').trim();
-    }
-  }
-  return String(text || '').trim();
+function stripLeadingInternalPlan(text) {
+  const raw = String(text || '');
+  const paras = raw.split(/\n\n+/);
+  if (paras.length < 2) return raw.trim();
+  let i = 0;
+  while (i < paras.length - 1 && looksLikeInternalPlan(paras[i])) i += 1;
+  if (i === 0) return raw.trim();
+  const rest = paras.slice(i).join('\n\n').trim();
+  if (!rest || looksLikeClosingOnly(rest)) return raw.trim();
+  return rest;
 }
 
 /** Last narration block, with thought chrome removed. Email/MCP reply body. */

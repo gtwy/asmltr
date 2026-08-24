@@ -92,31 +92,29 @@ test('stripThoughtChrome: email/mcp drop chips and thought preamble, keep the an
 });
 
 
-test('stripThoughtChrome: plan paragraph above James, is not mailed', () => {
-  const leaked = [
-    'Photo is two CyberPower PR2200LCDRT2U units. OEM cartridge is RB1290X4F — I’ll send the Amazon links and flag that you need two, one per unit.',
-    '',
-    'James,',
-    '',
-    'Those are two CyberPower PR2200LCDRT2U units. Each takes one RB1290X4F.',
-  ].join('\n');
-  const out = stripThoughtChrome(leaked);
-  assert.equal(out.startsWith('James,'), true, out.slice(0, 80));
-  assert.equal(out.includes('I’ll send'), false);
-  assert.equal(out.includes('flag that'), false);
-  assert.ok(out.includes('RB1290X4F'));
-  assert.equal(stripThoughtChrome('James,\n\nThe SPF is fixed.'), 'James,\n\nThe SPF is fixed.');
-  assert.equal(
-    stripThoughtChrome('Working through the photos.\n\nDear Alex,\n\nThe invoice is attached.'),
-    'Dear Alex,\n\nThe invoice is attached.'
-  );
-  const signed = 'The SPF is fixed.\n\nSincerely,\nIvy';
+test('stripThoughtChrome: leading internal plan is dropped only when a letter follows', () => {
+  const plan = 'Photo is two CyberPower PR2200LCDRT2U units. OEM cartridge is RB1290X4F — I’ll send the Amazon links and flag that you need two, one per unit.';
+  const letter = "You're right — those are CyberPower. The model is PR2200LCDRT2U.";
+  const withName = plan + '\n\nJames,\n\n' + letter;
+  const noName = plan + '\n\n' + letter;
+  const outName = stripThoughtChrome(withName);
+  const outBare = stripThoughtChrome(noName);
+  assert.equal(outName.includes('I’ll send'), false);
+  assert.equal(outName.includes('Photo is'), false);
+  assert.ok(outName.includes("You're right"));
+  assert.ok(outName.includes('James,'), outName);
+  assert.equal(outBare.startsWith("You're right"), true, outBare.slice(0, 80));
+  assert.equal(outBare.includes('I’ll send'), false);
+  assert.equal(stripThoughtChrome("I'll send the invoice tomorrow."), "I'll send the invoice tomorrow.");
+  assert.equal(stripThoughtChrome(letter), letter);
+  const greeted = 'James,\n\n' + letter;
+  assert.equal(stripThoughtChrome(greeted), greeted);
+  const withStore = letter + '\n\nAmazon,\nthen the cart.';
+  assert.equal(stripThoughtChrome(withStore), withStore);
+  const signed = "I'll send the invoice tomorrow.\n\nSincerely,\nIvy";
   assert.equal(stripThoughtChrome(signed), signed);
-  const q = quietReplyFromResult({
-    segments: [leaked],
-    text: leaked,
-  });
-  assert.equal(q.startsWith('James,'), true);
+  const q = quietReplyFromResult({ segments: [noName], text: noName });
+  assert.equal(q.startsWith("You're right"), true);
 });
 
 test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 chip', () => {
