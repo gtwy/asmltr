@@ -10,7 +10,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          # Pinned to 24.18.0: Node 24.19.0 has a teardown regression that trips
+          # `Assertion failed: (env) != nullptr` in RemoveEnvironmentCleanupHook when better-sqlite3's
+          # native Statement finalizers run on process exit, crashing session-resume-recovery.test.js
+          # (every assertion passes — only the exit crashes). Bump deliberately once upstream fixes it.
+          node-version: '24.18.0'
 
       - name: Install dependencies
         run: |

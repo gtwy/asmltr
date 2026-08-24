@@ -25,10 +25,11 @@ process.env.ASMLTR_CORE_DB = TMP_DB;
 const engines = require('../core/src/engines');
 const sessions = require('../core/src/sessions');
 
-// Close the sqlite handle deterministically when the file's tests finish. Otherwise better-sqlite3's
-// native Statement finalizers run during Node's environment teardown and, on Node 24 in CI, trip an
-// `Assertion failed: (env) != nullptr` that crashes the test process on exit (every assertion here
-// passes — only the exit crashed, which is what turned CI red since PR #114).
+// Close the sqlite handle deterministically when the file's tests finish (good hygiene). NOTE: the
+// actual CI crash — `Assertion failed: (env) != nullptr` in RemoveEnvironmentCleanupHook when
+// better-sqlite3's native Statement finalizers run on process exit — is a Node 24.19.0 teardown
+// REGRESSION (24.18.0 is fine), so closing the db doesn't prevent it; CI pins Node to 24.18.0 in
+// .github/workflows/test.yml. This close stays as correct cleanup regardless.
 after(() => { try { sessions.db.close(); } catch (_) {} });
 
 // ── recognizing a vanished session ────────────────────────────────────────────
