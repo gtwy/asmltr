@@ -9,6 +9,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Realtime streaming transcription for Discord voice (#140).** Discord voice now streams each speaker's audio into the shared OpenAI GA Realtime STT over a WebSocket (`shared/speech/realtime-stt.js`), with **server-VAD deciding turn boundaries** instead of a fixed 1s silence timer, and **live captions** that grow as you speak and settle into the final line. No new dependency (Node's global WebSocket + the existing ephemeral-token path). Per-speaker sessions persist across short pauses and idle-close after prolonged silence. Toggle with `voice_realtime` (batch per-utterance STT remains the fallback).
 
 ### Changed
 
