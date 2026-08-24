@@ -88,6 +88,7 @@ const meta = {
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
       voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
       voice_barge_in: { type: 'boolean', title: 'Voice: barge-in — let someone interrupt a spoken reply by talking over it (off = quieter in noisy/cross-talk meetings)', default: true },
+      voice_realtime: { type: 'boolean', title: 'Voice: realtime streaming transcription (server-VAD turn-taking + live captions) instead of batch-per-utterance', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
       stream_steps: { type: 'boolean', title: 'Post intermediary narration steps to the thread live as they land (only when directly addressed)', default: true },
       stream_tools: { type: 'boolean', title: 'Also post a subdued line for each tool call while streaming steps', default: false },
@@ -739,13 +740,49 @@ RESPONSE RULES:
     return wasBusy;
   }
 
+  // Live streaming captions (realtime mode): one editable message per speaker that grows as they talk,
+  // then becomes the final transcript. Edits are throttled so we stay well under Discord's rate limits.
+  const liveCaptions = new Map(); // `${guildId}:${name}` -> { msg, lastEdit, pending, sending }
+  const CAPTION_THROTTLE_MS = 1400;
+  async function onVoicePartial(guildId, name, text) {
+    if (!voicePostTranscript || !text) return;
+    const ch = voiceText.get(guildId); if (!ch) return;
+    const key = `${guildId}:${name}`;
+    let cap = liveCaptions.get(key);
+    if (!cap) {
+      cap = { msg: null, lastEdit: Date.now(), pending: text, sending: true };
+      liveCaptions.set(key, cap);
+      try { cap.msg = await ch.send(`🎙️ **${name}:** ${text}…`); } catch (_) {}
+      cap.sending = false;
+      return;
+    }
+    cap.pending = text;
+    if (cap.sending || (Date.now() - cap.lastEdit) < CAPTION_THROTTLE_MS) return;
+    cap.sending = true;
+    try { if (cap.msg) await cap.msg.edit(`🎙️ **${name}:** ${cap.pending}…`); cap.lastEdit = Date.now(); } catch (_) {}
+    cap.sending = false;
+  }
+  // Turn the live caption into the final transcript line (reuses the same message). Returns true if it did.
+  function finalizeCaption(guildId, name, finalText) {
+    const key = `${guildId}:${name}`;
+    const cap = liveCaptions.get(key);
+    if (!cap) return false;
+    liveCaptions.delete(key);
+    if (cap.msg) { cap.msg.edit(`🗣️ **${name}:** ${finalText}`).catch(() => {}); return true; }
+    return false;
+  }
+
   // Called for EVERY transcribed utterance. Posts the live transcript, then decides if it's for
   // the assistant — addressed by name OR we're inside an active follow-up window (so follow-ups
   // need no wake word). A dismissal phrase exits answering mode back to transcription-only.
   async function handleVoiceUtterance(guildId, name, text, meta = {}) {
     const ch = voiceText.get(guildId);
     logTranscript(guildId, name, text); // always captured for the end-of-session file
-    if (ch && voicePostTranscript) ch.send(`🗣️ **${name}:** ${text}`).catch(() => {}); // live flood (toggleable)
+    // Post the transcript line — in realtime mode, finalize the streaming caption into the final text
+    // (one message per turn) instead of posting a duplicate line.
+    if (ch && voicePostTranscript) {
+      if (!(meta.realtime && finalizeCaption(guildId, name, text))) ch.send(`🗣️ **${name}:** ${text}`).catch(() => {});
+    }
     let voice; try { voice = require('./voice'); } catch (_) { return; }
     const lc = text.toLowerCase();
     const active = (voiceActive.get(guildId) || 0) > Date.now();
@@ -858,7 +895,9 @@ RESPONSE RULES:
       voiceText.set(message.guild.id, message.channel);
       voice.startListening(message.guild.id, client, {
         transcribe: sttTranscribe,
+        realtime: cfg.voice_realtime !== false, // streaming STT + server-VAD turn-taking (batch fallback if off)
         onUtterance: (name, text, meta) => handleVoiceUtterance(message.guild.id, name, text, meta),
+        onPartial: (name, text) => onVoicePartial(message.guild.id, name, text),
         onBargeIn: () => {
           const gid = message.guild.id;
           if (cfg.voice_barge_in === false) return;        // disabled for noisy/cross-talk meetings
