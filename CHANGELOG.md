@@ -13,6 +13,8 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
+- **Voice speaker identity (#148).** In a multi-person voice call Eve addressed everyone as one person and applied the wrong trust tier, because the voice path passed the speaker's display name as `sender.raw_id` (matches no identity mapping → resolved `default`/tier 0). The speaker's immutable Discord user ID now rides through to `sender.raw_id` (same key the text path uses), so each turn resolves the correct principal + trust — the person who said her name. Verified: user ID → the real principal (tier 1); display name → default (tier 0).
+- **"Eve, stop" now actually halts an in-flight realtime reply (#149).** Stop/barge-in fired and aborted, but the reply still spoke ~10s later when the LLM turn finished after the abort. `speak()` now requires a live speech session, and a per-guild reply generation (bumped on stop) makes the in-flight reply bail before synthesizing/speaking/posting even if generation completes after the abort.
 
 ## [0.16.0] - 2026-08-24
 
