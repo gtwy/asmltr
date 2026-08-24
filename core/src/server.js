@@ -1394,7 +1394,14 @@ app.get('/v2/recordings/:id', (req, res) => {
 app.get('/v2/recordings/:id/audio', (req, res) => {
   const p = recordings.audioPath(req.params.id); if (!p) return res.status(404).json({ error: 'no audio' });
   const m = recordings.get(req.params.id);
-  res.set('Content-Type', m.mime || 'application/octet-stream');
+  // The recording's MIME is whatever the uploader sent as the POST /v2/recordings Content-Type, so it is
+  // attacker-controlled alongside the raw body. Serve it only when it names an audio type; anything else
+  // (a text/html or image/svg+xml upload) becomes an opaque download. nosniff stops the browser sniffing
+  // the bytes back into an executable type, so this route can't be turned into stored XSS on the origin.
+  const raw = String((m && m.mime) || '');
+  res.set('Content-Type', /^audio\/[a-z0-9.+-]+$/i.test(raw) ? raw : 'application/octet-stream');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Content-Disposition', 'inline');
   require('fs').createReadStream(p).pipe(res);
 });
 app.delete('/v2/recordings/:id', (req, res) => res.json({ ok: recordings.remove(req.params.id) }));
