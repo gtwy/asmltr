@@ -8,6 +8,11 @@ that resolves an inbound envelope to effective capabilities on every turn.
     The trust store is **default-deny**. An unknown sender — one whose identifier matches no
     principal — gets **no capabilities at all**. Until you seed the store, nobody has access.
 
+
+!!! warning "Discord is invite-only"
+    The current Discord path (silo on, `observe_only` context on the next @, `announce *`) is for
+    servers you invite people into. A truly public/open Discord is not trusted yet.
+
 ## The trust store (SQLite)
 
 A single SQLite database (`trust.db`, path via `ASMLTR_TRUST_DB`) with four tables:

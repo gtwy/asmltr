@@ -85,6 +85,15 @@ Server Settings → Members → kick the bot. Leaving is immediate; the gateway 
 
 ---
 
+## Invite-only servers (trust)
+
+The current Discord path is for **invite-only** servers — people you let in. That includes silo
+access, `observe_only` context on the next @, and `announce *`. A truly public or open Discord
+(anyone can join, no invite gate) is **not trusted yet**. Do not treat this connector as safe on
+an open server.
+
+---
+
 ## Message flow — when does it respond?
 
 Every message runs through this gauntlet in `messageCreate` (first `return` wins). Understanding the
