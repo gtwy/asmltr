@@ -923,9 +923,9 @@ async function start(ctx) {
       (ccOnly
         ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]]. `
         : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
-      `A customer on this thread who answered questions you asked is in-context: interpret and reply to everyone on the chain. That is not a staff-only "Tim check xyz" listen. People already on the thread, or in Rolodex/contacts, are not strangers — look them up before treating From as unknown. ` +
-      `DNS, registrar, and other infra: interpret the records to everyone, then ask James specifically whether to apply. Do not change DNS or give away another customer or internal detail until he confirms. After he confirms, apply, then mail everyone that it is done. ` +
-      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. ` +
+      `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at @example.com (James, Tim, Joey, or Steve) says so. Do not add those staff to a thread they are not already on. ` +
+      `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Rolodex/contacts, are not strangers. ` +
+      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. Do not add Tim, Joey, or Steve unless they were already on To/Cc. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
