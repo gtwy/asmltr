@@ -80,6 +80,9 @@ function buildMailContent(text, signature) {
   return html ? { text: plain, html } : { text: plain };
 }
 
+// Letter-only rule stays last in system_prompt_extra.
+const LETTER_ONLY_EXTRA = 'Write the letter only. The first line of the mailed body is the greeting or the first sentence to the reader. No notes-to-self, no photo captions, no I\'ll-send plans above that.';
+
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
 
 const meta = {
@@ -668,8 +671,9 @@ async function start(ctx) {
         extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. @example.com is always silent. Customer we already emailed on an open ticket: one notice to Example Co staff only.';
       }
     }
-    extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags. Do not use Discord-only markup (-# subtext, 💭 chips) in a letter.';
-    extra += ' Write the letter only. The first line of the mailed body is the greeting or the first sentence to the reader. No notes-to-self, no photo captions, no I\'ll-send plans above that.';
+    extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags.';
+    extra += ' Do not retype or restyle the signature; the connector appends it. Do not use Discord -# or 💭 in a letter (if you do, send-time unwraps it). Use markdown for emphasis; headings only when they help, not on a two-line note.';
+    extra += ' ' + LETTER_ONLY_EXTRA;
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,
@@ -918,4 +922,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, queueOutboundMail, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };

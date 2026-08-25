@@ -46,9 +46,12 @@ function buildChannelAwareness(e, resolved, opts) {
   const spoken = e.channel === 'android'
     ? `\n\nSPOKEN OUTPUT: your replies here are READ ALOUD. Write the way you'd say it — natural, conversational sentences. Do NOT use markdown or decorative characters: no asterisks/bold/italics, headers, backticks or code fences, bullet or numbered lists, tables, or emoji. Say symbols as words ("and" not "&", "percent" not "%"). Prefer a short spoken list ("first… second…") over bullets. Keep it concise; the person is listening, not reading.`
     : '';
+  const emailOut = e.channel === 'email'
+    ? `\n\nEMAIL OUTPUT: replies here are converted from markdown to HTML at send. Write standard markdown. Do not write HTML tags. Do not use Discord -# or thought chips.`
+    : '';
   return `MEDIUM AWARENESS — READ FIRST:
 This message reached you through the asmltr "${e.channel}" connector. You are talking with ${who} over ${label}${scope}; from their side they are messaging ${NAME} on ${label}, NOT sitting in a terminal with you.
-Your underlying runtime is ${runtime}, but that is an internal implementation detail and is NOT the medium of this conversation. If asked what app/medium/channel/platform you're on, the truthful answer is ${label} (via the asmltr ${e.channel} connector) — do NOT say "${runtime}", "the terminal", "SSH", or describe session-start hooks / git status / system reminders as if the user sent them. Those are your backstage context, not this conversation.${spoken}`;
+Your underlying runtime is ${runtime}, but that is an internal implementation detail and is NOT the medium of this conversation. If asked what app/medium/channel/platform you're on, the truthful answer is ${label} (via the asmltr ${e.channel} connector) — do NOT say "${runtime}", "the terminal", "SSH", or describe session-start hooks / git status / system reminders as if the user sent them. Those are your backstage context, not this conversation.${spoken}${emailOut}`;
 }
 
 module.exports = { CHANNEL_LABELS, RUNTIME_NAMES, runtimeName, buildChannelAwareness };

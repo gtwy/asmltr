@@ -48,13 +48,32 @@ function normalizeNewlines(s) {
   return String(s == null ? '' : s).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
-/** Drop Discord subtext lines (-#) and leftover thought-balloon chips. */
+/** If the whole remainder is italicized, return the inner text (*foo* / _foo_ → foo). */
+function unwrapWholeItalic(s) {
+  const t = String(s == null ? '' : s).trim();
+  const m = /^(\*|_)([\s\S]+)\1$/.exec(t);
+  return m ? m[2] : t;
+}
+
+/**
+ * Unwrap Discord subtext (-#) to inner text; drop leftover thought-balloon chips.
+ * Does not delete the words. Former -# line indexes are returned so the HTML
+ * converter can render those lines as Discord-like small italic.
+ */
+function unwrapDiscordLines(s) {
+  const subtextLines = new Set();
+  const lines = normalizeNewlines(s).split('\n').map((line, i) => {
+    const cleaned = line.replace(/💭/g, '');
+    const m = /^-#\s*(.*)$/.exec(cleaned);
+    if (!m) return cleaned;
+    subtextLines.add(i);
+    return unwrapWholeItalic(m[1]);
+  });
+  return { text: lines.join('\n'), subtextLines };
+}
+
 function stripDiscordChrome(s) {
-  return normalizeNewlines(s)
-    .split('\n')
-    .filter((line) => !/^-\#/.test(line))
-    .join('\n')
-    .replace(/💭/g, '');
+  return unwrapDiscordLines(s).text;
 }
 
 function safeHref(escapedUrl) {
@@ -63,12 +82,22 @@ function safeHref(escapedUrl) {
   return escapeHtml(raw);
 }
 
+function disclosureSpan(phrase) {
+  return `<span style="${DISCLOSURE_STYLE}">${phrase}</span>`;
+}
+
 function styleDisclosures(s) {
   let out = s;
   for (const phrase of DISCLOSURES) {
-    if (!out.includes(phrase)) continue;
-    const wrapped = `<span style="${DISCLOSURE_STYLE}">${phrase}</span>`;
-    out = out.split(phrase).join(wrapped);
+    const wrapped = disclosureSpan(phrase);
+    const variants = [`<em>${phrase}</em>`, `*${phrase}*`, `_${phrase}_`];
+    for (const v of variants) {
+      if (out.includes(v)) out = out.split(v).join(wrapped);
+    }
+    const hole = `\u0000D${phrase}\u0000`;
+    out = out.split(wrapped).join(hole);
+    if (out.includes(phrase)) out = out.split(phrase).join(wrapped);
+    out = out.split(hole).join(wrapped);
   }
   return out;
 }
@@ -137,8 +166,22 @@ function tag(name, style, inner) {
   return `<${name} style="${style}">${inner}</${name}>`;
 }
 
+function lineNeedsSmallItalic(escapedLine, idx, subtextLines) {
+  if (subtextLines && subtextLines.has(idx)) return true;
+  const raw = unescapeHtml(escapedLine).trim();
+  return /^AI Assistant to \S/i.test(raw);
+}
+
+function formatLine(escapedLine, idx, subtextLines) {
+  const html = applyInline(escapedLine);
+  if (!lineNeedsSmallItalic(escapedLine, idx, subtextLines)) return html;
+  if (html.startsWith(`<span style="${DISCLOSURE_STYLE}">`) && html.endsWith('</span>')) return html;
+  return `<span style="${DISCLOSURE_STYLE}">${html}</span>`;
+}
+
 /** Inner HTML fragment. Escapes first, then applies markdown. */
-function markdownToHtml(md) {
+function markdownToHtml(md, opts) {
+  const subtextLines = (opts && opts.subtextLines) || new Set();
   const escaped = escapeHtml(normalizeNewlines(md));
   const lines = escaped.split('\n');
   const out = [];
@@ -162,7 +205,7 @@ function markdownToHtml(md) {
     const hm = /^(#{1,4}) (.+)$/.exec(line);
     if (hm) {
       const level = hm[1].length;
-      out.push(tag(`h${level}`, STYLE[`h${level}`], applyInline(hm[2].trim())));
+      out.push(tag(`h${level}`, STYLE[`h${level}`], formatLine(hm[2].trim(), i, subtextLines)));
       i += 1;
       continue;
     }
@@ -173,7 +216,7 @@ function markdownToHtml(md) {
         quote.push(lines[i].replace(/^&gt; ?/, ''));
         i += 1;
       }
-      const inner = applyInline(quote.join('\n')).replace(/\n/g, '<br>');
+      const inner = quote.map((q, k) => formatLine(q, i - quote.length + k, subtextLines)).join('<br>');
       out.push(tag('blockquote', STYLE.blockquote, inner));
       continue;
     }
@@ -181,7 +224,7 @@ function markdownToHtml(md) {
     if (/^[-*+] /.test(line)) {
       const items = [];
       while (i < lines.length && /^[-*+] /.test(lines[i])) {
-        items.push(tag('li', STYLE.li, applyInline(lines[i].replace(/^[-*+] /, ''))));
+        items.push(tag('li', STYLE.li, formatLine(lines[i].replace(/^[-*+] /, ''), i, subtextLines)));
         i += 1;
       }
       out.push(tag('ul', STYLE.ul, items.join('')));
@@ -191,7 +234,7 @@ function markdownToHtml(md) {
     if (/^\d+\. /.test(line)) {
       const items = [];
       while (i < lines.length && /^\d+\. /.test(lines[i])) {
-        items.push(tag('li', STYLE.li, applyInline(lines[i].replace(/^\d+\. /, ''))));
+        items.push(tag('li', STYLE.li, formatLine(lines[i].replace(/^\d+\. /, ''), i, subtextLines)));
         i += 1;
       }
       out.push(tag('ol', STYLE.ol, items.join('')));
@@ -204,11 +247,13 @@ function markdownToHtml(md) {
     }
 
     const para = [];
+    const paraIdx = [];
     while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i])) {
       para.push(lines[i]);
+      paraIdx.push(i);
       i += 1;
     }
-    const inner = applyInline(para.join('\n')).replace(/\n/g, '<br>');
+    const inner = para.map((ln, k) => formatLine(ln, paraIdx[k], subtextLines)).join('<br>');
     out.push(tag('p', STYLE.p, inner));
   }
 
@@ -231,11 +276,14 @@ function wrapEmailHtml(inner) {
 }
 
 function emailHtmlFromMarkdown(md) {
-  return wrapEmailHtml(markdownToHtml(stripDiscordChrome(md)));
+  const { text, subtextLines } = unwrapDiscordLines(md);
+  return wrapEmailHtml(markdownToHtml(text, { subtextLines }));
 }
 
 module.exports = {
   escapeHtml,
+  unwrapWholeItalic,
+  unwrapDiscordLines,
   stripDiscordChrome,
   markdownToHtml,
   wrapEmailHtml,

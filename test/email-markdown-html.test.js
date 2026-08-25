@@ -1,6 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
 const {
   escapeHtml,
   stripDiscordChrome,
@@ -8,6 +10,7 @@ const {
   wrapEmailHtml,
   emailHtmlFromMarkdown,
   buildMailContent,
+  LETTER_ONLY_EXTRA,
 } = require('../connectors/types/email');
 
 test('bold italic headings render as tags', () => {
@@ -40,16 +43,20 @@ test('http links become underlined anchors', () => {
   assert.match(h, /text-decoration:underline/);
 });
 
-test('Discord -# line is stripped', () => {
+test('Discord -# line unwraps inner text and drops chips', () => {
   const stripped = stripDiscordChrome('-# Working\nHello\n-# Still working\nWorld 💭 done');
-  assert.doesNotMatch(stripped, /Working/);
-  assert.doesNotMatch(stripped, /Still working/);
+  assert.match(stripped, /Working/);
+  assert.match(stripped, /Still working/);
   assert.doesNotMatch(stripped, /💭/);
+  assert.doesNotMatch(stripped, /^-#/m);
   assert.match(stripped, /Hello/);
   assert.match(stripped, /World/);
+  assert.equal(stripDiscordChrome('-# *(paid link)*').trim(), '(paid link)');
   const html = emailHtmlFromMarkdown('-# Working\nDear reader\n');
-  assert.doesNotMatch(html, /Working/);
+  assert.match(html, /Working/);
   assert.match(html, /Dear reader/);
+  assert.match(html, /<span style="font-size:12px;font-style:italic;color:#555;">Working<\/span>/);
+  assert.doesNotMatch(html, /-#/);
 });
 
 test('(paid link) and Associate sentence get small italic', () => {
@@ -97,4 +104,53 @@ test('lists blockquotes code and hard breaks', () => {
   assert.match(h, /<blockquote[^>]*>quoted<\/blockquote>/);
   assert.match(h, /<code[^>]*>code<\/code>/);
   assert.match(h, /<pre[^>]*>[\s\S]*const x = 1;/);
+});
+
+test('-# *(paid link)* under a URL survives as small italic', () => {
+  const src = 'https://example.com/dp/B0FAKE0000\n-# *(paid link)*';
+  const h = emailHtmlFromMarkdown(src);
+  assert.match(h, /https:\/\/example.com\/dp\/B0FAKE0000/);
+  assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">\(paid link\)<\/span>/);
+  assert.doesNotMatch(h, /-#/);
+  assert.doesNotMatch(h, /<em>\(paid link\)<\/em>/);
+});
+
+test('-# Associate sentence survives as small italic', () => {
+  const src = '-# *As an Amazon Associate I earn from qualifying purchases.*';
+  const h = emailHtmlFromMarkdown(src);
+  assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">As an Amazon Associate I earn from qualifying purchases\.<\/span>/);
+  assert.doesNotMatch(h, /-#/);
+  assert.doesNotMatch(h, /<em>As an Amazon Associate I earn from qualifying purchases\.<\/em>/);
+});
+
+test('italic-wrapped disclosure forms are small italic, not just em', () => {
+  const h = markdownToHtml('See *(paid link)* and *As an Amazon Associate I earn from qualifying purchases.*');
+  assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">\(paid link\)<\/span>/);
+  assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">As an Amazon Associate I earn from qualifying purchases\.<\/span>/);
+  assert.doesNotMatch(h, /<em>\(paid link\)<\/em>/);
+});
+
+test('AI Assistant attribution line is 12px italic; line above is not', () => {
+  const h = markdownToHtml('Hello\nAI Assistant to Alex');
+  assert.match(h, /Hello/);
+  assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">AI Assistant to Alex<\/span>/);
+  assert.doesNotMatch(h, /<span style="font-size:12px;font-style:italic;color:#555;">Hello<\/span>/);
+  const nameLine = emailHtmlFromMarkdown('Ivy Hedera 🔶🌿\n\nAI Assistant to Alex');
+  assert.match(nameLine, /Ivy Hedera/);
+  assert.doesNotMatch(nameLine, /<span style="font-size:12px;font-style:italic;color:#555;">Ivy Hedera/);
+});
+
+test('letter-only extra is the suffix of the extra string', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/email/index.js'), 'utf8');
+  assert.equal(
+    LETTER_ONLY_EXTRA,
+    'Write the letter only. The first line of the mailed body is the greeting or the first sentence to the reader. No notes-to-self, no photo captions, no I\'ll-send plans above that.',
+  );
+  assert.match(src, /Write the letter only\. The first line of the mailed body is the greeting/);
+  const adds = [...src.matchAll(/extra \+= [^;]+;/g)].map((m) => m[0]);
+  assert.ok(adds.length >= 1);
+  assert.match(adds[adds.length - 1], /LETTER_ONLY_EXTRA/);
+  const extraTail = src.indexOf("extra += ' ' + LETTER_ONLY_EXTRA");
+  const markdownIdx = src.lastIndexOf('You may use standard markdown');
+  assert.ok(extraTail > markdownIdx);
 });
