@@ -19,10 +19,12 @@ identity is now Gaia (or a generic assistant name):
   Local-chat banner reads `process.env.ASSISTANT_NAME` (default `gaia`).
 - Docs: `docs/cli.md` `(ivy: grok)` → `(gaia: grok)`.
 - CHANGELOG unreleased line: "Example configs for ivy" → gaia.
-- Tests: `Ivy Hedera` → `Gaia` (no surname); `assistant@example.com` assistant-self
-  fixtures → `assistant@example.com`; prompt-leak `(Ivy)` / `IvyBot` /
-  GitHub `workingPlaceholder('Ivy')` / upload caption `ivy what is this` /
-  effort-classifier `Hi Ivy` → Gaia.
+- Tests in this commit: `Ivy Hedera` → `Gaia` (no surname); assistant mailbox
+  fixtures → `assistant@example.com`; remaining install mailboxes in
+  `email-owner-cc.test.js` → `owner@example.com` / `other@example.com`.
+  Prompt-leak `(Ivy)` / `IvyBot`, GitHub `workingPlaceholder('Ivy')`,
+  upload caption `ivy what is this`, and effort-classifier `Hi Ivy` were
+  left as leftovers (not this chunk).
 - `extras/ivy-local/rolodex` comments "Ivy's cache" / "Ivy Rolodex" → Gaia
   / assistant cache. Directory name unchanged.
 
