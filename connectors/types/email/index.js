@@ -486,7 +486,6 @@ function persistLogOnlyAlert(hit, rec) {
 
 
 const EMAIL_ADDR_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-const OUTBOUND_DEDUP_MS = 30 * 60 * 1000;
 
 function parseAddrList(v) {
   if (v == null || v === '') return [];
@@ -516,10 +515,6 @@ function parseAddrList(v) {
   return out;
 }
 
-function outboundBodyKey(text) {
-  return crypto.createHash('sha1').update(String(text || '').replace(/\s+/g, ' ').trim()).digest('hex');
-}
-
 function addrsFromField(field) {
   const vals = field && field.value;
   if (!Array.isArray(vals)) return [];
@@ -531,98 +526,43 @@ function addrsFromField(field) {
   return out;
 }
 
-/** Reply-all: To = From (minus us), Cc = inbound To/Cc minus us minus To. Owner is Cc only when the letter is to someone else. */
-function replyAllRecipients(parsed, selfAddr, ownerAddr) {
+function selfInTo(parsed, selfAddr) {
   const self = String(selfAddr || '').trim().toLowerCase();
-  const owner = String(ownerAddr || '').trim().toLowerCase();
-  const from = addrsFromField(parsed && parsed.from).filter((a) => a && a !== self);
-  const others = [...addrsFromField(parsed && parsed.to), ...addrsFromField(parsed && parsed.cc)]
-    .filter((a) => a && a !== self && !from.includes(a));
-  const to = [...new Set(from)];
-  const cc = [];
-  const seen = new Set(to);
-  for (const a of others) {
-    if (seen.has(a)) continue;
-    seen.add(a);
-    cc.push(a);
-  }
-  if (owner && owner !== self && !seen.has(owner) && to.some((a) => a !== owner)) {
-    cc.push(owner);
-  }
-  return { to, cc };
+  return !!self && addrsFromField(parsed && parsed.to).includes(self);
 }
 
-/**
- * Same-letter SMTP gate. Records recipients as soon as prepare() runs (before queued SMTP),
- * so a later connector reply cannot secretly To someone already on the send.
- *
- * - Auto-Cc owner when To is someone else (visible Cc, not a second letter).
- * - Same body within windowMs: drop addresses already on a prior send; skip entirely if none left.
- * - force: true sends anyway (operator said it never arrived).
- */
-function createOutboundGate({ ownerAddr, windowMs, nowFn } = {}) {
+function selfInCcOnly(parsed, selfAddr) {
+  const self = String(selfAddr || '').trim().toLowerCase();
+  if (!self) return false;
+  return !selfInTo(parsed, self) && addrsFromField(parsed && parsed.cc).includes(self);
+}
+
+/** Visible Cc of the operator when the letter is to someone else. No timer, no second SMTP. */
+function applyOwnerCc(payload, ownerAddr) {
   const owner = String(ownerAddr || '').trim().toLowerCase();
-  const window = Number(windowMs) > 0 ? Number(windowMs) : OUTBOUND_DEDUP_MS;
-  const now = typeof nowFn === 'function' ? nowFn : Date.now;
-  const rows = [];
-
-  function prune(t) {
-    const cut = t - window;
-    while (rows.length && rows[0].at < cut) rows.shift();
+  const to = parseAddrList(payload && payload.to);
+  const cc = parseAddrList(payload && payload.cc).filter((a) => !to.includes(a));
+  if (owner && !to.includes(owner) && !cc.includes(owner) && to.some((a) => a !== owner)) {
+    cc.push(owner);
   }
-
-  function already(key) {
-    const s = new Set();
-    for (const r of rows) {
-      if (r.key === key) for (const a of r.addrs) s.add(a);
-    }
-    return s;
+  if (!to.length) {
+    return { skip: true, reason: 'skip outbound — no recipients', payload };
   }
-
-  function prepare(payload, opts) {
-    const force = !!(opts && opts.force);
-    const t = now();
-    prune(t);
-    let to = parseAddrList(payload && payload.to);
-    let cc = parseAddrList(payload && payload.cc).filter((a) => !to.includes(a));
-    if (owner && !to.includes(owner) && !cc.includes(owner) && to.some((a) => a !== owner)) {
-      cc.push(owner);
-    }
-    const key = outboundBodyKey(payload && payload.text);
-    const skippedAddrs = [];
-    if (!force) {
-      const have = already(key);
-      for (const a of [...to, ...cc]) {
-        if (have.has(a)) skippedAddrs.push(a);
-      }
-      to = to.filter((a) => !have.has(a));
-      cc = cc.filter((a) => !have.has(a) && !to.includes(a));
-    }
-    if (!to.length && cc.length) to = [cc.shift()];
-    if (!to.length) {
-      return {
-        skip: true,
-        reason: skippedAddrs.length
-          ? ('skip duplicate — already copied: ' + skippedAddrs.join(', '))
-          : 'skip outbound — no recipients',
-        skippedAddrs,
-        key,
-        payload,
-      };
-    }
-    const next = Object.assign({}, payload, {
+  return {
+    skip: false,
+    payload: Object.assign({}, payload, {
       to: to.join(', '),
       cc: cc.length ? cc.join(', ') : undefined,
-    });
-    rows.push({ at: t, key, addrs: [...to, ...cc] });
-    return { skip: false, payload: next, skippedAddrs, key };
-  }
+    }),
+  };
+}
 
-  return { prepare, rows };
+function createOutboundGate({ ownerAddr } = {}) {
+  return { prepare: (payload) => applyOwnerCc(payload, ownerAddr) };
 }
 
 /** Kick SMTP and return immediately. Errors are logged; the HTTP /send caller is already done.
- * Optional prepare() runs synchronously first so a later reply in the same turn sees the recipients. */
+ * Optional prepare() runs synchronously (owner Cc) before the queue. */
 function queueOutboundMail(sendMail, payload, log, prepare) {
   let next = payload;
   if (typeof prepare === 'function') {
@@ -633,7 +573,7 @@ function queueOutboundMail(sendMail, payload, log, prepare) {
     }
     if (p && p.skip) {
       try { (log || console.error)(p.reason || 'outbound skipped'); } catch (_) {}
-      return { ok: true, queued: false, skipped: true, reason: p.reason, skippedAddrs: p.skippedAddrs };
+      return { ok: true, queued: false, skipped: true, reason: p.reason };
     }
     next = (p && p.payload) || payload;
   }
@@ -697,11 +637,11 @@ async function start(ctx) {
     return info;
   }
 
-  async function sendMail(payload, opts) {
-    const p = outboundGate.prepare(payload, opts);
+  async function sendMail(payload) {
+    const p = outboundGate.prepare(payload);
     if (p.skip) {
       ctx.log(p.reason);
-      return { skipped: true, reason: p.reason, skippedAddrs: p.skippedAddrs };
+      return { skipped: true, reason: p.reason };
     }
     return smtpSend(p.payload);
   }
@@ -808,7 +748,7 @@ async function start(ctx) {
     if (!known && !hit) {
       if (ownerForward && ownerForward !== fromAddr) {
         const fwd = `${NAME} forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
-        await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd }, { force: true });
+        await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd });
         ctx.log(`forwarded unknown ${fromAddr} → ${ownerForward}`);
       } else {
         ctx.log(`unknown sender ${fromAddr} — no owner_forward_to, skipped`);
@@ -817,13 +757,16 @@ async function start(ctx) {
     }
 
     const sendPolicy = policy;
-    const suppressReply = isAutomatedSender(fromAddr) || !!(hit && hit.reply_to_sender === false);
+    const ccOnly = selfInCcOnly(parsed, selfAddr);
     let extra =
-      `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
-      `Do not type a name or signature block — "${fromName}" and the rest of the signature are appended automatically. NEVER sign as the operator/owner or impersonate a human. ` +
+      `You are answering an EMAIL as ${fromName}. Your assistant text is NOT mailed — there is no auto-reply. ` +
+      `To send a letter: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"]. ` +
+      `Then reply with exactly [[NO_REPLY]]. Do not type a name or signature block — "${fromName}" and the rest of the signature are appended on send. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
-      `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
-      `When mailing a third party, asmltr send them and --cc the operator (visible Cc). Do not also write a letter that To's someone already on that send — the connector will drop the duplicate. ` +
+      (ccOnly
+        ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]]. `
+        : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. `) +
+      `When mailing a third party, --cc the operator (visible Cc). The connector also Ccs owner_forward_to if they are missing. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
@@ -854,23 +797,9 @@ async function start(ctx) {
 
     for (const a of actions || []) {
       if (a.type === 'reply' && a.text && a.text.trim()) {
-        // Shadow mode (always_draft) = ZERO outbound. Legit replies already come back as {drafted};
-        // a stray {reply} here is a core early-return (e.g. access-revoked / moderation notice), which
-        // we must NOT email out in shadow. Under a sending policy, deliver it.
-        if (sendPolicy === 'always_draft') { ctx.log(`shadow: suppressed inline reply to ${fromAddr}`); continue; }
-        if (suppressReply) { ctx.log(`suppressed reply to automated/ops sender ${fromAddr}`); continue; }
-        const tc = threads.get(convKey) || {};
-        const ra = replyAllRecipients(parsed, selfAddr, ownerForward);
-        const replyTo = (ra.to && ra.to.length) ? ra.to : [fromAddr];
-        const replyCc = (ra.cc && ra.cc.length) ? ra.cc : undefined;
-        const sent = await sendMail({
-          to: replyTo.join(', '),
-          cc: replyCc ? replyCc.join(', ') : undefined,
-          subject: replySubject, text: a.text, inReplyTo: messageId, references: tc.references,
-        });
-        if (sent && sent.skipped) ctx.log(`reply skipped (${replySubject}): ${sent.reason}`);
-        else ctx.log(`replied to ${replyTo.join(', ')}${replyCc ? ' cc ' + replyCc.join(', ') : ''} (${replySubject})`);
-      } // 'drafted' → held for approval (dashboard); 'status'/others → nothing to mail
+        // No auto-reply. Session text is never SMTP'd. Letters go out only via /out (asmltr send).
+        ctx.log(`no auto-reply (${replySubject}); send via asmltr send if this turn needed a letter`);
+      }
     }
     return { handled: true };
   }
@@ -1057,7 +986,7 @@ async function start(ctx) {
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references, force } = req.body || {};
+      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
       const tc = (ref && threads.get(ref)) || {};
       const subj = subject || tc.subject || `Message from ${fromName}`;
@@ -1069,9 +998,8 @@ async function start(ctx) {
         references: refsIn || tc.references,
         attachments,
       };
-      // Fire-and-forget SMTP. prepare() records recipients synchronously so a later
-      // connector reply in this turn cannot secretly To someone already on the send.
-      res.json(queueOutboundMail(smtpSend, payload, ctx.log, (pl) => outboundGate.prepare(pl, { force: !!force })));
+      // Fire-and-forget SMTP. prepare() adds owner Cc when To is someone else.
+      res.json(queueOutboundMail(smtpSend, payload, ctx.log, (pl) => outboundGate.prepare(pl)));
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   // Mailbox browse (the manager's /read proxies here; op = list | read | search).
@@ -1092,4 +1020,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, parseAddrList, outboundBodyKey, addrsFromField, replyAllRecipients, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };

@@ -259,7 +259,7 @@ async function cmdSend(rest) {
     else if (t === '--caption') caption = rest[++i];
     else if (t === '--subject') subject = rest[++i]; // email subject (ignored by channels without one)
     else if (t === '--cc') cc = rest[++i]; // email Cc (comma-separated ok)
-    else if (t === '--force') force = true; // email: send even if this body already copied those recipients
+    else if (t === '--force') force = true;
     else words.push(t);
   }
   const channel = words[0], target = words[1], text = words.slice(2).join(' ');
@@ -282,11 +282,7 @@ async function cmdSend(rest) {
     if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
     r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   }
-  if (r && r.ok && r.skipped) {
-    console.log(A.yel(`already copied — not a second letter${r.reason ? ' (' + r.reason + ')' : ''}`));
-  } else {
-    console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
-  }
+  console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 
 async function cmdGuildPost(rest) {
