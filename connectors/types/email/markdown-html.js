@@ -6,7 +6,7 @@
  */
 
 const DISCLOSURE_STYLE = 'font-size:12px;font-style:italic;color:#555;';
-const PITCH_STYLE = 'font-size:12px;color:#555;';
+const PITCH_STYLE = 'font-size:12px;font-weight:bold;color:#555;';
 const DISCLOSURES = [
   '(paid link)',
   'As an Amazon Associate I earn from qualifying purchases.',

@@ -157,7 +157,7 @@ test('pitch line is 12px not italic; assistant line stays italic', () => {
     'Ivy Hedera\nAI Assistant to Example Owner\n\n[Example Co](https://example.com) can build an AI assistant like this for your team.',
   );
   assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">AI Assistant to Example Owner<\/span>/);
-  assert.match(h, /<span style="font-size:12px;color:#555;"><a href="https:\/\/example.com"/);
+  assert.match(h, /<span style="font-size:12px;font-weight:bold;color:#555;"><a href="https:\/\/example.com"/);
   assert.doesNotMatch(h, /<span style="font-size:12px;font-style:italic;color:#555;"><a href="https:\/\/example.com"/);
 });
 
