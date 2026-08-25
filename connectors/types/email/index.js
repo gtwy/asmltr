@@ -537,6 +537,39 @@ function selfInCcOnly(parsed, selfAddr) {
   return !selfInTo(parsed, self) && addrsFromField(parsed && parsed.cc).includes(self);
 }
 
+/** Reply-all: keep everyone on the inbound From/To/Cc except us and --drop. Discord-originated sends (no thread) are unchanged. */
+function mergeReplyAll(payload, thread, selfAddr, dropList) {
+  const self = String(selfAddr || '').trim().toLowerCase();
+  const drop = new Set(
+    parseAddrList(dropList).concat(self ? [self] : []),
+  );
+  const tFrom = (thread && thread.from) || [];
+  const tTo = (thread && thread.to) || [];
+  const tCc = (thread && thread.cc) || [];
+  if (!tFrom.length && !tTo.length && !tCc.length) return payload;
+
+  const seen = new Set();
+  const to = [];
+  const cc = [];
+  function push(bucket, list) {
+    for (const a of list) {
+      if (!a || drop.has(a) || seen.has(a)) continue;
+      seen.add(a);
+      bucket.push(a);
+    }
+  }
+  push(to, parseAddrList(payload && payload.to));
+  push(to, tFrom);
+  push(to, tTo);
+  push(cc, parseAddrList(payload && payload.cc));
+  push(cc, tCc);
+  if (!to.length && cc.length) to.push(cc.shift());
+  return Object.assign({}, payload, {
+    to: to.join(', '),
+    cc: cc.length ? cc.join(', ') : undefined,
+  });
+}
+
 /** Visible Cc of the operator when the letter is to someone else. No timer, no second SMTP. */
 function applyOwnerCc(payload, ownerAddr) {
   const owner = String(ownerAddr || '').trim().toLowerCase();
@@ -591,7 +624,10 @@ async function start(ctx) {
   const fromName = cfg.from_name || NAME;
   const policy = sendPolicyFromConfig(cfg);
   const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
-  const signature = cfg.signature || `\n\n—\n${fromName}`;
+  const signature = cfg.signature || (
+    `\n\n\n${fromName}\n\nAI Assistant to Example Owner\n\n` +
+    'If this felt like extra staff, James can put one in your shop.\n'
+  );
   const coreBase = String(process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle\/?$/i, '');
 
   async function resolveSender(addr, name) {
@@ -734,7 +770,13 @@ async function start(ctx) {
       } catch (e) { ctx.log(`attachment save failed: ${e.message}`); }
     }
 
-    threads.set(convKey, { subject: replySubject, messageId, references: [...refs, messageId].filter(Boolean) });
+    threads.set(convKey, {
+      subject: replySubject, messageId,
+      references: [...refs, messageId].filter(Boolean),
+      from: addrsFromField(parsed.from),
+      to: addrsFromField(parsed.to),
+      cc: addrsFromField(parsed.cc),
+    });
 
     let text = `From: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
     if (savedNotes.length) text += `\n\n[Attachments saved to the shared asmltr upload area (findable via \`asmltr uploads\`):\n${savedNotes.join('\n')}]`;
@@ -761,12 +803,13 @@ async function start(ctx) {
     let extra =
       `You are answering an EMAIL as ${fromName}. Your assistant text is NOT mailed — there is no auto-reply. ` +
       `To send a letter: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"]. ` +
+      `On a chain, the connector reply-alls everyone already on To/Cc (minus you) unless you pass --drop <addr> or --no-reply-all. Check To and Cc before sending. Do not drop Tim/Joey/James/the customer unless asked. ` +
       `Then reply with exactly [[NO_REPLY]]. Do not type a name or signature block — "${fromName}" and the rest of the signature are appended on send. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
       (ccOnly
         ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]]. `
-        : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. `) +
-      `When mailing a third party, --cc the operator (visible Cc). The connector also Ccs owner_forward_to if they are missing. ` +
+        : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
+      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
@@ -986,18 +1029,19 @@ async function start(ctx) {
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references } = req.body || {};
+      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references, drop, reply_all } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
       const tc = (ref && threads.get(ref)) || {};
       const subj = subject || tc.subject || `Message from ${fromName}`;
       const attachments = kind === 'file' && filePath ? [{ path: filePath, filename: path.basename(filePath) }] : undefined;
       const refsIn = references == null ? null : (Array.isArray(references) ? references : String(references).split(/\s+/).filter(Boolean));
-      const payload = {
+      let payload = {
         to: target, cc, subject: subj, text: text || caption || '',
         inReplyTo: inReplyTo || tc.messageId,
         references: refsIn || tc.references,
         attachments,
       };
+      if (reply_all !== false) payload = mergeReplyAll(payload, tc, selfAddr, drop);
       // Fire-and-forget SMTP. prepare() adds owner Cc when To is someone else.
       res.json(queueOutboundMail(smtpSend, payload, ctx.log, (pl) => outboundGate.prepare(pl)));
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -1020,4 +1064,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };

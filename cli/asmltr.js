@@ -251,7 +251,7 @@ async function cmdRelease(key) {
 async function cmdSend(rest) {
   exitIfDenied('send');
   // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."]
-  let file = null, caption = null, subject = null, cc = null, force = false;
+  let file = null, caption = null, subject = null, cc = null, force = false, drop = null, noReplyAll = false;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
@@ -259,19 +259,27 @@ async function cmdSend(rest) {
     else if (t === '--caption') caption = rest[++i];
     else if (t === '--subject') subject = rest[++i]; // email subject (ignored by channels without one)
     else if (t === '--cc') cc = rest[++i]; // email Cc (comma-separated ok)
+    else if (t === '--drop') drop = rest[++i]; // email: omit these chain addrs from reply-all
+    else if (t === '--no-reply-all') noReplyAll = true;
     else if (t === '--force') force = true;
     else words.push(t);
   }
   const channel = words[0], target = words[1], text = words.slice(2).join(' ');
   if (!channel || !target || (!text && !file)) {
     throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
-      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"] [--force]\n' +
+      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"] [--drop "<addr>"] [--no-reply-all] [--force]\n' +
       '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@example.com "the body" --subject "Hello" --cc "boss@example.com" --file /root/report.pdf');
   }
   const body = file
     ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject, cc }
     : { channel, target, kind: 'text', text, subject, cc };
   if (force) body.force = true;
+  if (channel === 'email') {
+    const conv = process.env.ASMLTR_ATTACH_CONVERSATION_KEY;
+    if (conv) body.ref = conv;
+    if (drop) body.drop = drop;
+    if (noReplyAll) body.reply_all = false;
+  }
   // Route through the CORE (/v2/send) so a cross-channel post is ASSIMILATED into the destination
   // session's context (it learns it "said" this, instead of it looking foreign on the next read).
   // Fall back to the manager's /send if the core is unreachable — delivery still works, just no assimilation.
