@@ -6,6 +6,7 @@
  */
 
 const DISCLOSURE_STYLE = 'font-size:12px;font-style:italic;color:#555;';
+const PITCH_STYLE = 'font-size:12px;color:#555;';
 const DISCLOSURES = [
   '(paid link)',
   'As an Amazon Associate I earn from qualifying purchases.',
@@ -172,11 +173,22 @@ function lineNeedsSmallItalic(escapedLine, idx, subtextLines) {
   return /^AI Assistant to \S/i.test(raw);
 }
 
+function lineNeedsPitchSize(escapedLine) {
+  const raw = unescapeHtml(escapedLine).trim();
+  return /Example Co can build an AI assistant/i.test(raw)
+    || /^\[Example Co\]\(https:\/\/techdirect\.ai\)/i.test(raw);
+}
+
 function formatLine(escapedLine, idx, subtextLines) {
   const html = applyInline(escapedLine);
-  if (!lineNeedsSmallItalic(escapedLine, idx, subtextLines)) return html;
-  if (html.startsWith(`<span style="${DISCLOSURE_STYLE}">`) && html.endsWith('</span>')) return html;
-  return `<span style="${DISCLOSURE_STYLE}">${html}</span>`;
+  if (lineNeedsSmallItalic(escapedLine, idx, subtextLines)) {
+    if (html.startsWith(`<span style="${DISCLOSURE_STYLE}">`) && html.endsWith('</span>')) return html;
+    return `<span style="${DISCLOSURE_STYLE}">${html}</span>`;
+  }
+  if (lineNeedsPitchSize(escapedLine)) {
+    return `<span style="${PITCH_STYLE}">${html}</span>`;
+  }
+  return html;
 }
 
 /** Inner HTML fragment. Escapes first, then applies markdown. */
