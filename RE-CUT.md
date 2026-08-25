@@ -9,24 +9,31 @@ Draft only. Do not apply host cutover today. Live product stays on `ivy` /
 Public-facing example / fixture / help text that used the private assistant
 identity is now Gaia (or a generic assistant name):
 
-- Example env: `ASSISTANT_NAME=gaia` in `.env.example` and `env.ivy.example`
-  (filename `env.ivy.example` kept as the host-shaped example file). Comments
-  note that the live host stays ivy via off-git config.
+- Example env: `ASSISTANT_NAME=gaia` in `.env.example` and `env.gaia.example`
+  (renamed from `env.ivy.example`). Host-shaped seed example renamed
+  `seed.ivy.example.json` → `seed.gaia.example.json`. Comments note that
+  the live host stays ivy via off-git config.
 - `scripts/apply-user-units.sh` example banners / `ASSISTANT_NAME` check → gaia,
-  with a comment that the live host stays ivy via off-git config. Does not
-  edit live systemd.
+  and copies `env.gaia.example` / `seed.gaia.example.json`. Comment that the
+  live host stays ivy via off-git config. Does not edit live systemd.
+- `core/ecosystem.config.js` points at `env.gaia.example`.
+- `test/example-configs.test.js` locals `ivy` / `ivyFriend` / `ivyEnv` →
+  `gaia` / `gaiaFriend` / `gaiaEnv`, loading the renamed example files.
 - CLI help: "ivy local chat" / "local ivy REPL" / "talk to ivy" → gaia.
   Local-chat banner reads `process.env.ASSISTANT_NAME` (default `gaia`).
 - Docs: `docs/cli.md` `(ivy: grok)` → `(gaia: grok)`.
-- CHANGELOG unreleased line: "Example configs for ivy" → gaia.
-- Tests in this commit: `Ivy Hedera` → `Gaia` (no surname); assistant mailbox
-  fixtures → `assistant@example.com`; remaining install mailboxes in
+- CHANGELOG unreleased line: "Example configs for ivy" → gaia; filenames
+  updated to `env.gaia.example` / `seed.gaia.example.json`.
+- Tests: `Ivy Hedera` → `Gaia` (no surname); assistant mailbox fixtures →
+  `assistant@example.com`; remaining install mailboxes in
   `email-owner-cc.test.js` → `owner@example.com` / `other@example.com`.
-  Follow-up also recut prompt-leak `(Ivy)` / `IvyBot` → Gaia, GitHub
-  `workingPlaceholder('Gaia')`, upload caption `gaia what is this`, and
-  effort-classifier `Hi Gaia`.
+  Prompt-leak `(Ivy)` / `IvyBot` → Gaia, GitHub `workingPlaceholder('Gaia')`,
+  upload caption `gaia what is this`, and effort-classifier `Hi Gaia`.
 - `extras/ivy-local/rolodex` comments "Ivy's cache" / "Ivy Rolodex" → Gaia
   / assistant cache. Directory name unchanged.
+- `shared/step-public.js` LANGUAGE_OVERLAP: dropped the `'ivy'` token
+  (list is now rose/daisy plus the other common-word surnames). Not a
+  special-case keep. No live PII classifier wired.
 
 ## Running-code now uses ASSISTANT_NAME
 
@@ -45,10 +52,9 @@ Connectors / identity / wake-word already used `ASSISTANT_NAME`.
 ## extras/ivy-local folder name kept on purpose
 
 The directory, `register.sh` `IVY`/`IVY_LOCAL` locals, example systemd unit
-names (`ivy-rolodex-sync.*`), `mode: "ivy-cache"`, and filenames
-`env.ivy.example` / `seed.ivy.example.json` stay. Those are host-shaped
-extras paths, not the public product persona. Do not rename the folder in
-this recut.
+names (`ivy-rolodex-sync.*`), and `mode: "ivy-cache"` stay. Those are
+host-shaped extras paths, not the public product persona. Do not rename
+the folder in this recut.
 
 ## What still must move to overlay vs stay in public asmltr
 
@@ -80,10 +86,8 @@ Rules for the public tree:
 
 ## Left on purpose
 
-- `shared/step-public.js` LANGUAGE_OVERLAP common-word `'ivy'` (rose/daisy/ivy)
 - `test/update-ref.test.js` git branch fixture `ivy` / `origin/ivy`
-- `env.ivy.example`, `seed.ivy.example.json` filenames; example-configs
-  locals `ivy` / `ivyFriend` / `ivyEnv` that load those files
+  (git branch name, not assistant name)
 - `extras/ivy-local/**` path, `register.sh` `IVY` var, systemd unit names,
   `mode: "ivy-cache"`
 - Eve-as-reviewer (`Eve: skip extras/ivy-local...`)
@@ -93,9 +97,10 @@ Rules for the public tree:
 - `test/engine-grok-effort.test.js` catch-up speaker `Eve:`
 - `test/admin-alert.test.js` display_name `Eve'; id`
 - `docs/ROADMAP-RECORDER-CONTEXTBANKS.md` "Eve observes calls"
-- `core/ecosystem.config.js` mention of filename `env.ivy.example`
 - git commit messages (not edited)
 - No Dionysus hits in this tree
+- LANGUAGE_OVERLAP no longer special-cases `'ivy'` (token dropped). PII
+  classify-then-redact is later; no live classifier wired.
 
 ## Do not apply host cutover today
 

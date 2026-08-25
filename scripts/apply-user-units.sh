@@ -28,8 +28,8 @@ cd "$REPO"
 test -f core/src/engines/grok.js || { echo "NEED grok adapter in $REPO"; exit 1; }
 
 if [[ ! -f .env ]]; then
-  cp env.ivy.example .env
-  echo "wrote .env from env.ivy.example"
+  cp env.gaia.example .env
+  echo "wrote .env from env.gaia.example"
 else
   echo ".env already present — leaving it"
 fi
@@ -38,8 +38,8 @@ grep -q '^ASSISTANT_NAME=gaia' .env || echo "WARN: ASSISTANT_NAME is not gaia"
 grep -q '^ASMLTR_WEB_OWNER_ID=owner' .env || echo "WARN: ASMLTR_WEB_OWNER_ID should be owner"
 
 if [[ ! -f core/src/trust/seed.json ]]; then
-  cp core/src/trust/seed.ivy.example.json core/src/trust/seed.json
-  echo "wrote seed.json from seed.ivy.example.json"
+  cp core/src/trust/seed.gaia.example.json core/src/trust/seed.json
+  echo "wrote seed.json from seed.gaia.example.json"
 fi
 
 echo "== unit tests (no grok tokens) =="

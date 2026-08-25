@@ -191,7 +191,7 @@ const LANGUAGE_OVERLAP = new Set([
   'king', 'stone', 'wood', 'hill', 'park', 'west', 'east', 'north', 'south',
   'long', 'young', 'little', 'short', 'good', 'best', 'rich', 'fair', 'true',
   'baker', 'miller', 'smith', 'cook', 'porter', 'ward', 'hall', 'lane', 'ford',
-  'rose', 'daisy', 'ivy',
+  'rose', 'daisy',
 ]);
 
 const IDENTITY_TALK_RE = /\b(last\s+names?|surnames?|family\s+names?|first\s+names?|given\s+names?|spell(?:ed|ing|s)?|who(?:'s|\s+is|\s+are)|identit(?:y|ies)|customers?|clients?|\bnamed\b|mr\.?|mrs\.?|ms\.?|dr\.?)\b/i;
