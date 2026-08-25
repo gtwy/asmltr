@@ -77,8 +77,8 @@ test('emailHtmlFromMarkdown returns a full html document with a body', () => {
 });
 
 test('buildMailContent returns multipart text plus html', () => {
-  const c = buildMailContent('Hello **world**', '\n\n—\nIvy');
-  assert.equal(c.text, 'Hello **world**\n\n—\nIvy');
+  const c = buildMailContent('Hello **world**', '\n\n—\nGaia');
+  assert.equal(c.text, 'Hello **world**\n\n—\nGaia');
   assert.ok(c.html);
   assert.match(c.html, /<strong>world<\/strong>/);
   assert.match(c.html, /<html/i);
@@ -135,9 +135,9 @@ test('AI Assistant attribution line is 12px italic; line above is not', () => {
   assert.match(h, /Hello/);
   assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">AI Assistant to Alex<\/span>/);
   assert.doesNotMatch(h, /<span style="font-size:12px;font-style:italic;color:#555;">Hello<\/span>/);
-  const nameLine = emailHtmlFromMarkdown('Ivy Hedera 🔶🌿\n\nAI Assistant to Alex');
-  assert.match(nameLine, /Ivy Hedera/);
-  assert.doesNotMatch(nameLine, /<span style="font-size:12px;font-style:italic;color:#555;">Ivy Hedera/);
+  const nameLine = emailHtmlFromMarkdown('Gaia 🔶🌿\n\nAI Assistant to Alex');
+  assert.match(nameLine, /Gaia/);
+  assert.doesNotMatch(nameLine, /<span style="font-size:12px;font-style:italic;color:#555;">Gaia/);
 });
 
 test('letter-only extra is the suffix of the extra string', () => {

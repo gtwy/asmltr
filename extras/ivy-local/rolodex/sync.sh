@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Refresh Ivy's separate Rolodex cache from localhost GET /export.
+# Refresh Gaia's separate Rolodex cache from localhost GET /export.
 # Writes ONLY contacts.json. Never creates, reads, or overwrites aliases.json.
 set -euo pipefail
 

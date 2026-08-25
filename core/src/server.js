@@ -216,7 +216,7 @@ function drainObserved(key) {
  */
 
 /** Write a completed ask/grok turn into the Self silo (memory/transcripts + last-topics)
- *  and the ivy stream so a fresh session after idle can rehydrate without grepping
+ *  and the assistant stream so a fresh session after idle can rehydrate without grepping
  *  events-*.jsonl. Best-effort: never fail the turn. */
 function persistAskTurn(e, result, assistantText) {
   if (!e || !result || result.isError) return;
@@ -232,8 +232,8 @@ function persistAskTurn(e, result, assistantText) {
     });
   } catch (_) {}
   try {
-    const streamName = (process.env.ASSISTANT_NAME || 'assistant').trim() || 'assistant';
-    let st = streams.get(streamName.toLowerCase()) || streams.get('ivy');
+    const streamName = (process.env.ASSISTANT_NAME || 'gaia').trim() || 'gaia';
+    let st = streams.get(streamName.toLowerCase());
     if (!st) st = streams.create({ name: streamName, description: `${streamName} local ask / grok turns (auto-written)` });
     if (e.conversation_key) streams.attach(st.id, e.conversation_key);
     streams.append(st.id, {
@@ -732,7 +732,7 @@ async function handle(envelope, opts = {}) {
       identity: resolved.user_key, source: 'core', payload: { action: 'redacted', count: masked, public: !!e.public } });
   }
 
-  // Self silo + ivy stream: persist the (possibly redacted) user+assistant turn for rehydrate.
+  // Self silo + assistant stream: persist the (possibly redacted) user+assistant turn for rehydrate.
   const replyText = (actions.find((a) => a && a.type === 'reply') || {}).text;
   persistAskTurn(e, result, replyText);
 
@@ -1205,7 +1205,7 @@ app.post('/v2/backups/import', express.raw({ type: 'application/octet-stream', l
 // The dashboard is a browser CONNECTOR: it posts `assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
 // from ASMLTR_WEB_OWNER_ID or the reverse proxy's X-Remote-User. Seed that same value as
-// an assistant-web identifier (ivy: owner) or web chat is default-deny.
+// an assistant-web identifier (gaia: owner) or web chat is default-deny.
 function webOwnerId(req) {
   return process.env.ASMLTR_WEB_OWNER_ID
     || (req && req.get && req.get('X-Remote-User')) || null;

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Apply ivy localhost as systemd --user units.
+# Apply gaia localhost as systemd --user units (public example).
+# Live host stays ivy via off-git config. Do not change live systemd from this tree.
 # Do not install pm2. Do not start Discord.
 # Do not touch corona.service or rolodex.service. Do not push. Do not cat ~/.grok/auth.json.
 set -euo pipefail
@@ -9,7 +10,7 @@ NODE24="${ASMLTR_NODE:-$HOME/.local/bin/node}"
 GROK_BIN="${ASMLTR_GROK_BIN:-$HOME/.grok/bin/grok}"
 WITH_COLLECTOR="${WITH_COLLECTOR:-0}"
 
-echo "== ivy apply as $(whoami) =="
+echo "== gaia apply as $(whoami) =="
 
 export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
 unset XAI_API_KEY
@@ -33,7 +34,7 @@ else
   echo ".env already present — leaving it"
 fi
 chmod 600 .env || true
-grep -q '^ASSISTANT_NAME=ivy' .env || echo "WARN: ASSISTANT_NAME is not ivy"
+grep -q '^ASSISTANT_NAME=gaia' .env || echo "WARN: ASSISTANT_NAME is not gaia"
 grep -q '^ASMLTR_WEB_OWNER_ID=owner' .env || echo "WARN: ASMLTR_WEB_OWNER_ID should be owner"
 
 if [[ ! -f core/src/trust/seed.json ]]; then
@@ -67,7 +68,7 @@ if [[ "$WITH_COLLECTOR" = 1 ]]; then
   curl -sf http://127.0.0.1:3017/health && echo || echo "WARN: collector /health failed"
 fi
 
-echo "== talk to ivy =="
+echo "== talk to gaia =="
 echo "  $NODE24 $REPO/cli/asmltr.js ask \"Reply with exactly the word pong and nothing else.\""
 echo "DONE. Do not start connector-manager. Do not git push. Do not install pm2."
 echo "Optional Corona/Rolodex/OneNote wrappers: bash $REPO/extras/ivy-local/register.sh"

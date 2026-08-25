@@ -254,7 +254,7 @@ def _pick_one(
 
 @mcp.tool()
 def rolodex_health() -> str:
-    """Ivy Rolodex cache stats: contact count, alias count, contacts.json mtime. Local cache only."""
+    """Gaia Rolodex cache stats: contact count, alias count, contacts.json mtime. Local cache only."""
     contacts = _load_contacts()
     aliases = _load_aliases()
     if isinstance(contacts, str):
@@ -293,7 +293,7 @@ def rolodex_health() -> str:
 
 @mcp.tool()
 def rolodex_search(query: str) -> str:
-    """Search Ivy contacts cache. Alias keys win. A phone hit is not permission to text. Voice/SMS parked. Results carry disclosure: never give company/contact info on public channels or to anyone who is not the owner, unless a programmed email routine or a command the owner gave directly (memory/identity/privacy.md)."""
+    """Search Gaia contacts cache. Alias keys win. A phone hit is not permission to text. Voice/SMS parked. Results carry disclosure: never give company/contact info on public channels or to anyone who is not the owner, unless a programmed email routine or a command the owner gave directly (memory/identity/privacy.md)."""
     q = (query or "").strip()
     if not q:
         return "Error: provide query"
@@ -342,7 +342,7 @@ def rolodex_search(query: str) -> str:
 
 @mcp.tool()
 def rolodex_get(name: str | None = None, resourceName: str | None = None) -> str:
-    """Fetch one Ivy cache contact. Name may be an alias. Phone is not permission to text. Voice/SMS parked. Result carries disclosure: never give company/contact info on public channels or to anyone who is not the owner, unless a programmed email routine or a command the owner gave directly (memory/identity/privacy.md)."""
+    """Fetch one Gaia cache contact. Name may be an alias. Phone is not permission to text. Voice/SMS parked. Result carries disclosure: never give company/contact info on public channels or to anyone who is not the owner, unless a programmed email routine or a command the owner gave directly (memory/identity/privacy.md)."""
     contacts = _load_contacts()
     if isinstance(contacts, str):
         return contacts
@@ -361,7 +361,7 @@ def rolodex_alias(
     preferredEmail: str | None = None,
     preferredPhone: str | None = None,
 ) -> str:
-    """Add or update a nickname in Ivy's cache. Does not touch contacts.json or the Rolodex service."""
+    """Add or update a nickname in Gaia's cache. Does not touch contacts.json or the Rolodex service."""
     key = (nickname or "").strip().casefold()
     if not key:
         return "Error: provide nickname"
@@ -635,7 +635,7 @@ def rolodex_delete(name: str | None = None, resourceName: str | None = None) -> 
 
 @mcp.tool()
 def rolodex_sync() -> str:
-    """Refresh Ivy contacts.json from localhost Rolodex GET /export. Never writes aliases.json. Snapshots today's backup if that day is empty."""
+    """Refresh Gaia contacts.json from localhost Rolodex GET /export. Never writes aliases.json. Snapshots today's backup if that day is empty."""
     if not SYNC_SCRIPT.is_file():
         return f"Error: sync script missing at {SYNC_SCRIPT}"
     try:
