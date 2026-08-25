@@ -384,6 +384,73 @@ function persistLastUid(instanceId, uid) {
   fs.writeFileSync(f, JSON.stringify({ lastUid: uid }) + '\n', { mode: 0o600 });
 }
 
+// Thread participants survive worker restart so reply-all and "already on this chain"
+// still work after a recycle. Override with ASMLTR_EMAIL_THREADS_FILE.
+const THREADS_KEEP = 200;
+
+function threadsFile(instanceId) {
+  if (process.env.ASMLTR_EMAIL_THREADS_FILE) return process.env.ASMLTR_EMAIL_THREADS_FILE;
+  return path.join(os.homedir(), '.asmltr', `email-threads-${instanceId}.json`);
+}
+
+function readThreads(instanceId) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(threadsFile(instanceId), 'utf8'));
+    const obj = raw && raw.threads && typeof raw.threads === 'object' ? raw.threads : {};
+    return new Map(Object.entries(obj));
+  } catch (_) {
+    return new Map();
+  }
+}
+
+function persistThreads(instanceId, map) {
+  const entries = [...(map || new Map()).entries()].slice(-THREADS_KEEP);
+  const f = threadsFile(instanceId);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ threads: Object.fromEntries(entries) }) + '\n', { mode: 0o600 });
+}
+
+/** Emails from a Rolodex/contacts.json export (`{ results: [{ emails: [] }] }`). */
+function emailsFromContactsDoc(doc) {
+  const set = new Set();
+  const rows = (doc && Array.isArray(doc.results)) ? doc.results
+    : (Array.isArray(doc) ? doc : []);
+  for (const row of rows) {
+    for (const e of (row && row.emails) || []) {
+      const a = String(e || '').trim().toLowerCase();
+      if (a.includes('@')) set.add(a);
+    }
+  }
+  return set;
+}
+
+function contactsFile() {
+  if (process.env.ASMLTR_EMAIL_CONTACTS_FILE) return process.env.ASMLTR_EMAIL_CONTACTS_FILE;
+  return path.join(os.homedir(), '.asmltr', 'ivy-rolodex', 'contacts.json');
+}
+
+const contactsCache = { path: '', mtimeMs: -1, set: new Set() };
+
+function contactsHasEmail(addr) {
+  const a = String(addr || '').trim().toLowerCase();
+  if (!a.includes('@')) return false;
+  const f = contactsFile();
+  let st;
+  try { st = fs.statSync(f); } catch (_) { return false; }
+  if (contactsCache.path !== f || contactsCache.mtimeMs !== st.mtimeMs) {
+    try {
+      contactsCache.set = emailsFromContactsDoc(JSON.parse(fs.readFileSync(f, 'utf8')));
+      contactsCache.path = f;
+      contactsCache.mtimeMs = st.mtimeMs;
+    } catch (_) {
+      contactsCache.set = new Set();
+      contactsCache.path = f;
+      contactsCache.mtimeMs = st.mtimeMs;
+    }
+  }
+  return contactsCache.set.has(a);
+}
+
 function loadMatchers(filePath) {
   const p = filePath || defaultOpsAllowthroughPath();
   try {
@@ -537,6 +604,46 @@ function selfInCcOnly(parsed, selfAddr) {
   return !selfInTo(parsed, self) && addrsFromField(parsed && parsed.cc).includes(self);
 }
 
+function selfIsRecipient(parsed, selfAddr) {
+  const self = String(selfAddr || '').trim().toLowerCase();
+  if (!self) return false;
+  return addrsFromField(parsed && parsed.to).includes(self)
+    || addrsFromField(parsed && parsed.cc).includes(self);
+}
+
+function headerHasThread(parsed) {
+  if (!parsed) return false;
+  if (parsed.inReplyTo) return true;
+  const refs = parsed.references;
+  if (Array.isArray(refs) && refs.filter(Boolean).length) return true;
+  if (typeof refs === 'string' && refs.trim()) return true;
+  return false;
+}
+
+function senderOnPriorThread(prior, fromAddr) {
+  const a = String(fromAddr || '').trim().toLowerCase();
+  if (!prior || !a) return false;
+  const bag = []
+    .concat(prior.from || [])
+    .concat(prior.to || [])
+    .concat(prior.cc || [])
+    .map((x) => String(x).toLowerCase());
+  return bag.includes(a);
+}
+
+/**
+ * Cold-mail strangers: owner-forward. Do not forward when they are already on
+ * this chain, replying to us, or in the optional contacts file (Rolodex).
+ */
+function shouldOwnerForwardUnknown({
+  known, opsHit, parsed, selfAddr, fromAddr, priorThread, contactsKnown,
+} = {}) {
+  if (known || opsHit || contactsKnown) return false;
+  if (senderOnPriorThread(priorThread, fromAddr)) return false;
+  if (headerHasThread(parsed) && selfIsRecipient(parsed, selfAddr)) return false;
+  return true;
+}
+
 /** Reply-all: keep everyone on the inbound From/To/Cc except us and --drop. Discord-originated sends (no thread) are unchanged. */
 function mergeReplyAll(payload, thread, selfAddr, dropList) {
   const self = String(selfAddr || '').trim().toLowerCase();
@@ -651,9 +758,9 @@ async function start(ctx) {
     auth: { user: address, pass: password },
   });
 
-  // conversation_key -> { subject, messageId, references[] } so replies (inline OR later draft
-  // approval via /out) thread correctly. In-memory: best-effort across a connector restart.
-  const threads = new Map();
+  // conversation_key -> { subject, messageId, references[], from, to, cc }. Disk + memory
+  // so a recycle does not treat a thread participant as a stranger or drop reply-all.
+  const threads = readThreads(ctx.instanceId);
   const selfAddr = String(address).toLowerCase();
   const outboundGate = createOutboundGate({ ownerAddr: ownerForward });
 
@@ -770,6 +877,7 @@ async function start(ctx) {
       } catch (e) { ctx.log(`attachment save failed: ${e.message}`); }
     }
 
+    const priorThread = threads.get(convKey) || null;
     threads.set(convKey, {
       subject: replySubject, messageId,
       references: [...refs, messageId].filter(Boolean),
@@ -777,6 +885,8 @@ async function start(ctx) {
       to: addrsFromField(parsed.to),
       cc: addrsFromField(parsed.cc),
     });
+    try { persistThreads(ctx.instanceId, threads); }
+    catch (e) { ctx.log(`persist threads: ${e.message}`); }
 
     let text = `From: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
     if (savedNotes.length) text += `\n\n[Attachments saved to the shared asmltr upload area (findable via \`asmltr uploads\`):\n${savedNotes.join('\n')}]`;
@@ -785,9 +895,13 @@ async function start(ctx) {
 
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
-    // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
+    const contactsKnown = contactsHasEmail(fromAddr);
+    // Access-card known, Rolodex/contacts, or already on this chain: create a turn.
+    // Cold strangers: forward to the owner, no reply.
     // Ops allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
-    if (!known && !hit) {
+    if (shouldOwnerForwardUnknown({
+      known, opsHit: hit, parsed, selfAddr, fromAddr, priorThread, contactsKnown,
+    })) {
       if (ownerForward && ownerForward !== fromAddr) {
         const fwd = `${NAME} forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
         await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd });
@@ -809,6 +923,8 @@ async function start(ctx) {
       (ccOnly
         ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]]. `
         : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
+      `A customer on this thread who answered questions you asked is in-context: interpret and reply to everyone on the chain. That is not a staff-only "Tim check xyz" listen. People already on the thread, or in Rolodex/contacts, are not strangers — look them up before treating From as unknown. ` +
+      `DNS, registrar, and other infra: interpret the records to everyone, then ask James specifically whether to apply. Do not change DNS or give away another customer or internal detail until he confirms. After he confirms, apply, then mail everyone that it is done. ` +
       `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
@@ -1064,4 +1180,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
