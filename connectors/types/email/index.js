@@ -626,7 +626,7 @@ async function start(ctx) {
   const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
   const signature = cfg.signature || (
     `\n\n\n${fromName}\nAI Assistant to Example Owner\n\n\n` +
-    'Example Co can build an AI assistant like this for your team.\n'
+    '[Example Co](https://example.com) can build an AI assistant like this for your team.\n'
   );
   const coreBase = String(process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle\/?$/i, '');
 

@@ -242,7 +242,16 @@ function markdownToHtml(md, opts) {
     }
 
     if (line.trim() === '') {
-      i += 1;
+      // Keep consecutive blank source lines. Skipping them collapsed \n\n\n to one
+      // paragraph gap, so Gmail showed a single break. &nbsp; so empty <p> is not dropped.
+      let n = 0;
+      while (i < lines.length && lines[i].trim() === '') {
+        n += 1;
+        i += 1;
+      }
+      for (let k = 0; k < n; k++) {
+        out.push('<p style="margin:0;padding:0;line-height:1.5;">&nbsp;</p>');
+      }
       continue;
     }
 
