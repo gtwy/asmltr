@@ -6,6 +6,7 @@
  */
 
 const DISCLOSURE_STYLE = 'font-size:12px;font-style:italic;color:#555;';
+const PITCH_STYLE = 'font-size:12px;font-weight:bold;color:#555;';
 const DISCLOSURES = [
   '(paid link)',
   'As an Amazon Associate I earn from qualifying purchases.',
@@ -172,11 +173,22 @@ function lineNeedsSmallItalic(escapedLine, idx, subtextLines) {
   return /^AI Assistant to \S/i.test(raw);
 }
 
+function lineNeedsPitchSize(escapedLine) {
+  const raw = unescapeHtml(escapedLine).trim();
+  return /Example Co can build an AI assistant/i.test(raw)
+    || /^\[Example Co\]\(https:\/\/techdirect\.ai\)/i.test(raw);
+}
+
 function formatLine(escapedLine, idx, subtextLines) {
   const html = applyInline(escapedLine);
-  if (!lineNeedsSmallItalic(escapedLine, idx, subtextLines)) return html;
-  if (html.startsWith(`<span style="${DISCLOSURE_STYLE}">`) && html.endsWith('</span>')) return html;
-  return `<span style="${DISCLOSURE_STYLE}">${html}</span>`;
+  if (lineNeedsSmallItalic(escapedLine, idx, subtextLines)) {
+    if (html.startsWith(`<span style="${DISCLOSURE_STYLE}">`) && html.endsWith('</span>')) return html;
+    return `<span style="${DISCLOSURE_STYLE}">${html}</span>`;
+  }
+  if (lineNeedsPitchSize(escapedLine)) {
+    return `<span style="${PITCH_STYLE}">${html}</span>`;
+  }
+  return html;
 }
 
 /** Inner HTML fragment. Escapes first, then applies markdown. */
@@ -242,7 +254,16 @@ function markdownToHtml(md, opts) {
     }
 
     if (line.trim() === '') {
-      i += 1;
+      // Keep consecutive blank source lines. Skipping them collapsed \n\n\n to one
+      // paragraph gap, so Gmail showed a single break. &nbsp; so empty <p> is not dropped.
+      let n = 0;
+      while (i < lines.length && lines[i].trim() === '') {
+        n += 1;
+        i += 1;
+      }
+      for (let k = 0; k < n; k++) {
+        out.push('<p style="margin:0;padding:0;line-height:1.5;">&nbsp;</p>');
+      }
       continue;
     }
 

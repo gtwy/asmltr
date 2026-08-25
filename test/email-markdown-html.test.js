@@ -140,6 +140,27 @@ test('AI Assistant attribution line is 12px italic; line above is not', () => {
   assert.doesNotMatch(nameLine, /<span style="font-size:12px;font-style:italic;color:#555;">Gaia/);
 });
 
+test('consecutive blank lines are kept as &nbsp; paragraphs, not collapsed', () => {
+  const h = markdownToHtml('above\n\n\nIvy Hedera\nAI Assistant to Example Owner\n\n\nbelow');
+  const spacers = h.match(/<p style="margin:0;padding:0;line-height:1.5;">&nbsp;<\/p>/g) || [];
+  assert.equal(spacers.length, 4);
+  assert.match(h, /Ivy Hedera<br><span style="font-size:12px;font-style:italic;color:#555;">AI Assistant to Example Owner<\/span>/);
+});
+
+test('markdown link in the pitch line becomes an href', () => {
+  const h = markdownToHtml('[Example Co](https://example.com) can build an AI assistant like this for your team.');
+  assert.match(h, /<a href="https:\/\/example.com"[^>]*>Example Co<\/a>/);
+});
+
+test('pitch line is 12px not italic; assistant line stays italic', () => {
+  const h = markdownToHtml(
+    'Ivy Hedera\nAI Assistant to Example Owner\n\n[Example Co](https://example.com) can build an AI assistant like this for your team.',
+  );
+  assert.match(h, /<span style="font-size:12px;font-style:italic;color:#555;">AI Assistant to Example Owner<\/span>/);
+  assert.match(h, /<span style="font-size:12px;font-weight:bold;color:#555;"><a href="https:\/\/example.com"/);
+  assert.doesNotMatch(h, /<span style="font-size:12px;font-style:italic;color:#555;"><a href="https:\/\/example.com"/);
+});
+
 test('letter-only extra is the suffix of the extra string', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/email/index.js'), 'utf8');
   assert.equal(
