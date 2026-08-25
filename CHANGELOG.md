@@ -11,6 +11,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Fixed
 - **Email: no auto-reply of session text.** The connector no longer SMTPs the assistant `reply` action. Letters go out only via `asmltr send` / `/out` (in context: spoken to, or told to do something). CC-only chains are listen-unless-asked. `owner_forward_to` is still a visible Cc when To is someone else. No 30-minute duplicate timer.
 - **Email: chain reply-all.** `/out` with a thread `ref` keeps everyone on inbound From/To/Cc (minus the mailbox). `--drop` / `--no-reply-all` only if asked to omit someone. `asmltr send email` from an email turn passes the conversation `ref`.
+- **Email signature pitch** (Ivy): extra blank before the name; name and `AI Assistant to …` on adjacent lines; two blanks; then `Example Co can build an AI assistant like this for your team.`
 
 ### Added
 - **Example configs for ivy exceptions (no PII):** `shared/tool-policy.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.ivy.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_TOOL_POLICY_FILE` in `.env.example` / `env.ivy.example`.
