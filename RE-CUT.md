@@ -84,6 +84,18 @@ Rules for the public tree:
 - Do not copy `~/.asmltr/identity.md`, `mcp.json`, `.env`, `trust.db`,
   `*env`, systemd units, or `email-authserv.json` into git.
 
+## guild_post → send (record, do not recut the API today)
+
+Public product wording is **send**. `guild_post` / `asmltr_guild_post` / `asmltr guild-post` stay as current Discord implementation names in this tree:
+
+- `cli/asmltr.js` outbound kind `guild_post`
+- `connectors/types/discord/index.js` `kind === 'guild_post'`
+- `mcp/toolbelt-server.js` tool `asmltr_guild_post`
+- `shared/toolbelt-prompt.js` and `docs/connectors/discord.md`
+- tests `test/guild-post.test.js`, `test/toolbelt-deny.test.js`
+
+Do not rename those symbols in this chunk (tests and MCP names are wired). Later overlay/private work should present the action as send and keep guild-only posting as a Discord connector detail, not a public product verb. Destination for outbound-stage remains overlay (see above). Do not live-wire that move today.
+
 ## Left on purpose
 
 - `test/update-ref.test.js` git branch fixture `ivy` / `origin/ivy`
