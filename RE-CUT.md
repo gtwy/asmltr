@@ -141,6 +141,26 @@ Rules for the public tree:
 - LANGUAGE_OVERLAP no longer special-cases `'ivy'` (token dropped). PII
   classify-then-redact is later; no live classifier wired.
 
+## Channel-public tool-policy tripwire (host-gated)
+
+`shared/tool-policy.js` `isRestricted` used to deny **public Discord before
+principal** (`envelope.public === true` → restricted even with
+`bypass_moderation`). That is the channel-public / public-before-principal
+tripwire.
+
+This recut branch still has the function, but the tripwire is isolated
+behind the host path:
+
+- Apply channel-public deny only when `HOST_CHANNEL_POLICY=1` **or**
+  `ASSISTANT_NAME` is explicitly the host identity (`ivy`).
+- Default product path (`ASSISTANT_NAME=gaia` or unset) does **not** apply
+  that channel-public deny. Public Discord + bypass/owner is then not
+  restricted by `isRestricted`; non-bypass callers remain restricted via
+  the remaining `bypass_moderation` check.
+- Live ivy (`8f6d472`) still has the ungated tripwire. This recut does
+  not edit the live ivy asmltr checkout. No Discord-connector auth
+  layer was added. Overlay modules are not wired into core-entry.
+
 ## Do not apply host cutover today
 
 Do not bounce. Do not checkout live `ivy` / `ivy-local` main. Do not push

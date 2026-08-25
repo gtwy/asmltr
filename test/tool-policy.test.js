@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { policyFor, denyToolsEnv } = require('../shared/tool-policy');
+const { describe } = require('node:test');
+const { policyFor, denyToolsEnv, isRestricted, hostChannelPolicy } = require('../shared/tool-policy');
 const { buildToolbeltPrompt } = require('../shared/toolbelt-prompt');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-tool-policy-'));
@@ -214,4 +215,77 @@ test('restricted prompt names video/image/code off when denied', () => {
   assert.equal(on.includes('VIDEO GENERATION is off this turn'), false);
   assert.equal(on.includes('IMAGE GENERATION is off this turn'), false);
   assert.equal(on.includes('WRITING PROGRAMS is off this turn'), false);
+});
+
+function withEnv(vars, fn) {
+  const prev = {};
+  for (const [k, v] of Object.entries(vars)) {
+    prev[k] = Object.prototype.hasOwnProperty.call(process.env, k) ? process.env[k] : undefined;
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try { return fn(); }
+  finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+describe('channel-public deny is host-gated', { concurrency: 1 }, () => {
+  test('Gaia default (ASSISTANT_NAME=gaia): public discord + bypass is not channel-public denied', () => {
+    withEnv({ ASSISTANT_NAME: 'gaia', HOST_CHANNEL_POLICY: undefined }, () => {
+      assert.equal(hostChannelPolicy(), false);
+      const p = policyFor({
+        channel: 'discord', public: true,
+        context: { scope_id: 'guild:other-guild' },
+        channel_context: { channelId: 'ch1' },
+      }, { bypass_moderation: true, user_key: 'owner' });
+      assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), false);
+      assert.equal(p.restricted, false);
+      assert.equal(p.deny.send, false);
+      assert.equal(p.deny.shell, false);
+    });
+  });
+
+  test('Gaia default (ASSISTANT_NAME unset): public-before-principal tripwire is off', () => {
+    withEnv({ ASSISTANT_NAME: undefined, HOST_CHANNEL_POLICY: undefined }, () => {
+      assert.equal(hostChannelPolicy(), false);
+      assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), false);
+      assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: false }), true);
+    });
+  });
+
+  test('Gaia default: public discord without bypass is still restricted', () => {
+    withEnv({ ASSISTANT_NAME: 'gaia', HOST_CHANNEL_POLICY: undefined }, () => {
+      const p = policyFor({
+        channel: 'discord', public: true,
+        context: { scope_id: 'guild:other-guild' },
+      }, { bypass_moderation: false });
+      assert.equal(p.restricted, true);
+      assert.equal(p.deny.send, true);
+      assert.equal(p.deny.shell, true);
+    });
+  });
+
+  test('host path HOST_CHANNEL_POLICY=1: public-before-principal deny even with bypass', () => {
+    withEnv({ ASSISTANT_NAME: 'gaia', HOST_CHANNEL_POLICY: '1' }, () => {
+      assert.equal(hostChannelPolicy(), true);
+      const p = policyFor({
+        channel: 'discord', public: true,
+        context: { scope_id: 'guild:other-guild' },
+      }, { bypass_moderation: true, user_key: 'owner' });
+      assert.equal(p.restricted, true);
+      assert.equal(p.deny.send, true);
+      assert.equal(p.deny.shell, true);
+    });
+  });
+
+  test('host path ASSISTANT_NAME=ivy: public-before-principal deny even with bypass', () => {
+    withEnv({ ASSISTANT_NAME: 'ivy', HOST_CHANNEL_POLICY: undefined }, () => {
+      assert.equal(hostChannelPolicy(), true);
+      assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), true);
+    });
+  });
 });

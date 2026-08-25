@@ -1,6 +1,8 @@
 'use strict';
 /**
  * V31: per-turn tool policy. Restricted Discord cannot shell/streams/send/cwd-write.
+ * Channel-public / isRestricted-before-principal deny is host-gated
+ * (HOST_CHANNEL_POLICY=1 or ASSISTANT_NAME=ivy). Default Gaia path skips it.
  * Silo read/write is not part of that deny (James 21 Aug 2026). Do not fold
  * silo denies into a V31 PR — privacy.md is the silo safeguard.
  * Video/image gen and writing programs for a caller are owner/bypass unless
@@ -65,10 +67,20 @@ function siloAllowlisted(envelope, allow) {
   return !!(g && a.guilds.includes(g)) || !!(c && a.channels.includes(c));
 }
 
+function hostChannelPolicy() {
+  // Channel-public / isRestricted-before-principal deny is host-only.
+  // Live ivy still has the ungated tripwire. Default Gaia path skips it.
+  if (String(process.env.HOST_CHANNEL_POLICY || '') === '1') return true;
+  const name = String(process.env.ASSISTANT_NAME || '').trim().toLowerCase();
+  return name === 'ivy';
+}
+
 function isRestricted(envelope, resolved) {
   const ch = String((envelope && envelope.channel) || '');
   if (ch !== 'discord') return false;
-  if (envelope && envelope.public) return true;
+  // public-before-principal: host path only (ASSISTANT_NAME=ivy or HOST_CHANNEL_POLICY=1).
+  // ASSISTANT_NAME=gaia or unset must not apply that channel-public deny.
+  if (hostChannelPolicy() && envelope && envelope.public) return true;
   return !(resolved && resolved.bypass_moderation);
 }
 
@@ -186,7 +198,7 @@ function exitIfDenied(kind) {
 }
 
 module.exports = {
-  policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
+  policyFile, loadAllowlist, policyFor, isRestricted, hostChannelPolicy, siloAllowlisted,
   videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
 };
