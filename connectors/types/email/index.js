@@ -925,6 +925,7 @@ async function start(ctx) {
         : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
       `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at @example.com (James, Tim, Joey, or Steve) says so. Do not add those staff to a thread they are not already on. ` +
       `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Rolodex/contacts, are not strangers. ` +
+      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where/description, flag normal holidays and busy conflicts, and wait for James to confirm. Full flowchart: memory/ops/calendar-schedule.md. ` +
       `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. Do not add Tim, Joey, or Steve unless they were already on To/Cc. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
