@@ -71,8 +71,8 @@ test('queueOutboundMail still returns before sendMail finishes', async () => {
 test('mergeReplyAll keeps Tim/Joey/James when send targeted only Angela', () => {
   const thread = {
     from: ['angela@example.com'],
-    to: ['assistant@example.com', 'owner@example.com', 'chris@example.com'],
-    cc: ['sam@example.com'],
+    to: ['assistant@example.com', 'owner@example.com', 'tim@example.com'],
+    cc: ['joey@example.com'],
   };
   const p = mergeReplyAll(
     { to: 'angela@example.com', text: 'hi' },
@@ -83,25 +83,25 @@ test('mergeReplyAll keeps Tim/Joey/James when send targeted only Angela', () => 
   const all = (p.to + ' ' + (p.cc || '')).toLowerCase();
   assert.match(p.to, /angela@example.com/);
   assert.match(all, /owner@example.com/);
-  assert.match(all, /chris@example.com/);
-  assert.match(all, /sam@example.com/);
+  assert.match(all, /tim@example.com/);
+  assert.match(all, /joey@example.com/);
   assert.equal(all.includes('assistant@example.com'), false);
 });
 
 test('mergeReplyAll honors --drop', () => {
   const thread = {
     from: ['angela@example.com'],
-    to: ['owner@example.com', 'chris@example.com', 'assistant@example.com'],
+    to: ['owner@example.com', 'tim@example.com', 'assistant@example.com'],
     cc: [],
   };
   const p = mergeReplyAll(
     { to: 'angela@example.com', text: 'hi' },
     thread,
     'assistant@example.com',
-    'chris@example.com',
+    'tim@example.com',
   );
   const all = (p.to + ' ' + (p.cc || '')).toLowerCase();
-  assert.equal(all.includes('chris@example.com'), false);
+  assert.equal(all.includes('tim@example.com'), false);
   assert.match(all, /owner@example.com/);
 });
 
