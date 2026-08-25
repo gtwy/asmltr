@@ -1,6 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
 const {
   looksLikePromptLeak, looksLikePromptRestatement, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
@@ -313,4 +315,13 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
   assert.equal(identityHintKindMap([{ id: 'solo', display_name: 'Derek' }]).get('derek'), 'first-name');
   assert.equal(identityHintKindMap([{ id: 'ada', display_name: 'Ada Lovelace' }]).get('lovelace'), 'last-name');
   assert.deepEqual(publicBlockHints(['James', 'Watt', 'wx412'], kinds).map((h) => h.toLowerCase()), ['watt']);
+});
+
+test('LANGUAGE_OVERLAP omits ivy (plant-name token is not special-cased)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'shared', 'step-public.js'), 'utf8');
+  const block = src.match(/const LANGUAGE_OVERLAP = new Set\(\[([\s\S]*?)\]\);/);
+  assert.ok(block, 'LANGUAGE_OVERLAP list present');
+  assert.equal(/\b'ivy'\b/.test(block[1]), false);
+  assert.match(block[1], /'rose'/);
+  assert.match(block[1], /'daisy'/);
 });
