@@ -8,6 +8,9 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ## [Unreleased]
 
+### Fixed
+- **Email: no second letter to someone already copied.** `asmltr send` during an email turn and the connector's auto-reply used to SMTP the same body twice (reply-all to the thread, then a secret To: the operator). The connector now reply-alls (To = From, Cc = other inbound addresses), auto-Ccs `owner_forward_to` when the letter is to someone else, and drops any recipient already on the same body within 30 minutes. `--force` on `asmltr send` / `/out` still sends.
+
 ### Added
 - **Example configs for ivy exceptions (no PII):** `shared/tool-policy.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.ivy.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_TOOL_POLICY_FILE` in `.env.example` / `env.ivy.example`.
 - **`asmltr guild-post` name lookup** also indexes threads on regular text/announcement channels (not only forums) and media channels.

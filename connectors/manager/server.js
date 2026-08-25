@@ -207,7 +207,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const bindHost = inst.config && inst.config.bind_host;
   const host = (bindHost && bindHost !== '0.0.0.0' && bindHost !== '::') ? bindHost : '127.0.0.1';
   try {
-    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query }) });
+    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force }) });
     const j = await r.json().catch(() => ({}));
     // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
     // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.
