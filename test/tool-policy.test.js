@@ -282,10 +282,10 @@ describe('channel-public deny is host-gated', { concurrency: 1 }, () => {
     });
   });
 
-  test('host path ASSISTANT_NAME=ivy: public-before-principal deny even with bypass', () => {
-    withEnv({ ASSISTANT_NAME: 'ivy', HOST_CHANNEL_POLICY: undefined }, () => {
-      assert.equal(hostChannelPolicy(), true);
-      assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), true);
+  test('ASSISTANT_NAME does not enable the host channel tripwire', () => {
+    withEnv({ ASSISTANT_NAME: 'other', HOST_CHANNEL_POLICY: undefined }, () => {
+      assert.equal(hostChannelPolicy(), false);
+      assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), false);
     });
   });
 });

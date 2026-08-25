@@ -42,7 +42,7 @@ identity is now Gaia (or a generic assistant name):
 The leftover hardcoded fallback `streams.get('ivy')` is removed. If no
 stream exists for the configured name, one is created under that name.
 
-A live process that still has off-git `ASSISTANT_NAME=ivy` keeps the ivy
+A live process on the host checkout still has the ungated tripwire; that tree keeps the
 stream. Example files and the code default now say `gaia`.
 
 CLI local-chat banner uses `process.env.ASSISTANT_NAME` (default `gaia`).
@@ -151,8 +151,8 @@ tripwire.
 This recut branch still has the function, but the tripwire is isolated
 behind the host path:
 
-- Apply channel-public deny only when `HOST_CHANNEL_POLICY=1` **or**
-  `ASSISTANT_NAME` is explicitly the host identity (`ivy`).
+- Apply channel-public deny only when `HOST_CHANNEL_POLICY=1`.
+  `ASSISTANT_NAME` must not special-case any host product name.
 - Default product path (`ASSISTANT_NAME=gaia` or unset) does **not** apply
   that channel-public deny. Public Discord + bypass/owner is then not
   restricted by `isRestricted`; non-bypass callers remain restricted via
