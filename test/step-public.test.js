@@ -17,7 +17,7 @@ test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
   assert.equal(looksLikePromptLeak('path is /home/someone/.asmltr'), true);
   assert.equal(looksLikePromptLeak('Reading a file'), false);
   assert.equal(looksLikePromptLeak('the answer is 42'), false);
-  assert.equal(looksLikePromptLeak('The user is Ada (ada-id) asking me (Ivy) in #room'), true);
+  assert.equal(looksLikePromptLeak('The user is Ada (ada-id) asking me (Gaia) in #room'), true);
   assert.equal(looksLikePromptLeak('This is a Discord message in #food'), true);
   assert.equal(looksLikePromptLeak('I was @-mentioned, so I should reply'), true);
   assert.equal(looksLikePromptLeak('Let me search the recipe board'), false);
@@ -158,7 +158,7 @@ test('identityHintsFrom splits hyphenated principal ids and keeps mailboxes whol
       { surface: 'email', value: 'ada@example.com' },
       { surface: 'discord', value: '123456789012345678' },
     ],
-  }, { id: 'self', display_name: 'IvyBot' }]);
+  }, { id: 'self', display_name: 'GaiaBot' }]);
   assert.ok(hints.includes('fixture-person'));
   assert.ok(hints.includes('person'));
   assert.ok(hints.includes('Lovelace'));
@@ -166,7 +166,7 @@ test('identityHintsFrom splits hyphenated principal ids and keeps mailboxes whol
   assert.equal(hints.includes('com'), false);
   assert.equal(hints.includes('123456789012345678'), false);
   assert.equal(hints.includes('self'), false);
-  assert.equal(hints.includes('IvyBot'), false);
+  assert.equal(hints.includes('GaiaBot'), false);
   const hintKinds = identityHintKindMap([{
     id: 'fixture-person',
     display_name: 'Ada Lovelace',
@@ -174,7 +174,7 @@ test('identityHintsFrom splits hyphenated principal ids and keeps mailboxes whol
       { surface: 'email', value: 'ada@example.com' },
       { surface: 'discord', value: '123456789012345678' },
     ],
-  }, { id: 'self', display_name: 'IvyBot' }]);
+  }, { id: 'self', display_name: 'GaiaBot' }]);
   assert.equal(discordThoughtLine('Updating principal fixture-person', hints, hintKinds), '-# 💭 Updating principal fixture-person');
   assert.equal(discordThoughtLine('Email Ada Lovelace the links', hints, hintKinds), '');
   assert.equal(discordThoughtLine('Checking the recipe board', hints, hintKinds), '-# 💭 Checking the recipe board');

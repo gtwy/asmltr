@@ -22,9 +22,9 @@ identity is now Gaia (or a generic assistant name):
 - Tests in this commit: `Ivy Hedera` → `Gaia` (no surname); assistant mailbox
   fixtures → `assistant@example.com`; remaining install mailboxes in
   `email-owner-cc.test.js` → `owner@example.com` / `other@example.com`.
-  Prompt-leak `(Ivy)` / `IvyBot`, GitHub `workingPlaceholder('Ivy')`,
-  upload caption `ivy what is this`, and effort-classifier `Hi Ivy` were
-  left as leftovers (not this chunk).
+  Follow-up also recut prompt-leak `(Ivy)` / `IvyBot` → Gaia, GitHub
+  `workingPlaceholder('Gaia')`, upload caption `gaia what is this`, and
+  effort-classifier `Hi Gaia`.
 - `extras/ivy-local/rolodex` comments "Ivy's cache" / "Ivy Rolodex" → Gaia
   / assistant cache. Directory name unchanged.
 
