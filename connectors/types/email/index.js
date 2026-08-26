@@ -514,7 +514,7 @@ function persistThreads(instanceId, map) {
   fs.writeFileSync(f, JSON.stringify({ threads: Object.fromEntries(entries) }) + '\n', { mode: 0o600 });
 }
 
-/** Emails from a Rolodex/contacts.json export (`{ results: [{ emails: [] }] }`). */
+/** Emails from a contacts.json export (`{ results: [{ emails: [] }] }`). Tests only. */
 function emailsFromContactsDoc(doc) {
   const set = new Set();
   const rows = (doc && Array.isArray(doc.results)) ? doc.results
@@ -528,31 +528,47 @@ function emailsFromContactsDoc(doc) {
   return set;
 }
 
-function contactsFile() {
-  if (process.env.ASMLTR_EMAIL_CONTACTS_FILE) return process.env.ASMLTR_EMAIL_CONTACTS_FILE;
-  return path.join(os.homedir(), '.asmltr', 'ivy-rolodex', 'contacts.json');
+function contactsCliPython() {
+  const envPy = String(process.env.IVY_LOCAL_PYTHON || '').trim();
+  if (envPy) return envPy;
+  const venv = path.join(os.homedir(), 'src', 'asmltr', 'extras', 'ivy-local', '.venv', 'bin', 'python');
+  try { fs.accessSync(venv, fs.constants.X_OK); return venv; } catch (_) {}
+  return 'python3';
 }
 
-const contactsCache = { path: '', mtimeMs: -1, set: new Set() };
+function contactsCliScript() {
+  const override = String(process.env.ASMLTR_CONTACTS_CLI || '').trim();
+  if (override) return override;
+  return path.join(os.homedir(), '.asmltr', 'ivy-local', 'gworkspace', 'contacts_cli.py');
+}
+
+function parseContactsHasStdout(stdout) {
+  const line = String(stdout || '').trim().split('\n').filter(Boolean).pop() || '';
+  if (!line) return false;
+  const parsed = JSON.parse(line);
+  return !!(parsed && parsed.ok && parsed.known);
+}
+
+const contactsMem = new Map();
 
 function contactsHasEmail(addr) {
   const a = String(addr || '').trim().toLowerCase();
   if (!a.includes('@')) return false;
-  const f = contactsFile();
-  let st;
-  try { st = fs.statSync(f); } catch (_) { return false; }
-  if (contactsCache.path !== f || contactsCache.mtimeMs !== st.mtimeMs) {
-    try {
-      contactsCache.set = emailsFromContactsDoc(JSON.parse(fs.readFileSync(f, 'utf8')));
-      contactsCache.path = f;
-      contactsCache.mtimeMs = st.mtimeMs;
-    } catch (_) {
-      contactsCache.set = new Set();
-      contactsCache.path = f;
-      contactsCache.mtimeMs = st.mtimeMs;
-    }
+  if (contactsMem.has(a)) return contactsMem.get(a);
+  let known = false;
+  try {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync(contactsCliPython(), [contactsCliScript(), 'has-email', a], {
+      encoding: 'utf8',
+      timeout: 15000,
+      env: process.env,
+    });
+    known = parseContactsHasStdout(r.stdout);
+  } catch (_) {
+    known = false;
   }
-  return contactsCache.set.has(a);
+  contactsMem.set(a, known);
+  return known;
 }
 
 function loadMatchers(filePath) {
@@ -737,7 +753,7 @@ function senderOnPriorThread(prior, fromAddr) {
 
 /**
  * Cold-mail strangers: owner-forward. Do not forward when they are already on
- * this chain, replying to us, or in the optional contacts file (Rolodex).
+ * this chain, replying to us, or in Google Contacts (People API).
  */
 function shouldOwnerForwardUnknown({
   known, opsHit, parsed, selfAddr, fromAddr, priorThread, contactsKnown,
@@ -1008,7 +1024,7 @@ async function start(ctx) {
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
     const contactsKnown = contactsHasEmail(fromAddr);
-    // Access-card known, Rolodex/contacts, or already on this chain: create a turn.
+    // Access-card known, Google Contacts, or already on this chain: create a turn.
     // Cold strangers: forward to the owner, no reply.
     // Ops allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
     if (shouldOwnerForwardUnknown({
@@ -1037,8 +1053,8 @@ async function start(ctx) {
         ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]]. `
         : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
       `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at @example.com (James, Tim, Joey, or Steve) says so. Do not add those staff to a thread they are not already on. ` +
-      `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Rolodex/contacts, are not strangers. ` +
-      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where and any body notes, and wait for James to confirm. First letter to others: do not say you cannot book until James confirms or that a workflow blocks you. If someone (e.g. Steve) later sends a change, repeat the corrected details; a short still-waiting-on-James is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or Ivy/TDS closer in the letter — those go on the Google event only. If James does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to James: say there is a conflict and James should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Conflict details go to James only (Discord). Do not tell anyone else he is free. Remote only if James says remote (blank location). If he says house or office, use that address as location. Do not infer remote from home/office. If James clearly says Joey and/or Tim (or both) will be going and he will not: the repeat-back says he is not attending; on create pass organizer_going=false (leave his RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the guys who are going, not James's number. People James names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default; Shot Blasting Tip). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on James on the first pass). Event details and exceptions only. Full flowchart: memory/ops/calendar-schedule.md. ` +
+      `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Google Contacts, are not strangers. ` +
+      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where and any body notes, and wait for James to confirm. First letter to others: do not say you cannot book until James confirms or that a workflow blocks you. If someone (e.g. Steve) later sends a change, repeat the corrected details; a short still-waiting-on-James is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or Ivy/TDS closer in the letter — those go on the Google event only. If James does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to James: say there is a conflict and James should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Conflict details go to James only (Discord). Do not tell anyone else he is free. Remote only if James says remote (blank location). If he says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If James clearly says Joey and/or Tim (or both) will be going and he will not: the repeat-back says he is not attending; on create pass organizer_going=false (leave his RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the guys who are going, not James's number. People James names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default; Shot Blasting Tip). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on James on the first pass). Event details and exceptions only. Full flowchart: memory/ops/calendar-schedule.md. ` +
       `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. Do not add Tim, Joey, or Steve unless they were already on To/Cc. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
@@ -1295,4 +1311,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
