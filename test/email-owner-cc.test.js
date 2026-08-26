@@ -105,6 +105,27 @@ test('mergeReplyAll honors --drop', () => {
   assert.match(all, /owner@example.com/);
 });
 
+test('mergeReplyAll drops automated vendors but keeps real Microsoft employees', () => {
+  const thread = {
+    from: ['microsoft-noreply@microsoft.com'],
+    to: ['assistant@example.com', 'owner@example.com'],
+    cc: ['alerts@logmein.com', 'alice@microsoft.com'],
+  };
+  const p = mergeReplyAll(
+    { to: 'owner@example.com, sam@example.com, chris@example.com', text: 'staff' },
+    thread,
+    'assistant@example.com',
+    [],
+  );
+  const all = (p.to + ' ' + (p.cc || '')).toLowerCase();
+  assert.equal(all.includes('microsoft-noreply@microsoft.com'), false);
+  assert.equal(all.includes('alerts@logmein.com'), false);
+  assert.match(all, /owner@example.com/);
+  assert.match(all, /sam@example.com/);
+  assert.match(all, /chris@example.com/);
+  assert.match(all, /alice@microsoft.com/);
+});
+
 test('mergeReplyAll without a thread leaves the payload To/Cc alone', () => {
   const p = mergeReplyAll(
     { to: 'solo@example.com', cc: 'boss@example.com', text: 'hi' },

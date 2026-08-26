@@ -17,7 +17,10 @@ const ENTRA = [{
 
 test('noreply sender is automated', () => {
   assert.equal(isAutomatedSender('alerts-noreply@example.com'), true);
+  assert.equal(isAutomatedSender('microsoft-noreply@microsoft.com'), true);
+  assert.equal(isAutomatedSender('alerts@logmein.com'), true);
   assert.equal(isAutomatedSender('person@example.com'), false);
+  assert.equal(isAutomatedSender('alice@microsoft.com'), false);
 });
 
 test('domain match is @domain or a subdomain, not a suffix of the local part', () => {
