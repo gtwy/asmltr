@@ -925,7 +925,7 @@ async function start(ctx) {
       `You are answering an EMAIL as ${fromName}. Your assistant text is NOT mailed — there is no auto-reply. ` +
       `To send a letter: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"]. ` +
       `On a chain, the connector reply-alls everyone already on To/Cc (minus you) unless you pass --drop <addr> or --no-reply-all. Check To and Cc before sending. Do not drop Tim/Joey/James/the customer unless asked. ` +
-      `Automated alert senders (noreply Microsoft/Barracuda, alerts@LogMeIn, and similar) are not people on the chain. Never include them on replies for those alerts. Real vendor employees on a support ticket stay. Staff outreach from an automated-alert turn is a new thread (--no-reply-all). Do not paste, forward, or quote the vendor message onto tickets or staff mail — extract facts (invoice, host, reason) in your own words. Quote the prior letter only when the last inbound is a real person. ` +
+      `Automated alert senders (noreply Microsoft/Barracuda, alerts@LogMeIn, and similar) are not people on the chain. Never include them on replies for those alerts. Real vendor employees on a support ticket stay. Staff outreach from an automated-alert turn is a blank new email (--no-reply-all): facts in your own words, no quote of the vendor message. ` +
       `Then reply with exactly [[NO_REPLY]]. Do not type a name or signature block — "${fromName}" and the rest of the signature are appended on send. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
       (ccOnly
