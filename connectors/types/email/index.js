@@ -115,13 +115,35 @@ function quoteTextBlock(quote) {
   return `\n\n${attr}\n${quoted}`;
 }
 
+function sanitizeQuoteHtml(raw) {
+  let s = String(raw || '');
+  if (!s.trim()) return '';
+  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(s);
+  if (body) s = body[1];
+  s = s.replace(/<\/?(?:!doctype|html|head|meta|link|title)(?:\s[^>]*)?>/gi, '');
+  s = s.replace(/<script\b[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/<style\b[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<noscript\b[\s\S]*?<\/noscript>/gi, '');
+  s = s.replace(/<img\b[^>]*>/gi, '');
+  s = s.replace(/<source\b[^>]*>/gi, '');
+  s = s.replace(/<video\b[\s\S]*?<\/video>/gi, '');
+  s = s.replace(/<picture\b[\s\S]*?<\/picture>/gi, '');
+  s = s.replace(/\s(?:src|srcset|poster)=(['"])cid:[\s\S]*?\1/gi, '');
+  s = s.replace(/url\(\s*['"]?cid:[^)]+\)/gi, 'none');
+  s = s.replace(/\shref=(['"])javascript:[\s\S]*?\1/gi, '');
+  return s.trim();
+}
+
 function quoteHtmlBlock(quote) {
   const attr = escapeHtml(formatQuoteAttr(quote));
-  const body = escapeHtml(String((quote && quote.text) || '')).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '<br>');
+  let inner = sanitizeQuoteHtml((quote && quote.html) || '');
+  if (!inner) {
+    inner = escapeHtml(String((quote && quote.text) || '')).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '<br>');
+  }
   return (
     '<div class="gmail_quote">' +
     `<div dir="ltr" class="gmail_attr">${attr}<br></div>` +
-    `<blockquote class="gmail_quote" style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${body}</blockquote>` +
+    `<blockquote class="gmail_quote" style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${inner}</blockquote>` +
     '</div>'
   );
 }
@@ -134,13 +156,16 @@ function spliceQuoteHtml(html, block) {
 }
 
 function quoteFromThread(tc) {
-  const text = tc && String(tc.quoteText || '').trim();
-  if (!text) return null;
+  if (!tc) return null;
+  const text = String(tc.quoteText || '').trim();
+  const html = sanitizeQuoteHtml(tc.quoteHtml || '');
+  if (!text && !html) return null;
   return {
     fromName: tc.quoteFromName || '',
     fromAddr: tc.quoteFromAddr || '',
     date: tc.quoteDate || null,
     text,
+    html,
   };
 }
 
@@ -150,7 +175,9 @@ function quoteFromThread(tc) {
 function buildMailContent(text, signature, opts) {
   const plain = (text || '') + (signature || '');
   const quote = opts && opts.quote;
-  const wantQuote = subjectHasTestWord(opts && opts.subject) && quote && String(quote.text || '').trim();
+  const wantQuote = subjectHasTestWord(opts && opts.subject)
+    && quote
+    && (String(quote.html || '').trim() || String(quote.text || '').trim());
   let textOut = plain;
   if (wantQuote) textOut = plain + quoteTextBlock(quote);
   let html;
@@ -974,6 +1001,7 @@ async function start(ctx) {
       quoteFromAddr: fromAddr,
       quoteDate: parsed.date ? new Date(parsed.date).toISOString() : null,
       quoteText: String(parsed.text || '').trim(),
+      quoteHtml: sanitizeQuoteHtml(parsed.html || ''),
     });
     try { persistThreads(ctx.instanceId, threads); }
     catch (e) { ctx.log(`persist threads: ${e.message}`); }
@@ -1273,4 +1301,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, subjectHasTestWord, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, subjectHasTestWord, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };

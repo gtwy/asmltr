@@ -5,6 +5,7 @@ const {
   buildMailContent,
   subjectHasTestWord,
   formatQuoteAttr,
+  sanitizeQuoteHtml,
 } = require('../connectors/types/email');
 
 const SIG = '\n\n\nIvy Hedera 🔶🌿\nAI Assistant to Example Owner\n\n[Example Co](https://example.com) can build an AI assistant like this for your team.\n';
@@ -59,4 +60,33 @@ test('Test subject without stored inbound text → no quote', () => {
 test('attachments stay off buildMailContent', () => {
   const c = buildMailContent('Hi', SIG, { subject: 'Test', quote: QUOTE });
   assert.equal(c.attachments, undefined);
+});
+
+test('sanitizeQuoteHtml keeps nested gmail_quote, drops img/script/cid', () => {
+  const raw = '<html><body><p>Hello</p><img src="cid:photo@x" alt="x"><script>alert(1)</script>'
+    + '<div class="gmail_quote"><blockquote class="gmail_quote">older</blockquote></div>'
+    + '</body></html>';
+  const out = sanitizeQuoteHtml(raw);
+  assert.match(out, /<p>Hello<\/p>/);
+  assert.match(out, /gmail_quote/);
+  assert.match(out, />older</);
+  assert.doesNotMatch(out, /<img/i);
+  assert.doesNotMatch(out, /<script/i);
+  assert.doesNotMatch(out, /cid:/i);
+});
+
+test('Test subject wraps inbound HTML after signature, not through markdown', () => {
+  const quote = {
+    ...QUOTE,
+    html: '<p>Cleveland then</p><img src="https://example.com/x.jpg"><div class="gmail_quote">nested</div>',
+  };
+  const c = buildMailContent('New letter.\n', SIG, { subject: 'Re: James Test', quote });
+  const qat = c.html.indexOf('gmail_quote');
+  const above = c.html.slice(0, qat);
+  assert.match(above, /New letter/);
+  assert.match(above, /Ivy Hedera/);
+  assert.match(c.html.slice(qat), /Cleveland then/);
+  assert.match(c.html.slice(qat), /nested/);
+  assert.doesNotMatch(c.html.slice(qat), /<img/i);
+  assert.ok(c.html.lastIndexOf('</body>') > qat);
 });
