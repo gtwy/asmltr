@@ -71,13 +71,92 @@ function shouldExtraFetchPass({ stopped, usable, pendingExists, mailbox, lastUid
   return !!(progressed && moreUidsWaiting(mailbox, lastUid));
 }
 
+/** Outbound subject has the word Test (James 26 Aug 2026). Case-insensitive. James Test yes; Contest no. */
+function subjectHasTestWord(subject) {
+  return /\btest\b/i.test(String(subject || ''));
+}
+
+function parseQuoteDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function formatQuoteAttr(quote) {
+  const addr = String((quote && quote.fromAddr) || '').trim();
+  const name = String((quote && quote.fromName) || '').trim();
+  const dt = parseQuoteDate(quote && quote.date);
+  let when = 'a message';
+  if (dt) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).formatToParts(dt);
+    const get = (t) => (parts.find((p) => p.type === t) || {}).value || '';
+    when = `${get('weekday')}, ${get('month')} ${get('day')}, ${get('year')} at ${get('hour')}:${get('minute')} ${get('dayPeriod')}`;
+  }
+  if (name && addr && name.toLowerCase() !== addr.toLowerCase()) {
+    return `On ${when} ${name} <${addr}> wrote:`;
+  }
+  const who = addr || name;
+  return who ? `On ${when} <${who}> wrote:` : `On ${when} wrote:`;
+}
+
+function quoteTextBlock(quote) {
+  const attr = formatQuoteAttr(quote);
+  const lines = String((quote && quote.text) || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const quoted = lines.map((line) => (line === '' ? '>' : `> ${line}`)).join('\n');
+  return `\n\n${attr}\n${quoted}`;
+}
+
+function quoteHtmlBlock(quote) {
+  const attr = escapeHtml(formatQuoteAttr(quote));
+  const body = escapeHtml(String((quote && quote.text) || '')).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '<br>');
+  return (
+    '<div class="gmail_quote">' +
+    `<div dir="ltr" class="gmail_attr">${attr}<br></div>` +
+    `<blockquote class="gmail_quote" style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${body}</blockquote>` +
+    '</div>'
+  );
+}
+
+function spliceQuoteHtml(html, block) {
+  const doc = String(html || '');
+  const i = doc.toLowerCase().lastIndexOf('</body>');
+  if (i === -1) return doc + block;
+  return doc.slice(0, i) + block + doc.slice(i);
+}
+
+function quoteFromThread(tc) {
+  const text = tc && String(tc.quoteText || '').trim();
+  if (!text) return null;
+  return {
+    fromName: tc.quoteFromName || '',
+    fromAddr: tc.quoteFromAddr || '',
+    date: tc.quoteDate || null,
+    text,
+  };
+}
+
 // Multipart body for SMTP: text is markdown+signature; html is sanitized conversion.
 // Fail open: convert errors omit html so nodemailer sends text only.
-function buildMailContent(text, signature) {
+// Quote (Gmail bar) is spliced AFTER conversion, only when subject has the word Test.
+function buildMailContent(text, signature, opts) {
   const plain = (text || '') + (signature || '');
+  const quote = opts && opts.quote;
+  const wantQuote = subjectHasTestWord(opts && opts.subject) && quote && String(quote.text || '').trim();
+  let textOut = plain;
+  if (wantQuote) textOut = plain + quoteTextBlock(quote);
   let html;
   try { html = emailHtmlFromMarkdown(plain); } catch (_) { html = undefined; }
-  return html ? { text: plain, html } : { text: plain };
+  if (html && wantQuote) html = spliceQuoteHtml(html, quoteHtmlBlock(quote));
+  return html ? { text: textOut, html } : { text: textOut };
 }
 
 // Letter-only rule stays last in system_prompt_extra.
@@ -771,8 +850,8 @@ async function start(ctx) {
   const selfAddr = String(address).toLowerCase();
   const outboundGate = createOutboundGate({ ownerAddr: ownerForward });
 
-  async function smtpSend({ to, cc, subject, text, inReplyTo, references, attachments }) {
-    const content = buildMailContent(text, signature);
+  async function smtpSend({ to, cc, subject, text, inReplyTo, references, attachments, quote }) {
+    const content = buildMailContent(text, signature, { subject, quote });
     const info = await smtp.sendMail({
       from: `"${fromName}" <${address}>`, to,
       cc: cc || undefined,
@@ -891,6 +970,10 @@ async function start(ctx) {
       from: addrsFromField(parsed.from),
       to: addrsFromField(parsed.to),
       cc: addrsFromField(parsed.cc),
+      quoteFromName: fromName2,
+      quoteFromAddr: fromAddr,
+      quoteDate: parsed.date ? new Date(parsed.date).toISOString() : null,
+      quoteText: String(parsed.text || '').trim(),
     });
     try { persistThreads(ctx.instanceId, threads); }
     catch (e) { ctx.log(`persist threads: ${e.message}`); }
@@ -1165,6 +1248,7 @@ async function start(ctx) {
         inReplyTo: inReplyTo || tc.messageId,
         references: refsIn || tc.references,
         attachments,
+        quote: quoteFromThread(tc),
       };
       if (reply_all !== false) payload = mergeReplyAll(payload, tc, selfAddr, drop);
       // Fire-and-forget SMTP. prepare() adds owner Cc when To is someone else.
@@ -1189,4 +1273,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, subjectHasTestWord, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
