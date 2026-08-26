@@ -3,7 +3,6 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildMailContent,
-  subjectHasTestWord,
   formatQuoteAttr,
   sanitizeQuoteHtml,
 } = require('../connectors/types/email');
@@ -16,25 +15,17 @@ const QUOTE = {
   text: 'Please look at *_domainkey* and *foo* in this inbound.',
 };
 
-test('subjectHasTestWord is a word, case-insensitive, ok in a longer subject', () => {
-  assert.equal(subjectHasTestWord('James Test'), true);
-  assert.equal(subjectHasTestWord('Re: JAMES TEST'), true);
-  assert.equal(subjectHasTestWord('Test quote 1'), true);
-  assert.equal(subjectHasTestWord('Contest'), false);
-  assert.equal(subjectHasTestWord('Latest'), false);
-  assert.equal(subjectHasTestWord('testing'), false);
-  assert.equal(subjectHasTestWord('Re: Rhino ticket'), false);
-});
-
-test('no Test in subject → body-only, no gmail_quote', () => {
+test('reply with last inbound → quote after conversion, markdown not applied to inbound', () => {
   const c = buildMailContent('Hello **world**', SIG, { subject: 'Re: Rhino', quote: QUOTE });
-  assert.equal(c.text.includes('Hello **world**'), true);
-  assert.doesNotMatch(c.text, /^>/m);
-  assert.doesNotMatch(c.html, /gmail_quote/);
+  assert.match(c.html, /gmail_quote/);
   assert.match(c.html, /<strong>world<\/strong>/);
+  const above = c.html.slice(0, c.html.indexOf('gmail_quote'));
+  assert.match(above, /<strong>world<\/strong>/);
+  assert.doesNotMatch(c.html.slice(c.html.indexOf('gmail_quote')), /<em>foo<\/em>/);
+  assert.match(c.text, /> Please look at \*_domainkey\*/);
 });
 
-test('Test subject with last inbound → quote after conversion, markdown not applied to inbound', () => {
+test('quoted inbound stays after conversion, markdown not applied to inbound', () => {
   const c = buildMailContent('A loaf on the sill.\n', SIG, { subject: 'Re: James Test', quote: QUOTE });
   assert.match(c.html, /gmail_quote/);
   assert.match(c.html, /gmail_attr/);
@@ -52,7 +43,7 @@ test('Test subject with last inbound → quote after conversion, markdown not ap
   assert.match(formatQuoteAttr(QUOTE), /Example Owner <owner@example\.io>/);
 });
 
-test('Test subject without stored inbound text → no quote', () => {
+test('no stored inbound → no quote', () => {
   const c = buildMailContent('Hi', SIG, { subject: 'Test', quote: null });
   assert.doesNotMatch(c.html, /gmail_quote/);
 });
@@ -75,7 +66,7 @@ test('sanitizeQuoteHtml keeps nested gmail_quote, drops img/script/cid', () => {
   assert.doesNotMatch(out, /cid:/i);
 });
 
-test('Test subject wraps inbound HTML after signature, not through markdown', () => {
+test('wraps inbound HTML after signature, not through markdown', () => {
   const quote = {
     ...QUOTE,
     html: '<p>Cleveland then</p><img src="https://example.com/x.jpg"><div class="gmail_quote">nested</div>',

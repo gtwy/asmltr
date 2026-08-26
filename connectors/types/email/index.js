@@ -71,11 +71,6 @@ function shouldExtraFetchPass({ stopped, usable, pendingExists, mailbox, lastUid
   return !!(progressed && moreUidsWaiting(mailbox, lastUid));
 }
 
-/** Outbound subject has the word Test (James 26 Aug 2026). Case-insensitive. James Test yes; Contest no. */
-function subjectHasTestWord(subject) {
-  return /\btest\b/i.test(String(subject || ''));
-}
-
 function parseQuoteDate(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   const d = new Date(value);
@@ -171,12 +166,11 @@ function quoteFromThread(tc) {
 
 // Multipart body for SMTP: text is markdown+signature; html is sanitized conversion.
 // Fail open: convert errors omit html so nodemailer sends text only.
-// Quote (Gmail bar) is spliced AFTER conversion, only when subject has the word Test.
+// Quote (Gmail bar) is spliced AFTER conversion when last inbound is on the thread.
 function buildMailContent(text, signature, opts) {
   const plain = (text || '') + (signature || '');
   const quote = opts && opts.quote;
-  const wantQuote = subjectHasTestWord(opts && opts.subject)
-    && quote
+  const wantQuote = quote
     && (String(quote.html || '').trim() || String(quote.text || '').trim());
   let textOut = plain;
   if (wantQuote) textOut = plain + quoteTextBlock(quote);
@@ -1301,4 +1295,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, subjectHasTestWord, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsFile, contactsHasEmail, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
