@@ -306,6 +306,38 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     leakDropped: false,
     publicSurface: true,
     ...opts,
+  }), 'Check the Lovelace kernel docs.');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Ada Lovelace wrote the notes.',
+    leakDropped: false,
+    publicSurface: true,
+    ...opts,
+  }), 'response blocked due to privacy rules: no last name');
+  const allisonStaff = {
+    hints: identityHintsFrom([{ id: 'staff', display_name: 'Riley Example' }]),
+    hintKinds: identityHintKindMap([{ id: 'staff', display_name: 'Riley Example' }]),
+  };
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Pittsburgh / Example Town — tonight into Friday (EDT)',
+    leakDropped: false,
+    publicSurface: true,
+    ...allisonStaff,
+  }), 'Pittsburgh / Example Town — tonight into Friday (EDT)');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Riley Example is on site.',
+    leakDropped: false,
+    publicSurface: true,
+    ...allisonStaff,
+  }), 'response blocked due to privacy rules: no last name');
+  assert.equal(pickPublicReply({
+    pending: '',
+    replyText: 'Is Allison the correct spelling?',
+    leakDropped: false,
+    publicSurface: true,
+    ...allisonStaff,
   }), 'response blocked due to privacy rules: no last name');
   const kinds = identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]);
   assert.equal(kinds.get('james'), 'first-name');
