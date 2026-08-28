@@ -2,7 +2,7 @@
 /**
  * Prefer a host overlay outbound-stage wrap when present, else public shared/outbound-stage.
  * Overlay path: ASMLTR_OUTBOUND_STAGE or ~/.asmltr/ivy-local/overlay/outbound-stage.js
- * Installs without overlay keep the public gate. Does not print secrets.
+ * Public file is staging + root allowlist. Host PATH GATE lives in the overlay wrap.
  */
 const fs = require('fs');
 const path = require('path');

@@ -21,7 +21,7 @@ asmltr tail            live global event stream
 asmltr watch <key>     live stream for one session
 asmltr system          current system metrics
 asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
-asmltr send discord <id-or-name> "<text>"  same Discord server (trusted / Access 1–5 fallback)
+asmltr send discord <id-or-name> "<text>"  same Discord server (trusted role / resolve allow)
 asmltr guild-post <id-or-name> "<text>"  alias of same-guild send
 asmltr announce "<text>" [--to T]    post a cross-session announcement
 asmltr announcements                 list live announcements
@@ -199,8 +199,8 @@ Posts to the connector manager's `/send`; prints `✓ sent …` with the deliver
 on success, or the error on failure.
 
 Public Discord denies cross-system `asmltr send` (email / other servers). Same-server
-posting is still `asmltr send discord <id-or-name>` (trusted role or resolve allow;
-Access card 1–5 fallback until roles are applied). `asmltr guild-post` is an alias.
+posting is still `asmltr send discord <id-or-name>` (trusted role or resolve allow).
+`asmltr guild-post` is an alias.
 
 ### Same-guild `asmltr send discord`
 

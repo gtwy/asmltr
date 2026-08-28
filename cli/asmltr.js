@@ -838,7 +838,7 @@ function cmdHelp() {
        [--title T] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
-  asmltr send discord <id-or-name> "…"  same Discord server (trusted / Access 1–5 fallback).
+  asmltr send discord <id-or-name> "…"  same Discord server (trusted role / resolve allow).
        guild-post is an alias. A name looks up (does not post) until they confirm.
   asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
        [--caption T]                   delete only after Discord confirms. retry / list / gc

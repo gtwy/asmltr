@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Same-guild Discord post used by asmltr send (guild-post stays an alias).
- * Trusted role or resolve() allow; Access 1–5 fallback until live APPLY.
+ * Trusted role or resolve() allow (guild-post / send / *). Owner always can.
  * No email, no telegram, no other Discord servers, never the same channel
  * they asked from. Mute/disable is inbound only — posting into a muted
  * channel still works. Remote body has no thought chips. Ask-channel reply is

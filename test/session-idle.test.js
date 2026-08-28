@@ -5,8 +5,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-require('../core/src/sqlite-stmt-keep');
-
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-idle-'));
 process.env.ASMLTR_CORE_DB = path.join(tmp, 't.db');
 

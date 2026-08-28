@@ -48,7 +48,7 @@ test('forum parent vs thread', () => {
   assert.equal(destGuildId({ guild: { id: 'g2' } }), 'g2');
 });
 
-test('public guild: send denied; guildPost trusted/allow or Access 1-5 fallback or owner', () => {
+test('public guild: send denied; guildPost trusted/allow or owner (no tier fallback)', () => {
   const env = {
     channel: 'discord', public: true,
     context: { scope_id: 'guild:g1' },
@@ -56,7 +56,7 @@ test('public guild: send denied; guildPost trusted/allow or Access 1-5 fallback 
   };
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0 }).deny.guildPost, true);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.send, true);
-  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.guildPost, true);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 6 }).deny.guildPost, true);
   assert.equal(policyFor(env, { bypass_moderation: true, trust_tier: 0, user_key: 'owner' }).deny.guildPost, false);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, roles: ['trusted'] }).deny.guildPost, false);

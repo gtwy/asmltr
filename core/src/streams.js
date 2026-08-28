@@ -11,7 +11,6 @@
  *
  * Tables (in the core DB): streams · stream_events (+ FTS5 mirror) · stream_members · stream_cursors.
  */
-require('./sqlite-stmt-keep');
 const Database = require('better-sqlite3');
 const DB_PATH = require('./db-path').coreDbPath();
 const fs = require('fs');

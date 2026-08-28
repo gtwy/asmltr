@@ -83,8 +83,8 @@ Folded. The public product verb is **`asmltr send`**. Same-guild Discord
 post (confirm first, on-behalf-of, fuzzy name→channel) runs through
 `asmltr send discord` when `ASMLTR_ATTACH_GUILD` is set. Internal kind
 stays `guild_post`. `asmltr guild-post` / MCP `asmltr_guild_post` are
-aliases. Capability is trusted role or `resolve()` allow; Access 1–5
-lookups remain as fallback until live APPLY.
+aliases. Capability is trusted role or `resolve()` allow
+(`guild-post` / `send` / `*`). No Access 1–5 send-gate fallback.
 
 Stop/abort: send, voice, Grok stream, and inject register a processing
 entry (`abortTarget`). Starter can abort their turn. Public asmltr does
@@ -128,25 +128,18 @@ Rules for the public tree:
 - LANGUAGE_OVERLAP no longer special-cases `'ivy'` (token dropped). PII
   classify-then-redact is later; no live classifier wired.
 
-## Channel-public tool-policy tripwire (host-gated)
+## Channel-public tool-policy tripwire (overlay only)
 
 `shared/tool-policy.js` `isRestricted` used to deny **public Discord before
 principal** (`envelope.public === true` → restricted even with
-`bypass_moderation`). That is the channel-public / public-before-principal
-tripwire.
+`bypass_moderation`). That tripwire is **not** a public product gate.
 
-This recut branch still has the function, but the tripwire is isolated
-behind the host path:
-
-- Apply channel-public deny only when `HOST_CHANNEL_POLICY=1`.
-  `ASSISTANT_NAME` must not special-case any host product name.
-- Default product path (`ASSISTANT_NAME=gaia` or unset) does **not** apply
-  that channel-public deny. Public Discord + bypass/owner is then not
-  restricted by `isRestricted`; non-bypass callers remain restricted via
-  the remaining `bypass_moderation` check.
-- Live ivy (`8f6d472`) still has the ungated tripwire. This recut does
-  not edit the live ivy asmltr checkout. No Discord-connector auth
-  layer was added. Overlay modules are not wired into core-entry.
+- Public default is not channel-deny. Public Discord + bypass/owner is
+  not restricted by `isRestricted`; non-bypass callers remain restricted
+  via `bypass_moderation`.
+- Host overlays wrap `isRestricted` so `envelope.public` stays restricted
+  on the live Ivy plane. `ASSISTANT_NAME` must not special-case any host
+  product name. No Discord-connector auth layer in public.
 
 ## Do not apply host cutover today
 

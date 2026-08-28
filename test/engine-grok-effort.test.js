@@ -5,8 +5,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-require('../core/src/sqlite-stmt-keep');
-
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-effort-'));
 const nextFile = path.join(tmp, 'next-effort');
 process.env.ASMLTR_GROK_NEXT_EFFORT_FILE = nextFile;

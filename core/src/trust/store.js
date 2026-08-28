@@ -18,7 +18,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-require('../sqlite-stmt-keep');
 const Database = require('better-sqlite3');
 const { identifierLookups, normalizeIdentValue } = require('./ident-lookups');
 const { identAddDecision } = require('./ident-add');

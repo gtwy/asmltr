@@ -104,7 +104,7 @@ Not env-driven except the path. Copy `shared/tool-policy.example.json` to `~/.as
 
 | Variable | Default | What |
 |---|---|---|
-| `ASMLTR_TOOL_POLICY_FILE` | `~/.asmltr/tool-policy.json` | Allowlists: `photoAllow` / `imageAllow` (stills + `asmltr post`, not video), `videoAllow` (clips **and** stills), `mediaAllow` (both), `codeAllow` (write-a-program). Empty = owner/bypass only. Same-guild Discord post is **not** this file — it is `principals.default_tier` 1–5. |
+| `ASMLTR_TOOL_POLICY_FILE` | `~/.asmltr/tool-policy.json` | Example allowlists: `photoAllow` / `imageAllow` (format only; not a public stills gate), `videoAllow` (clips **and** stills), `mediaAllow` (both), `codeAllow` (write-a-program). Empty = owner/bypass only. Same-guild Discord post is **not** this file — it is trusted role or `resolve()` allow. |
 
 ## Admin / security alerts
 

@@ -87,7 +87,7 @@ Then seed:
 node core/src/trust/seed.js
 ```
 
-Add teammates as additional principals (optionally with a limited `role_id`). Anyone who should **same-guild Discord post** needs `default_tier` 1–5 (the example `friend` principal uses `3`). Stills/video/code are a separate allowlist:
+Add teammates as additional principals (optionally with a limited `role_id`). Anyone who should **same-guild Discord post** needs a trusted role or `resolve()` allow (`guild-post` / `send` / `*`). `default_tier` is a schema field, not the send gate. Stills/video/code example allowlists:
 
 ```bash
 mkdir -p ~/.asmltr

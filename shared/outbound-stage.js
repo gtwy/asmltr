@@ -89,32 +89,6 @@ function mediaKind(buf) {
   return '';
 }
 
-function denyRoots() {
-  const home = os.homedir();
-  return [
-    path.join(home, '.ssh'),
-    path.join(home, '.gnupg'),
-    path.join(home, '.asmltr', 'silos'),
-    path.join(home, '.asmltr', 'secrets'),
-    path.join(home, '.asmltr', 'auth'),
-    path.join(home, '.grok', 'auth.json'),
-    path.join(home, 'src', 'asmltr', 'core', 'data'),
-  ];
-}
-
-function underDenied(abs) {
-  for (const d of denyRoots()) {
-    try {
-      if (fs.existsSync(d) && inside(d, abs)) return true;
-      if (fs.existsSync(d) && real(d) === abs) return true;
-    } catch (_) {}
-    if (String(abs).startsWith(d + path.sep) || abs === d) return true;
-  }
-  if (/(^|[\\/])\.env(\.|$)/i.test(abs)) return true;
-  if (/\.(db|sqlite)(-wal|-shm)?$/i.test(abs)) return true;
-  return false;
-}
-
 function ingestRoots() {
   const roots = [stageDir()];
   const extra = process.env.ASMLTR_ATTACH_INGEST;
@@ -145,7 +119,6 @@ function ingestAllowed(srcPath) {
   let st;
   try { st = fs.statSync(abs); } catch { return false; }
   if (!st.isFile() || st.size < 1 || st.size > MAX_BYTES) return false;
-  if (underDenied(abs)) return false;
   const buf = Buffer.alloc(16);
   const fd = fs.openSync(abs, 'r');
   try { fs.readSync(fd, buf, 0, 16, 0); } finally { fs.closeSync(fd); }

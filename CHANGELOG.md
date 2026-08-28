@@ -9,7 +9,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Changed
-- **Same-guild Discord post is `asmltr send`.** Confirm-first name lookup, on-behalf-of preface, and fuzzy channel match stay. Capability is trusted role or `resolve()` allow, with Access 1–5 as fallback until live APPLY. `asmltr guild-post` / MCP `asmltr_guild_post` remain aliases. Discord/Telegram `/out` and manager `/send` load a host overlay outbound-stage wrap when present (`ASMLTR_OUTBOUND_STAGE` or `~/.asmltr/ivy-local/overlay/outbound-stage.js`) and fall back to `shared/outbound-stage`.
+- **Same-guild Discord post is `asmltr send`.** Confirm-first name lookup, on-behalf-of preface, and fuzzy channel match stay. Capability is trusted role or `resolve()` allow (`guild-post` / `send` / `*`). `asmltr guild-post` / MCP `asmltr_guild_post` remain aliases. Discord/Telegram `/out` and manager `/send` load a host overlay outbound-stage wrap when present (`ASMLTR_OUTBOUND_STAGE` or `~/.asmltr/ivy-local/overlay/outbound-stage.js`) and fall back to `shared/outbound-stage`.
 - **Stop actually halts send/voice/stream/inject.** Those paths register a processing abort target. Starter may abort their turn (not owner-only). SDK `/v2/abort` can pass speaker/starter/owner so a host overlay can fail-closed.
 
 ### Removed

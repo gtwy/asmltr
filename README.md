@@ -249,7 +249,7 @@ for d in core connectors insights/collector cli; do (cd "$d" && npm install); do
 cp .env.example .env                 # then edit: ASSISTANT_NAME, secrets, ports
 
 # 3. Seed the trust store (DEFAULT-DENY — nobody has access until seeded)
-cp core/src/trust/seed.example.json core/src/trust/seed.json   # add yourself as owner; friend is Access 1–5
+cp core/src/trust/seed.example.json core/src/trust/seed.json   # add yourself as owner; grant trusted/send to posters
 node core/src/trust/seed.js
 mkdir -p ~/.asmltr && cp shared/tool-policy.example.json ~/.asmltr/tool-policy.json  # stills/video/code locally
 

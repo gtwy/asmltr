@@ -182,7 +182,7 @@ servers). Same-server posting uses the same verb:
 
 | Rule | What |
 |---|---|
-| Who | Owner, trusted role, or `resolve()` allow (`guild-post` / `send` / `*`). Access card `default_tier` **1–5** is a fallback until roles are applied. Tier 0 with empty roles cannot. |
+| Who | Owner, trusted role, or `resolve()` allow (`guild-post` / `send` / `*`). `default_tier` is a schema field, not the send gate. Empty roles cannot. |
 | Where | This Discord server only. No DMs, no email, no other guilds. |
 | Same channel | Skipped — answer in the ask channel instead. |
 | Name vs id | A name (`the 666 degree steak thread`) **looks up** and does not post. Confirm with the person, then call again with the snowflake. |
@@ -192,7 +192,7 @@ servers). Same-server posting uses the same verb:
 | Body | Prefixed `Posting on behalf of <@asker>` then two blank lines. No thought chips on the remote post. |
 | After a real post | Ask channel gets `Post complete.` — then `[[NO_REPLY]]`. |
 
-Recommended seed + allowlist (placeholders only): `core/src/trust/seed.example.json` (`friend` at `default_tier` 3) and `shared/tool-policy.example.json`.
+Recommended seed + allowlist (placeholders only): `core/src/trust/seed.example.json` (example `friend` principal) and `shared/tool-policy.example.json`.
 
 ---
 

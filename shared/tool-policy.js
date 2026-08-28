@@ -1,8 +1,8 @@
 'use strict';
 /**
  * V31: per-turn tool policy. Restricted Discord cannot shell/streams/send/cwd-write.
- * Channel-public / isRestricted-before-principal deny is host-gated
- * (HOST_CHANNEL_POLICY=1 only). Default product path skips it.
+ * Channel-public / isRestricted-before-principal deny is not a public gate.
+ * Default product path is not channel-deny. Host overlays may wrap isRestricted.
  * Silo read/write is not part of that deny (James 21 Aug 2026). Do not fold
  * silo denies into a V31 PR — privacy.md is the silo safeguard.
  * Video/image gen and writing programs for a caller are owner/bypass unless
@@ -67,18 +67,9 @@ function siloAllowlisted(envelope, allow) {
   return !!(g && a.guilds.includes(g)) || !!(c && a.channels.includes(c));
 }
 
-function hostChannelPolicy() {
-  // Channel-public / isRestricted-before-principal deny is host-only.
-  // Default product path skips it. Live host checkout still has the ungated tripwire.
-  return String(process.env.HOST_CHANNEL_POLICY || '') === '1';
-}
-
 function isRestricted(envelope, resolved) {
   const ch = String((envelope && envelope.channel) || '');
   if (ch !== 'discord') return false;
-  // public-before-principal: host path only (HOST_CHANNEL_POLICY=1).
-  // Default / unset must not apply that channel-public deny.
-  if (hostChannelPolicy() && envelope && envelope.public) return true;
   return !(resolved && resolved.bypass_moderation);
 }
 
@@ -106,12 +97,11 @@ function videoAuthorized(envelope, resolved, allow) {
   return listed(envelope, resolved, a.videoPrincipals, a.videoDiscordIds);
 }
 
-/** Stills + asmltr post: owner/bypass, photo/image/media lists, or videoAllow (video implies stills). */
+/** Stills + asmltr post: owner/bypass or videoAllow (video implies stills). photoAllow/imageAllow host lists are not a public gate. */
 function imageAuthorized(envelope, resolved, allow) {
   if (ownerish(resolved)) return true;
   const a = allow || loadAllowlist();
-  return listed(envelope, resolved, a.imagePrincipals, a.imageDiscordIds)
-    || listed(envelope, resolved, a.videoPrincipals, a.videoDiscordIds);
+  return listed(envelope, resolved, a.videoPrincipals, a.videoDiscordIds);
 }
 
 function mediaAuthorized(envelope, resolved, allow) {
@@ -125,7 +115,7 @@ function codeAuthorized(envelope, resolved, allow) {
   return listed(envelope, resolved, a.codePrincipals, a.codeDiscordIds);
 }
 
-/** Same-guild Discord post: owner, trusted role, or resolve() allow. Access 1–5 fallback until APPLY. */
+/** Same-guild Discord post: owner, trusted role, or resolve() allow (guild-post / send / *). */
 function grantTokens(resolved) {
   const out = [];
   if (!resolved) return out;
@@ -148,9 +138,7 @@ function guildPostAuthorized(resolved) {
     || tokens.includes('send') || tokens.includes('*')) {
     return true;
   }
-  // fallback until live APPLY so empty roles still work
-  const t = Number(resolved && resolved.trust_tier);
-  return t >= 1 && t <= 5;
+  return false;
 }
 
 function emptyDeny() {
@@ -173,7 +161,7 @@ function policyFor(envelope, resolved, allow) {
     deny.shell = true;
     deny.write = true;
   }
-  // Same-guild Discord post: in a guild, trusted role / resolve allow, or Access 1–5 fallback.
+  // Same-guild Discord post: in a guild, trusted role / resolve allow.
   if (!guildIdFrom(envelope) || !guildPostAuthorized(resolved)) deny.guildPost = true;
   if (!isRestricted(envelope, resolved)) return { deny, restricted: false };
   deny.shell = true;
@@ -217,7 +205,7 @@ function exitIfDenied(kind) {
 }
 
 module.exports = {
-  policyFile, loadAllowlist, policyFor, isRestricted, hostChannelPolicy, siloAllowlisted,
+  policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
   videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized, grantTokens,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
 };

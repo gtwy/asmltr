@@ -89,8 +89,8 @@ Then seed:
 node core/src/trust/seed.js
 ```
 Add teammates as additional principals — but only people the user names.
-- **Same-guild send (recommended):** anyone who should post in this Discord server (`asmltr send discord`) needs a trusted role / resolve allow, or Access card `default_tier` **1–5** as fallback (example seed uses `3` on `friend`). Tier 0 with empty roles cannot post. Owner (`bypass_moderation`) always can. Public Discord still denies cross-system send (email / other servers).
-- **Stills / video / code (recommended):** copy `shared/tool-policy.example.json` → `~/.asmltr/tool-policy.json`. List trust `principals.id` under `photoAllow` if they may generate stills. Leave `videoAllow` empty unless the user wants clips. ⛏ ASK USER who (if anyone) is on each list — never copy real names or Discord ids into git.
+- **Same-guild send (recommended):** anyone who should post in this Discord server (`asmltr send discord`) needs a trusted role / resolve allow (`guild-post` / `send` / `*`). Empty roles cannot post. Owner (`bypass_moderation`) always can. Public Discord still denies cross-system send (email / other servers). `default_tier` is a schema field, not the send gate.
+- **Stills / video / code (recommended):** copy `shared/tool-policy.example.json` → `~/.asmltr/tool-policy.json` as a local example. Public stills gate is owner/bypass or `videoAllow`. Host overlays may honor photo grants. Leave `videoAllow` empty unless the user wants clips. ⛏ ASK USER who (if anyone) is on each list — never copy real names or Discord ids into git.
 
 ```bash
 mkdir -p ~/.asmltr

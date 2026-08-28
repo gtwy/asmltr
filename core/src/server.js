@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 'use strict';
-const _sqliteKeep = require('./sqlite-stmt-keep');
 const { healthPayload } = require('./health-payload');
 const { policyFor } = require('../../shared/tool-policy');
 const { buildToolbeltPrompt } = require('../../shared/toolbelt-prompt');
