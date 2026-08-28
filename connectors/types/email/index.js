@@ -228,7 +228,7 @@ function root32(refs, inReplyTo, messageId) {
 function isAutomatedSender(addr) {
   const a = String(addr || '');
   if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(a)) return true;
-  // alerts@logmein.com and similar — not a person on the chain (James 26 Aug 2026).
+  // alerts@example.com and similar — not a person on the chain (James 26 Aug 2026).
   if (/^(alerts|notifications?|notify)@/i.test(a)) return true;
   return false;
 }
