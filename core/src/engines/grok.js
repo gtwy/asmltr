@@ -155,7 +155,6 @@ const HIGH_PARTS = [
   'recipes?',
   'cigars?',
   'cooking',
-  'rolodex',
   'contacts',
   'troubleshoot(?:ing)?',
   'diagnos(?:e|is|ing)',

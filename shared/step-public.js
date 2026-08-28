@@ -133,8 +133,9 @@ function identityHintKindMap(records) {
       const parts = nameParts(dn);
       if (last) {
         set(last, 'last-name');
-        for (const p of parts) {
-          if (p.toLowerCase() !== last.toLowerCase()) set(p, 'first-name');
+        const given = String(dn).trim().split(/[\s._-]+/).filter(Boolean);
+        for (const p of given) {
+          if (p.length >= 2 && p.toLowerCase() !== last.toLowerCase()) set(p, 'first-name');
         }
       } else if (parts.length === 1) {
         set(parts[0], 'first-name');
@@ -179,21 +180,6 @@ function publicBlockHints(hints, hintKinds) {
   return (hints || []).filter((h) => PUBLIC_BLOCK_KINDS.has(kindForHint(h, hintKinds)));
 }
 
-/**
- * Ordinary English that also occurs as surnames. Not a family-name list:
- * these tokens only block when the message is about identity (names, spelling,
- * customers). 60 Watt / the color black / "may I" must post.
- */
-const LANGUAGE_OVERLAP = new Set([
-  'black', 'white', 'brown', 'green', 'gray', 'grey', 'blue', 'gold', 'silver', 'red',
-  'watt',
-  'may', 'june', 'july', 'april', 'march', 'august',
-  'king', 'stone', 'wood', 'hill', 'park', 'west', 'east', 'north', 'south',
-  'long', 'young', 'little', 'short', 'good', 'best', 'rich', 'fair', 'true',
-  'baker', 'miller', 'smith', 'cook', 'porter', 'ward', 'hall', 'lane', 'ford',
-  'rose', 'daisy',
-]);
-
 const IDENTITY_TALK_RE = /\b(last\s+names?|surnames?|family\s+names?|first\s+names?|given\s+names?|spell(?:ed|ing|s)?|who(?:'s|\s+is|\s+are)|identit(?:y|ies)|customers?|clients?|\bnamed\b|mr\.?|mrs\.?|ms\.?|dr\.?)\b/i;
 
 /** True when every \bhint\b hit is a unit/measure (60 Watt, watt-equivalent, watts). */
@@ -220,18 +206,28 @@ function textHasFirstName(text, hintKinds) {
   if (!hintKinds || typeof hintKinds.entries !== 'function') return false;
   const s = String(text || '');
   for (const [tok, kind] of hintKinds.entries()) {
-    if (kind !== 'first-name' || String(tok).length < 4) continue;
+    if (kind !== 'first-name' || String(tok).length < 2) continue;
     if (new RegExp('\\b' + escapeRe(tok) + '\\b', 'i').test(s)) return true;
   }
   return false;
 }
 
-/** Skip a last-name token when it is language, not a person. Rare surnames still always block. */
+function textHasFullDisplayName(text, hintKinds) {
+  if (!hintKinds || typeof hintKinds.entries !== 'function') return false;
+  const s = String(text || '');
+  for (const [tok, kind] of hintKinds.entries()) {
+    if (kind !== 'identity' || !/\s/.test(tok)) continue;
+    if (new RegExp('\\b' + escapeRe(tok) + '\\b', 'i').test(s)) return true;
+  }
+  return false;
+}
+
+/** Skip a last-name token when the message is not about identity. No word list. */
 function lastNameIsLanguageUse(text, hint, hintKinds) {
   if (lastNameOnlyUnitUses(text, hint)) return true;
-  if (!LANGUAGE_OVERLAP.has(String(hint || '').toLowerCase())) return false;
   if (IDENTITY_TALK_RE.test(text)) return false;
   if (textHasFirstName(text, hintKinds)) return false;
+  if (textHasFullDisplayName(text, hintKinds)) return false;
   return true;
 }
 

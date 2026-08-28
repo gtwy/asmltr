@@ -8,7 +8,12 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ## [Unreleased]
 
+### Removed
+- **extras/ivy-local Rolodex MCP.** Contacts are gworkspace People API. `register.sh` no longer adds Rolodex or the ivy-rolodex-sync timer. Host dumps under `~/rolodex` / `~/.asmltr/rolodex-cache/` are left on disk.
+
 ### Fixed
+- **Email: reply-all drops automated senders.** `noreply` / `no-reply` / `alerts@` / `notifications@` are not people on the chain (James 26 Aug 2026). Real vendor employees stay. Staff outreach from an automated-alert turn still uses `--no-reply-all`.
+- **Email: do not owner-forward thread participants as strangers.** A From that is already on the chain (In-Reply-To/References + we are To/Cc), stored on the persisted thread, or present in the optional Rolodex/contacts file creates a turn. Cold mail from an address we have never seen still forwards to `owner_forward_to`.
 - **Email: no auto-reply of session text.** The connector no longer SMTPs the assistant `reply` action. Letters go out only via `asmltr send` / `/out` (in context: spoken to, or told to do something). CC-only chains are listen-unless-asked. `owner_forward_to` is still a visible Cc when To is someone else. No 30-minute duplicate timer.
 - **Email: chain reply-all.** `/out` with a thread `ref` keeps everyone on inbound From/To/Cc (minus the mailbox). `--drop` / `--no-reply-all` only if asked to omit someone. `asmltr send email` from an email turn passes the conversation `ref`.
 - **Email signature pitch** (Ivy): extra blank before the name; name and `AI Assistant to …` on adjacent lines; two blanks; then `[Example Co](https://example.com) can build an AI assistant like this for your team.` HTML keeps consecutive blank source lines (`&nbsp;` paragraphs) so Gmail does not collapse `\n\n\n` to one gap.

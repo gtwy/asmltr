@@ -71,13 +71,113 @@ function shouldExtraFetchPass({ stopped, usable, pendingExists, mailbox, lastUid
   return !!(progressed && moreUidsWaiting(mailbox, lastUid));
 }
 
+function parseQuoteDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function formatQuoteAttr(quote) {
+  const addr = String((quote && quote.fromAddr) || '').trim();
+  const name = String((quote && quote.fromName) || '').trim();
+  const dt = parseQuoteDate(quote && quote.date);
+  let when = 'a message';
+  if (dt) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).formatToParts(dt);
+    const get = (t) => (parts.find((p) => p.type === t) || {}).value || '';
+    when = `${get('weekday')}, ${get('month')} ${get('day')}, ${get('year')} at ${get('hour')}:${get('minute')} ${get('dayPeriod')}`;
+  }
+  if (name && addr && name.toLowerCase() !== addr.toLowerCase()) {
+    return `On ${when} ${name} <${addr}> wrote:`;
+  }
+  const who = addr || name;
+  return who ? `On ${when} <${who}> wrote:` : `On ${when} wrote:`;
+}
+
+function quoteTextBlock(quote) {
+  const attr = formatQuoteAttr(quote);
+  const lines = String((quote && quote.text) || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const quoted = lines.map((line) => (line === '' ? '>' : `> ${line}`)).join('\n');
+  return `\n\n${attr}\n${quoted}`;
+}
+
+function sanitizeQuoteHtml(raw) {
+  let s = String(raw || '');
+  if (!s.trim()) return '';
+  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(s);
+  if (body) s = body[1];
+  s = s.replace(/<\/?(?:!doctype|html|head|meta|link|title)(?:\s[^>]*)?>/gi, '');
+  s = s.replace(/<script\b[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/<style\b[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<noscript\b[\s\S]*?<\/noscript>/gi, '');
+  s = s.replace(/<img\b[^>]*>/gi, '');
+  s = s.replace(/<source\b[^>]*>/gi, '');
+  s = s.replace(/<video\b[\s\S]*?<\/video>/gi, '');
+  s = s.replace(/<picture\b[\s\S]*?<\/picture>/gi, '');
+  s = s.replace(/\s(?:src|srcset|poster)=(['"])cid:[\s\S]*?\1/gi, '');
+  s = s.replace(/url\(\s*['"]?cid:[^)]+\)/gi, 'none');
+  s = s.replace(/\shref=(['"])javascript:[\s\S]*?\1/gi, '');
+  return s.trim();
+}
+
+function quoteHtmlBlock(quote) {
+  const attr = escapeHtml(formatQuoteAttr(quote));
+  let inner = sanitizeQuoteHtml((quote && quote.html) || '');
+  if (!inner) {
+    inner = escapeHtml(String((quote && quote.text) || '')).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '<br>');
+  }
+  return (
+    '<div class="gmail_quote">' +
+    `<div dir="ltr" class="gmail_attr">${attr}<br></div>` +
+    `<blockquote class="gmail_quote" style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${inner}</blockquote>` +
+    '</div>'
+  );
+}
+
+function spliceQuoteHtml(html, block) {
+  const doc = String(html || '');
+  const i = doc.toLowerCase().lastIndexOf('</body>');
+  if (i === -1) return doc + block;
+  return doc.slice(0, i) + block + doc.slice(i);
+}
+
+function quoteFromThread(tc) {
+  if (!tc) return null;
+  const text = String(tc.quoteText || '').trim();
+  const html = sanitizeQuoteHtml(tc.quoteHtml || '');
+  if (!text && !html) return null;
+  return {
+    fromName: tc.quoteFromName || '',
+    fromAddr: tc.quoteFromAddr || '',
+    date: tc.quoteDate || null,
+    text,
+    html,
+  };
+}
+
 // Multipart body for SMTP: text is markdown+signature; html is sanitized conversion.
 // Fail open: convert errors omit html so nodemailer sends text only.
-function buildMailContent(text, signature) {
+// Quote (Gmail bar) is spliced AFTER conversion when last inbound is on the thread.
+function buildMailContent(text, signature, opts) {
   const plain = (text || '') + (signature || '');
+  const quote = opts && opts.quote;
+  const wantQuote = quote
+    && (String(quote.html || '').trim() || String(quote.text || '').trim());
+  let textOut = plain;
+  if (wantQuote) textOut = plain + quoteTextBlock(quote);
   let html;
   try { html = emailHtmlFromMarkdown(plain); } catch (_) { html = undefined; }
-  return html ? { text: plain, html } : { text: plain };
+  if (html && wantQuote) html = spliceQuoteHtml(html, quoteHtmlBlock(quote));
+  return html ? { text: textOut, html } : { text: textOut };
 }
 
 // Letter-only rule stays last in system_prompt_extra.
@@ -126,7 +226,11 @@ function root32(refs, inReplyTo, messageId) {
 }
 
 function isAutomatedSender(addr) {
-  return /(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(String(addr || ''));
+  const a = String(addr || '');
+  if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(a)) return true;
+  // alerts@logmein.com and similar — not a person on the chain (James 26 Aug 2026).
+  if (/^(alerts|notifications?|notify)@/i.test(a)) return true;
+  return false;
 }
 
 /**
@@ -384,6 +488,89 @@ function persistLastUid(instanceId, uid) {
   fs.writeFileSync(f, JSON.stringify({ lastUid: uid }) + '\n', { mode: 0o600 });
 }
 
+// Thread participants survive worker restart so reply-all and "already on this chain"
+// still work after a recycle. Override with ASMLTR_EMAIL_THREADS_FILE.
+const THREADS_KEEP = 200;
+
+function threadsFile(instanceId) {
+  if (process.env.ASMLTR_EMAIL_THREADS_FILE) return process.env.ASMLTR_EMAIL_THREADS_FILE;
+  return path.join(os.homedir(), '.asmltr', `email-threads-${instanceId}.json`);
+}
+
+function readThreads(instanceId) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(threadsFile(instanceId), 'utf8'));
+    const obj = raw && raw.threads && typeof raw.threads === 'object' ? raw.threads : {};
+    return new Map(Object.entries(obj));
+  } catch (_) {
+    return new Map();
+  }
+}
+
+function persistThreads(instanceId, map) {
+  const entries = [...(map || new Map()).entries()].slice(-THREADS_KEEP);
+  const f = threadsFile(instanceId);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ threads: Object.fromEntries(entries) }) + '\n', { mode: 0o600 });
+}
+
+/** Emails from a contacts.json export (`{ results: [{ emails: [] }] }`). Tests only. */
+function emailsFromContactsDoc(doc) {
+  const set = new Set();
+  const rows = (doc && Array.isArray(doc.results)) ? doc.results
+    : (Array.isArray(doc) ? doc : []);
+  for (const row of rows) {
+    for (const e of (row && row.emails) || []) {
+      const a = String(e || '').trim().toLowerCase();
+      if (a.includes('@')) set.add(a);
+    }
+  }
+  return set;
+}
+
+function contactsCliPython() {
+  const envPy = String(process.env.IVY_LOCAL_PYTHON || '').trim();
+  if (envPy) return envPy;
+  const venv = path.join(os.homedir(), 'src', 'asmltr', 'extras', 'ivy-local', '.venv', 'bin', 'python');
+  try { fs.accessSync(venv, fs.constants.X_OK); return venv; } catch (_) {}
+  return 'python3';
+}
+
+function contactsCliScript() {
+  const override = String(process.env.ASMLTR_CONTACTS_CLI || '').trim();
+  if (override) return override;
+  return path.join(os.homedir(), '.asmltr', 'ivy-local', 'gworkspace', 'contacts_cli.py');
+}
+
+function parseContactsHasStdout(stdout) {
+  const line = String(stdout || '').trim().split('\n').filter(Boolean).pop() || '';
+  if (!line) return false;
+  const parsed = JSON.parse(line);
+  return !!(parsed && parsed.ok && parsed.known);
+}
+
+const contactsMem = new Map();
+
+function contactsHasEmail(addr) {
+  const a = String(addr || '').trim().toLowerCase();
+  if (!a.includes('@')) return false;
+  if (contactsMem.has(a)) return contactsMem.get(a);
+  let known = false;
+  try {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync(contactsCliPython(), [contactsCliScript(), 'has-email', a], {
+      encoding: 'utf8',
+      timeout: 15000,
+      env: process.env,
+    });
+    known = parseContactsHasStdout(r.stdout);
+  } catch (_) {
+    known = false;
+  }
+  contactsMem.set(a, known);
+  return known;
+}
+
 function loadMatchers(filePath) {
   const p = filePath || defaultOpsAllowthroughPath();
   try {
@@ -537,7 +724,49 @@ function selfInCcOnly(parsed, selfAddr) {
   return !selfInTo(parsed, self) && addrsFromField(parsed && parsed.cc).includes(self);
 }
 
-/** Reply-all: keep everyone on the inbound From/To/Cc except us and --drop. Discord-originated sends (no thread) are unchanged. */
+function selfIsRecipient(parsed, selfAddr) {
+  const self = String(selfAddr || '').trim().toLowerCase();
+  if (!self) return false;
+  return addrsFromField(parsed && parsed.to).includes(self)
+    || addrsFromField(parsed && parsed.cc).includes(self);
+}
+
+function headerHasThread(parsed) {
+  if (!parsed) return false;
+  if (parsed.inReplyTo) return true;
+  const refs = parsed.references;
+  if (Array.isArray(refs) && refs.filter(Boolean).length) return true;
+  if (typeof refs === 'string' && refs.trim()) return true;
+  return false;
+}
+
+function senderOnPriorThread(prior, fromAddr) {
+  const a = String(fromAddr || '').trim().toLowerCase();
+  if (!prior || !a) return false;
+  const bag = []
+    .concat(prior.from || [])
+    .concat(prior.to || [])
+    .concat(prior.cc || [])
+    .map((x) => String(x).toLowerCase());
+  return bag.includes(a);
+}
+
+/**
+ * Cold-mail strangers: owner-forward. Do not forward when they are already on
+ * this chain, replying to us, or in Google Contacts (People API).
+ */
+function shouldOwnerForwardUnknown({
+  known, opsHit, parsed, selfAddr, fromAddr, priorThread, contactsKnown,
+} = {}) {
+  if (known || opsHit || contactsKnown) return false;
+  if (senderOnPriorThread(priorThread, fromAddr)) return false;
+  if (headerHasThread(parsed) && selfIsRecipient(parsed, selfAddr)) return false;
+  return true;
+}
+
+/** Reply-all: keep everyone on the inbound From/To/Cc except us, --drop, and automated senders.
+ * Discord-originated sends (no thread) are unchanged. James 26 Aug 2026: noreply Microsoft/Barracuda
+ * (and alerts@ / notifications@) are not people on the chain. Real vendor employees stay. */
 function mergeReplyAll(payload, thread, selfAddr, dropList) {
   const self = String(selfAddr || '').trim().toLowerCase();
   const drop = new Set(
@@ -554,6 +783,7 @@ function mergeReplyAll(payload, thread, selfAddr, dropList) {
   function push(bucket, list) {
     for (const a of list) {
       if (!a || drop.has(a) || seen.has(a)) continue;
+      if (isAutomatedSender(a)) continue;
       seen.add(a);
       bucket.push(a);
     }
@@ -651,14 +881,14 @@ async function start(ctx) {
     auth: { user: address, pass: password },
   });
 
-  // conversation_key -> { subject, messageId, references[] } so replies (inline OR later draft
-  // approval via /out) thread correctly. In-memory: best-effort across a connector restart.
-  const threads = new Map();
+  // conversation_key -> { subject, messageId, references[], from, to, cc }. Disk + memory
+  // so a recycle does not treat a thread participant as a stranger or drop reply-all.
+  const threads = readThreads(ctx.instanceId);
   const selfAddr = String(address).toLowerCase();
   const outboundGate = createOutboundGate({ ownerAddr: ownerForward });
 
-  async function smtpSend({ to, cc, subject, text, inReplyTo, references, attachments }) {
-    const content = buildMailContent(text, signature);
+  async function smtpSend({ to, cc, subject, text, inReplyTo, references, attachments, quote }) {
+    const content = buildMailContent(text, signature, { subject, quote });
     const info = await smtp.sendMail({
       from: `"${fromName}" <${address}>`, to,
       cc: cc || undefined,
@@ -770,13 +1000,21 @@ async function start(ctx) {
       } catch (e) { ctx.log(`attachment save failed: ${e.message}`); }
     }
 
+    const priorThread = threads.get(convKey) || null;
     threads.set(convKey, {
       subject: replySubject, messageId,
       references: [...refs, messageId].filter(Boolean),
       from: addrsFromField(parsed.from),
       to: addrsFromField(parsed.to),
       cc: addrsFromField(parsed.cc),
+      quoteFromName: fromName2,
+      quoteFromAddr: fromAddr,
+      quoteDate: parsed.date ? new Date(parsed.date).toISOString() : null,
+      quoteText: String(parsed.text || '').trim(),
+      quoteHtml: sanitizeQuoteHtml(parsed.html || ''),
     });
+    try { persistThreads(ctx.instanceId, threads); }
+    catch (e) { ctx.log(`persist threads: ${e.message}`); }
 
     let text = `From: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
     if (savedNotes.length) text += `\n\n[Attachments saved to the shared asmltr upload area (findable via \`asmltr uploads\`):\n${savedNotes.join('\n')}]`;
@@ -785,9 +1023,13 @@ async function start(ctx) {
 
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
-    // Known people (in the trust store): reply immediately. Strangers: forward to the owner, no reply.
+    const contactsKnown = contactsHasEmail(fromAddr);
+    // Access-card known, Google Contacts, or already on this chain: create a turn.
+    // Cold strangers: forward to the owner, no reply.
     // Ops allow-through (Microsoft Entra alerts, etc.) creates a turn even if unknown.
-    if (!known && !hit) {
+    if (shouldOwnerForwardUnknown({
+      known, opsHit: hit, parsed, selfAddr, fromAddr, priorThread, contactsKnown,
+    })) {
       if (ownerForward && ownerForward !== fromAddr) {
         const fwd = `${NAME} forwarded this — I don't know the sender, so I didn't reply.\n\nFrom: ${fromName2} <${fromAddr}>\nSubject: ${subject}\n\n${body}`;
         await sendMail({ to: ownerForward, subject: `Fwd: ${subject}`, text: fwd });
@@ -804,12 +1046,16 @@ async function start(ctx) {
       `You are answering an EMAIL as ${fromName}. Your assistant text is NOT mailed — there is no auto-reply. ` +
       `To send a letter: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"]. ` +
       `On a chain, the connector reply-alls everyone already on To/Cc (minus you) unless you pass --drop <addr> or --no-reply-all. Check To and Cc before sending. Do not drop Tim/Joey/James/the customer unless asked. ` +
+      `Automated alert senders (noreply Microsoft/Barracuda, alerts@LogMeIn, and similar) are not people on the chain. Never include them on replies for those alerts. Real vendor employees on a support ticket stay. Staff outreach from an automated-alert turn is a blank new email (--no-reply-all): facts in your own words, no quote of the vendor message. ` +
       `Then reply with exactly [[NO_REPLY]]. Do not type a name or signature block — "${fromName}" and the rest of the signature are appended on send. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
       (ccOnly
         ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]]. `
         : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
-      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. ` +
+      `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at @example.com (James, Tim, Joey, or Steve) says so. Do not add those staff to a thread they are not already on. ` +
+      `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Google Contacts, are not strangers. ` +
+      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where and any body notes, and wait for James to confirm. First letter to others: do not say you cannot book until James confirms or that a workflow blocks you. If someone (e.g. Steve) later sends a change, repeat the corrected details; a short still-waiting-on-James is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or Ivy/TDS closer in the letter — those go on the Google event only. If James does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to James: say there is a conflict and James should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Stay on this email thread — do not also ping James on Discord about the same invite. Do not tell anyone else he is free. Remote only if James says remote (blank location). Remote description never uses Ivy's "I": one Example Co employee attending → "{FirstName} will not be on-site"; more than one → "we will not be on-site". If he says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If James clearly says Joey and/or Tim (or both) will be going and he will not: the repeat-back says he is not attending; on create pass organizer_going=false (leave his RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the guys who are going, not James's number. People James names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default; Shot Blasting Tip). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on James on the first pass). Event details and exceptions only. Full flowchart: memory/ops/calendar-schedule.md. ` +
+      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. Do not add Tim, Joey, or Steve unless they were already on To/Cc. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
@@ -1040,6 +1286,7 @@ async function start(ctx) {
         inReplyTo: inReplyTo || tc.messageId,
         references: refsIn || tc.references,
         attachments,
+        quote: quoteFromThread(tc),
       };
       if (reply_all !== false) payload = mergeReplyAll(payload, tc, selfAddr, drop);
       // Fire-and-forget SMTP. prepare() adds owner Cc when To is someone else.
@@ -1064,4 +1311,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
