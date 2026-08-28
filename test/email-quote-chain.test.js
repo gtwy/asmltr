@@ -7,9 +7,9 @@ const {
   sanitizeQuoteHtml,
 } = require('../connectors/types/email');
 
-const SIG = '\n\n\nIvy Hedera 🔶🌿\nAI Assistant to Example Owner\n\n[Example Co](https://example.com) can build an AI assistant like this for your team.\n';
+const SIG = '\n\n\nGaia 🔶🌿\nAI Assistant to Alex Example\n\n[Example Co](https://example.com) can build an AI assistant like this for your team.\n';
 const QUOTE = {
-  fromName: 'Example Owner',
+  fromName: 'Alex Example',
   fromAddr: 'owner@example.com',
   date: '2026-08-26T19:22:00.000Z', // 15:22 EDT
   text: 'Please look at *_domainkey* and *foo* in this inbound.',
@@ -36,11 +36,11 @@ test('quoted inbound stays after conversion, markdown not applied to inbound', (
   assert.doesNotMatch(c.html.slice(c.html.indexOf('gmail_quote')), /<em>foo<\/em>/);
   assert.doesNotMatch(c.html.slice(c.html.indexOf('gmail_quote')), /<strong>/);
   assert.match(c.text, /> Please look at \*_domainkey\*/);
-  const sigAt = c.text.indexOf('Ivy Hedera');
+  const sigAt = c.text.indexOf('Gaia');
   const gtAt = c.text.indexOf('\n>');
   assert.ok(sigAt > 0 && gtAt > sigAt);
   assert.match(c.html, /On .* at \d{1,2}:\d{2} (AM|PM)/);
-  assert.match(formatQuoteAttr(QUOTE), /Example Owner <owner@example\.io>/);
+  assert.match(formatQuoteAttr(QUOTE), /Alex Example <owner@example\.com>/);
 });
 
 test('no stored inbound → no quote', () => {
@@ -75,7 +75,7 @@ test('wraps inbound HTML after signature, not through markdown', () => {
   const qat = c.html.indexOf('gmail_quote');
   const above = c.html.slice(0, qat);
   assert.match(above, /New letter/);
-  assert.match(above, /Ivy Hedera/);
+  assert.match(above, /Gaia/);
   assert.match(c.html.slice(qat), /Cleveland then/);
   assert.match(c.html.slice(qat), /nested/);
   assert.doesNotMatch(c.html.slice(qat), /<img/i);
