@@ -1,14 +1,13 @@
 'use strict';
 /**
- * V23: /health payload. Size-only sqlite keep-list — never dump SQL strings.
+ * /health payload. No sqlite keep-list (that helper is gone).
  */
 
-function healthPayload({ active, sqliteKeepSize }) {
+function healthPayload({ active }) {
   return {
     status: 'ok',
     service: 'asmltr-core',
     active,
-    sqlite_keep: { size: sqliteKeepSize },
   };
 }
 

@@ -6,16 +6,18 @@ const path = require('path');
 const { healthPayload } = require('../core/src/health-payload');
 
 test('health JSON has no SQL strings', () => {
-  const p = healthPayload({ active: 2, sqliteKeepSize: 4 });
+  const p = healthPayload({ active: 2 });
   const raw = JSON.stringify(p);
   assert.equal(/SELECT|INSERT|UPDATE|DELETE|CREATE|FROM /i.test(raw), false);
-  assert.equal('sql' in p.sqlite_keep, false);
-  assert.deepEqual(p.sqlite_keep, { size: 4 });
+  assert.equal('sqlite_keep' in p, false);
   assert.equal(p.status, 'ok');
+  assert.equal(p.service, 'asmltr-core');
+  assert.equal(p.active, 2);
 });
 
-test('server.js does not dump keep.keys() SQL', () => {
+test('server.js does not reference sqlite keep', () => {
   const src = readFileSync(path.join(__dirname, '../core/src/server.js'), 'utf8');
-  assert.equal(src.includes('_sqliteKeep.keep.keys()'), false);
+  assert.equal(src.includes('_sqliteKeep'), false);
+  assert.equal(src.includes('sqlite-stmt-keep'), false);
   assert.ok(src.includes("require('./health-payload')"));
 });

@@ -825,9 +825,7 @@ app.use(express.json({ limit: '10mb' }));
 // JSON shape, and base64 costs 4 bytes per 3, so a base64-only route caps near 7.5 MiB of file.
 const { rawBody, fileFrom } = require('./raw-body');
 
-app.get('/health', (req, res) => res.json(healthPayload({
-  active, sqliteKeepSize: _sqliteKeep.keep.size,
-})));
+app.get('/health', (req, res) => res.json(healthPayload({ active })));
 // Build identity — the code sha this process is running + when it started. An updater checks this
 // (not just /health, which returns 200 even on stale code) to confirm the restart actually landed.
 const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
