@@ -52,7 +52,7 @@ Connectors / identity / wake-word already used `ASSISTANT_NAME`.
 ## extras/ivy-local folder name kept on purpose
 
 The directory, `register.sh` `IVY`/`IVY_LOCAL` locals, example systemd unit
-names (`ivy-rolodex-sync.*`), and `mode: "ivy-cache"` stay. Those are
+names are gone with extras Rolodex (597993b). `mode: "ivy-cache"` if any leftover is
 host-shaped extras paths, not the public product persona. Do not rename
 the folder in this recut.
 

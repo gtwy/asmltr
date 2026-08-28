@@ -77,7 +77,6 @@ if not isinstance(cfg, dict):
 cfg.setdefault("servers", {})
 if not isinstance(cfg["servers"], dict):
     cfg["servers"] = {}
-cfg["servers"].pop("rolodex", None)
 for name, spec in servers.items():
     prev = cfg["servers"].get(name) or {}
     disabled = bool(prev.get("disabled")) if isinstance(prev, dict) else False
@@ -112,7 +111,6 @@ if [[ -x "$GROK_BIN" ]]; then
       echo "WARN: grok mcp add $name failed"
     fi
   done
-  "$GROK_BIN" mcp remove rolodex >/dev/null 2>&1 || true
   "$GROK_BIN" mcp list || true
 else
   echo "WARN: grok not at $GROK_BIN — skip grok mcp add"
