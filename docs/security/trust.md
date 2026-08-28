@@ -109,7 +109,7 @@ Seed file shape (`seed.example.json`):
 }
 ```
 
-`default_tier` **1–5** is an Access card: they may `asmltr guild-post` in the **same** Discord server (not `asmltr send`, not other servers, not DMs/email). Tier 0 cannot. Tiers 6+ cannot. Owner (`bypass_moderation`) always can. Discord ids in the example are placeholders — replace locally; never commit real snowflakes. Stills/video/code allowlists are `~/.asmltr/tool-policy.json` (copy `shared/tool-policy.example.json`).
+Same-guild Discord post is `asmltr send discord` (alias `asmltr guild-post`): trusted role or `resolve()` allow, with Access card `default_tier` **1–5** as fallback until roles are applied. Not other servers, not DMs/email. Owner (`bypass_moderation`) always can. Discord ids in the example are placeholders — replace locally; never commit real snowflakes. Stills/video/code allowlists are `~/.asmltr/tool-policy.json` (copy `shared/tool-policy.example.json`).
 
 !!! note "Identifier surfaces"
     `surface` is the connector channel (`discord`, `telegram`, `mcp`, `github`) or `apikey`;

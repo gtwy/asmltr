@@ -248,8 +248,74 @@ async function cmdRelease(key) {
   console.log(A.grn('released — channel resumes'));
 }
 
+async function deliverSameGuildPost({ target, text, title, replyTo }) {
+  exitIfDenied('guildPost');
+  const gp = require('../shared/guild-post');
+  const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
+  const on_behalf_of = process.env.ASMLTR_ATTACH_SENDER || '';
+  const here = process.env.ASMLTR_ATTACH_TARGET || '';
+  if (!source_guild) throw new Error('same-guild send only from a Discord server channel (no DMs, no email)');
+  if (!on_behalf_of) throw new Error('same-guild send needs the asker id (ASMLTR_ATTACH_SENDER)');
+  if (!gp.looksLikeSnowflake(target)) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    const r = await fetch(MANAGER_BASE + '/send', {
+      method: 'POST', headers,
+      body: JSON.stringify({ channel: 'discord', target, kind: 'guild_resolve', query: target, source_guild, text }),
+    }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+    if (!r || !r.ok) {
+      console.log(A.red('guild-resolve failed: ' + ((r && r.error) || JSON.stringify(r))));
+      return;
+    }
+    const matches = r.matches || [];
+    if (!matches.length) {
+      console.log('No channel/thread matched ' + JSON.stringify(target) + '. Ask them to be more specific. NOT POSTED.');
+      return;
+    }
+    console.log('NOT POSTED — confirm with them first, then send discord <id> with the same text.');
+    for (const m of matches) {
+      const where = m.kind === 'thread' ? ('thread in #' + (m.parent || '?')) : m.kind === 'forum' ? 'forum (new post)' : 'channel (not a thread)';
+      console.log((m.score || 0) + '  ' + m.id + '  ' + (m.name || '') + '  [' + where + ']');
+    }
+    return;
+  }
+  if (here && String(target) === String(here)) {
+    console.log('same channel — skipped send; answer here normally');
+    return;
+  }
+  const body = {
+    channel: 'discord', target, kind: 'guild_post', text,
+    source_guild, on_behalf_of, source_channel: here || undefined,
+    title: title || undefined, reply_to: replyTo || undefined,
+    from_session: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || undefined,
+  };
+  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => null);
+  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+  if (r && r.skipped && r.reason === 'same_channel') {
+    console.log('same channel — skipped send; answer here normally');
+    return;
+  }
+  if (!r || !r.ok) {
+    console.log(A.red('send failed: ' + ((r && r.error) || JSON.stringify(r))));
+    return;
+  }
+  if (here) {
+    const ack = { channel: 'discord', target: here, kind: 'text', text: 'Post complete.' };
+    await fetch(MANAGER_BASE + '/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(MANAGER_TOKEN ? { Authorization: 'Bearer ' + MANAGER_TOKEN } : {}) },
+      body: JSON.stringify(ack),
+    }).catch(() => null);
+  }
+  console.log('Posted. Reply [[NO_REPLY]] now — do not repeat the body.');
+}
+
 async function cmdSend(rest) {
-  exitIfDenied('send');
   // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."]
   let file = null, caption = null, subject = null, cc = null, force = false, drop = null, noReplyAll = false;
   const words = [];
@@ -270,6 +336,11 @@ async function cmdSend(rest) {
       '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"] [--drop "<addr>"] [--no-reply-all] [--force]\n' +
       '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@example.com "the body" --subject "Hello" --cc "boss@example.com" --file /root/report.pdf');
   }
+  // Same-guild Discord post folds into send (confirm first, on-behalf-of, fuzzy name).
+  if (String(channel).toLowerCase() === 'discord' && process.env.ASMLTR_ATTACH_GUILD && !file) {
+    return await deliverSameGuildPost({ target, text, title: null, replyTo: null });
+  }
+  exitIfDenied('send');
   const body = file
     ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject, cc }
     : { channel, target, kind: 'text', text, subject, cc };
@@ -294,82 +365,19 @@ async function cmdSend(rest) {
 }
 
 async function cmdGuildPost(rest) {
-  exitIfDenied('guildPost');
   let title = null, replyTo = null;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
-    const t = rest[i];
-    if (t === '--title') title = rest[++i];
-    else if (t === '--reply-to') replyTo = rest[++i];
-    else words.push(t);
+    const tok = rest[i];
+    if (tok === '--title') title = rest[++i];
+    else if (tok === '--reply-to') replyTo = rest[++i];
+    else words.push(tok);
   }
   const target = words[0], text = words.slice(1).join(' ');
   if (!target) {
-    throw new Error('usage: asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>]');
+    throw new Error('usage: asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>] (alias of asmltr send discord …)');
   }
-  const gp = require('../shared/guild-post');
-  const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
-  const on_behalf_of = process.env.ASMLTR_ATTACH_SENDER || '';
-  const here = process.env.ASMLTR_ATTACH_TARGET || '';
-  if (!source_guild) throw new Error('guild-post only from a Discord server channel (no DMs, no email)');
-  if (!on_behalf_of) throw new Error('guild-post needs the asker id (ASMLTR_ATTACH_SENDER)');
-  if (!gp.looksLikeSnowflake(target)) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
-    const r = await fetch(MANAGER_BASE + '/send', {
-      method: 'POST', headers,
-      body: JSON.stringify({ channel: 'discord', target, kind: 'guild_resolve', query: target, source_guild, text }),
-    }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
-    if (!r || !r.ok) {
-      console.log(A.red('guild-resolve failed: ' + ((r && r.error) || JSON.stringify(r))));
-      return;
-    }
-    const matches = r.matches || [];
-    if (!matches.length) {
-      console.log('No channel/thread matched ' + JSON.stringify(target) + '. Ask them to be more specific. NOT POSTED.');
-      return;
-    }
-    console.log('NOT POSTED — confirm with them first, then guild-post <id> with the same text.');
-    for (const m of matches) {
-      const where = m.kind === 'thread' ? ('thread in #' + (m.parent || '?')) : m.kind === 'forum' ? 'forum (new post)' : 'channel (not a thread)';
-      console.log((m.score || 0) + '  ' + m.id + '  ' + (m.name || '') + '  [' + where + ']');
-    }
-    return;
-  }
-  if (here && String(target) === String(here)) {
-    console.log('same channel — skipped guild-post; answer here normally');
-    return;
-  }
-  const body = {
-    channel: 'discord', target, kind: 'guild_post', text,
-    source_guild, on_behalf_of, source_channel: here || undefined,
-    title: title || undefined, reply_to: replyTo || undefined,
-    from_session: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || undefined,
-  };
-  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    .then((x) => x.json()).catch(() => null);
-  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
-    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
-  }
-  if (r && r.skipped && r.reason === 'same_channel') {
-    console.log('same channel — skipped guild-post; answer here normally');
-    return;
-  }
-  if (!r || !r.ok) {
-    console.log(A.red('guild-post failed: ' + ((r && r.error) || JSON.stringify(r))));
-    return;
-  }
-  if (here) {
-    const ack = { channel: 'discord', target: here, kind: 'text', text: 'Post complete.' };
-    await fetch(MANAGER_BASE + '/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(MANAGER_TOKEN ? { Authorization: 'Bearer ' + MANAGER_TOKEN } : {}) },
-      body: JSON.stringify(ack),
-    }).catch(() => null);
-  }
-  console.log('Posted. Reply [[NO_REPLY]] now — do not repeat the body.');
+  return await deliverSameGuildPost({ target, text, title, replyTo });
 }
 
 async function deliverFile(channel, target, filePath, caption) {
@@ -830,8 +838,8 @@ function cmdHelp() {
        [--title T] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
-  asmltr guild-post <id-or-name> "<text>"  same Discord server. A name looks up (does not post)
-       [--title T] [--reply-to id]         until they confirm; then post with the id.
+  asmltr send discord <id-or-name> "…"  same Discord server (trusted / Access 1–5 fallback).
+       guild-post is an alias. A name looks up (does not post) until they confirm.
   asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
        [--caption T]                   delete only after Discord confirms. retry / list / gc
        ... --subject "<subj>"           set the subject (email)

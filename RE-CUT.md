@@ -79,32 +79,20 @@ Do not live-wire those moves today.
 
 ## guild_post → send (public verb is send)
 
-The public product verb is **`asmltr send`**. `guild_post` /
-`asmltr guild-post` / MCP `asmltr_guild_post` is a same-server Discord
-posting path that still lives in the public tree. It should not be the
-word the public product talks about.
+Folded. The public product verb is **`asmltr send`**. Same-guild Discord
+post (confirm first, on-behalf-of, fuzzy name→channel) runs through
+`asmltr send discord` when `ASMLTR_ATTACH_GUILD` is set. Internal kind
+stays `guild_post`. `asmltr guild-post` / MCP `asmltr_guild_post` are
+aliases. Capability is trusted role or `resolve()` allow; Access 1–5
+lookups remain as fallback until live APPLY.
 
-Still in this tree today (do not rename in this chunk — record only):
+Stop/abort: send, voice, Grok stream, and inject register a processing
+entry (`abortTarget`). Starter can abort their turn. Public asmltr does
+not make stop owner-only.
 
-- CLI: `cli/asmltr.js` `kind: 'guild_post'`
-- Connector: `connectors/types/discord/index.js` `kind === 'guild_post'`
-- MCP: `mcp/toolbelt-server.js` `asmltr_guild_post`
-- Prompt: `shared/toolbelt-prompt.js` advertises `asmltr guild-post`
-- Tests: `test/guild-post.test.js`, `test/toolbelt-deny.test.js`
-- Docs: `docs/cli.md`, `docs/connectors/discord.md`,
-  `docs/coordination/cross-channel.md`, `docs/security/trust.md`,
-  `INSTALL-WITH-AGENT.md` still teach `guild-post` as a separate verb
-  because public Discord denies cross-channel `asmltr send`
-
-What still must move to overlay (private ivy-local, not a public asmltr PR):
-
-- The `guild_post` kind and MCP/toolbelt copy — host-only same-guild post
-- Access-card (tier 1–5) gate that exists only to unlock that path
-- Docs/prompt that present `guild-post` as a product verb; public docs
-  should keep talking about `asmltr send`
-
-Leave the implementations in this tree for now. Overlay later. Do not
-live-wire today.
+`/out` file posts: Discord, Telegram, and manager prefer
+`ASMLTR_OUTBOUND_STAGE` or `~/.asmltr/ivy-local/overlay/outbound-stage.js`
+and fall back to `shared/outbound-stage`.
 
 ## Draft public vs private persona (do not live-wire)
 
@@ -134,8 +122,7 @@ Rules for the public tree:
 - `test/engine-grok-effort.test.js` catch-up speaker `Eve:`
 - `test/admin-alert.test.js` display_name `Eve'; id`
 - `docs/ROADMAP-RECORDER-CONTEXTBANKS.md` "Eve observes calls"
-- `guild_post` / `asmltr guild-post` implementation and tests (move later;
-  public tree should talk about `send`)
+- `guild_post` kind + `asmltr guild-post` alias remain as implementation; public verb is send
 - git commit messages (not edited)
 - No Dionysus hits in this tree
 - LANGUAGE_OVERLAP no longer special-cases `'ivy'` (token dropped). PII

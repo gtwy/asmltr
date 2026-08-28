@@ -227,7 +227,7 @@ async function start(ctx) {
       // with an undefined body → "message text is empty". 'photo'/'document' force a specific send.
       if (kind === 'file' || kind === 'photo' || kind === 'document') {
         if (!filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
-        const stage = require('../../../shared/outbound-stage');
+        const stage = require('../../../shared/load-outbound-stage').loadOutboundStage();
         if (!stage.outboundFileAllowed(filePath)) {
           return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
         }

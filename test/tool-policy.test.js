@@ -153,8 +153,8 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
     channel: 'discord',
     chTarget: 'ch1',
   });
-  assert.equal(text.includes('asmltr send'), false);
-  assert.ok(text.includes('asmltr guild-post'));
+  assert.ok(text.includes('asmltr send discord'));
+  assert.ok(text.includes('asmltr_guild_post'));
   assert.ok(text.includes('Post complete'));
   assert.equal(text.includes('asmltr streams'), false);
   assert.equal(text.includes('asmltr announce'), false);
@@ -174,7 +174,8 @@ test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
   assert.ok(text.includes('SELF SILO'));
   assert.ok(text.includes('asmltr_silo_find'));
   assert.equal(text.includes('use the Bash tool'), false);
-  assert.equal(text.includes('asmltr send'), false);
+  assert.equal(text.includes('asmltr send <channel>'), false);
+  assert.ok(text.includes('asmltr send discord'));
   assert.equal(text.includes('asmltr streams'), false);
   assert.equal(text.includes('asmltr announce'), false);
   assert.equal(text.includes('asmltr silo put'), false);

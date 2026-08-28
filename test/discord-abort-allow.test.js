@@ -38,3 +38,20 @@ test('discord stop is not in OWNER_ONLY_CMDS; processing stores starterId', () =
   assert.ok(block);
   assert.equal(/['\"]stop['\"]/.test(block[1]), false);
 });
+
+test('send voice stream inject register abortTarget; stop passes identities; not owner-only', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(src, /function abortTarget\(/);
+  const sendSlice = src.slice(src.indexOf("app.post('/out'"), src.indexOf("app.post('/out'") + 3500);
+  assert.match(sendSlice, /abortTarget\(/);
+  assert.match(src, /loadOutboundStage/);
+  const voiceSlice = src.slice(src.indexOf('voiceBusy.add(guildId)'), src.indexOf('voiceBusy.add(guildId)') + 400);
+  assert.match(voiceSlice, /abortTarget\(/);
+  assert.match(src, /abortTarget\(cid, message\.author\.id, 'stream'\)/);
+  assert.match(src, /abortTarget\(cid, message\.author\.id, 'inject'\)/);
+  assert.match(src, /speakerId: String\(message\.author\.id\)/);
+  assert.match(src, /starterId: starterId/);
+  const block = src.match(/const OWNER_ONLY_CMDS = new Set\((\[[\s\S]*?\])\)/);
+  assert.ok(block);
+  assert.equal(/['"]stop['"]/.test(block[1]), false);
+});

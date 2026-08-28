@@ -125,9 +125,30 @@ function codeAuthorized(envelope, resolved, allow) {
   return listed(envelope, resolved, a.codePrincipals, a.codeDiscordIds);
 }
 
-/** Same-guild Discord post: owner, or Access card default_tier 1–5. */
+/** Same-guild Discord post: owner, trusted role, or resolve() allow. Access 1–5 fallback until APPLY. */
+function grantTokens(resolved) {
+  const out = [];
+  if (!resolved) return out;
+  for (const key of ['permissions', 'allow', 'roles', 'role_ids']) {
+    const v = resolved[key];
+    if (Array.isArray(v)) {
+      for (const x of v) {
+        if (x && typeof x === 'object') out.push(String(x.id || x.name || ''));
+        else out.push(String(x));
+      }
+    } else if (typeof v === 'string' && v) out.push(v);
+  }
+  return out.map((s) => s.toLowerCase()).filter(Boolean);
+}
+
 function guildPostAuthorized(resolved) {
   if (ownerish(resolved)) return true;
+  const tokens = grantTokens(resolved);
+  if (tokens.includes('trusted') || tokens.includes('guild-post') || tokens.includes('guildpost')
+    || tokens.includes('send') || tokens.includes('*')) {
+    return true;
+  }
+  // fallback until live APPLY so empty roles still work
   const t = Number(resolved && resolved.trust_tier);
   return t >= 1 && t <= 5;
 }
@@ -152,7 +173,7 @@ function policyFor(envelope, resolved, allow) {
     deny.shell = true;
     deny.write = true;
   }
-  // Same-guild Discord post: in a guild, Access 1–5 or owner.
+  // Same-guild Discord post: in a guild, trusted role / resolve allow, or Access 1–5 fallback.
   if (!guildIdFrom(envelope) || !guildPostAuthorized(resolved)) deny.guildPost = true;
   if (!isRestricted(envelope, resolved)) return { deny, restricted: false };
   deny.shell = true;
@@ -197,6 +218,6 @@ function exitIfDenied(kind) {
 
 module.exports = {
   policyFile, loadAllowlist, policyFor, isRestricted, hostChannelPolicy, siloAllowlisted,
-  videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized,
+  videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized, grantTokens,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
 };

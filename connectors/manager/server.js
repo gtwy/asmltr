@@ -2,6 +2,7 @@
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
+const { loadOutboundStage } = require('../../shared/load-outbound-stage');
 const { bearerEqual } = require('../../shared/bearer-equal');
 const { connectorAuthHeaders } = require('../../shared/connector-http-auth');
 /**
@@ -198,6 +199,12 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   // "this channel can't attach files" instead of a confusing failure inside the connector.
   if (ATTACH_KINDS.includes(kind) && !supportsAttachments(meta)) {
     return { ok: false, status: 400, error: `type '${inst.type}' does not support outbound file attachments` };
+  }
+  if (filePath) {
+    const stage = loadOutboundStage();
+    if (typeof stage.outboundFileAllowed === 'function' && !stage.outboundFileAllowed(filePath)) {
+      return { ok: false, status: 403, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' };
+    }
   }
   const port = instancePort(inst);
   if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` };

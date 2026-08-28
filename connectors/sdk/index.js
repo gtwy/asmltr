@@ -216,7 +216,16 @@ function makeCoreClient(coreUrl) {
     // Access principals for public-surface sanitizer hints (ids / names / mailboxes). Fail-open at caller.
     trustPrincipals() { return this._get('/trust/principals').then((j) => j.principals || []); },
     // Abort the in-flight turn for a conversation (the session survives + is resumable).
-    abort(conversationKey) { return this._post('/v2/abort', { conversation_key: conversationKey }); },
+    abort(conversationKey, ids) {
+      const body = { conversation_key: conversationKey };
+      if (ids && typeof ids === 'object') {
+        if (ids.speakerId) body.speakerId = ids.speakerId;
+        if (ids.authorId) body.authorId = ids.authorId;
+        if (ids.starterId) body.starterId = ids.starterId;
+        if (ids.ownerId) body.ownerId = ids.ownerId;
+      }
+      return this._post('/v2/abort', body);
+    },
     // Inject text into a running/next turn as steering guidance. interrupt:true aborts+redirects;
     // interrupt:false (default) queues behind the current turn and continues it with the guidance folded in.
     inject(conversationKey, text, opts = {}) { return this._post('/v2/inject', { conversation_key: conversationKey, text, by: opts.by || 'operator', interrupt: !!opts.interrupt }); },

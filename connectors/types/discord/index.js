@@ -145,6 +145,18 @@ async function start(ctx) {
   // --- state ---
   let memory = { servers: {}, globalTimeline: [] };
   const processing = new Map();
+  function abortTarget(cid, starterId, kind) {
+    if (cid == null || cid === '') return null;
+    const id = String(cid);
+    if (!processing.has(id)) processing.set(id, { starterId: String(starterId || ''), kind: kind || 'turn' });
+    return processing.get(id);
+  }
+  function releaseAbortTarget(cid, kind) {
+    if (cid == null || cid === '') return;
+    const id = String(cid);
+    const slot = processing.get(id);
+    if (slot && (!kind || slot.kind === kind)) processing.delete(id);
+  }
   const lateMedia = new Map(); // cid -> message (same-author upload during a turn; run after)
   const pendingReply = new Map(); // cid -> { timer, message, forced } — the reply-debounce quiet-window
   let silenced = false;
@@ -360,7 +372,14 @@ async function start(ctx) {
         let acted = false;
         if (voiceHere) { const s = await stopVoiceReply(gid, { chime: false }); acted = acted || s; }
         if (slot) {
-          try { await ctx.core.abort(convKeyFor(message)); acted = true; }
+          try {
+            await ctx.core.abort(convKeyFor(message), {
+              speakerId: String(message.author.id),
+              starterId: starterId || undefined,
+              ownerId: owner ? String(message.author.id) : 'owner',
+            });
+            acted = true;
+          }
           catch (e) { ctx.log('abort failed: ' + e.message); await message.channel.send('⚠ Couldn\'t stop the current turn.'); }
         }
         await message.react(acted ? '🛑' : '🤷').catch(() => {});
@@ -502,6 +521,7 @@ ${referentPromptBlock()}`;
         const guidance = String(message.content || '').replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim();
         if (guidance) {
           const by = injectBy(await isOwner(message), message.author.id);
+          abortTarget(cid, message.author.id, 'inject');
           ctx.core.inject(convKeyFor(message), guidance, { by, interrupt: false })
             .then(() => message.react('👀').catch(() => {}))
             .catch((e) => ctx.log('mid-turn steer failed: ' + e.message));
@@ -509,7 +529,7 @@ ${referentPromptBlock()}`;
       }
       return;
     }
-    processing.set(cid, { starterId: String(message.author.id) });
+    abortTarget(cid, message.author.id, 'stream');
     // Discord's typing indicator auto-expires after ~10s. Re-trigger it every
     // 8s so the "…is typing" shows for the ENTIRE (possibly multi-minute)
     // processing time, not just the first few seconds. Cleared in finally.
@@ -1026,6 +1046,8 @@ ${referentPromptBlock()}`;
     if (voiceMuted.has(guildId)) return; // MUTED (P2): addressed, but stay quiet — transcript already posted
     if (voiceBusy.has(guildId)) return;  // don't stack replies
     voiceBusy.add(guildId);
+    const originCid = ch && ch.id;
+    abortTarget(originCid, meta.userId || '', 'voice');
     voice.startSpeech(guildId);              // open a cancellable reply session (barge-in / stop can interrupt)
     voiceReplyStart.set(guildId, Date.now()); // start the barge-in grace window
     const myGen = voiceGen.get(guildId) || 0; // this reply's generation; stopVoiceReply bumps it to cancel
@@ -1081,7 +1103,7 @@ ${referentPromptBlock()}`;
       }
       if (VOICE_WINDOW_MS > 0 && live()) voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open the follow-up window (strict mode: never)
     } catch (e) { voice.stopDrone(guildId); ctx.log(`[voice] reply failed: ${e.message}`); if (ch) ch.send(`⚠️ voice reply failed: ${e.message}`).catch(() => {}); }
-    finally { voice.endSpeech(guildId); voiceReplyStart.delete(guildId); voiceBusy.delete(guildId); setVoiceStatus(null); } // back to listening/idle
+    finally { voice.endSpeech(guildId); voiceReplyStart.delete(guildId); voiceBusy.delete(guildId); releaseAbortTarget(originCid, 'voice'); setVoiceStatus(null); } // back to listening/idle
   }
 
   // Voice commands: "the assistant, join" (joins the author's voice channel + chimes + listens) / "the assistant, leave".
@@ -1254,6 +1276,7 @@ ${referentPromptBlock()}`;
   // File posts (`kind: file` + path) are how `asmltr post` attaches without Bash:
   // stage a safe name, POST here, delete the staged copy only after messageId.
   app.post('/out', requireConnectorToken, async (req, res) => {
+    let outMarked = null;
     try {
       const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
       if (kind === 'guild_resolve') {
@@ -1267,6 +1290,11 @@ ${referentPromptBlock()}`;
       }
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
       if (!channel) return res.status(404).json({ ok: false, error: 'channel not found' });
+      const procCid = source_channel || channel.id;
+      if (procCid && !processing.has(String(procCid))) {
+        abortTarget(procCid, on_behalf_of || '', 'send');
+        outMarked = { cid: procCid, kind: 'send' };
+      }
       if (kind === 'guild_post') {
         // Mute/disable is inbound only. Cross-post into a muted channel/thread is allowed.
         const gp = require('../../../shared/guild-post');
@@ -1299,7 +1327,7 @@ ${referentPromptBlock()}`;
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
       if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
       if (isFile) {
-        const stage = require('../../../shared/outbound-stage');
+        const stage = require('../../../shared/load-outbound-stage').loadOutboundStage();
         if (!stage.outboundFileAllowed(filePath)) {
           return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
         }
@@ -1313,6 +1341,9 @@ ${referentPromptBlock()}`;
         : `discord:${ctx.instanceId}:channel:${channel.id}`;
       res.json({ ok: true, messageId: m.id, conversation_key });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+    finally {
+      if (outMarked) releaseAbortTarget(outMarked.cid, outMarked.kind);
+    }
   });
   // --- channel enable/disable control (TUI/GUI drive this) -------------------------------
   // GET → every text channel the bot can see, with its effective enabled state.

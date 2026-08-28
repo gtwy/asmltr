@@ -48,7 +48,7 @@ test('forum parent vs thread', () => {
   assert.equal(destGuildId({ guild: { id: 'g2' } }), 'g2');
 });
 
-test('public guild: send denied; guildPost only Access 1-5 or owner', () => {
+test('public guild: send denied; guildPost trusted/allow or Access 1-5 fallback or owner', () => {
   const env = {
     channel: 'discord', public: true,
     context: { scope_id: 'guild:g1' },
@@ -59,6 +59,9 @@ test('public guild: send denied; guildPost only Access 1-5 or owner', () => {
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.guildPost, false);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 6 }).deny.guildPost, true);
   assert.equal(policyFor(env, { bypass_moderation: true, trust_tier: 0, user_key: 'owner' }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, roles: ['trusted'] }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, permissions: ['guild-post'] }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, allow: ['send'] }).deny.guildPost, false);
   assert.equal(sameChannel('ch1', 'ch1'), true);
   assert.equal(sameChannel('ch1', 'ch2'), false);
 });
@@ -93,7 +96,10 @@ test('discord /out handles guild_post and forum threads', () => {
   assert.match(src, /Mute\/disable is inbound only/);
   const cli = fs.readFileSync(path.join(__dirname, '../cli/asmltr.js'), 'utf8');
   assert.match(cli, /cmdGuildPost/);
+  assert.match(cli, /deliverSameGuildPost/);
+  assert.match(cli, /ASMLTR_ATTACH_GUILD/);
   const belt = fs.readFileSync(path.join(__dirname, '../mcp/toolbelt-server.js'), 'utf8');
   assert.match(belt, /asmltr_guild_post/);
   assert.match(belt, /deny: 'guildPost'/);
+  assert.match(belt, /asmltr_send/);
 });

@@ -50,8 +50,8 @@ Resolution rules (from `deliver()` in `connectors/manager/server.js`):
 
 !!! warning "Public Discord denies `asmltr send`"
     Even the owner cannot `asmltr send` from a public Discord channel (no email, no Telegram, no
-    other Discord servers). Same-server posting is a separate verb: `asmltr guild-post` (Access
-    cards tier 1–5 or owner). See [Discord → Same-guild post](../connectors/discord.md#same-guild-post-asmltr-guild-post).
+    other Discord servers). Same-server posting is `asmltr send discord` (trusted role or
+    resolve allow; Access 1–5 fallback). See [Discord → Same-guild post](../connectors/discord.md#same-guild-post-asmltr-send-discord).
 
 ## The agent verb: `asmltr send`
 

@@ -173,16 +173,16 @@ Mute/disable is **inbound only**. The bot will not *listen* in a muted channel (
 
 ---
 
-## Same-guild post (`asmltr guild-post`)
+## Same-guild post (`asmltr send discord`)
 
-Public Discord **always** denies `asmltr send` (even for the owner) — that tool is cross-system
-(email, Telegram, other Discord servers). Same-server posting is a **different** tool:
+Public Discord **always** denies cross-system `asmltr send` (email, Telegram, other Discord
+servers). Same-server posting uses the same verb:
 
-`asmltr guild-post <id-or-name> "<text>"` (MCP `asmltr_guild_post`).
+`asmltr send discord <id-or-name> "<text>"` (MCP `asmltr_send`; alias `asmltr_guild_post`).
 
 | Rule | What |
 |---|---|
-| Who | Owner, or an Access card (`principals.default_tier` **1–5**). Tier 0 and 6+ cannot. |
+| Who | Owner, trusted role, or `resolve()` allow (`guild-post` / `send` / `*`). Access card `default_tier` **1–5** is a fallback until roles are applied. Tier 0 with empty roles cannot. |
 | Where | This Discord server only. No DMs, no email, no other guilds. |
 | Same channel | Skipped — answer in the ask channel instead. |
 | Name vs id | A name (`the 666 degree steak thread`) **looks up** and does not post. Confirm with the person, then call again with the snowflake. |
