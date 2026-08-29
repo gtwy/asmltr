@@ -133,7 +133,7 @@ test("greet force_message only after session.updated and listening", () => {
   assert.match(cg, /onSession/);
 });
 
-test("1:1 first utterance after greet forces response.create", () => {
+test("first utterance after greet forces response.create even in a group", () => {
   const fs = require("fs");
   const src = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/index.js"), "utf8");
   assert.match(src, /_awaitFirstUser/);

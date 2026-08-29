@@ -1543,7 +1543,7 @@ ${referentPromptBlock()}`;
         const c = converseSessions.get(guildId);
         if (!c || typeof c.createResponse !== 'function') return;
         const humans = countHumansNow(guildId);
-        const firstAfterGreet = !!(c._awaitFirstUser && humans <= 1);
+        const firstAfterGreet = !!c._awaitFirstUser;
         const herMouth = voiceBusy.has(guildId);
         if (!firstAfterGreet && !shouldForceTurn({ humans, herMouth })) return;
         c._awaitFirstUser = false;
@@ -1551,7 +1551,7 @@ ${referentPromptBlock()}`;
         forceTurnAt.set(guildId, Date.now());
         try {
           c.createResponse();
-          ctx.log(firstAfterGreet ? '[voice] 1:1 first-utterance after greet → response.create' : '[voice] 1:1 speaking-stop → response.create');
+          ctx.log(firstAfterGreet ? '[voice] first-utterance after greet → response.create' : '[voice] 1:1 speaking-stop → response.create');
         } catch (e) { ctx.log(`[voice] createResponse: ${e.message}`); }
       },
       log: (m) => ctx.log(`[voice] ${m}`),
