@@ -1190,7 +1190,7 @@ ${referentPromptBlock()}`;
       return;
     }
 
-    // For me? Live: the model decides (1:1 = always; group = name/context). Flux path still uses
+    // For me? Live: the model decides (1:1 = always; group = lean in when welcome). Flux path still uses
     // the follow-up window or the wake matcher, except 1:1 (just James) where every line is for her.
     const solo = countHumansNow(guildId) <= 1;
     if (!converseSessions.has(guildId) && !active && !solo) {
@@ -1577,7 +1577,7 @@ ${referentPromptBlock()}`;
         : (voicePostTranscript
           ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `scribe-off`).'
           : 'Live transcript is **off** — I listen quietly' + (voiceTranscriptFile ? ' and post a full transcript `.txt` when I leave.' : '.'));
-      message.channel.send(`🎙️ Joined **${vc.name}** — I'm on the call. ${transcriptNote} Just talk. In a group, say **"${NAME}"** only if you need to pull me in. \`@${client.user.username} leave-voice\` to hang up.`).catch(() => {});
+      message.channel.send(`🎙️ Joined **${vc.name}** — I'm on the call. ${transcriptNote} Just talk. I'll jump in when it looks like you want me. \`@${client.user.username} leave-voice\` to hang up.`).catch(() => {});
     } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }
   }
 

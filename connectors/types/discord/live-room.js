@@ -32,7 +32,7 @@ function roomInstructions(humans) {
   if (count <= 1) {
     return 'This is a 1:1 voice call. Every utterance is for you. Always answer. No name is required. Do not wait to judge whether it was for you.';
   }
-  return 'This is a group voice call. Always listen. Answer when you are addressed by name, by context, or when you are being spoken to. Stay silent when the humans are talking among themselves.';
+  return 'This is a group voice call. Talk when context indicates your input is welcome: a question in the air, a pause for you, or being included. Lean in when welcome. Do not wait for your name. Stay quiet only when they are clearly talking among themselves and do not want you.';
 }
 
 module.exports = { countHumans, roomInstructions };

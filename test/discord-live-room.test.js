@@ -40,9 +40,12 @@ test('roomInstructions 1:1 always answer', () => {
   assert.equal(roomInstructions(undefined), s);
 });
 
-test('roomInstructions group interprets', () => {
+test('roomInstructions group lean-in when welcome', () => {
   const s = roomInstructions(2);
   assert.match(s, /group voice call/);
-  assert.match(s, /Stay silent/);
-  assert.match(s, /addressed by name/);
+  assert.match(s, /Lean in when welcome/);
+  assert.match(s, /Do not wait for your name/);
+  assert.match(s, /question in the air/);
+  assert.doesNotMatch(s, /Stay silent unless/);
+  assert.doesNotMatch(s, /addressed by name/);
 });
