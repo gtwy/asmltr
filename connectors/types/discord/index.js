@@ -1380,6 +1380,7 @@ ${referentPromptBlock()}`;
     const voice = require('./voice');
     if (!voice.isListening(guildId) || !voice.isConnected(guildId)) return;
     conv._greeted = true;
+    conv._awaitFirstUser = true;
     try { conv.forceMessage("ivy's here"); ctx.log('[voice] greet force_message (session.updated, listening)'); } catch (e) { ctx.log(`[voice] greet: ${e.message}`); }
   }
 
@@ -1435,6 +1436,8 @@ ${referentPromptBlock()}`;
       },
       onResponseDone: () => {
         const voice = require('./voice');
+        // Unmute uplink now so the next 1:1 utterance is not eaten during drain.
+        voiceBusy.delete(guildId);
         Promise.resolve(voice.endPcmPlayback(guildId))
           .catch(() => {})
           .then(() => {
@@ -1445,7 +1448,6 @@ ${referentPromptBlock()}`;
               if (next) voiceActive.set(guildId, next);
               pcmRing.delete(guildId + ':' + sp.userId);
             }
-            voiceBusy.delete(guildId);
             voiceReplyStart.delete(guildId);
             clearVoiceOverlap(guildId);
             setVoiceStatus(null);
@@ -1519,7 +1521,10 @@ ${referentPromptBlock()}`;
         converseSpeaker.set(guildId, { userId: String(userId), name: (meta && meta.name) || String(userId) });
         // Phone call: every human in the VC goes to the WS. No last-speaker / wake gate.
         // Mute uplink only while her mouth is actually playing (echo). Not voiceBusy.
-        if (vmod.isSpeaking(guildId)) return;
+        const live = converseSessions.get(guildId);
+        // Echo mute only while she is actually generating audio. After greet, first user PCM must flow.
+        if (voiceBusy.has(guildId)) return;
+        if (!live && vmod.isSpeaking(guildId)) return;
         if (!pcmTurnLogged.has(guildId)) {
           pcmTurnLogged.add(guildId);
           pcmTurnAt.set(guildId, Date.now());
@@ -1535,12 +1540,19 @@ ${referentPromptBlock()}`;
         clearVoiceOverlap(guildId);
       },
       onSpeechEnd: () => {
-        if (!shouldForceTurn({ humans: countHumansNow(guildId), herMouth: voiceBusy.has(guildId) || require('./voice').isSpeaking(guildId) })) return;
         const c = converseSessions.get(guildId);
         if (!c || typeof c.createResponse !== 'function') return;
+        const humans = countHumansNow(guildId);
+        const firstAfterGreet = !!(c._awaitFirstUser && humans <= 1);
+        const herMouth = voiceBusy.has(guildId);
+        if (!firstAfterGreet && !shouldForceTurn({ humans, herMouth })) return;
+        c._awaitFirstUser = false;
         pcmTurnLogged.delete(guildId);
         forceTurnAt.set(guildId, Date.now());
-        try { c.createResponse(); ctx.log('[voice] 1:1 speaking-stop → response.create'); } catch (e) { ctx.log(`[voice] createResponse: ${e.message}`); }
+        try {
+          c.createResponse();
+          ctx.log(firstAfterGreet ? '[voice] 1:1 first-utterance after greet → response.create' : '[voice] 1:1 speaking-stop → response.create');
+        } catch (e) { ctx.log(`[voice] createResponse: ${e.message}`); }
       },
       log: (m) => ctx.log(`[voice] ${m}`),
     });

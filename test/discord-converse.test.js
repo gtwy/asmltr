@@ -132,3 +132,11 @@ test("greet force_message only after session.updated and listening", () => {
   const cg = fs.readFileSync(path.join(__dirname, "../shared/speech/converse-grok.js"), "utf8");
   assert.match(cg, /onSession/);
 });
+
+test("1:1 first utterance after greet forces response.create", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/index.js"), "utf8");
+  assert.match(src, /_awaitFirstUser/);
+  assert.match(src, /first-utterance after greet/);
+  assert.match(src, /Unmute uplink now/);
+});
