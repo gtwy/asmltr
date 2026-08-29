@@ -37,6 +37,7 @@ const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speaker
 const { injectBy } = require('./inject-by');
 const { splitResponse } = require('../../../shared/discord-split');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
+const { shouldBargeIn } = require('./barge-in');
 const voiceTools = require('./voice-tools');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
@@ -874,8 +875,8 @@ ${referentPromptBlock()}`;
 
   const voiceBusy = new Set();   // guildIds mid-reply (one spoken reply at a time)
   const voiceActive = new Map(); // guildId -> expiry ts of the "answering mode" follow-up window
-  const voiceReplyStart = new Map(); // guildId -> ts a reply began (barge-in grace window)
-  const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after a reply starts (don't cut off on the asker's own trailing words)
+  const voiceReplyStart = new Map(); // guildId -> ts first spoken audio started (barge-in grace window)
+  const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after first spoken audio (don't cut off on the asker's own trailing words)
   const voiceMuted = new Set();  // guildIds where Eve is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
   const voiceGen = new Map();    // guildId -> reply generation. stopVoiceReply bumps it; the in-flight reply checks it and bails, so a stopped turn never speaks even if the LLM finishes after the abort.
   // 0 (default) = STRICT: respond ONLY when directly addressed by name, then go passive. A positive
@@ -1050,7 +1051,6 @@ ${referentPromptBlock()}`;
     const originCid = ch && ch.id;
     abortTarget(originCid, meta.userId || '', 'voice');
     voice.startSpeech(guildId);              // open a cancellable reply session (barge-in / stop can interrupt)
-    voiceReplyStart.set(guildId, Date.now()); // start the barge-in grace window
     const myGen = voiceGen.get(guildId) || 0; // this reply's generation; stopVoiceReply bumps it to cancel
     const live = () => (voiceGen.get(guildId) || 0) === myGen; // still the current, un-stopped reply?
     try {
@@ -1069,7 +1069,7 @@ ${referentPromptBlock()}`;
           if (!live()) return;             // cancelled before this sentence's turn to play
           const mp3 = await ttsP;
           if (!mp3 || !live()) return;      // cancelled during TTS
-          if (!firstAudio) { firstAudio = true; voice.stopDrone(guildId); setVoiceStatus('🔊 speaking'); }
+          if (!firstAudio) { firstAudio = true; voice.stopDrone(guildId); setVoiceStatus('🔊 speaking'); voiceReplyStart.set(guildId, Date.now()); }
           await voice.speak(guildId, mp3);
         }).catch((e) => ctx.log(`[voice] speak failed: ${e.message}`));
       };
@@ -1156,8 +1156,7 @@ ${referentPromptBlock()}`;
       onBargeIn: () => {
         const gid = guildId;
         if (cfg.voice_barge_in === false) return;
-        if (!voiceBusy.has(gid)) return;
-        if (Date.now() - (voiceReplyStart.get(gid) || 0) < BARGE_GRACE_MS) return;
+        if (!shouldBargeIn({ busy: voiceBusy.has(gid), speaking: voice.isSpeaking(gid), replyStartedAt: voiceReplyStart.get(gid), now: Date.now(), graceMs: BARGE_GRACE_MS })) return;
         ctx.log('[voice] barge-in: user spoke over the reply → cancelling');
         stopVoiceReply(gid, { chime: false });
       },
