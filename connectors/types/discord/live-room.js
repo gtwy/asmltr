@@ -35,4 +35,12 @@ function roomInstructions(humans) {
   return 'This is a group voice call. Talk when context indicates your input is welcome: a question in the air, a pause for you, or being included. Lean in when welcome. Do not wait for your name. Stay quiet only when they are clearly talking among themselves and do not want you.';
 }
 
-module.exports = { countHumans, roomInstructions };
+/** 1:1: Discord speaking-stop must produce a spoken reply. Not while her mouth is playing. */
+function shouldForceTurn({ humans, herMouth } = {}) {
+  const n = Number(humans);
+  const count = Number.isFinite(n) ? n : 0;
+  return count <= 1 && !herMouth;
+}
+
+module.exports = { countHumans, roomInstructions, shouldForceTurn };
+

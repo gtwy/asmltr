@@ -260,3 +260,14 @@ test('input_audio_transcription.updated is partial; completed is final', () => {
   assert.equal(got[2].final, true);
   assert.equal(got[2].t, 'How you doing? Ivy how are you doing');
 });
+
+test("createResponse commits the audio buffer then response.create", async () => {
+  MockWS.instances = [];
+  const session = openSession({}, { getKey: async () => "vault-test-key", WebSocket: MockWS });
+  await session.ready;
+  session.createResponse();
+  const parsed = MockWS.instances[0].sent.map((x) => JSON.parse(x));
+  const types = parsed.map((x) => x.type);
+  assert.ok(types.includes("input_audio_buffer.commit"));
+  assert.ok(types.includes("response.create"));
+});

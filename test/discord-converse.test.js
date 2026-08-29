@@ -92,3 +92,30 @@ test('Live user transcript edits in place; 1:1 room line; no stay-silent-among-t
   assert.doesNotMatch(src, /Stay silent when the humans are talking among themselves\. No wake word is required/);
   assert.match(src, /solo = countHumansNow\(guildId\) <= 1/);
 });
+
+test("Live 1:1 speaking-stop forces response.create", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/index.js"), "utf8");
+  assert.match(src, /onSpeechEnd/);
+  assert.match(src, /createResponse/);
+  assert.match(src, /1:1 speaking-stop/);
+  const voice = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/voice.js"), "utf8");
+  assert.match(voice, /onSpeechEnd/);
+});
+
+test('Live pack: grok-only, WS reopen, scribe edit, speaking-stop', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(src, /grok-only Live \(no Flux\)/);
+  assert.match(src, /converse reopening \(still in VC\)/);
+  assert.match(src, /converse WS closed code=/);
+  assert.match(src, /PCM → WS bytes=/);
+  assert.match(src, /firstAudio/);
+  assert.match(src, /cap\.msg\.edit/);
+  assert.match(src, /!converseSessions.has\(guildId\) && ch && shouldPostLive/);
+  const voice = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
+  const convAt = voice.indexOf('if (converse)');
+  const rtAt = voice.indexOf('if (realtime)');
+  assert.ok(convAt > 0 && convAt < rtAt, 'converse must win over realtime');
+});

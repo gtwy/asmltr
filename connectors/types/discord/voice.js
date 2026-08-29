@@ -164,7 +164,7 @@ function closeRealtime(guildId) {
 }
 
 // Converse path: per-user 48k stereo → 24k mono PCM into the grok-voice WS (last-speaker gated by allowPcm).
-function converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24, endpointMs, log }) {
+function converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24, onSpeechEnd, endpointMs, log }) {
   if (isSelfUser(client, userId)) return;
   if (typeof allowPcm === 'function' && !allowPcm(userId)) return;
   const { EndBehaviorType } = lib();
@@ -186,7 +186,10 @@ function converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24
       if (onPcm24) onPcm24(userId, pcm, { name });
     } catch (e) { log(`converse push err: ${e.message}`); }
   });
-  decoder.on('end', () => { entry.subscribed = false; });
+  decoder.on('end', () => {
+    entry.subscribed = false;
+    if (typeof onSpeechEnd === 'function') { try { onSpeechEnd(userId); } catch (_) {} }
+  });
 }
 
 function closeConverseSubs(guildId) {
@@ -200,7 +203,7 @@ function closeConverseSubs(guildId) {
 // onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
 // realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
 // converse = true → skip Flux; relay last-speaker PCM via onPcm24 (Ivy Live).
-function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onBargeEnd, onPartial, realtime, realtimeModel, realtimeLive, realtimeProvider, converse, allowPcm, onPcm24, vad = {}, log = () => {} }) {
+function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onBargeEnd, onPartial, onSpeechEnd, realtime, realtimeModel, realtimeLive, realtimeProvider, converse, allowPcm, onPcm24, vad = {}, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;
   const { EndBehaviorType } = lib();
@@ -221,8 +224,8 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
     if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
     // Converse PCM is tapped off the Flux decoder (onPcm24) — do NOT skip STT: spoken-stop /
     // mute / leave / name-gate / 🗣️ still need transcripts. Last-speaker gating is in onPcm24.
+    if (converse) { converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24, onSpeechEnd, endpointMs, log }); return; }
     if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, onPcm24, model: realtimeModel || 'gpt-live-transcribe', live: realtimeLive !== false, provider: realtimeProvider, endpointMs, log }); return; }
-    if (converse) { converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24, endpointMs, log }); return; }
     if (active.has(userId)) return;
     active.add(userId);
     const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: endpointMs } });

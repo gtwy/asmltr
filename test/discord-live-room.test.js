@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { countHumans, roomInstructions } = require('../connectors/types/discord/live-room');
+const { countHumans, roomInstructions, shouldForceTurn } = require('../connectors/types/discord/live-room');
 
 function ch(members) {
   return { members: { values: () => members[Symbol.iterator] ? members : members } };
@@ -48,4 +48,11 @@ test('roomInstructions group lean-in when welcome', () => {
   assert.match(s, /question in the air/);
   assert.doesNotMatch(s, /Stay silent unless/);
   assert.doesNotMatch(s, /addressed by name/);
+});
+
+test("shouldForceTurn 1:1 when her mouth is idle", () => {
+  assert.equal(shouldForceTurn({ humans: 1, herMouth: false }), true);
+  assert.equal(shouldForceTurn({ humans: 0, herMouth: false }), true);
+  assert.equal(shouldForceTurn({ humans: 1, herMouth: true }), false);
+  assert.equal(shouldForceTurn({ humans: 2, herMouth: false }), false);
 });

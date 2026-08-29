@@ -82,6 +82,7 @@ function buildSessionUpdate(opts) {
     voice: VOICE,
     tools: asRealtimeFunctions(opts && opts.tools),
     turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false },
+    idle_timeout_ms: 3600000,
     reasoning: { effort: 'none' },
     audio: {
       input: {
@@ -329,6 +330,10 @@ function openSession(handlers, opts) {
       sendJson(appendPcmEvent(buf));
     },
     cancel() { sendJson({ type: 'response.cancel' }); },
+    createResponse() {
+      sendJson({ type: 'input_audio_buffer.commit' });
+      sendJson({ type: 'response.create' });
+    },
     forceMessage(text) {
       const line = String(text || '').trim();
       if (!line) return;
