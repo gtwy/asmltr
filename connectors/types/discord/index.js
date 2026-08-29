@@ -40,6 +40,10 @@ const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
 const { shouldPlayWakeChime } = require('./wake-chime');
 const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp } = require('./voice-followup');
+const {
+  isTranscriptOff, setTranscriptOff, serializeTranscriptOff, loadTranscriptOff,
+  isTranscriptOffCmd, isTranscriptOnCmd, shouldPostLive, shouldUploadLeaveFile,
+} = require('./transcript-channel');
 const voiceTools = require('./voice-tools');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
@@ -64,6 +68,7 @@ const OWNER_ONLY_CMDS = new Set([
   'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
   'drone-on', 'drone on', 'drone-off', 'drone off',
   'transcript-on', 'transcript on', 'transcript-off', 'transcript off',
+  'transcribe-on', 'transcribe on', 'transcribe-off', 'transcribe off',
   'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
   'mute-voice', 'mute voice', 'voice-mute', 'unmute-voice', 'unmute voice', 'voice-unmute',
   'update-asmltr', 'update asmltr', 'self-update', 'update yourself',
@@ -191,16 +196,18 @@ async function start(ctx) {
   const channelStates = new Map(); // channel_id -> boolean (explicit override)
   let channelsDefault = cfg.channels_default !== false; // unlisted channels: enabled unless config says otherwise
   let engageAllBots = false;
+  let transcriptOffChannels = new Set();
   try {
     const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     (s.mutedChannels || []).forEach((c) => channelStates.set(String(c), false)); // migrate legacy mutes
     if (s.channels && typeof s.channels === 'object') for (const [c, on] of Object.entries(s.channels)) channelStates.set(String(c), !!on);
     if (typeof s.channelsDefault === 'boolean') channelsDefault = s.channelsDefault;
     engageAllBots = !!s.engageAllBots;
+    transcriptOffChannels = loadTranscriptOff(s.transcriptOffChannels);
   } catch (_) {}
   function channelEnabled(cid) { return channelStates.has(String(cid)) ? channelStates.get(String(cid)) : channelsDefault; }
   function saveSettings() {
-    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify({ channels: Object.fromEntries(channelStates), channelsDefault, engageAllBots })); }
+    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify({ channels: Object.fromEntries(channelStates), channelsDefault, engageAllBots, transcriptOffChannels: serializeTranscriptOff(transcriptOffChannels) })); }
     catch (e) { ctx.log('settings persist failed: ' + e.message); }
   }
 
@@ -324,6 +331,14 @@ async function start(ctx) {
     if (OWNER_ONLY_CMDS.has(cmd) && !(await isOwner(message))) {
       await message.channel.send('🔒 Only my owner can run that command.'); return true;
     }
+    if (isTranscriptOffCmd(cmd)) {
+      setTranscriptOff(transcriptOffChannels, cid, true); saveSettings();
+      await message.channel.send(`🔕 Live transcript **off** in this channel — I'll stay quiet here until \`@${me} transcribe-on\`.`); return true;
+    }
+    if (isTranscriptOnCmd(cmd)) {
+      setTranscriptOff(transcriptOffChannels, cid, false); saveSettings();
+      await message.channel.send('📝 Live transcript **on** — I\'ll post 🗣️ lines as people speak.'); return true;
+    }
     switch (cmd) {
       case 'silence': case 'be quiet': case 'quiet': case 'shush':
         silenced = true; await message.channel.send(`🤐 Mention-only mode — I'll stay quiet unless @-mentioned. \`@${me} speak\` to restore.`); return true;
@@ -341,10 +356,7 @@ async function start(ctx) {
         voiceDrone = true; await message.channel.send('🎛 Ambient processing drone **on** for voice replies.'); return true;
       case 'drone-off': case 'drone off':
         voiceDrone = false; await message.channel.send('🎛 Ambient processing drone **off**.'); return true;
-      case 'transcript-on': case 'transcript on':
-        voicePostTranscript = true; await message.channel.send('📝 Live transcript **on** — I\'ll post 🗣️ lines as people speak.'); return true;
-      case 'transcript-off': case 'transcript off':
-        voicePostTranscript = false; await message.channel.send(`🔕 Live transcript **off** — I\'ll stay quiet in chat and ${voiceTranscriptFile ? 'upload the full transcript as a .txt when I leave voice' : 'keep transcribing silently'}.`); return true;
+      // transcript on/off handled above (per-channel persist via isTranscriptOffCmd / isTranscriptOnCmd)
       case 'join-voice': case 'join voice': case 'join vc': case 'join the voice':
         await doJoinVoice(message); return true;
       case 'update-asmltr': case 'update asmltr': case 'self-update': case 'update yourself':
@@ -404,9 +416,9 @@ async function start(ctx) {
         await message.channel.send('🔊 Voice unmuted — I\'ll respond when addressed again.'); return true;
       }
       case 'status':
-        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})`); return true;
+        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})\n**Transcript:** ${isTranscriptOff(transcriptOffChannels, cid) ? 'off in this channel (`transcribe-on` to restore)' : 'on in this channel (`transcribe-off` to hide)'}`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`transcript-on\` / \`transcript-off\` · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`transcribe-on\` / \`transcribe-off\` (this channel) · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
@@ -884,7 +896,7 @@ ${referentPromptBlock()}`;
   // missing/0 = 25s same-speaker follow-up after she talks. -1/false = STRICT (name every turn).
   const VOICE_WINDOW_MS = resolveVoiceFollowupMs(cfg.voice_followup_ms);
   let voiceDrone = cfg.voice_drone !== false; // ambient "working" drone during a spoken reply (toggleable)
-  let voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ lines into the text channel (toggleable)
+  const voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ default; per-channel transcribe-off wins
   const voiceTranscriptFile = cfg.voice_transcript_file !== false; // upload a full transcript .txt on leave
   const voiceLog = new Map(); // guildId -> [{ t, who, text }] accumulated for the whole voice session
 
@@ -898,7 +910,8 @@ ${referentPromptBlock()}`;
   // Build + upload the accumulated transcript to `ch`, then clear it. Called when leaving voice.
   async function uploadTranscript(guildId, ch) {
     const arr = voiceLog.get(guildId); voiceLog.delete(guildId);
-    if (!voiceTranscriptFile || !ch || !arr || !arr.length) return;
+    if (!ch || !arr || !arr.length) return;
+    if (!shouldUploadLeaveFile({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voiceTranscriptFile })) return;
     try {
       const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
       const body = `Voice transcript — ${new Date().toISOString().slice(0, 10)}\n` +
@@ -947,8 +960,9 @@ ${referentPromptBlock()}`;
   const liveCaptions = new Map(); // `${guildId}:${name}` -> { msg, lastEdit, pending, sending }
   const CAPTION_THROTTLE_MS = 1400;
   async function onVoicePartial(guildId, name, text) {
-    if (!voicePostTranscript || !text) return;
+    if (!text) return;
     const ch = voiceText.get(guildId); if (!ch) return;
+    if (!shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) return;
     const key = `${guildId}:${name}`;
     let cap = liveCaptions.get(key);
     if (!cap) {
@@ -983,7 +997,7 @@ ${referentPromptBlock()}`;
     logTranscript(guildId, name, text); // always captured for the end-of-session file
     // Post the transcript line — in realtime mode, finalize the streaming caption into the final text
     // (one message per turn) instead of posting a duplicate line.
-    if (ch && voicePostTranscript) {
+    if (ch && shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) {
       if (!(meta.realtime && finalizeCaption(guildId, name, text))) ch.send(`🗣️ **${name}:** ${text}`).catch(() => {});
     }
     let voice; try { voice = require('./voice'); } catch (_) { return; }
@@ -1108,7 +1122,7 @@ ${referentPromptBlock()}`;
       // Only record/announce the reply if it wasn't stopped mid-flight (a cancelled turn never really spoke).
       if (full.trim() && live()) {
         logTranscript(guildId, NAME, full.trim());
-        if (ch && voicePostTranscript) ch.send(`🔊 **${NAME}:** ${full.trim().slice(0, 1800)}`).catch(() => {});
+        if (ch && shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) ch.send(`🔊 **${NAME}:** ${full.trim().slice(0, 1800)}`).catch(() => {});
       }
       // Arm AFTER she actually finishes speaking (await chain = last speak() idle), last-speaker only.
       if (live() && firstAudio) {
@@ -1250,11 +1264,14 @@ ${referentPromptBlock()}`;
       const { rtModel, rtLive, rtProvider, vad } = await realtimeListenConfig();
       ctx.log(`[voice] realtime role → ${rtProvider}:${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
       await startVoiceListening(message.guild.id);
-      ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${voicePostTranscript})`);
+      ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${!isTranscriptOff(transcriptOffChannels, message.channel.id) && voicePostTranscript})`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
-      const transcriptNote = voicePostTranscript
-        ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `transcript-off`).'
-        : 'Live transcript is **off** — I listen quietly' + (voiceTranscriptFile ? ' and post a full transcript `.txt` when I leave.' : '.');
+      const originOff = isTranscriptOff(transcriptOffChannels, message.channel.id);
+      const transcriptNote = originOff
+        ? `Live transcript is **off** in this channel — I listen quietly. \`@${client.user.username} transcribe-on\` to restore.`
+        : (voicePostTranscript
+          ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `transcribe-off`).'
+          : 'Live transcript is **off** — I listen quietly' + (voiceTranscriptFile ? ' and post a full transcript `.txt` when I leave.' : '.'));
       message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. ${transcriptNote} Say **"${NAME}, …"** out loud to ask something — I'll play a soft "working" drone and answer by voice. After that, **follow-ups need no name** for a bit; say **"that's enough, ${NAME}"** to go back to just listening, or \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
     } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }
   }
