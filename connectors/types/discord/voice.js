@@ -220,8 +220,11 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
   receiver.speaking.on('start', (userId) => {
     if (!listening.has(guildId)) return;
     if (isSelfUser(client, userId)) return; // loopback/echo: do not subscribe, STT, onPcm24, or barge
-    // Humans talking over playback. Bot user ignored above; speakers→mic echo still arrives as
-    // the human's userId and is gated by the 1.5s local talk-through.
+    try {
+      const u = client.users.cache.get(userId);
+      if (u && u.bot) return;
+    } catch (_) {}
+    // Humans talking over playback. Bot/self ignored; 3s continuous talk-through before barge.
     if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
     // Converse PCM is tapped off the Flux decoder (onPcm24) — do NOT skip STT: spoken-stop /
     // mute / leave / name-gate / 🗣️ still need transcripts. Last-speaker gating is in onPcm24.
@@ -255,6 +258,10 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
     receiver.speaking.on('end', (userId) => {
       if (!listening.has(guildId)) return;
       if (isSelfUser(client, userId)) return;
+      try {
+        const u = client.users.cache.get(userId);
+        if (u && u.bot) return;
+      } catch (_) {}
       try { onBargeEnd(userId); } catch (_) {}
     });
   }

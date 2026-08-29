@@ -67,11 +67,11 @@ test('short overlap 400ms does not barge', () => {
     now: 10_000 + GRACE,
     graceMs: GRACE,
     userSpeechMs: 400,
-    minSpeechMs: 1500,
+    minSpeechMs: 3000,
   }), false);
 });
 
-test('sustained 1500ms overlap after grace does barge', () => {
+test('sustained 1500ms overlap after grace does not barge (need 3s)', () => {
   assert.equal(shouldBargeIn({
     busy: true,
     speaking: true,
@@ -79,7 +79,18 @@ test('sustained 1500ms overlap after grace does barge', () => {
     now: 10_000 + GRACE,
     graceMs: GRACE,
     userSpeechMs: 1500,
-    minSpeechMs: 1500,
+    minSpeechMs: 3000,
+  }), false);
+});
+test('sustained 3000ms overlap after grace does barge', () => {
+  assert.equal(shouldBargeIn({
+    busy: true,
+    speaking: true,
+    replyStartedAt: 10_000,
+    now: 10_000 + 3000,
+    graceMs: GRACE,
+    userSpeechMs: 3000,
+    minSpeechMs: 3000,
   }), true);
 });
 
@@ -90,8 +101,8 @@ test('sustained overlap still respects 1200ms grace', () => {
     replyStartedAt: 10_000,
     now: 10_000 + GRACE - 1,
     graceMs: GRACE,
-    userSpeechMs: 1500,
-    minSpeechMs: 1500,
+    userSpeechMs: 3000,
+    minSpeechMs: 3000,
   }), false);
 });
 
@@ -105,7 +116,7 @@ test('Live onSpeechStart does not immediately stopVoiceReply', () => {
   assert.match(body, /clearVoiceOverlap/);
   assert.match(body, /isSpeaking\(guildId\)/);
   assert.match(body, /voiceBusy\.has\(guildId\)/);
-  // Echo: do not arm 1.5s barge from xAI VAD while she is playing.
+  // Echo: do not arm 3s barge from xAI VAD while she is playing.
   assert.equal(/armVoiceOverlap/.test(body), false);
 });
 
@@ -179,14 +190,17 @@ test('play turn to completion: onResponseDone / endPcmPlayback without hard does
   assert.match(done, /endSpeech/);
 });
 
-test('Live uses local 1.5s barge; onBargeIn does not skip converseSessions', () => {
+test('Live uses local 3s barge; onBargeIn does not skip converseSessions', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   const barge = src.slice(src.indexOf('onBargeIn:'), src.indexOf('onBargeEnd:'));
   assert.equal(/converseSessions\.has\(guildId\)\s*return/.test(barge), false);
   assert.match(barge, /armVoiceOverlap/);
   const end = src.slice(src.indexOf('onBargeEnd:'), src.indexOf('log: (m)'));
   assert.equal(/converseSessions\.has\(guildId\)\s*return/.test(end), false);
-  assert.match(src, /BARGE_MIN_SPEECH_MS = 1500/);
+  assert.match(src, /BARGE_MIN_SPEECH_MS = 3000/);
+  assert.match(src, /3s cancel/);
+  assert.match(src, /ignored \(need /);
+  assert.doesNotMatch(src, /VOICE_STOP_RE.*barge/);
 });
 
 test('Live play path uses pcm48MonoToPcm48Stereo not pcm24MonoToPcm48Stereo; session 48k', () => {

@@ -899,7 +899,7 @@ ${referentPromptBlock()}`;
   const voiceActive = new Map(); // guildId -> { expires, userId } last-speaker follow-up window
   const voiceReplyStart = new Map(); // guildId -> ts first spoken audio started (barge-in grace window)
   const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after first spoken audio (don't cut off on the asker's own trailing words)
-  const BARGE_MIN_SPEECH_MS = 1500; // must talk through her this long before barge-in cancels
+  const BARGE_MIN_SPEECH_MS = 3000; // continuous human talk-over before barge; sneeze/one word must not dump her
   const voiceOverlapArm = new Map();   // guildId -> overlap start ts
   const voiceOverlapTimer = new Map(); // guildId -> pending barge check
   const voiceMuted = new Set();  // guildIds where Eve is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
@@ -970,9 +970,8 @@ ${referentPromptBlock()}`;
         if (wait > 0) voiceOverlapTimer.set(guildId, setTimeout(tick, wait));
         return;
       }
-      ctx.log(live
-        ? '[voice] converse server_vad barge-in'
-        : '[voice] barge-in: user spoke over the reply → cancelling');
+      const ms = now - arm;
+      ctx.log('[voice] overlap ' + ms + 'ms → 3s cancel');
       stopVoiceReply(guildId, { chime: false, barge: true });
       if (live) {
         const conv = converseSessions.get(guildId);
@@ -1417,7 +1416,7 @@ ${referentPromptBlock()}`;
       onSpeechStart: () => {
         if (cfg.voice_barge_in === false) return;
         const v = require('./voice');
-        // Echo: xAI server_vad hears her playback. Ignore while playing. Local Discord 1.5s barge owns interrupt.
+        // Echo: xAI server_vad hears her playback. Ignore while playing. Local Discord 3s barge owns interrupt.
         if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
       },
       onSpeechStop: () => {
@@ -1548,6 +1547,11 @@ ${referentPromptBlock()}`;
         armVoiceOverlap(guildId, { live: converseSessions.has(guildId) });
       },
       onBargeEnd: () => {
+        const arm = voiceOverlapArm.get(guildId);
+        if (arm) {
+          const ms = Date.now() - arm;
+          ctx.log('[voice] overlap ' + ms + 'ms → ignored (need ' + BARGE_MIN_SPEECH_MS + ' continuous)');
+        }
         clearVoiceOverlap(guildId);
       },
       onSpeechEnd: () => {
