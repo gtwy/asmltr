@@ -316,7 +316,8 @@ function waitPcmIdle(guildId, e) {
       const { AudioPlayerStatus } = lib();
       const st = e.player.state && e.player.state.status;
       if (st === AudioPlayerStatus.Idle) { done(); return; }
-      const t = setTimeout(done, 1500);
+      const t = setTimeout(done, 30000);
+      try { e.player.on('error', () => { clearTimeout(t); done(); }); } catch (_) {}
       e.player.once(AudioPlayerStatus.Idle, () => { clearTimeout(t); done(); });
     } catch (_) { done(); }
   });
@@ -371,6 +372,9 @@ function primePcmPlayback(e) {
     pcm.write(e.queued);
     e.queued = Buffer.alloc(0);
   }
+  try { pcm.on('error', () => {}); } catch (_) {}
+  try { encoder.on('error', () => {}); } catch (_) {}
+  try { player.on('error', () => {}); } catch (_) {}
   player.play(createAudioResource(encoder, { inputType: StreamType.Opus }));
   e.conn.subscribe(player);
   const s = speech.get(e.guildId);

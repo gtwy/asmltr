@@ -212,9 +212,14 @@ function applyServerEvent(ev, handlers) {
     if (t && h.onAssistantText) { try { h.onAssistantText(String(t)); } catch (_) {} }
     return 'assistant_text';
   }
-  if (typ === 'conversation.item.input_audio_transcription.completed' || typ === 'conversation.item.input_audio_transcription.updated') {
+  if (typ === 'conversation.item.input_audio_transcription.updated') {
     const t = (ev.transcript || (ev.item && ev.item.transcript) || ev.text || '').trim();
-    if (t && h.onUserTranscript) { try { h.onUserTranscript(t, ev); } catch (_) {} }
+    if (t && h.onUserTranscript) { try { h.onUserTranscript(t, ev, { final: false }); } catch (_) {} }
+    return 'user_transcript_partial';
+  }
+  if (typ === 'conversation.item.input_audio_transcription.completed') {
+    const t = (ev.transcript || (ev.item && ev.item.transcript) || ev.text || '').trim();
+    if (t && h.onUserTranscript) { try { h.onUserTranscript(t, ev, { final: true }); } catch (_) {} }
     return 'user_transcript';
   }
   if (typ === 'response.function_call_arguments.done') {

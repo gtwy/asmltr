@@ -120,7 +120,8 @@ test('index: prime on join of existing members; drop on leave; flip applies cach
   const apply = src.slice(src.indexOf('function applyLiveSpeaker'), src.indexOf('function bindLiveSpeaker'));
   assert.doesNotMatch(apply, /ctx\.core\.resolve/);
   assert.doesNotMatch(apply, /recallForInject/);
-  assert.match(apply, /applyFromCache/);
+  assert.match(apply, /liveSpeakerCache.get/);
+  assert.match(apply, /liveRoomLine/);
 
   const handle = src.slice(src.indexOf('async function handleVoiceUtterance'), src.indexOf('async function engineKeys'));
   const live = handle.slice(handle.indexOf('if (converseSessions.has(guildId))'), handle.indexOf('if (voiceBusy.has(guildId))'));

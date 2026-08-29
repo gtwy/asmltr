@@ -66,8 +66,8 @@ function siloRecallBlock(recalled) {
   return 'PRIOR CONVERSATION (from Self silo; this is a FRESH engine session after idle or first turn). Use this as your memory of earlier chat. Do NOT grep events-*.jsonl for prior conversation.\n\n' + body;
 }
 
-function buildLiveInstructions({ voiceGuidance, identity, speakerLine, siloRecall } = {}) {
-  return [voiceGuidance, identity, speakerLine, siloRecall].filter(Boolean).join('\n\n');
+function buildLiveInstructions({ voiceGuidance, identity, speakerLine, siloRecall, room } = {}) {
+  return [voiceGuidance, room, identity, speakerLine, siloRecall].filter(Boolean).join('\n\n');
 }
 
 async function executeFunctionCall({ name, args, resolved, envelope, turn, invoke } = {}) {

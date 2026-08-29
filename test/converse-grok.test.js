@@ -241,3 +241,22 @@ test('forceMessage is xAI force_message, no response.create', async () => {
   assert.equal(item.item.content[0].text, "ivy's here");
   assert.equal(parsed.some((x) => x.type === 'response.create' && parsed.indexOf(x) > parsed.indexOf(item)), false);
 });
+
+test('input_audio_transcription.updated is partial; completed is final', () => {
+  const got = [];
+  const { applyServerEvent } = require('../shared/speech/converse-grok');
+  applyServerEvent({ type: 'conversation.item.input_audio_transcription.updated', transcript: 'How you doing?' }, {
+    onUserTranscript: (t, ev, meta) => { got.push({ t, final: !!(meta && meta.final) }); },
+  });
+  applyServerEvent({ type: 'conversation.item.input_audio_transcription.updated', transcript: 'How you doing? Ivy how are you doing' }, {
+    onUserTranscript: (t, ev, meta) => { got.push({ t, final: !!(meta && meta.final) }); },
+  });
+  applyServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'How you doing? Ivy how are you doing' }, {
+    onUserTranscript: (t, ev, meta) => { got.push({ t, final: !!(meta && meta.final) }); },
+  });
+  assert.equal(got.length, 3);
+  assert.equal(got[0].final, false);
+  assert.equal(got[1].final, false);
+  assert.equal(got[2].final, true);
+  assert.equal(got[2].t, 'How you doing? Ivy how are you doing');
+});

@@ -46,6 +46,7 @@ const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp, lastSpeakerId
 const {
   createLiveSpeakerCache, membersToPrime, voiceMemberDelta, applyFromCache,
 } = require('./live-speaker');
+const { countHumans, roomInstructions } = require('./live-room');
 const {
   isTranscriptOff, setTranscriptOff, serializeTranscriptOff, loadTranscriptOff,
   isTranscriptOffCmd, isTranscriptOnCmd, shouldPostLive, shouldUploadLeaveFile,
@@ -918,6 +919,20 @@ ${referentPromptBlock()}`;
   const liveSpeakerCache = createLiveSpeakerCache(); // (guildId, userId) -> { instructions, tools }
   const PCM_RING_BYTES = 48000 * 2 * 4;
 
+  function countHumansNow(guildId) {
+    try {
+      const voice = require('./voice');
+      const cid = voice.channelIdOf && voice.channelIdOf(guildId);
+      if (!cid) return 1; // can't see the room: answer (1:1)
+      const ch = client.channels.cache && client.channels.cache.get(cid);
+      const selfId = client.user && client.user.id;
+      return countHumans(ch, selfId);
+    } catch (_) { return 1; }
+  }
+  function liveRoomLine(guildId) {
+    return roomInstructions(countHumansNow(guildId));
+  }
+
   function clearVoiceOverlap(guildId) {
     voiceOverlapArm.delete(guildId);
     const t = voiceOverlapTimer.get(guildId);
@@ -1090,6 +1105,35 @@ ${referentPromptBlock()}`;
     return false;
   }
 
+  function upsertLiveUserLine(guildId, name, text, final) {
+    const ch = voiceText.get(guildId);
+    const line = String(text || '').slice(0, 1800);
+    if (!line) return;
+    if (final) logTranscript(guildId, name, line);
+    if (!ch || !shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) return;
+    const key = `${guildId}:${name}`;
+    let cap = liveCaptions.get(key);
+    if (!cap) {
+      cap = { msg: null, lastEdit: Date.now(), pending: line, sending: true };
+      liveCaptions.set(key, cap);
+      ch.send(`🗣️ **${name}:** ${line}`).then((m) => { cap.msg = m; cap.sending = false; }).catch(() => { cap.sending = false; });
+      if (final) liveCaptions.delete(key);
+      return;
+    }
+    cap.pending = line;
+    if (final) {
+      liveCaptions.delete(key);
+      if (cap.msg) { cap.msg.edit(`🗣️ **${name}:** ${line}`).catch(() => {}); return; }
+      if (!cap.sending) ch.send(`🗣️ **${name}:** ${line}`).catch(() => {});
+      return;
+    }
+    if (cap.sending || (Date.now() - cap.lastEdit) < CAPTION_THROTTLE_MS) return;
+    cap.sending = true;
+    if (cap.msg) {
+      cap.msg.edit(`🗣️ **${name}:** ${cap.pending}`).then(() => { cap.lastEdit = Date.now(); cap.sending = false; }).catch(() => { cap.sending = false; });
+    } else cap.sending = false;
+  }
+
   // Called for EVERY transcribed utterance. Posts the live transcript, then decides if it's for
   // the assistant — addressed by name OR the SAME last speaker is inside the follow-up window
   // (so their next line needs no wake word). Other speakers still need the name. A dismissal
@@ -1151,9 +1195,10 @@ ${referentPromptBlock()}`;
       return;
     }
 
-    // For me? Inside the follow-up window, OR the shared wake matcher fires WITH enough confidence (#136).
-    // A low-confidence / bare-name mis-hear is rejected here and logged, so false triggers are visible.
-    if (!active) {
+    // For me? Live: the model decides (1:1 = always; group = name/context). Flux path still uses
+    // the follow-up window or the wake matcher, except 1:1 (just James) where every line is for her.
+    const solo = countHumansNow(guildId) <= 1;
+    if (!converseSessions.has(guildId) && !active && !solo) {
       const d = wakeDecision(text, meta.confidence);
       if (!d.addressed) {
         if (d.reason === 'low-confidence' || d.reason === 'bare-name-no-confidence-signal') {
@@ -1353,11 +1398,12 @@ ${referentPromptBlock()}`;
     await primeVoiceChannelMembers(ch);
   }
 
-  function defaultLiveInstructions() {
+  function defaultLiveInstructions(guildId) {
     let identityBlock = '';
     try { identityBlock = require('../../../shared/identity').fullIdentity(); } catch (_) {}
     return liveTools.buildLiveInstructions({
       voiceGuidance: VOICE_GUIDANCE,
+      room: liveRoomLine(guildId),
       identity: identityBlock,
       speakerLine: '',
       siloRecall: '',
@@ -1366,12 +1412,18 @@ ${referentPromptBlock()}`;
 
   function applyLiveSpeaker(guildId, userId) {
     const conv = converseSessions.get(guildId);
-    applyFromCache({
-      cache: liveSpeakerCache,
-      guildId,
-      userId,
-      conv,
-      fallbackInstructions: defaultLiveInstructions(),
+    if (!conv || typeof conv.update !== 'function') return;
+    const uid = userId != null && userId !== '' ? String(userId) : '';
+    const hit = uid ? liveSpeakerCache.get(guildId, uid) : null;
+    const room = liveRoomLine(guildId);
+    if (!hit) {
+      conv.update({ instructions: defaultLiveInstructions(guildId), tools: [] });
+      return;
+    }
+    const tools = Array.isArray(hit.tools) ? hit.tools : [];
+    conv.update({
+      instructions: [hit.instructions, room].filter(Boolean).join('\n\n'),
+      tools,
     });
   }
 
@@ -1470,20 +1522,17 @@ ${referentPromptBlock()}`;
             setVoiceStatus(null);
           });
       },
-      onUserTranscript: (text) => {
-        const ch = voiceText.get(guildId);
-        const line = String(text || "").trim();
+      onUserTranscript: (text, ev, meta) => {
+        const line = String(text || '').trim();
         if (!line) return;
         const sp = converseSpeaker.get(guildId) || {};
-        const who = sp.name || "speaker";
-        logTranscript(guildId, who, line);
-        if (ch && shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) {
-          ch.send(`🗣️ **${who}:** ${line.slice(0, 1800)}`).catch(() => {});
-        }
+        const who = sp.name || 'speaker';
+        const final = !!(meta && meta.final) || (ev && String(ev.type || '').endsWith('completed'));
+        upsertLiveUserLine(guildId, who, line, final);
       },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
       onClose: () => ctx.log('[voice] converse WS closed'),
-    }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE + '\n\nYou are on a live voice call. Always listen. Speak when you are addressed or it is your turn. Stay silent when the humans are talking among themselves. No wake word is required.', tools: [] });
+    }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE + '\n\n' + liveRoomLine(guildId), tools: [] });
     try { await session.ready; } catch (e) {
       ctx.log(`[voice] converse unavailable (${e.message}) — Flux+CLI+TTS`);
       try { session.close(); } catch (_) {}
@@ -1687,6 +1736,8 @@ ${referentPromptBlock()}`;
         const ch = newState.channel;
         if (ch) primeVoiceChannelMembers(ch).catch(() => {});
       }
+      const sp = converseSpeaker.get(guildId);
+      if (sp && sp.userId && converseSessions.has(guildId)) applyLiveSpeaker(guildId, sp.userId);
     } catch (_) {}
   });
 

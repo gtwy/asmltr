@@ -81,3 +81,13 @@ test('Live name is grab not keepalive: lastSpeakerId converseBound while socket 
   assert.match(wake, /IVY_ALIASES/);
   assert.match(wake, /'iv'/);
 });
+
+test('Live user transcript edits in place; 1:1 room line; no stay-silent-among-themselves default', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(require('path').join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(src, /upsertLiveUserLine/);
+  assert.match(src, /liveRoomLine/);
+  assert.match(src, /countHumansNow/);
+  assert.doesNotMatch(src, /Stay silent when the humans are talking among themselves\. No wake word is required/);
+  assert.match(src, /solo = countHumansNow\(guildId\) <= 1/);
+});
