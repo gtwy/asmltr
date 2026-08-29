@@ -172,6 +172,12 @@ test('https markdown image becomes an img; javascript URL does not', () => {
   assert.doesNotMatch(bad, /javascript/i);
 });
 
+test('cid markdown image is mailed src, not an http link', () => {
+  const h = markdownToHtml('![Ivy](cid:ivy-sig)\n[Example Co](https://example.com) can build an AI assistant like this for your team.');
+  assert.match(h, /<img src="cid:ivy-sig" alt="Ivy"/);
+  assert.doesNotMatch(h, /<a href="cid:/);
+});
+
 test('signature image sits after two blanks and immediately above the pitch', () => {
   const h = markdownToHtml(
     'Gaia\nAI Assistant to Alex\n\n\n![Ivy](https://example.com/sig.png)\n[Example Co](https://example.com) can build an AI assistant like this for your team.',

@@ -83,6 +83,13 @@ function safeHref(escapedUrl) {
   return escapeHtml(raw);
 }
 
+/** Images may use https or a mailed CID. Never javascript: and never cid: on <a href>. */
+function imageSrc(escapedUrl) {
+  const raw = unescapeHtml(escapedUrl).trim();
+  if (/^cid:[A-Za-z0-9._-]+$/i.test(raw)) return escapeHtml(raw);
+  return safeHref(escapedUrl);
+}
+
 function disclosureSpan(phrase) {
   return `<span style="${DISCLOSURE_STYLE}">${phrase}</span>`;
 }
@@ -113,7 +120,7 @@ function applyBoldItalic(s) {
 
 function replaceImages(s, stash) {
   return s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (full, alt, url) => {
-    const href = safeHref(url);
+    const href = imageSrc(url);
     if (!href) return full;
     return stash(
       `<img src="${href}" alt="${alt}" width="96" height="96" ` +
@@ -124,7 +131,7 @@ function replaceImages(s, stash) {
 
 function isBareImageLine(escapedLine) {
   const raw = unescapeHtml(escapedLine).trim();
-  return /^!\[[^\]]*\]\(https?:\/\/[^)]+\)$/i.test(raw);
+  return /^!\[[^\]]*\]\((https?:\/\/[^)]+|cid:[A-Za-z0-9._-]+)\)$/i.test(raw);
 }
 
 function replaceLinks(s, stash) {

@@ -37,6 +37,34 @@ const { simpleParser } = require('mailparser');
 // How often the IMAP watcher proves it's genuinely alive (a NOOP round-trip). Below the manager's
 // default 120s stale threshold so a healthy watcher clears it with room to spare.
 const IMAP_PROBE_MS = Number(process.env.ASMLTR_EMAIL_IMAP_PROBE_MS) || 60000;
+const SIG_IMAGE_CID = 'ivy-sig';
+
+function signatureImageAttachment(filePath) {
+  const p = String(filePath || '').trim();
+  if (!p) return null;
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile() || st.size < 1) return null;
+  } catch (_) { return null; }
+  return {
+    filename: path.basename(p),
+    path: p,
+    cid: SIG_IMAGE_CID,
+    contentDisposition: 'inline',
+    contentType: 'image/png',
+  };
+}
+
+function withSignatureImage(attachments, filePath) {
+  const inline = signatureImageAttachment(filePath);
+  if (!inline) return attachments;
+  const list = Array.isArray(attachments) ? attachments.slice() : [];
+  if (list.some((a) => a && (a.cid === inline.cid || a.path === inline.path))) {
+    return list.length ? list : attachments;
+  }
+  list.push(inline);
+  return list;
+}
 
 // Liveness probe: a NOOP that round-trips to the server, time-boxed. Resolves when the IMAP link is
 // genuinely alive; REJECTS when it's dead or stalled (incl. a half-open TCP that never emits 'close').
@@ -208,6 +236,7 @@ const meta = {
       mailbox: { type: 'string', title: 'IMAP mailbox to watch', default: 'INBOX' },
       approval_policy: { type: 'string', title: 'Send policy', default: 'always_draft', enum: ['always_draft', 'auto_send_full_trust', 'always_send', 'trust_tier:1', 'trust_tier:2', 'trust_tier:3'] },
       signature: { type: 'string', title: 'Signature (blank = auto from from_name)', default: '' },
+      signature_image: { type: 'string', title: 'Filesystem PNG mailed inline as cid:ivy-sig (blank = no CID attach)', default: '' },
       process_backlog: { type: 'boolean', title: 'On first connect, process existing unread mail (off = only react to NEW arrivals)', default: false },
       owner_forward_to: { type: 'string', title: 'Forward unknown senders here (blank = do not forward)', default: '' },
       authserv_id: {
@@ -856,7 +885,7 @@ async function start(ctx) {
   const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
   const signature = cfg.signature || (
     `\n\n\n${fromName}\nAI Assistant to Example Owner\n\n\n` +
-    '![Ivy](https://example.com/img/brand/ivy-work-u-transparent.png)\n' +
+    `![Ivy](cid:${SIG_IMAGE_CID})\n` +
     '[Example Co](https://example.com) can build an AI assistant like this for your team.\n'
   );
   const coreBase = String(process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle\/?$/i, '');
@@ -898,7 +927,7 @@ async function start(ctx) {
       ...(content.html ? { html: content.html } : {}),
       inReplyTo: inReplyTo || undefined,
       references: references && references.length ? references.join(' ') : undefined,
-      attachments: attachments || undefined,
+      attachments: withSignatureImage(attachments, cfg.signature_image) || undefined,
     });
     ctx.emit({ event_type: 'outbound', session_id: `email:${ctx.instanceId}:to:${to}`, identity: address, payload: { to, cc: cc || undefined, subject } });
     return info;
@@ -1312,4 +1341,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };
