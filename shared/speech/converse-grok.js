@@ -7,7 +7,7 @@
  *
  * Locked: session.voice = "ara" (never eve, never an ElevenLabs voice_id).
  *         session.tools = asmltr function tools (never native web_search / x_search / mcp).
- *         turn_detection = { type: "server_vad", threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false }
+ *         turn_detection = { type: "server_vad", threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false }
  *         reasoning.effort = "none"
  *         PCM 48 kHz mono s16le both ways.
  *
@@ -81,7 +81,7 @@ function buildSessionUpdate(opts) {
   const session = {
     voice: VOICE,
     tools: asRealtimeFunctions(opts && opts.tools),
-    turn_detection: { type: 'server_vad', threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false },
+    turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false },
     reasoning: { effort: 'none' },
     audio: {
       input: {
@@ -324,6 +324,15 @@ function openSession(handlers, opts) {
       sendJson(appendPcmEvent(buf));
     },
     cancel() { sendJson({ type: 'response.cancel' }); },
+    forceMessage(text) {
+      const line = String(text || '').trim();
+      if (!line) return;
+      sendJson({
+        type: 'conversation.item.create',
+        item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: line }] },
+      });
+      sendJson({ type: 'response.create' });
+    },
     update(next) { sendJson(buildSessionUpdate(next || {})); },
     sendFunctionOutput(callId, output) {
       sendJson(functionOutputItem(callId, output));

@@ -316,7 +316,7 @@ function waitPcmIdle(guildId, e) {
       const { AudioPlayerStatus } = lib();
       const st = e.player.state && e.player.state.status;
       if (st === AudioPlayerStatus.Idle) { done(); return; }
-      const t = setTimeout(done, 120000);
+      const t = setTimeout(done, 1500);
       e.player.once(AudioPlayerStatus.Idle, () => { clearTimeout(t); done(); });
     } catch (_) { done(); }
   });

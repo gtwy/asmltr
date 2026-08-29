@@ -42,9 +42,9 @@ test('session.update: ara, tools=[], server_vad, reasoning none, PCM 48k, grok-v
   assert.notEqual(u.session.voice, 'eve');
   assert.deepEqual(u.session.tools, []);
   assert.deepEqual(u.session.turn_detection, {
-    type: 'server_vad', threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false,
+    type: 'server_vad', threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false,
   });
-  assert.equal(u.session.turn_detection.threshold, 0.85);
+  assert.equal(u.session.turn_detection.threshold, 0.5);
   assert.equal(u.session.turn_detection.interrupt_response, false);
   assert.deepEqual(u.session.reasoning, { effort: 'none' });
   assert.equal(u.session.audio.input.format.type, 'audio/pcm');
@@ -118,7 +118,7 @@ test('source never reads process.env.XAI_API_KEY or puts the key on a spawn', ()
   assert.match(src, /wss:\/\/api\.x\.ai\/v1\/realtime\?model=/);
   assert.match(src, /asRealtimeFunctions/);
   assert.match(src, /server_vad/);
-  assert.match(src, /threshold:\s*0\.85/);
+  assert.match(src, /threshold:\s*0\.5/);
   assert.match(src, /interrupt_response:\s*false/);
   assert.match(src, /effort:\s*'none'/);
   assert.match(src, /const VOICE = 'ara'/);
@@ -225,4 +225,16 @@ test('function_call event → output item sent', async () => {
   const item = functionOutputItem('c1', { ok: true });
   assert.equal(item.item.type, 'function_call_output');
   assert.equal(asRealtimeFunctions([{ type: 'web_search' }]).length, 0);
+});
+
+test('forceMessage sends conversation.item.create then response.create', async () => {
+  MockWS.instances = [];
+  const session = openSession({}, { getKey: async () => 'vault-test-key', WebSocket: MockWS });
+  await session.ready;
+  session.forceMessage("ivy's here");
+  const types = MockWS.instances[0].sent.map((x) => JSON.parse(x).type);
+  assert.ok(types.includes('conversation.item.create'));
+  assert.ok(types.includes('response.create'));
+  const item = JSON.parse(MockWS.instances[0].sent.find((x) => JSON.parse(x).type === 'conversation.item.create'));
+  assert.equal(item.item.content[0].text, "ivy's here");
 });

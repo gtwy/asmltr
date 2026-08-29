@@ -1420,6 +1420,17 @@ ${referentPromptBlock()}`;
             setVoiceStatus(null);
           });
       },
+      onUserTranscript: (text) => {
+        const ch = voiceText.get(guildId);
+        const line = String(text || "").trim();
+        if (!line) return;
+        const sp = converseSpeaker.get(guildId) || {};
+        const who = sp.name || "speaker";
+        logTranscript(guildId, who, line);
+        if (ch && shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) {
+          ch.send(`🗣️ **${who}:** ${line.slice(0, 1800)}`).catch(() => {});
+        }
+      },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
       onClose: () => ctx.log('[voice] converse WS closed'),
     }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE + '\n\nYou are on a live voice call. Always listen. Speak when you are addressed or it is your turn. Stay silent when the humans are talking among themselves. No wake word is required.', tools: [] });
@@ -1428,6 +1439,7 @@ ${referentPromptBlock()}`;
       try { session.close(); } catch (_) {}
       return null;
     }
+    try { session.forceMessage("ivy's here"); } catch (e) { ctx.log(`[voice] greet: ${e.message}`); }
     return session;
   }
 
@@ -1441,7 +1453,8 @@ ${referentPromptBlock()}`;
     }
     voice.startListening(guildId, client, {
       transcribe: sttTranscribe,
-      realtime,
+      realtime: conv ? false : realtime,
+      converse: !!conv,
       realtimeModel: rtModel,
       realtimeLive: rtLive,
       realtimeProvider: rtProvider,
