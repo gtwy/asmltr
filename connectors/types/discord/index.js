@@ -1170,9 +1170,7 @@ ${referentPromptBlock()}`;
       if (next) voiceActive.set(guildId, next);
       converseSpeaker.set(guildId, { userId: speakerId, name });
       pcmRing.delete(guildId + ':' + speakerId); // do not dump echo-contaminated ring into the WS on wake
-      bindLiveSpeaker(guildId, speakerId, name).catch(() => {});
-      if (!voiceBusy.has(guildId)) voiceBusy.add(guildId);
-      try { voice.startSpeech(guildId); } catch (_) {}
+      // Phone call: no session.update / no voiceBusy latch on the hot path (stuck mute + WS kill).
       setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
       return;
     }
@@ -1424,7 +1422,7 @@ ${referentPromptBlock()}`;
       },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
       onClose: () => ctx.log('[voice] converse WS closed'),
-    }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE, tools: [] });
+    }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE + '\n\nYou are on a live voice call. Always listen. Speak when you are addressed or it is your turn. Stay silent when the humans are talking among themselves. No wake word is required.', tools: [] });
     try { await session.ready; } catch (e) {
       ctx.log(`[voice] converse unavailable (${e.message}) — Flux+CLI+TTS`);
       try { session.close(); } catch (_) {}
@@ -1440,7 +1438,6 @@ ${referentPromptBlock()}`;
     if (conv) {
       converseSessions.set(guildId, conv);
       ctx.log(`[voice] converse bound ${converseGrok.MODEL} voice=ara tools=[] — skip handleStream + ElevenLabs TTS`);
-      bindLiveSpeaker(guildId, '', '').catch(() => {});
     }
     voice.startListening(guildId, client, {
       transcribe: sttTranscribe,
@@ -1461,14 +1458,11 @@ ${referentPromptBlock()}`;
         arr.push(pcm);
         let total = 0; for (const b of arr) total += b.length;
         while (arr.length > 1 && total > PCM_RING_BYTES) { total -= arr[0].length; arr.shift(); }
-        if (!converseGrok.shouldRelayPcm({ speakerId: lastSpeakerId(guildId), userId, muted: voiceMuted.has(guildId) })) return;
-        const prev = converseSpeaker.get(guildId);
+        if (voiceMuted.has(guildId)) return;
         converseSpeaker.set(guildId, { userId: String(userId), name: (meta && meta.name) || String(userId) });
-        if (!prev || String(prev.userId) !== String(userId)) {
-          bindLiveSpeaker(guildId, String(userId), (meta && meta.name) || String(userId)).catch(() => {});
-        }
-        // While she is playing, do not feed xAI her echo. Still fill pcmRing (above).
-        if (voiceBusy.has(guildId) || vmod.isSpeaking(guildId)) return;
+        // Phone call: every human in the VC goes to the WS. No last-speaker / wake gate.
+        // Mute uplink only while her mouth is actually playing (echo). Not voiceBusy.
+        if (vmod.isSpeaking(guildId)) return;
         conv.pushPcm24(pcm);
       } : undefined,
       onBargeIn: () => {
@@ -1559,7 +1553,12 @@ ${referentPromptBlock()}`;
       const { rtModel, rtLive, rtProvider, vad } = await realtimeListenConfig();
       ctx.log(`[voice] realtime role → ${rtProvider}:${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
       await startVoiceListening(message.guild.id);
-      ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${!isTranscriptOff(transcriptOffChannels, message.channel.id) && voicePostTranscript})`);
+      const oid = String(message.author.id);
+      const oname = (message.author && (message.author.globalName || message.author.username)) || oid;
+      converseSpeaker.set(message.guild.id, { userId: oid, name: oname });
+      const held = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: oid });
+      if (held) voiceActive.set(message.guild.id, held);
+      ctx.log(`[voice] JOINED ${vc.name} — open-line (realtime=${cfg.voice_realtime !== false}, post_transcript=${!isTranscriptOff(transcriptOffChannels, message.channel.id) && voicePostTranscript}) owner=${oid}`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const originOff = isTranscriptOff(transcriptOffChannels, message.channel.id);
       const transcriptNote = originOff
@@ -1567,7 +1566,7 @@ ${referentPromptBlock()}`;
         : (voicePostTranscript
           ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `scribe-off`).'
           : 'Live transcript is **off** — I listen quietly' + (voiceTranscriptFile ? ' and post a full transcript `.txt` when I leave.' : '.'));
-      message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. ${transcriptNote} Say **"${NAME}, …"** out loud to ask something — I'll play a soft "working" drone and answer by voice. After that, **follow-ups need no name** for a bit; say **"that's enough, ${NAME}"** to go back to just listening, or \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
+      message.channel.send(`🎙️ Joined **${vc.name}** — I'm on the call. ${transcriptNote} Just talk. In a group, say **"${NAME}"** only if you need to pull me in. \`@${client.user.username} leave-voice\` to hang up.`).catch(() => {});
     } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }
   }
 

@@ -12,7 +12,13 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.match(src, /converse bound/);
   assert.match(src, /skip handleStream \+ ElevenLabs/);
   assert.match(src, /if \(converseSessions\.has\(guildId\)\)/);
-  assert.match(src, /shouldRelayPcm/);
+  assert.match(src, /open-line/);
+  assert.match(src, /Just talk/);
+  const pcm = src.slice(src.indexOf("onPcm24:"), src.indexOf("onBargeIn:"));
+  assert.match(pcm, /conv.pushPcm24/);
+  assert.equal(/shouldRelayPcm/.test(pcm), false);
+  assert.equal(/bindLiveSpeaker/.test(pcm), false);
+  assert.match(pcm, /isSpeaking\(guildId\)/);
   assert.match(src, /pushPcm24Play/);
   assert.match(src, /voice=ara/);
   assert.doesNotMatch(src, /voice:\s*'eve'/);
