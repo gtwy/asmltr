@@ -406,5 +406,6 @@ module.exports = {
   bind,
   invoke,
   invokeLocal,
+  findDiscordVoiceUrl,
   handleMcp,
 };
