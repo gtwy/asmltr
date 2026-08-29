@@ -88,10 +88,6 @@ test('instructions contain identity/silo when speaker bound', () => {
   assert.match(built, /IDENTITY/);
   assert.match(built, /CURRENT SPEAKER/);
   assert.match(built, /PRIOR CONVERSATION/);
-  const idx = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
-  assert.match(idx, /fullIdentity/);
-  assert.match(idx, /recallForInject/);
-  assert.match(idx, /bindLiveSpeaker/);
 });
 
 test('Flux handleStream voice deny-all remains; Live text envelope does not trip it', () => {

@@ -43,9 +43,6 @@ const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
 const { shouldPlayWakeChime } = require('./wake-chime');
 const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp, lastSpeakerId: lastSpeakerFromWindow } = require('./voice-followup');
-const {
-  createLiveSpeakerCache, membersToPrime, voiceMemberDelta, applyFromCache,
-} = require('./live-speaker');
 const { countHumans, roomInstructions } = require('./live-room');
 const {
   isTranscriptOff, setTranscriptOff, serializeTranscriptOff, loadTranscriptOff,
@@ -916,7 +913,6 @@ ${referentPromptBlock()}`;
   const converseSessions = new Map(); // guildId -> converse-grok session (Ivy Live)
   const converseSpeaker = new Map(); // guildId -> { userId, name }
   const pcmRing = new Map(); // `${guildId}:${userId}` -> Buffer[] last ~4s
-  const liveSpeakerCache = createLiveSpeakerCache(); // (guildId, userId) -> { instructions, tools }
   const PCM_RING_BYTES = 48000 * 2 * 4;
 
   function countHumansNow(guildId) {
@@ -990,7 +986,6 @@ ${referentPromptBlock()}`;
     const conv = converseSessions.get(guildId);
     converseSessions.delete(guildId);
     converseSpeaker.delete(guildId);
-    liveSpeakerCache.dropGuild(guildId);
     for (const k of [...pcmRing.keys()]) { if (k.startsWith(String(guildId) + ':')) pcmRing.delete(k); }
     if (conv) { try { conv.close(); } catch (_) {} }
     try { require('./voice').endPcmPlayback(guildId, { hard: true }); } catch (_) {}
@@ -1220,8 +1215,6 @@ ${referentPromptBlock()}`;
       if (next) voiceActive.set(guildId, next);
       converseSpeaker.set(guildId, { userId: speakerId, name });
       pcmRing.delete(guildId + ':' + speakerId); // do not dump echo-contaminated ring into the WS on wake
-      // Phone call: no voiceBusy latch. Speaker flip is cache-only (no resolve/recall).
-      applyLiveSpeaker(guildId, speakerId);
       setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
       return;
     }
@@ -1332,103 +1325,10 @@ ${referentPromptBlock()}`;
     return { rtModel, rtLive, rtProvider, vad, realtime: cfg.voice_realtime !== false };
   }
 
-  async function primeLiveMember(guildId, userId, name) {
-    if (!userId) return;
-    const selfId = client.user && client.user.id ? String(client.user.id) : '';
-    if (selfId && String(userId) === selfId) return; // skip Ivy herself
-    const ch = voiceText.get(guildId);
-    const envelope = liveTools.textEnvelope({
-      instanceId: ctx.instanceId,
-      guildId,
-      channelId: ch && ch.id,
-      userId,
-      username: name,
-    });
-    let resolved = { is_default: true };
-    try { resolved = (await ctx.core.resolve(envelope)) || resolved; } catch (_) {}
-    const tools = liveTools.toolsForSpeaker(resolved, envelope);
-    const speakerLine = liveTools.speakerIdentityLine({
-      channel: 'discord',
-      speakerId: userId,
-      speakerName: (resolved && !resolved.is_default && resolved.display_name) || name || 'an unidentified user',
-    });
-    let identityBlock = '';
-    try { identityBlock = require('../../../shared/identity').fullIdentity(); } catch (_) {}
-    let siloRecall = '';
-    try {
-      const transcripts = require('../../../shared/transcripts');
-      const includeLastTopics = !!(resolved && resolved.bypass_moderation);
-      const keys = [voiceConvKey(guildId)];
-      if (ch && ch.id) keys.push(`discord:${ctx.instanceId}:channel:${ch.id}`);
-      const parts = [];
-      for (let i = 0; i < keys.length; i++) {
-        const recalled = transcripts.recallForInject({ conversationKey: keys[i], includeLastTopics: includeLastTopics && i === 0 });
-        if (recalled) parts.push(recalled);
-      }
-      siloRecall = liveTools.siloRecallBlock(parts.join('\n\n'));
-    } catch (_) {}
-    const guidance = tools.length ? VOICE_GUIDANCE_LIVE : VOICE_GUIDANCE;
-    liveSpeakerCache.set(guildId, userId, {
-      instructions: liveTools.buildLiveInstructions({
-        voiceGuidance: guidance,
-        identity: identityBlock,
-        speakerLine,
-        siloRecall,
-      }),
-      tools,
-    });
-    const sp = converseSpeaker.get(guildId);
-    if (sp && String(sp.userId) === String(userId)) applyLiveSpeaker(guildId, userId);
-  }
-
-  async function primeVoiceChannelMembers(channel) {
-    if (!channel) return;
-    const guildId = channel.guild && channel.guild.id;
-    if (!guildId) return;
-    const selfId = client.user && client.user.id;
-    await Promise.all(membersToPrime(channel, selfId).map((m) => primeLiveMember(guildId, m.userId, m.name)));
-  }
-
-  async function primeCurrentChannel(guildId) {
-    let voice; try { voice = require('./voice'); } catch (_) { return; }
-    const cid = voice.channelIdOf && voice.channelIdOf(guildId);
-    if (!cid) return;
-    let ch;
-    try { ch = await client.channels.fetch(cid); } catch (_) { return; }
-    await primeVoiceChannelMembers(ch);
-  }
-
-  function defaultLiveInstructions(guildId) {
-    let identityBlock = '';
-    try { identityBlock = require('../../../shared/identity').fullIdentity(); } catch (_) {}
-    return liveTools.buildLiveInstructions({
-      voiceGuidance: VOICE_GUIDANCE,
-      room: liveRoomLine(guildId),
-      identity: identityBlock,
-      speakerLine: '',
-      siloRecall: '',
-    });
-  }
-
-  function applyLiveSpeaker(guildId, userId) {
+  function refreshRoomInstructions(guildId) {
     const conv = converseSessions.get(guildId);
     if (!conv || typeof conv.update !== 'function') return;
-    const uid = userId != null && userId !== '' ? String(userId) : '';
-    const hit = uid ? liveSpeakerCache.get(guildId, uid) : null;
-    const room = liveRoomLine(guildId);
-    if (!hit) {
-      conv.update({ instructions: defaultLiveInstructions(guildId), tools: [] });
-      return;
-    }
-    const tools = Array.isArray(hit.tools) ? hit.tools : [];
-    conv.update({
-      instructions: [hit.instructions, room].filter(Boolean).join('\n\n'),
-      tools,
-    });
-  }
-
-  function bindLiveSpeaker(guildId, userId) {
-    applyLiveSpeaker(guildId, userId);
+    conv.update({ instructions: VOICE_GUIDANCE + '\n\n' + liveRoomLine(guildId) });
   }
 
   function runLiveFunction(guildId, conv, name, callId, args) {
@@ -1550,7 +1450,6 @@ ${referentPromptBlock()}`;
       converseSessions.set(guildId, conv);
       ctx.log(`[voice] converse bound ${converseGrok.MODEL} voice=ara tools=[] — skip handleStream + ElevenLabs TTS`);
     }
-    await primeCurrentChannel(guildId);
     voice.startListening(guildId, client, {
       transcribe: sttTranscribe,
       realtime: conv ? false : realtime,
@@ -1572,11 +1471,7 @@ ${referentPromptBlock()}`;
         let total = 0; for (const b of arr) total += b.length;
         while (arr.length > 1 && total > PCM_RING_BYTES) { total -= arr[0].length; arr.shift(); }
         if (voiceMuted.has(guildId)) return;
-        const prev = converseSpeaker.get(guildId);
         converseSpeaker.set(guildId, { userId: String(userId), name: (meta && meta.name) || String(userId) });
-        if (!prev || String(prev.userId) !== String(userId)) {
-          applyLiveSpeaker(guildId, String(userId));
-        }
         // Phone call: every human in the VC goes to the WS. No last-speaker / wake gate.
         // Mute uplink only while her mouth is actually playing (echo). Not voiceBusy.
         if (vmod.isSpeaking(guildId)) return;
@@ -1674,7 +1569,6 @@ ${referentPromptBlock()}`;
       converseSpeaker.set(message.guild.id, { userId: oid, name: oname });
       const held = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: oid });
       if (held) voiceActive.set(message.guild.id, held);
-      applyLiveSpeaker(message.guild.id, oid);
       ctx.log(`[voice] JOINED ${vc.name} — open-line (realtime=${cfg.voice_realtime !== false}, post_transcript=${!isTranscriptOff(transcriptOffChannels, message.channel.id) && voicePostTranscript}) owner=${oid}`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const originOff = isTranscriptOff(transcriptOffChannels, message.channel.id);
@@ -1703,41 +1597,14 @@ ${referentPromptBlock()}`;
   client.on('voiceStateUpdate', (oldState, newState) => {
     try {
       const guildId = String((newState.guild && newState.guild.id) || (oldState.guild && oldState.guild.id) || '');
-      if (!guildId) return;
-      const userId = String(newState.id || oldState.id || '');
-      if (!userId) return;
-      const selfId = client.user && client.user.id ? String(client.user.id) : '';
+      if (!guildId || !converseSessions.has(guildId)) return;
       let ivyChannelId = '';
       try { ivyChannelId = String(require('./voice').channelIdOf(guildId) || ''); } catch (_) {}
-      const delta = voiceMemberDelta({
-        oldChannelId: oldState.channelId,
-        newChannelId: newState.channelId,
-        ivyChannelId,
-        userId,
-        selfUserId: selfId,
-      });
-      if (!delta || !delta.action) return;
-      if (delta.action === 'drop-guild') {
-        liveSpeakerCache.dropGuild(guildId);
-        return;
-      }
-      if (delta.action === 'drop') {
-        liveSpeakerCache.drop(guildId, delta.userId);
-        return;
-      }
-      if (delta.action === 'prime') {
-        const mem = newState.member;
-        const name = (mem && (mem.displayName || (mem.user && mem.user.username))) || userId;
-        primeLiveMember(guildId, delta.userId, name).catch(() => {});
-        return;
-      }
-      if (delta.action === 'prime-channel') {
-        if (delta.dropGuildFirst) liveSpeakerCache.dropGuild(guildId);
-        const ch = newState.channel;
-        if (ch) primeVoiceChannelMembers(ch).catch(() => {});
-      }
-      const sp = converseSpeaker.get(guildId);
-      if (sp && sp.userId && converseSessions.has(guildId)) applyLiveSpeaker(guildId, sp.userId);
+      if (!ivyChannelId) return;
+      const oldCid = oldState.channelId && String(oldState.channelId);
+      const newCid = newState.channelId && String(newState.channelId);
+      if (oldCid !== ivyChannelId && newCid !== ivyChannelId) return;
+      refreshRoomInstructions(guildId);
     } catch (_) {}
   });
 

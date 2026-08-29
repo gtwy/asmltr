@@ -18,7 +18,7 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.match(pcm, /conv.pushPcm24/);
   assert.equal(/shouldRelayPcm/.test(pcm), false);
   assert.equal(/bindLiveSpeaker/.test(pcm), false);
-  assert.match(pcm, /applyLiveSpeaker/);
+  assert.equal(/applyLiveSpeaker/.test(pcm), false);
   assert.equal(/ctx\.core\.resolve/.test(pcm), false);
   assert.equal(/recallForInject/.test(pcm), false);
   assert.match(pcm, /isSpeaking\(guildId\)/);
@@ -57,7 +57,8 @@ test('join-voice stays owner-only; session.tools never native web_search/x_searc
   assert.equal(/type:\s*'x_search'/.test(grok), false);
   assert.equal(/type:\s*'mcp'/.test(grok), false);
   assert.match(index, /live-tools/);
-  assert.match(index, /bindLiveSpeaker/);
+  assert.match(index, /refreshRoomInstructions/);
+  assert.match(index, /liveRoomLine/);
   assert.match(index, /onFunctionCall/);
   assert.match(index, /VOICE_GUIDANCE_LIVE/);
   assert.doesNotMatch(index, /process\.env\.XAI_API_KEY/);
