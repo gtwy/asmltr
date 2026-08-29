@@ -39,6 +39,13 @@ function flushPcm48Frames(acc) {
   return { frames: Buffer.from(src.subarray(0, n)), rest: Buffer.from(src.subarray(n)) };
 }
 const converseSubs = new Map(); // '<guildId>:<userId>' -> { subscribed, name }
+const pcmPending = new Map(); // guildId -> 48k mono waiting for prior turn Idle
+
+/** Loopback/echo: Discord DOES deliver the bot's own playback as a speaking user. Never subscribe it. */
+function isSelfUser(client, userId) {
+  if (!client || client.user == null || userId == null || userId === '') return false;
+  return String(userId) === String(client.user.id);
+}
 
 async function joinChannel(voiceChannel) {
   const { joinVoiceChannel, entersState, VoiceConnectionStatus } = lib();
@@ -189,15 +196,6 @@ function closeConverseSubs(guildId) {
 }
 
 // transcribe = async (wavBuffer) -> text | { text, confidence } ; onUtterance = (name, text, meta) => {}
-
-/** True when Discord is reporting the bot itself (loopback / self-echo). Never subscribe, STT, PCM, or barge that. */
-function isSelfUser(client, userId) {
-  if (userId == null || userId === '') return false;
-  const id = client && client.user && client.user.id;
-  if (id == null || id === '') return false;
-  return String(id) === String(userId);
-}
-
 // onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply.
 // onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
 // realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
@@ -217,8 +215,9 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
 
   receiver.speaking.on('start', (userId) => {
     if (!listening.has(guildId)) return;
-    if (isSelfUser(client, userId)) return; // loopback: her own playback is not a human barge or STT
-    // Barge-in: humans talking over a reply. Debounced in onBargeIn (1.5s talk-through + 1.2s grace).
+    if (isSelfUser(client, userId)) return; // loopback/echo: do not subscribe, STT, onPcm24, or barge
+    // Humans talking over playback. Bot user ignored above; speakers→mic echo still arrives as
+    // the human's userId and is gated by the 1.5s local talk-through.
     if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
     // Converse PCM is tapped off the Flux decoder (onPcm24) — do NOT skip STT: spoken-stop /
     // mute / leave / name-gate / 🗣️ still need transcripts. Last-speaker gating is in onPcm24.
@@ -296,21 +295,38 @@ async function speak(guildId, mp3Buffer) {
 
 function stopListening(guildId) { listening.delete(guildId); closeRealtime(guildId); closeConverseSubs(guildId); endPcmPlayback(guildId, { hard: true }); }
 
-function endPcmPlayback(guildId, { hard, onDrain } = {}) {
+function finishPcmEntry(guildId, e) {
+  if (e && pcmOut.get(guildId) === e) pcmOut.delete(guildId);
+  if (e && e._idleResolve) {
+    const r = e._idleResolve;
+    e._idleResolve = null;
+    e._idlePromise = null;
+    try { r(); } catch (_) {}
+  }
+}
+
+function waitPcmIdle(guildId, e) {
+  if (!e) return Promise.resolve();
+  if (e._idlePromise) return e._idlePromise;
+  e._idlePromise = new Promise((resolve) => {
+    e._idleResolve = resolve;
+    const done = () => finishPcmEntry(guildId, e);
+    if (!e.player) { done(); return; }
+    try {
+      const { AudioPlayerStatus } = lib();
+      const st = e.player.state && e.player.state.status;
+      if (st === AudioPlayerStatus.Idle) { done(); return; }
+      const t = setTimeout(done, 120000);
+      e.player.once(AudioPlayerStatus.Idle, () => { clearTimeout(t); done(); });
+    } catch (_) { done(); }
+  });
+  return e._idlePromise;
+}
+
+function endPcmPlayback(guildId, { hard } = {}) {
   const e = pcmOut.get(guildId);
-  let finished = false;
-  const done = () => {
-    if (finished) return;
-    finished = true;
-    if (typeof onDrain === 'function') { try { onDrain(); } catch (_) {} }
-  };
-  if (!e) { done(); return; }
+  if (!e) return Promise.resolve();
   const forceStop = !!hard;
-  const tearDownHard = () => {
-    pcmOut.delete(guildId);
-    try { e.encoder && e.encoder.destroy(); } catch (_) {}
-    try { e.player && e.player.stop(true); } catch (_) {}
-  };
   try {
     let extra = e.acc || Buffer.alloc(0);
     e.acc = Buffer.alloc(0);
@@ -324,35 +340,21 @@ function endPcmPlayback(guildId, { hard, onDrain } = {}) {
       try { e.pcm.write(e.queued); } catch (_) {}
       e.queued = Buffer.alloc(0);
     }
-    if (forceStop) {
-      if (e.pcm) { try { e.pcm.end(); } catch (_) {} }
-      tearDownHard();
-      return;
-    }
-    // Drain: pad leftover to 3840, pcm.end(), do NOT hard-stop the player. Idle → drop map + onDrain.
-    e.draining = true;
     if (e.pcm) { try { e.pcm.end(); } catch (_) {} }
-    const player = e.player;
-    if (player && typeof player.once === 'function') {
-      let AudioPlayerStatus;
-      try { ({ AudioPlayerStatus } = lib()); } catch (_) { AudioPlayerStatus = null; }
-      const rec = e;
-      const onIdle = () => {
-        if (pcmOut.get(guildId) !== rec) return;
-        pcmOut.delete(guildId);
-        try { rec.encoder && rec.encoder.destroy(); } catch (_) {}
-        done();
-      };
-      if (AudioPlayerStatus) {
-        player.once(AudioPlayerStatus.Idle, onIdle);
-        if (player.state && player.state.status === AudioPlayerStatus.Idle) onIdle();
-        return;
-      }
+    e.draining = true;
+    if (forceStop) {
+      try { e.encoder && e.encoder.destroy(); } catch (_) {}
+      try { e.player && e.player.stop(true); } catch (_) {}
+      finishPcmEntry(guildId, e);
+      return Promise.resolve();
     }
-    pcmOut.delete(guildId);
-    done();
+    // Drain: pad leftover, pcm.end(), wait Idle. Do NOT player.stop(true).
+    return waitPcmIdle(guildId, e);
   } catch (_) {
-    tearDownHard();
+    try { e.encoder && e.encoder.destroy(); } catch (_) {}
+    try { e.player && e.player.stop(true); } catch (_) {}
+    finishPcmEntry(guildId, e);
+    return Promise.resolve();
   }
 }
 
@@ -383,15 +385,9 @@ function startPcmPlayback(guildId) {
   const conn = connections.get(guildId);
   if (!conn) return null;
   const existing = pcmOut.get(guildId);
-  if (existing) {
-    const s = speech.get(guildId);
-    if (s && s.cancelled) {
-      endPcmPlayback(guildId, { hard: true });
-    } else {
-      // still playing or draining this turn — do not hard-kill unless barged
-      return existing.player || null;
-    }
-  }
+  // Reuse the current turn's player. Never hard-kill queued audio of this turn.
+  // Next turn starts a new player only after the previous went idle (or was barged).
+  if (existing) return existing;
   if (!speech.get(guildId)) startSpeech(guildId);
   pcmOut.set(guildId, {
     guildId,
@@ -404,16 +400,27 @@ function startPcmPlayback(guildId) {
     encoder: null,
     player: null,
   });
-  return null;
+  return pcmOut.get(guildId);
 }
 
 function pushPcm24Play(guildId, buf) {
   const s = speech.get(guildId);
   if (s && s.cancelled) return;
+  if (!buf || !buf.length) return;
+  const existing = pcmOut.get(guildId);
+  if (existing && existing.draining) {
+    pcmPending.set(guildId, Buffer.concat([pcmPending.get(guildId) || Buffer.alloc(0), buf]));
+    const wait = existing._idlePromise || Promise.resolve();
+    wait.then(() => {
+      const leftover = pcmPending.get(guildId);
+      pcmPending.delete(guildId);
+      if (leftover && leftover.length) pushPcm24Play(guildId, leftover);
+    });
+    return;
+  }
   if (!pcmOut.get(guildId)) startPcmPlayback(guildId);
   const e = pcmOut.get(guildId);
-  if (!e || !buf || !buf.length) return;
-  if (e.draining) return; // play current turn to Idle; next turn starts a fresh session
+  if (!e || e.draining) return;
   try {
     const converted = converseGrok.pcm48MonoToPcm48Stereo(buf);
     const { frames, rest } = flushPcm48Frames(Buffer.concat([e.acc, converted]));
@@ -470,8 +477,7 @@ function channelIdOf(guildId) {
 module.exports = {
   joinChannel, playChime, speak, leave, isConnected, isListening, channelIdOf,
   startListening, stopListening, startDrone, stopDrone,
-  startSpeech, stopSpeech, endSpeech, isSpeaking,
+  startSpeech, stopSpeech, endSpeech, isSpeaking, isSelfUser,
   startPcmPlayback, pushPcm24Play, endPcmPlayback,
   flushPcm48Frames, OPUS_FRAME_BYTES, PCM_PREBUFFER_FRAMES,
-  isSelfUser,
 };

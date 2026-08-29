@@ -6,6 +6,7 @@ const path = require('path');
 const {
   KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
   buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
+  asRealtimeFunctions, functionOutputItem,
   fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, pcm48StereoToPcm48Mono, pcm48MonoToPcm48Stereo, secretValue,
 } = require('../shared/speech/converse-grok');
 
@@ -115,7 +116,7 @@ test('source never reads process.env.XAI_API_KEY or puts the key on a spawn', ()
   assert.equal(/=\s*process\.env\.XAI_API_KEY/.test(src), false);
   assert.match(src, /getSecret\(\s*KEY_NAME|getSecret\(\s*'xai_voice_api_key'/);
   assert.match(src, /wss:\/\/api\.x\.ai\/v1\/realtime\?model=/);
-  assert.match(src, /tools:\s*\[\]/);
+  assert.match(src, /asRealtimeFunctions/);
   assert.match(src, /server_vad/);
   assert.match(src, /threshold:\s*0\.85/);
   assert.match(src, /interrupt_response:\s*false/);
@@ -159,6 +160,7 @@ test('discord index.js does not send eve or ElevenLabs voice_id on the xAI socke
   assert.match(src, /voice=ara tools=\[\]/);
 });
 
+
 test('pcm48StereoToPcm48Mono averages L/R; pcm48MonoToPcm48Stereo L=R length*2', () => {
   const stereo = Buffer.alloc(4);
   stereo.writeInt16LE(1000, 0);
@@ -172,3 +174,55 @@ test('pcm48StereoToPcm48Mono averages L/R; pcm48MonoToPcm48Stereo L=R length*2',
   assert.equal(up.readInt16LE(2), 2000);
 });
 
+test('session.tools are function-type or []; never native web_search/x_search/mcp', () => {
+  const empty = buildSessionUpdate({});
+  assert.deepEqual(empty.session.tools, []);
+  const mixed = buildSessionUpdate({
+    tools: [
+      { type: 'web_search' },
+      { type: 'x_search' },
+      { type: 'mcp', name: 'mcp' },
+      { type: 'function', name: 'asmltr_sessions', description: 'list', parameters: { type: 'object', properties: {} } },
+      { name: 'asmltr_map', description: 'map', inputSchema: { type: 'object', properties: {} } },
+    ],
+  });
+  assert.equal(mixed.session.tools.every((t) => t.type === 'function'), true);
+  assert.equal(mixed.session.tools.some((t) => t.type === 'web_search' || t.name === 'web_search'), false);
+  assert.equal(mixed.session.tools.some((t) => t.type === 'x_search' || t.name === 'x_search'), false);
+  assert.equal(mixed.session.tools.some((t) => t.type === 'mcp' || t.name === 'mcp'), false);
+  assert.deepEqual(mixed.session.tools.map((t) => t.name).sort(), ['asmltr_map', 'asmltr_sessions']);
+  const grok = require('fs').readFileSync(require('path').join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
+  assert.equal(/type:\s*'web_search'/.test(grok), false);
+  assert.equal(/type:\s*'x_search'/.test(grok), false);
+  assert.equal(/type:\s*'mcp'/.test(grok), false);
+});
+
+test('function_call event → output item sent', async () => {
+  MockWS.instances = [];
+  const calls = [];
+  const session = openSession({
+    onFunctionCall: (x) => calls.push(x),
+  }, { getKey: async () => 'vault-test-key', WebSocket: MockWS });
+  await session.ready;
+  const ws = MockWS.instances[0];
+  ws.emitMessage({
+    type: 'response.function_call_arguments.done',
+    name: 'asmltr_sessions',
+    call_id: 'c1',
+    arguments: '{"x":1}',
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'asmltr_sessions');
+  assert.equal(calls[0].callId, 'c1');
+  assert.deepEqual(calls[0].arguments, { x: 1 });
+  session.sendFunctionOutput('c1', { ok: true, text: 'listed' });
+  const types = ws.sent.map((x) => JSON.parse(x).type);
+  assert.ok(types.includes('conversation.item.create'));
+  assert.ok(types.includes('response.create'));
+  const created = ws.sent.map((x) => JSON.parse(x)).find((e) => e.type === 'conversation.item.create');
+  assert.equal(created.item.type, 'function_call_output');
+  assert.equal(created.item.call_id, 'c1');
+  const item = functionOutputItem('c1', { ok: true });
+  assert.equal(item.item.type, 'function_call_output');
+  assert.equal(asRealtimeFunctions([{ type: 'web_search' }]).length, 0);
+});

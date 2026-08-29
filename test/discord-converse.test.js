@@ -35,14 +35,20 @@ test('voice.js converse listen path skips Flux and plays PCM 48k native', () => 
   assert.match(src, /allowPcm/);
 });
 
-test('join-voice stays owner-only; spoken tools stay empty on the WS', () => {
+test('join-voice stays owner-only; session.tools never native web_search/x_search/mcp', () => {
   const index = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   const ownerBlock = index.slice(index.indexOf('const OWNER_ONLY_CMDS'), index.indexOf('const meta'));
   assert.match(ownerBlock, /'join-voice'/);
   const grok = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
-  assert.match(grok, /tools:\s*\[\]/);
+  assert.match(grok, /asRealtimeFunctions/);
   assert.equal(/type:\s*'web_search'/.test(grok), false);
+  assert.equal(/type:\s*'x_search'/.test(grok), false);
   assert.equal(/type:\s*'mcp'/.test(grok), false);
+  assert.match(index, /live-tools/);
+  assert.match(index, /bindLiveSpeaker/);
+  assert.match(index, /onFunctionCall/);
+  assert.match(index, /VOICE_GUIDANCE_LIVE/);
+  assert.doesNotMatch(index, /process\.env\.XAI_API_KEY/);
 });
 
 test('grok CLI launchEnv still strips converse keys (source)', () => {

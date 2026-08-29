@@ -95,13 +95,48 @@ const TOOLS = [
 const BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
 const stripAnsi = (s) => String(s || '').replace(/\x1b\[[0-9;]*m/g, ''); // the CLI colorizes; the model wants plain text
+function cliEnv(extra) {
+  const env = { ...process.env, NO_COLOR: '1', ...(extra || {}) };
+  delete env.XAI_API_KEY;
+  delete env.XAI_VOICE_API_KEY;
+  delete env.xai_voice_api_key;
+  return env;
+}
 function runCli(argv) {
   return new Promise((resolve) => {
-    execFile(process.execPath, [CLI, ...argv], { timeout: 60000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1' } }, (err, stdout, stderr) => {
+    execFile(process.execPath, [CLI, ...argv], { timeout: 60000, maxBuffer: 4 * 1024 * 1024, env: cliEnv() }, (err, stdout, stderr) => {
       if (err) resolve({ isError: true, text: stripAnsi(stderr || err.message || '').trim() || `exit ${err.code}` });
       else resolve({ isError: false, text: stripAnsi(stdout || '').trim() || '(no output)' });
     });
   });
+}
+
+function denyObj(deny) {
+  if (deny && typeof deny === 'object' && ('shell' in deny || deny.all)) return deny;
+  return parseDenyEnv(typeof deny === 'string' ? deny : (process.env.ASMLTR_DENY_TOOLS || ''));
+}
+
+function listTools(deny) {
+  const denied = denyObj(deny);
+  return TOOLS.filter((t) => !t.deny || !denied[t.deny]).map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+}
+
+async function invokeTool(name, args, { deny, turn } = {}) {
+  const t = BY_NAME[name];
+  if (!t) return { ok: false, error: 'unknown tool: ' + name, isError: true };
+  const denied = denyObj(deny);
+  if (t.deny && denied[t.deny]) return { ok: false, error: 'denied: ' + t.deny, isError: true };
+  try {
+    if (t.handler === 'voice') {
+      const voiceTools = require('../connectors/types/discord/voice-tools');
+      const r = await voiceTools.invoke(t.name, args || {}, turn || voiceTools.turnFromEnv());
+      return r;
+    }
+    const r = await runCli(t.argv(args || {}));
+    return { ok: !r.isError, text: r.text, isError: r.isError };
+  } catch (e) {
+    return { ok: false, error: e.message, isError: true };
+  }
 }
 
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');
@@ -116,28 +151,27 @@ async function handle(msg) {
     case 'ping':
       return ok(msg.id, {});
     case 'tools/list':
-      const denied = parseDenyEnv(process.env.ASMLTR_DENY_TOOLS);
-      return ok(msg.id, { tools: TOOLS.filter((t) => !t.deny || !denied[t.deny]).map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+      return ok(msg.id, { tools: listTools(process.env.ASMLTR_DENY_TOOLS) });
     case 'tools/call': {
-      const t = BY_NAME[(msg.params || {}).name];
-      if (!t) return fail(msg.id, -32602, `unknown tool: ${(msg.params || {}).name}`);
-      const denied = parseDenyEnv(process.env.ASMLTR_DENY_TOOLS);
-      if (t.deny && denied[t.deny]) return ok(msg.id, { content: [{ type: 'text', text: 'denied: ' + t.deny }], isError: true });
-      try {
-        if (t.handler === 'voice') {
-          const voiceTools = require('../connectors/types/discord/voice-tools');
-          const r = await voiceTools.invoke(t.name, msg.params.arguments || {}, voiceTools.turnFromEnv());
-          return ok(msg.id, { content: [{ type: 'text', text: JSON.stringify(r) }], isError: !!(r && r.ok === false) });
-        }
-        const r = await runCli(t.argv(msg.params.arguments || {}));
-        return ok(msg.id, { content: [{ type: 'text', text: r.text }], isError: r.isError });
-      } catch (e) { return ok(msg.id, { content: [{ type: 'text', text: e.message }], isError: true }); }
+      const name = (msg.params || {}).name;
+      const t = BY_NAME[name];
+      if (!t) return fail(msg.id, -32602, `unknown tool: ${name}`);
+      const r = await invokeTool(name, (msg.params && msg.params.arguments) || {}, { deny: process.env.ASMLTR_DENY_TOOLS, turn: t.handler === 'voice' ? require('../connectors/types/discord/voice-tools').turnFromEnv() : undefined });
+      if (r && r.isError && String(r.error || '').startsWith('denied:')) {
+        return ok(msg.id, { content: [{ type: 'text', text: r.error }], isError: true });
+      }
+      const text = r && r.text != null ? r.text : JSON.stringify(r);
+      return ok(msg.id, { content: [{ type: 'text', text }], isError: !!(r && (r.isError || r.ok === false)) });
     }
     default:
       return fail(msg.id, -32601, `method not found: ${msg.method}`);
   }
 }
 
-const rl = readline.createInterface({ input: process.stdin });
-rl.on('line', (line) => { const s = line.trim(); if (!s) return; let msg; try { msg = JSON.parse(s); } catch { return; } Promise.resolve(handle(msg)).catch(() => {}); });
-rl.on('close', () => process.exit(0));
+if (require.main === module) {
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on('line', (line) => { const s = line.trim(); if (!s) return; let msg; try { msg = JSON.parse(s); } catch { return; } Promise.resolve(handle(msg)).catch(() => {}); });
+  rl.on('close', () => process.exit(0));
+}
+
+module.exports = { TOOLS, BY_NAME, listTools, invokeTool, handle, runCli };

@@ -25,6 +25,7 @@ const sharedStt = require('../../../shared/speech/stt');
 const sharedWake = require('../../../shared/speech/wake');            // shared confidence-gated wake matcher (#136)
 const voiceEngines = require('../../../shared/speech/voice-engines'); // pluggable STT/TTS role layer (#113/#139)
 const converseGrok = require('../../../shared/speech/converse-grok'); // Ivy Live grok-voice-think-fast-2.0 WS
+const liveTools = require('../../../shared/speech/live-tools');
 const vault = require('../../../shared/vault');
 
 // Assistant identity — the display name AND the spoken wake word for voice.
@@ -870,6 +871,11 @@ ${referentPromptBlock()}`;
     'Keep it short and natural — 1 to 3 sentences. No markdown, no bullet lists, no code blocks, no emoji, no URLs read out.',
     'Do not use tools. Reply from what you already know. Keep the SPOKEN answer brief and conversational.',
   ].join(' ');
+  const VOICE_GUIDANCE_LIVE = [
+    'You are in a LIVE Discord voice meeting and your reply will be spoken aloud.',
+    'Keep it short and natural — 1 to 3 sentences. No markdown, no bullet lists, no code blocks, no emoji, no URLs read out.',
+    'Call asmltr function tools when the speaker is trusted; if a tool is denied, say so briefly. Keep the SPOKEN answer brief and conversational.',
+  ].join(' ');
 
   async function elevenLabsTTS(text) {
     // Unified TTS (shared/speech/tts). ElevenLabs provider with this instance's voice/model/key;
@@ -946,7 +952,7 @@ ${referentPromptBlock()}`;
       ctx.log(live
         ? '[voice] converse server_vad barge-in'
         : '[voice] barge-in: user spoke over the reply → cancelling');
-      stopVoiceReply(guildId, { chime: false });
+      stopVoiceReply(guildId, { chime: false, barge: true });
       if (live) {
         const conv = converseSessions.get(guildId);
         if (conv) { try { conv.cancel(); } catch (_) {} }
@@ -1021,15 +1027,25 @@ ${referentPromptBlock()}`;
 
   // ONE hard-stop primitive behind spoken-"stop", barge-in, and text `@bot stop` fan-out (#138): cancel
   // playback + queued sentences, kill the drone, abort the in-flight core turn, free the busy latch.
-  async function stopVoiceReply(guildId, { chime = false } = {}) {
+  async function stopVoiceReply(guildId, { chime = false, barge = false } = {}) {
     let voice; try { voice = require('./voice'); } catch (_) { return false; }
     const wasBusy = voiceBusy.has(guildId);
     voiceGen.set(guildId, (voiceGen.get(guildId) || 0) + 1); // invalidate the in-flight reply so it can't speak
     voice.stopSpeech(guildId); voice.stopDrone(guildId);
-    try { voice.endPcmPlayback(guildId); } catch (_) {}
+    try { voice.endPcmPlayback(guildId, { hard: true }); } catch (_) {}
     const convStop = converseSessions.get(guildId);
     if (convStop) { try { convStop.cancel(); } catch (_) {} }
     voiceBusy.delete(guildId); voiceReplyStart.delete(guildId); clearVoiceOverlap(guildId);
+    // After a real barge, resume uplink with the talk-through PCM sitting in pcmRing.
+    if (barge && convStop) {
+      const sp = converseSpeaker.get(guildId);
+      if (sp && sp.userId) {
+        const ringKey = guildId + ':' + sp.userId;
+        const ring = pcmRing.get(ringKey);
+        pcmRing.delete(ringKey);
+        if (ring && ring.length) { try { convStop.pushPcm24(Buffer.concat(ring)); } catch (_) {} }
+      }
+    }
     try { await ctx.core.abort(voiceConvKey(guildId)); } catch (_) {}
     setVoiceStatus(null);
     if (chime && wasBusy) { try { await voice.playChime(guildId); } catch (_) {} }
@@ -1153,12 +1169,8 @@ ${referentPromptBlock()}`;
       const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: speakerId });
       if (next) voiceActive.set(guildId, next);
       converseSpeaker.set(guildId, { userId: speakerId, name });
-      const ringKey = guildId + ':' + speakerId;
-      const ring = pcmRing.get(ringKey);
-      pcmRing.delete(ringKey);
-      const convTurn = converseSessions.get(guildId);
-      const echoMute = voice.isSpeaking(guildId) || voiceBusy.has(guildId);
-      if (ring && ring.length && convTurn && !echoMute) { try { convTurn.pushPcm24(Buffer.concat(ring)); } catch (_) {} }
+      pcmRing.delete(guildId + ':' + speakerId); // do not dump echo-contaminated ring into the WS on wake
+      bindLiveSpeaker(guildId, speakerId, name).catch(() => {});
       if (!voiceBusy.has(guildId)) voiceBusy.add(guildId);
       try { voice.startSpeech(guildId); } catch (_) {}
       setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
@@ -1271,6 +1283,81 @@ ${referentPromptBlock()}`;
     return { rtModel, rtLive, rtProvider, vad, realtime: cfg.voice_realtime !== false };
   }
 
+  async function bindLiveSpeaker(guildId, userId, name) {
+    const conv = converseSessions.get(guildId);
+    if (!conv || typeof conv.update !== 'function') return;
+    const ch = voiceText.get(guildId);
+    const envelope = liveTools.textEnvelope({
+      instanceId: ctx.instanceId,
+      guildId,
+      channelId: ch && ch.id,
+      userId,
+      username: name,
+    });
+    let resolved = { is_default: true };
+    if (userId) {
+      try { resolved = (await ctx.core.resolve(envelope)) || resolved; } catch (_) {}
+    }
+    const tools = userId ? liveTools.toolsForSpeaker(resolved, envelope) : [];
+    const speakerLine = userId ? liveTools.speakerIdentityLine({
+      channel: 'discord',
+      speakerId: userId,
+      speakerName: (resolved && !resolved.is_default && resolved.display_name) || name || 'an unidentified user',
+    }) : '';
+    let identityBlock = '';
+    try { identityBlock = require('../../../shared/identity').fullIdentity(); } catch (_) {}
+    let siloRecall = '';
+    try {
+      const transcripts = require('../../../shared/transcripts');
+      const includeLastTopics = !!(resolved && resolved.bypass_moderation);
+      const keys = [voiceConvKey(guildId)];
+      if (ch && ch.id) keys.push(`discord:${ctx.instanceId}:channel:${ch.id}`);
+      const parts = [];
+      for (let i = 0; i < keys.length; i++) {
+        const recalled = transcripts.recallForInject({ conversationKey: keys[i], includeLastTopics: includeLastTopics && i === 0 });
+        if (recalled) parts.push(recalled);
+      }
+      siloRecall = liveTools.siloRecallBlock(parts.join('\n\n'));
+    } catch (_) {}
+    const guidance = tools.length ? VOICE_GUIDANCE_LIVE : VOICE_GUIDANCE;
+    conv.update({
+      instructions: liveTools.buildLiveInstructions({
+        voiceGuidance: guidance,
+        identity: identityBlock,
+        speakerLine,
+        siloRecall,
+      }),
+      tools,
+    });
+  }
+
+  function runLiveFunction(guildId, conv, name, callId, args) {
+    const sp = converseSpeaker.get(guildId) || {};
+    const ch = voiceText.get(guildId);
+    const envelope = liveTools.textEnvelope({
+      instanceId: ctx.instanceId,
+      guildId,
+      channelId: ch && ch.id,
+      userId: sp.userId,
+      username: sp.name,
+    });
+    const turn = {
+      channel: 'discord',
+      guildId: String(guildId),
+      sender: { raw_id: String(sp.userId || ''), raw_username: sp.name || '' },
+      context: { scope_id: `guild:${guildId}` },
+      conversation_key: envelope.conversation_key,
+    };
+    Promise.resolve()
+      .then(async () => {
+        let resolved = { is_default: true };
+        try { resolved = (await ctx.core.resolve(envelope)) || resolved; } catch (_) {}
+        return liveTools.executeFunctionCall({ name, args, resolved, envelope, turn });
+      })
+      .then((output) => { try { conv.sendFunctionOutput(callId, output); } catch (_) {} })
+      .catch(() => { try { conv.sendFunctionOutput(callId, JSON.stringify({ ok: false, error: 'denied' })); } catch (_) {} });
+  }
+
   async function tryOpenConverse(guildId) {
     let voiceKey = '';
     try {
@@ -1281,7 +1368,8 @@ ${referentPromptBlock()}`;
     if (!voiceKey || !r.engine_id || !voiceEngines.IMPLEMENTED.has(r.engine_id)) return null;
     let WS;
     try { WS = require('ws'); } catch (_) { WS = undefined; }
-    const session = converseGrok.openSession({
+    let session;
+    session = converseGrok.openSession({
       onOpen: () => ctx.log(`[voice] converse OPEN ${converseGrok.MODEL} voice=ara tools=[]`),
       onAudio: (pcm) => {
         if (voiceMuted.has(guildId)) return;
@@ -1296,12 +1384,10 @@ ${referentPromptBlock()}`;
       onSpeechStart: () => {
         if (cfg.voice_barge_in === false) return;
         const v = require('./voice');
-        // Echo: server_vad hears her own playback. Local Discord barge (1.5s + 1.2s grace) owns interrupt.
-        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
+        // xAI server_vad during playback is echo-contaminated: extra 1.5s arm only, never instant cancel.
+        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) armVoiceOverlap(guildId, { live: true });
       },
       onSpeechStop: () => {
-        const v = require('./voice');
-        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
         clearVoiceOverlap(guildId);
       },
       onAssistantText: (text) => {
@@ -1313,25 +1399,30 @@ ${referentPromptBlock()}`;
           ch.send(`🔊 **${NAME}:** ${t.slice(0, 1800)}`).catch(() => {});
         }
       },
+      onFunctionCall: ({ name, callId, arguments: args }) => {
+        runLiveFunction(guildId, session, name, callId, args);
+      },
       onResponseDone: () => {
         const voice = require('./voice');
-        const finish = () => {
-          voice.endSpeech(guildId);
-          const sp = converseSpeaker.get(guildId);
-          if (sp && sp.userId) {
-            const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: String(sp.userId) });
-            if (next) voiceActive.set(guildId, next);
-          }
-          voiceBusy.delete(guildId);
-          voiceReplyStart.delete(guildId);
-          clearVoiceOverlap(guildId);
-          setVoiceStatus(null);
-        };
-        try { voice.endPcmPlayback(guildId, { onDrain: finish }); } catch (_) { finish(); }
+        Promise.resolve(voice.endPcmPlayback(guildId))
+          .catch(() => {})
+          .then(() => {
+            voice.endSpeech(guildId);
+            const sp = converseSpeaker.get(guildId);
+            if (sp && sp.userId) {
+              const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: String(sp.userId) });
+              if (next) voiceActive.set(guildId, next);
+              pcmRing.delete(guildId + ':' + sp.userId);
+            }
+            voiceBusy.delete(guildId);
+            voiceReplyStart.delete(guildId);
+            clearVoiceOverlap(guildId);
+            setVoiceStatus(null);
+          });
       },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
       onClose: () => ctx.log('[voice] converse WS closed'),
-    }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE });
+    }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE, tools: [] });
     try { await session.ready; } catch (e) {
       ctx.log(`[voice] converse unavailable (${e.message}) — Flux+CLI+TTS`);
       try { session.close(); } catch (_) {}
@@ -1347,6 +1438,7 @@ ${referentPromptBlock()}`;
     if (conv) {
       converseSessions.set(guildId, conv);
       ctx.log(`[voice] converse bound ${converseGrok.MODEL} voice=ara tools=[] — skip handleStream + ElevenLabs TTS`);
+      bindLiveSpeaker(guildId, '', '').catch(() => {});
     }
     voice.startListening(guildId, client, {
       transcribe: sttTranscribe,
@@ -1359,7 +1451,8 @@ ${referentPromptBlock()}`;
       onPartial: (name, text) => onVoicePartial(guildId, name, text),
       onPcm24: conv ? (userId, pcm, meta) => {
         if (!pcm || !pcm.length || !userId) return;
-        if (voice.isSelfUser(client, userId)) return;
+        const vmod = require('./voice');
+        if (vmod.isSelfUser(client, userId)) return;
         const key = guildId + ':' + userId;
         let arr = pcmRing.get(key);
         if (!arr) { arr = []; pcmRing.set(key, arr); }
@@ -1367,15 +1460,18 @@ ${referentPromptBlock()}`;
         let total = 0; for (const b of arr) total += b.length;
         while (arr.length > 1 && total > PCM_RING_BYTES) { total -= arr[0].length; arr.shift(); }
         if (!converseGrok.shouldRelayPcm({ speakerId: lastSpeakerId(guildId), userId, muted: voiceMuted.has(guildId) })) return;
+        const prev = converseSpeaker.get(guildId);
         converseSpeaker.set(guildId, { userId: String(userId), name: (meta && meta.name) || String(userId) });
-        // Echo mute: while she is playing/busy, do not feed PCM into xAI. pcmRing still fills.
-        // Resume after real barge-in (busy/speaking cleared) or drain.
-        if (voice.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
+        if (!prev || String(prev.userId) !== String(userId)) {
+          bindLiveSpeaker(guildId, String(userId), (meta && meta.name) || String(userId)).catch(() => {});
+        }
+        // While she is playing, do not feed xAI her echo. Still fill pcmRing (above).
+        if (voiceBusy.has(guildId) || vmod.isSpeaking(guildId)) return;
         conv.pushPcm24(pcm);
       } : undefined,
       onBargeIn: () => {
         if (cfg.voice_barge_in === false) return;
-        armVoiceOverlap(guildId); // Live too: 1.5s talk-through + 1.2s grace (do not defer to xAI VAD)
+        armVoiceOverlap(guildId, { live: converseSessions.has(guildId) });
       },
       onBargeEnd: () => {
         clearVoiceOverlap(guildId);

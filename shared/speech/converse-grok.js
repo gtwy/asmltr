@@ -6,7 +6,7 @@
  *   wss://api.x.ai/v1/realtime?model=grok-voice-think-fast-2.0  (alias grok-voice-latest)
  *
  * Locked: session.voice = "ara" (never eve, never an ElevenLabs voice_id).
- *         session.tools = []  (no web_search, no MCP, no functions).
+ *         session.tools = asmltr function tools (never native web_search / x_search / mcp).
  *         turn_detection = { type: "server_vad", threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false }
  *         reasoning.effort = "none"
  *         PCM 48 kHz mono s16le both ways.
@@ -40,12 +40,47 @@ function secretValue(data) {
   return '';
 }
 
-/** session.update payload. voice is ALWAYS ara; tools ALWAYS empty. Extra opts cannot override those. */
+const NATIVE_TOOL_TYPES = new Set(['web_search', 'x_search', 'mcp']);
+
+function isNativeTool(t) {
+  if (!t || typeof t !== 'object') return true;
+  const typ = String(t.type || '');
+  const name = String(t.name || '');
+  if (NATIVE_TOOL_TYPES.has(typ) || NATIVE_TOOL_TYPES.has(name)) return true;
+  return false;
+}
+
+/** Realtime function tools only. Native web_search / x_search / mcp are stripped. Default []. */
+function asRealtimeFunctions(tools) {
+  if (!Array.isArray(tools) || !tools.length) return [];
+  const out = [];
+  for (const t of tools) {
+    if (!t || !t.name || isNativeTool(t)) continue;
+    if (t.type && t.type !== 'function') continue;
+    out.push({
+      type: 'function',
+      name: String(t.name),
+      description: String(t.description || ''),
+      parameters: t.parameters || t.inputSchema || { type: 'object', properties: {} },
+    });
+  }
+  return out;
+}
+
+function functionOutputItem(callId, output) {
+  const text = typeof output === 'string' ? output : JSON.stringify(output == null ? '' : output);
+  return {
+    type: 'conversation.item.create',
+    item: { type: 'function_call_output', call_id: callId, output: text },
+  };
+}
+
+/** session.update payload. voice is ALWAYS ara. Extra opts cannot override voice or interrupt_response. */
 function buildSessionUpdate(opts) {
   const instructions = (opts && opts.instructions) || '';
   const session = {
     voice: VOICE,
-    tools: [],
+    tools: asRealtimeFunctions(opts && opts.tools),
     turn_detection: { type: 'server_vad', threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false },
     reasoning: { effort: 'none' },
     audio: {
@@ -182,6 +217,25 @@ function applyServerEvent(ev, handlers) {
     if (t && h.onUserTranscript) { try { h.onUserTranscript(t, ev); } catch (_) {} }
     return 'user_transcript';
   }
+  if (typ === 'response.function_call_arguments.done') {
+    let args = ev.arguments;
+    if (typeof args === 'string') { try { args = JSON.parse(args); } catch (_) { args = {}; } }
+    if (h.onFunctionCall) {
+      try { h.onFunctionCall({ name: ev.name, callId: ev.call_id || ev.callId, arguments: args || {} }); } catch (_) {}
+    }
+    return 'function_call';
+  }
+  if (typ === 'response.output_item.done' || typ === 'response.output_item.added') {
+    const item = ev.item || {};
+    if (item.type === 'function_call') {
+      let args = item.arguments;
+      if (typeof args === 'string') { try { args = JSON.parse(args); } catch (_) { args = {}; } }
+      if (h.onFunctionCall) {
+        try { h.onFunctionCall({ name: item.name, callId: item.call_id || item.callId, arguments: args || {} }); } catch (_) {}
+      }
+      return 'function_call';
+    }
+  }
   if (typ === 'session.updated' || typ === 'session.created') return 'session';
   return undefined;
 }
@@ -198,12 +252,21 @@ function attach(ws, ev, fn) {
 /**
  * Open a converse WebSocket.
  * @param {object} handlers onOpen, onAudio(pcm48), onSpeechStart, onSpeechStop, onResponseDone,
- *   onCancelled, onAssistantText, onAssistantDelta, onUserTranscript, onError, onClose
- * @param {object} [opts] { getKey, apiKey, WebSocket, instructions }
- * @returns {{ pushPcm24(Buffer):void, cancel():void, close():void, isOpen():boolean, ready:Promise }}
+ *   onCancelled, onAssistantText, onAssistantDelta, onUserTranscript, onFunctionCall, onError, onClose
+ * @param {object} [opts] { getKey, apiKey, WebSocket, instructions, tools }
+ * @returns {{ pushPcm24(Buffer):void, cancel():void, update(opts):void, sendFunctionOutput(callId, output):void, close():void, isOpen():boolean, ready:Promise }}
  */
 function openSession(handlers, opts) {
-  const h = handlers || {};
+  const raw = handlers || {};
+  const seenFn = new Set();
+  const h = Object.assign({}, raw, {
+    onFunctionCall: (x) => {
+      const id = String((x && x.callId) || '');
+      if (id && seenFn.has(id)) return;
+      if (id) seenFn.add(id);
+      if (raw.onFunctionCall) { try { raw.onFunctionCall(x); } catch (_) {} }
+    },
+  });
   const WS = loadWebSocket(opts);
   let ws = null;
   let opened = false;
@@ -261,6 +324,11 @@ function openSession(handlers, opts) {
       sendJson(appendPcmEvent(buf));
     },
     cancel() { sendJson({ type: 'response.cancel' }); },
+    update(next) { sendJson(buildSessionUpdate(next || {})); },
+    sendFunctionOutput(callId, output) {
+      sendJson(functionOutputItem(callId, output));
+      sendJson({ type: 'response.create' });
+    },
     close() {
       opened = false;
       pending.length = 0;
@@ -275,5 +343,6 @@ function openSession(handlers, opts) {
 module.exports = {
   KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
   secretValue, buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
+  asRealtimeFunctions, functionOutputItem, isNativeTool,
   fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, pcm48StereoToPcm48Mono, pcm48MonoToPcm48Stereo, decodeAudioDelta,
 };
