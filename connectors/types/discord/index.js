@@ -913,6 +913,9 @@ ${referentPromptBlock()}`;
   const converseSessions = new Map(); // guildId -> converse-grok session (Ivy Live)
   const converseSpeaker = new Map(); // guildId -> { userId, name }
   const pcmRing = new Map(); // `${guildId}:${userId}` -> Buffer[] last ~4s
+  const pcmTurnLogged = new Set();
+  const pcmTurnAt = new Map();
+  const forceTurnAt = new Map();
   const PCM_RING_BYTES = 48000 * 2 * 4;
 
   function countHumansNow(guildId) {
@@ -1390,7 +1393,10 @@ ${referentPromptBlock()}`;
           voiceBusy.add(guildId);
           voice.startSpeech(guildId);
           voiceReplyStart.set(guildId, Date.now());
-          ctx.log('[voice] firstAudio');
+          const now = Date.now();
+          const t0 = pcmTurnAt.get(guildId);
+          const t1 = forceTurnAt.get(guildId);
+          ctx.log(`[voice] firstAudio pcmMs=${t0 ? now - t0 : -1} speakingStopMs=${t1 ? now - t1 : -1}`);
         }
         try { voice.pushPcm24Play(guildId, pcm); } catch (e) { ctx.log(`[voice] converse play: ${e.message}`); }
       },
@@ -1504,6 +1510,7 @@ ${referentPromptBlock()}`;
         if (vmod.isSpeaking(guildId)) return;
         if (!pcmTurnLogged.has(guildId)) {
           pcmTurnLogged.add(guildId);
+          pcmTurnAt.set(guildId, Date.now());
           ctx.log(`[voice] PCM → WS bytes=${pcm.length}`);
         }
         conv.pushPcm24(pcm);
@@ -1520,6 +1527,7 @@ ${referentPromptBlock()}`;
         const c = converseSessions.get(guildId);
         if (!c || typeof c.createResponse !== 'function') return;
         pcmTurnLogged.delete(guildId);
+        forceTurnAt.set(guildId, Date.now());
         try { c.createResponse(); ctx.log('[voice] 1:1 speaking-stop → response.create'); } catch (e) { ctx.log(`[voice] createResponse: ${e.message}`); }
       },
       log: (m) => ctx.log(`[voice] ${m}`),
