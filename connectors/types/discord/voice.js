@@ -225,7 +225,8 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
       if (u && u.bot) return;
     } catch (_) {}
     // Humans talking over playback. Bot/self ignored; 3s continuous talk-through before barge.
-    if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
+    // Gate on mouth (pacer/player), not speech.cancelled — response.done can clear isSpeaking while A–Z still plays.
+    if (onBargeIn && isMouthPlaying(guildId)) { try { onBargeIn(userId); } catch (_) {} }
     // Converse PCM is tapped off the Flux decoder (onPcm24) — do NOT skip STT: spoken-stop /
     // mute / leave / name-gate / 🗣️ still need transcripts. Last-speaker gating is in onPcm24.
     if (converse) { converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24, onSpeechEnd, endpointMs, log }); return; }
@@ -272,6 +273,12 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
 function startSpeech(guildId) { speech.set(guildId, { cancelled: false, player: null }); }
 // Is a (non-cancelled) reply currently speaking? Used to decide barge-in.
 function isSpeaking(guildId) { const s = speech.get(guildId); return !!(s && !s.cancelled); }
+/** True while 48k play still has a player, a pacer queue, or a live speech session. */
+function isMouthPlaying(guildId) {
+  const e = pcmOut.get(guildId);
+  if (e && (e.primed || (e.queued && e.queued.length) || e.player)) return true;
+  return isSpeaking(guildId);
+}
 // Hard-cancel the current reply: stop the sentence playing now AND make queued sentences no-op.
 function stopSpeech(guildId) {
   const s = speech.get(guildId);
@@ -370,6 +377,16 @@ function endPcmPlayback(guildId, { hard } = {}) {
   if (!e) return Promise.resolve();
   const forceStop = !!hard;
   try {
+    stopPcmPacer(e);
+    if (forceStop) {
+      e.queued = Buffer.alloc(0);
+      e.acc = Buffer.alloc(0);
+      try { e.pcm && e.pcm.end(); } catch (_) {}
+      try { e.encoder && e.encoder.destroy(); } catch (_) {}
+      try { e.player && e.player.stop(true); } catch (_) {}
+      finishPcmEntry(guildId, e);
+      return Promise.resolve();
+    }
     let extra = e.acc || Buffer.alloc(0);
     e.acc = Buffer.alloc(0);
     if (extra.length) {
@@ -377,8 +394,7 @@ function endPcmPlayback(guildId, { hard } = {}) {
       if (pad) extra = Buffer.concat([extra, Buffer.alloc(pad)]);
       e.queued = Buffer.concat([e.queued || Buffer.alloc(0), extra]);
     }
-    stopPcmPacer(e);
-    if (!forceStop && !e.primed && e.queued && e.queued.length) {
+    if (!e.primed && e.queued && e.queued.length) {
       primePcmPlayback(e);
       stopPcmPacer(e);
     }
@@ -388,12 +404,6 @@ function endPcmPlayback(guildId, { hard } = {}) {
     }
     if (e.pcm) { try { e.pcm.end(); } catch (_) {} }
     e.draining = true;
-    if (forceStop) {
-      try { e.encoder && e.encoder.destroy(); } catch (_) {}
-      try { e.player && e.player.stop(true); } catch (_) {}
-      finishPcmEntry(guildId, e);
-      return Promise.resolve();
-    }
     // Drain: pad leftover, pcm.end(), wait Idle. Do NOT player.stop(true).
     return waitPcmIdle(guildId, e);
   } catch (_) {
@@ -521,7 +531,7 @@ function channelIdOf(guildId) {
 module.exports = {
   joinChannel, playChime, speak, leave, isConnected, isListening, channelIdOf,
   startListening, stopListening, startDrone, stopDrone,
-  startSpeech, stopSpeech, endSpeech, isSpeaking, isSelfUser,
+  startSpeech, stopSpeech, endSpeech, isSpeaking, isMouthPlaying, isSelfUser,
   startPcmPlayback, pushPcm24Play, endPcmPlayback,
   flushPcm48Frames, OPUS_FRAME_BYTES, PCM_PREBUFFER_FRAMES, PCM_PACER_MS,
 };

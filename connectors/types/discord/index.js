@@ -971,7 +971,7 @@ ${referentPromptBlock()}`;
         return;
       }
       const ms = now - arm;
-      ctx.log('[voice] overlap ' + ms + 'ms → 3s cancel');
+      ctx.log('[voice] overlap ' + ms + 'ms → 3s cancel (drop pacer + player.stop + response.cancel)');
       stopVoiceReply(guildId, { chime: false, barge: true });
       if (live) {
         const conv = converseSessions.get(guildId);
@@ -1438,11 +1438,12 @@ ${referentPromptBlock()}`;
       },
       onResponseDone: () => {
         const voice = require('./voice');
-        // Unmute uplink now so the next 1:1 utterance is not eaten during drain.
-        voiceBusy.delete(guildId);
+        // Keep mouth/busy until the pacer actually finishes. Deleting voiceBusy here
+        // unmuted uplink and cleared barge while A–Z was still queued.
         Promise.resolve(voice.endPcmPlayback(guildId))
           .catch(() => {})
           .then(() => {
+            voiceBusy.delete(guildId);
             voice.endSpeech(guildId);
             const sp = converseSpeaker.get(guildId);
             if (sp && sp.userId) {
@@ -1544,6 +1545,9 @@ ${referentPromptBlock()}`;
       } : undefined,
       onBargeIn: () => {
         if (cfg.voice_barge_in === false) return;
+        if (!voiceOverlapArm.has(guildId)) {
+          ctx.log('[voice] overlap arm (mouth playing)');
+        }
         armVoiceOverlap(guildId, { live: converseSessions.has(guildId) });
       },
       onBargeEnd: () => {
@@ -1559,7 +1563,8 @@ ${referentPromptBlock()}`;
         if (!c || typeof c.createResponse !== 'function') return;
         const humans = countHumansNow(guildId);
         const firstAfterGreet = !!c._awaitFirstUser;
-        const herMouth = voiceBusy.has(guildId);
+        const vMouth = require('./voice');
+        const herMouth = voiceBusy.has(guildId) || !!(vMouth.isMouthPlaying && vMouth.isMouthPlaying(guildId));
         if (!firstAfterGreet && !shouldForceTurn({ humans, herMouth })) return;
         c._awaitFirstUser = false;
         pcmTurnLogged.delete(guildId);

@@ -190,6 +190,25 @@ test('play turn to completion: onResponseDone / endPcmPlayback without hard does
   assert.match(done, /endSpeech/);
 });
 
+test('hard endPcmPlayback drops pacer queue and player.stop, does not dump queued', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
+  const { isMouthPlaying } = require('../connectors/types/discord/voice');
+  assert.equal(typeof isMouthPlaying, 'function');
+  const endFn = src.slice(src.indexOf('function endPcmPlayback'), src.indexOf('function primePcmPlayback'));
+  const hard = endFn.slice(endFn.indexOf('if (forceStop)'), endFn.indexOf('let extra'));
+  assert.match(hard, /e\.queued = Buffer\.alloc\(0\)/);
+  assert.match(hard, /player\.stop\(true\)/);
+  assert.equal(/e\.pcm\.write\(e\.queued\)/.test(hard), false);
+  assert.match(src, /isMouthPlaying\(guildId\)/);
+});
+test('onResponseDone keeps voiceBusy until pacer drain', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const done = src.slice(src.indexOf('onResponseDone:'), src.indexOf('onUserTranscript:'));
+  const firstBusy = done.indexOf('voiceBusy.delete');
+  const drain = done.indexOf('endPcmPlayback');
+  assert.ok(drain >= 0 && firstBusy > drain, 'voiceBusy.delete must follow endPcmPlayback');
+  assert.match(src, /overlap arm \(mouth playing\)/);
+});
 test('Live uses local 3s barge; onBargeIn does not skip converseSessions', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   const barge = src.slice(src.indexOf('onBargeIn:'), src.indexOf('onBargeEnd:'));

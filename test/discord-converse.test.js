@@ -138,5 +138,5 @@ test("first utterance after greet forces response.create even in a group", () =>
   const src = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/index.js"), "utf8");
   assert.match(src, /_awaitFirstUser/);
   assert.match(src, /first-utterance after greet/);
-  assert.match(src, /Unmute uplink now/);
+  assert.match(src, /Keep mouth\/busy until the pacer actually finishes/);
 });
