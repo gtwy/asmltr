@@ -60,6 +60,26 @@ function channelIdFrom(envelope) {
   return String(cc.channelId || cc.channel_id || '');
 }
 
+/** Discord VOICE turn only — not Discord text. */
+function isDiscordVoice(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  const key = String(obj.conversation_key || obj.conversationKey || '');
+  if (key.startsWith('discord-voice:')) return true;
+  const cc = obj.channel_context || obj.channelContext || null;
+  if (cc && cc.voice === true) return true;
+  const ch = String(obj.channel || '').trim().toLowerCase();
+  if (ch === 'discord' && obj.voice === true) return true;
+  return false;
+}
+
+function denyAllFlags() {
+  const deny = emptyDeny();
+  for (const k of Object.keys(deny)) deny[k] = true;
+  deny.all = true;
+  return deny;
+}
+
+
 function siloAllowlisted(envelope, allow) {
   const a = allow || loadAllowlist();
   const g = guildIdFrom(envelope);
@@ -150,6 +170,8 @@ function emptyDeny() {
 }
 
 function policyFor(envelope, resolved, allow) {
+  // Voice handleStream: hard deny every tool. Discord TEXT is unchanged.
+  if (isDiscordVoice(envelope)) return { deny: denyAllFlags(), restricted: true };
   const deny = emptyDeny();
   if (!videoAuthorized(envelope, resolved, allow)) deny.video = true;
   if (!imageAuthorized(envelope, resolved, allow)) {
@@ -173,8 +195,9 @@ function policyFor(envelope, resolved, allow) {
 }
 
 function denyToolsEnv(deny) {
-  return ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost']
-    .filter((k) => deny && deny[k]).join(',');
+  const keys = ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost'];
+  if (deny && deny.all) return keys.join(',');
+  return keys.filter((k) => deny && deny[k]).join(',');
 }
 
 function parseDenyEnv(raw) {
@@ -208,4 +231,5 @@ module.exports = {
   policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
   videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized, grantTokens,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
+  isDiscordVoice, denyAllFlags,
 };

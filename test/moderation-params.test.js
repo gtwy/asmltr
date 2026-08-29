@@ -71,3 +71,16 @@ test('classifyRaw is a separate helper; moderate() is unchanged', () => {
   assert.match(log, /openai_api_key/);
   assert.match(log, /image_gen tools still work/);
 });
+
+test('voice moderation skip: owner/trusted/bypass skip nano; untrusted does not', () => {
+  const { shouldSkipModerationNetwork } = require('../core/src/moderation');
+  assert.equal(shouldSkipModerationNetwork({ bypass_moderation: true }, {}), true);
+  assert.equal(shouldSkipModerationNetwork({ bypass_moderation: true, user_key: 'owner' }, { voice: true }), true);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'owner' }, { voice: true }), true);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'friend', permissions: ['trusted'] }, { voice: true }), true);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'friend', is_default: false }, { voice: true }), false);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'default', is_default: true }, { voice: true }), false);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'owner' }, { voice: false }), false);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'untrusted-speaker', is_default: true }, { voice: true }), false);
+});
+

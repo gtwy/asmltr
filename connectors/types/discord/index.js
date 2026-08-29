@@ -38,6 +38,7 @@ const { injectBy } = require('./inject-by');
 const { splitResponse } = require('../../../shared/discord-split');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
+const { shouldPlayWakeChime } = require('./wake-chime');
 const voiceTools = require('./voice-tools');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
@@ -853,7 +854,7 @@ ${referentPromptBlock()}`;
   const VOICE_GUIDANCE = [
     'You are in a LIVE Discord voice meeting and your reply will be spoken aloud via text-to-speech.',
     'Keep it short and natural — 1 to 3 sentences. No markdown, no bullet lists, no code blocks, no emoji, no URLs read out.',
-    'You may use tools if truly needed, but keep the SPOKEN answer brief and conversational.',
+    'Do not use tools. Reply from what you already know. Keep the SPOKEN answer brief and conversational.',
   ].join(' ');
 
   async function elevenLabsTTS(text) {
@@ -1054,7 +1055,11 @@ ${referentPromptBlock()}`;
     const myGen = voiceGen.get(guildId) || 0; // this reply's generation; stopVoiceReply bumps it to cancel
     const live = () => (voiceGen.get(guildId) || 0) === myGen; // still the current, un-stopped reply?
     try {
-      if (!active) { await voice.playChime(guildId); await new Promise((r) => setTimeout(r, 600)); } // "I heard you" — only when ENTERING a conversation
+      // Join-once chime lives in doJoinVoice. Already listening / still in the VC: no chime, no 600ms hole.
+      if (shouldPlayWakeChime({ listening: voice.isListening(guildId), connected: voice.isConnected(guildId) })) {
+        await voice.playChime(guildId);
+        await new Promise((r) => setTimeout(r, 600));
+      }
       setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
       if (voiceDrone) voice.startDrone(guildId); // soft "working on it" ambience (toggleable)
 
@@ -1244,7 +1249,7 @@ ${referentPromptBlock()}`;
       const transcriptNote = voicePostTranscript
         ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `transcript-off`).'
         : 'Live transcript is **off** — I listen quietly' + (voiceTranscriptFile ? ' and post a full transcript `.txt` when I leave.' : '.');
-      message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. ${transcriptNote} Say **"${NAME}, …"** out loud to ask something — I'll chime, play a soft "working" drone, and answer by voice. After that, **follow-ups need no name** for a bit; say **"that's enough, ${NAME}"** to go back to just listening, or \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
+      message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. ${transcriptNote} Say **"${NAME}, …"** out loud to ask something — I'll play a soft "working" drone and answer by voice. After that, **follow-ups need no name** for a bit; say **"that's enough, ${NAME}"** to go back to just listening, or \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
     } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }
   }
 

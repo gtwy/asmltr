@@ -665,3 +665,38 @@ test('next-turn session flag: xhigh once then reset to baseline', () => {
   sessions.remove(key);
   try { sessions.db.close(); } catch (_) {}
 });
+
+test('discord-voice stays low even with lookup-ish words; discord text stays picker', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'medium';
+  try {
+    const voiceKey = { conversationKey: 'discord-voice:ivy:guild:1', channel: 'discord', cwd: noGit };
+    const voiceCtx = { channel: 'discord', channel_context: { voice: true, guildId: '1' }, cwd: noGit };
+    const voiceFlag = { channel: 'discord', voice: true, cwd: noGit };
+    for (const p of ['ok thanks', 'look up the Padron 1964 in Corona', 'search my contacts', 'can you hear me']) {
+      assert.equal(grok.chooseEffort({ prompt: p, ...voiceKey }), 'low', 'key:' + p);
+      assert.equal(grok.classifyEffort({ prompt: p, ...voiceKey }).reason, 'discord-voice', 'key reason:' + p);
+      assert.equal(grok.chooseEffort({ prompt: p, ...voiceCtx }), 'low', 'ctx:' + p);
+      assert.equal(grok.chooseEffort({ prompt: p, ...voiceFlag }), 'low', 'flag:' + p);
+      assert.equal(effortOf(grok.buildArgs({ prompt: p, ...voiceKey })), 'low', 'args:' + p);
+    }
+    const text = { prompt: 'ok thanks', cwd: noGit, channel: 'discord' };
+    assert.equal(grok.chooseEffort(text), 'medium');
+    assert.equal(effortOf(grok.buildArgs(text)), 'medium');
+    assert.equal(grok.chooseEffort({ prompt: 'look up the cigar in Corona', cwd: noGit, channel: 'discord' }), 'high');
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
+test('server passes voice signal into grok classify opts and moderate', () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'server.js'), 'utf8');
+  assert.match(server, /isDiscordVoice/);
+  assert.match(server, /channel_context:\s*e\.channel_context/);
+  assert.match(server, /voice:\s*voiceTurn/);
+  assert.match(server, /moderation\.moderate\([^\n]*voice:\s*voiceTurn/);
+  const grokSrc = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  assert.match(grokSrc, /isDiscordVoice\(opts\)/);
+  assert.match(grokSrc, /reason: 'discord-voice'/);
+  assert.match(grokSrc, /conversationKey, channel_context, voice/);
+});
+

@@ -266,14 +266,31 @@ async function logModerationEvent(event) {
 }
 
 /**
+ * Skip gpt-5-nano when we already know the speaker is trusted.
+ * Fail-closed: unknown / default / untrusted still hit the network.
+ * Bypass already skipped the network; voice+owner/trusted cannot regress that.
+ */
+function shouldSkipModerationNetwork(resolved, meta = {}) {
+  if (resolved && resolved.bypass_moderation) return true;
+  if (!meta || !meta.voice) return false;
+  if (!resolved || resolved.is_default) return false;
+  if (resolved.user_key === 'owner' || resolved.owner === true) return true;
+  const tokens = [];
+  if (Array.isArray(resolved.permissions)) tokens.push(...resolved.permissions);
+  if (Array.isArray(resolved.roles)) tokens.push(...resolved.roles);
+  if (typeof resolved.trust_tier === 'string' && /^(trusted|owner)$/i.test(resolved.trust_tier)) return true;
+  return tokens.some((t) => /^(trusted|owner|\*)$/i.test(String(t)));
+}
+
+/**
  * Moderate a clean user message for an already-resolved identity.
  * @param {string} userMessage  the clean user text (no system wrapper)
  * @param {object} resolved     ResolvedIdentity from resolver.js
- * @param {object} meta         { platform }
+ * @param {object} meta         { platform, voice? }
  * @returns {object} { allowed, bypassed?, riskLevel?, concerns?, reasoning?, monitored? }
  */
 async function moderate(userMessage, resolved, meta = {}) {
-  if (resolved.bypass_moderation) {
+  if (shouldSkipModerationNetwork(resolved, meta)) {
     return { allowed: true, bypassed: true, riskLevel: 0 };
   }
 
@@ -385,5 +402,5 @@ async function notifyBlock(resolved, userMessage, moderation, platform) {
 
 module.exports = {
   moderate, notifyBlock, adminAlert, buildAdminAlertCmd, cmdAlertLabel, logModerationEvent, buildOpenAIParams, parseReasoningEffort,
-  classifyRaw, pictureIntentOffLog, moderationKeyPresent,
+  classifyRaw, pictureIntentOffLog, moderationKeyPresent, shouldSkipModerationNetwork,
 };

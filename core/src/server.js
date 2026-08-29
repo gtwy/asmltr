@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const { healthPayload } = require('./health-payload');
-const { policyFor } = require('../../shared/tool-policy');
+const { policyFor, isDiscordVoice } = require('../../shared/tool-policy');
 const { buildToolbeltPrompt } = require('../../shared/toolbelt-prompt');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
@@ -402,7 +402,8 @@ async function handle(envelope, opts = {}) {
     extra: pExtra, toolbelt: pToolbelt, uploadsInstr: pUploadsInstr, uploadsList: pUploadsList, announce: pAnnounce,
   });
 
-  const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel });
+  const voiceTurn = isDiscordVoice(e);
+  const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel, voice: voiceTurn });
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',
     payload: { decision: mod.allowed ? 'ALLOW' : 'BLOCK', riskLevel: mod.riskLevel, monitored: !!mod.monitored, bypassed: !!mod.bypassed } });
@@ -520,6 +521,8 @@ async function handle(envelope, opts = {}) {
       resume,
       cwd,
       conversationKey: e.conversation_key,
+      channel_context: e.channel_context || null,
+      voice: voiceTurn,
       denyTools: toolPolicy.deny,
       attachChannel: e.channel,
       attachTarget: (e.channel_context && (e.channel_context.channelId || e.channel_context.channel_id || e.channel_context.chatId || e.channel_context.target)) || '',

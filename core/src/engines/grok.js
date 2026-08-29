@@ -31,6 +31,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const engines = require('../../../shared/engines');
+const { isDiscordVoice } = require('../../../shared/tool-policy');
 const { composePrompt } = require('../../../shared/prompt-compose');
 const gcTemps = require('../../../shared/gc-temps');
 const { buildImageGenClassifyPrompt, parseImageGenVerdict, hasStillThisTurn, pictureIntentClassifyText, shouldClassifyPictureIntent } = require('../../../shared/image-gen-ask');
@@ -116,7 +117,9 @@ function isOwnerFromEmail(opts) {
 //   Web (assistant-web, assistant-native, eve-assistant-web, eve-assistant-native)
 //   is always high AFTER one-shot/explicit. No +h/+xh, no word picker.
 //   Email (`email`) and MCP (`mcp`) force xhigh always (a chatty body
-//   with no code words is still xhigh). Discord keeps the three-tier picker
+//   with no code words is still xhigh). Discord VOICE (`discord-voice:` /
+//   channel_context.voice) is always low — lookup/code words do not raise
+//   it. Discord TEXT keeps the three-tier picker
 //   (+h/+xh/word/git). Do not inherit last effort. Do not use a generic
 //   XHIGH_CHANNELS list. No spawn kill timer. No CLI turn cap. Do not apply
 //   Claude maxTurns or ASMLTR_MAX_THINKING_TOKENS here.
@@ -236,7 +239,9 @@ function xhighReason(prompt) {
 }
 
 /** After classifyEffort: picture-request verdict may raise Discord/telegram to xhigh. Web/email/mcp keep their effort. */
-function raiseForImageGen(classified, { imageGen, channel } = {}) {
+function raiseForImageGen(classified, opts = {}) {
+  const imageGen = opts.imageGen;
+  const channel = opts.channel;
   const out = {
     effort: classified && classified.effort,
     reason: classified && classified.reason,
@@ -244,6 +249,7 @@ function raiseForImageGen(classified, { imageGen, channel } = {}) {
   };
   if (!imageGen) return out;
   if (isWebChannel(channel) || isEmailChannel(channel) || isMcpChannel(channel)) return out;
+  if (isDiscordVoice(opts)) return out;
   if (out.effort !== 'xhigh') {
     out.effort = 'xhigh';
     out.reason = 'image-gen';
@@ -320,6 +326,8 @@ function classifyEffort(opts) {
   // drop a mailbox turn to medium. Server must pass opts.channel or this is a no-op.
   if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
   if (isMcpChannel(opts.channel)) return { effort: 'xhigh', reason: 'mcp' };
+  // Voice turns stay low even if the utterance has lookup/code words.
+  if (isDiscordVoice(opts)) return { effort: 'low', reason: 'discord-voice' };
   const oneshotNext = normalizeEffort(opts.nextEffort);
   if (oneshotNext) return { effort: oneshotNext, reason: 'oneshot' };
   const oneshotExplicit = normalizeEffort(opts.effort);
@@ -532,6 +540,22 @@ function buildArgs(opts) {
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
   const disallowed = [];
+  if (opts.denyAll) {
+    // Empty allow-list: grok only keeps listed built-ins. `_none` matches nothing.
+    args.push('--tools', '_none');
+    args.push('--disable-web-search');
+    args.push('--no-subagents');
+    disallowed.push(
+      'web_search', 'web_fetch', 'run_terminal_cmd', 'bash', 'shell',
+      'search_replace', 'read_file', 'grep', 'list_dir', 'todo_write', 'task',
+      'image_gen', 'image_edit', 'image_to_video', 'reference_to_video', 'Agent',
+    );
+    args.push('--deny', 'Bash');
+    args.push('--deny', 'Edit');
+    args.push('--deny', 'Write');
+    args.push('--deny', 'web_search');
+    args.push('--deny', 'web_fetch');
+  }
   if (opts.denyShell) {
     disallowed.push('bash', 'shell', 'run_terminal_cmd');
     args.push('--deny', 'Bash');
@@ -762,20 +786,22 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools, attachChannel, attachTarget, attachGuild, attachSender, images, mediaFiles }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools, attachChannel, attachTarget, attachGuild, attachSender, images, mediaFiles, channel_context, voice }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
-  // Do not consume ~/.asmltr/next-effort on email/mcp — those channels are always xhigh.
-  const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel)) ? null : takeNextEffort(conversationKey);
-  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender };
+  const voiceTurn = isDiscordVoice({ channel, conversationKey, channel_context, voice });
+  // Do not consume ~/.asmltr/next-effort on email/mcp/voice — those channels force their effort.
+  const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel) || voiceTurn) ? null : takeNextEffort(conversationKey);
+  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, conversationKey, channel_context, voice };
   const { denyToolsEnv } = require('../../../shared/tool-policy');
   const deny = denyTools || {};
+  const denyAll = !!deny.all || voiceTurn;
   let classified = classifyEffort(effortOpts);
   const scored = scoringPrompt(effortOpts);
   let imageGen = false;
   let classifyUsage = null;
-  const skipImageClassify = !!deny.image || isEmailChannel(channel) || isMcpChannel(channel) || imageGenClassifyOff();
+  const skipImageClassify = !!deny.image || denyAll || isEmailChannel(channel) || isMcpChannel(channel) || voiceTurn || imageGenClassifyOff();
   const photoAttached = hasStillThisTurn({ images, mediaFiles, text: scored });
   const classifyText = pictureIntentClassifyText(scored, { photoAttached });
   if (!skipImageClassify && shouldClassifyPictureIntent(scored, { photoAttached })) {
@@ -793,13 +819,13 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
         imageGen = parseImageGenVerdict(r.text);
       }
     } catch (_) { imageGen = false; }
-    classified = raiseForImageGen(classified, { imageGen, channel });
+    classified = raiseForImageGen(classified, { imageGen, channel, conversationKey, channel_context, voice });
   }
   const effort = classified.effort;
   recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
   try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + (imageGen ? ' imageGen' : '') + ')\n'); } catch (_) {}
   if (onEvent) { try { onEvent({ type: 'effort', effort, imageGen, classifyUsage }); } catch (_) {} }
-  const denyEnv = denyToolsEnv(deny);
+  const denyEnv = denyToolsEnv(denyAll ? Object.assign({}, deny, { all: true }) : deny);
   const extra = { ASMLTR_INSIDE_TURN: '1' };
   if (conversationKey) extra.ASMLTR_TURN_KEY = String(conversationKey);
   if (denyEnv) extra.ASMLTR_DENY_TOOLS = denyEnv;
@@ -814,7 +840,9 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const args = buildArgs({
     prompt, systemPrompt, resume, cwd, model, sessionId, effortPrompt, channel,
     senderId, owner, bypass_moderation, user_key, sender,
-    denyShell: !!deny.shell, denyWrite: !!deny.write, denyVideo: !!deny.video, denyImage: !!deny.image,
+    conversationKey, channel_context, voice,
+    denyAll,
+    denyShell: denyAll || !!deny.shell, denyWrite: denyAll || !!deny.write, denyVideo: denyAll || !!deny.video, denyImage: denyAll || !!deny.image,
     images, mediaFiles,
     // If we raised for a picture request, pin --effort so buildArgs does not re-pick medium.
     nextEffort: classified.reason === 'image-gen' ? undefined : nextEffort,
@@ -923,7 +951,7 @@ module.exports = {
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
-  classifyEffort, chooseEffort, effortForTurn, raiseForImageGen,
+  classifyEffort, chooseEffort, effortForTurn, raiseForImageGen, isDiscordVoice,
   canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet, commitAndPushSamePost,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };
