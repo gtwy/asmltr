@@ -202,26 +202,28 @@ function denyToolsEnv(deny) {
 
 function parseDenyEnv(raw) {
   const set = new Set(String(raw || '').split(',').map((x) => x.trim()).filter(Boolean));
+  const all = set.has('all');
   return {
-    shell: set.has('shell'),
-    streams: set.has('streams'),
-    send: set.has('send'),
-    silo: set.has('silo'),
-    write: set.has('write'),
-    siloWrite: set.has('siloWrite'),
-    video: set.has('video'),
-    image: set.has('image'),
-    code: set.has('code'),
-    attach: set.has('attach'),
-    uploads: set.has('uploads'),
-    guildPost: set.has('guildPost'),
+    all,
+    shell: all || set.has('shell'),
+    streams: all || set.has('streams'),
+    send: all || set.has('send'),
+    silo: all || set.has('silo'),
+    write: all || set.has('write'),
+    siloWrite: all || set.has('siloWrite'),
+    video: all || set.has('video'),
+    image: all || set.has('image'),
+    code: all || set.has('code'),
+    attach: all || set.has('attach'),
+    uploads: all || set.has('uploads'),
+    guildPost: all || set.has('guildPost'),
   };
 }
 
 function exitIfDenied(kind) {
   const d = parseDenyEnv(process.env.ASMLTR_DENY_TOOLS);
   const mapped = kind === 'announce' ? 'send' : kind;
-  if (d[mapped] || d[kind]) {
+  if (d.all || d[mapped] || d[kind]) {
     console.error('denied: ' + mapped);
     process.exit(2);
   }

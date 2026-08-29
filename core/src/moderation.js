@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { isDiscordVoice } = require('../../shared/tool-policy');
 const { execFile } = require('child_process');
 let OpenAI = null;
 function loadOpenAI() { if (!OpenAI) OpenAI = require('openai'); return OpenAI; }
@@ -270,8 +271,9 @@ async function logModerationEvent(event) {
  * Text: bypass_moderation still skips the network; everyone else is fail-closed.
  */
 function shouldSkipModerationNetwork(resolved, meta = {}) {
-  if (meta && meta.voice) return true;
   if (resolved && resolved.bypass_moderation) return true;
+  // Spoken Discord turns skip gpt-5-nano (all speakers, not owner-only).
+  if (meta && (meta.voice === true || isDiscordVoice(meta))) return true;
   return false;
 }
 
@@ -284,7 +286,7 @@ function shouldSkipModerationNetwork(resolved, meta = {}) {
  */
 async function moderate(userMessage, resolved, meta = {}) {
   if (shouldSkipModerationNetwork(resolved, meta)) {
-    return { allowed: true, bypassed: true, riskLevel: 0 };
+    return { allowed: true, bypassed: true, skipped: true, riskLevel: 0 };
   }
 
   const isStrict = resolved.strict_mode === true;

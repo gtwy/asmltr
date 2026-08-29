@@ -346,10 +346,12 @@ async function handle(envelope, opts = {}) {
   // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
   const pRel = trust.buildRelationshipPrompt(resolved, e) || '';
   const pExtra = e.system_prompt_extra || ''; // connector-supplied per-turn context (e.g. Discord)
+  const voiceTurn = isDiscordVoice(e);
   const toolPolicy = policyFor(e, resolved);
   let pToolbelt = '';                          // STABLE: asmltr toolbelt / silo / vault / attachments awareness
   let pUploadsInstr = '', pUploadsList = '', pAnnounce = ''; // uploads-instr = STABLE; uploads-list + announce = VOLATILE
-  if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
+  // Voice handleStream: do not load toolbelt (or advertise asmltr CLI / MCP). deny.all is the core flag.
+  if (!voiceTurn && process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
     const chTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || '<this channel id>';
     pToolbelt = buildToolbeltPrompt({
       deny: toolPolicy.deny,
@@ -365,7 +367,7 @@ async function handle(envelope, opts = {}) {
   // Shared upload store; the in-prompt list is THIS conversation only so a photo ID in
   // one Discord channel does not grab last night's still from another room. Other rooms
   // stay available on purpose via `asmltr uploads`. Trust-gated: owner sessions only.
-  if (resolved.bypass_moderation) {
+  if (!voiceTurn && resolved.bypass_moderation) {
     pUploadsInstr = 'FILE UPLOADS: every file a user sends on any channel (Telegram, Discord, …) is saved to ONE shared area. ' +
       'The list below is THIS conversation only — do not treat a file from another Discord channel or app as the picture they just asked about. ' +
       'First look at recent context in THIS conversation (this session / last few messages). That is normal. If nothing obvious is there and this turn has no attached still, do not hunt this list or another room. Ask: "Did you forget to attach the media, or could you be more specific about what you want me to look at?" ' +
@@ -402,7 +404,6 @@ async function handle(envelope, opts = {}) {
     extra: pExtra, toolbelt: pToolbelt, uploadsInstr: pUploadsInstr, uploadsList: pUploadsList, announce: pAnnounce,
   });
 
-  const voiceTurn = isDiscordVoice(e);
   const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel, voice: voiceTurn, conversation_key: e.conversation_key, channel_context: e.channel_context });
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',

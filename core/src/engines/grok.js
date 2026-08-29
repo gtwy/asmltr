@@ -540,11 +540,14 @@ function buildArgs(opts) {
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
   const disallowed = [];
-  if (opts.denyAll) {
-    // Empty allow-list: grok only keeps listed built-ins. `_none` matches nothing.
-    args.push('--tools', '_none');
+  // Core flag: denyAll (policyFor deny.all / voice envelope) empties tools BEFORE spawn.
+  const denyAll = !!opts.denyAll || isDiscordVoice(opts);
+  if (denyAll) {
+    // Empty allow-list = tools:[]. grok only keeps listed built-ins.
+    args.push('--tools', '');
     args.push('--disable-web-search');
     args.push('--no-subagents');
+    args.push('--deny', 'MCPTool');
     disallowed.push(
       'web_search', 'web_fetch', 'run_terminal_cmd', 'bash', 'shell',
       'search_replace', 'read_file', 'grep', 'list_dir', 'todo_write', 'task',
@@ -787,10 +790,11 @@ function newState(sessionId) {
 let _mcpSynced = false;
 
 async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools, attachChannel, attachTarget, attachGuild, attachSender, images, mediaFiles, channel_context, voice }) {
-  if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
+  const voiceTurn = isDiscordVoice({ channel, conversationKey, channel_context, voice });
+  // Do not provision MCP servers on a spoken turn.
+  if (!_mcpSynced && !voiceTurn) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
-  const voiceTurn = isDiscordVoice({ channel, conversationKey, channel_context, voice });
   // Do not consume ~/.asmltr/next-effort on email/mcp/voice — those channels force their effort.
   const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel) || voiceTurn) ? null : takeNextEffort(conversationKey);
   const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, conversationKey, channel_context, voice };
