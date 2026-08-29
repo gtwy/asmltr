@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const {
-  KEY_NAME, MODEL, WS_URL, VOICE,
+  KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
   buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
   fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, secretValue,
 } = require('../shared/speech/converse-grok');
@@ -40,11 +40,19 @@ test('session.update: ara, tools=[], server_vad, reasoning none, PCM 24k, grok-v
   assert.equal(u.session.voice, 'ara');
   assert.notEqual(u.session.voice, 'eve');
   assert.deepEqual(u.session.tools, []);
-  assert.deepEqual(u.session.turn_detection, { type: 'server_vad' });
+  assert.deepEqual(u.session.turn_detection, {
+    type: 'server_vad', threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false,
+  });
+  assert.equal(u.session.turn_detection.threshold, 0.85);
+  assert.equal(u.session.turn_detection.interrupt_response, false);
   assert.deepEqual(u.session.reasoning, { effort: 'none' });
   assert.equal(u.session.audio.input.format.type, 'audio/pcm');
   assert.equal(u.session.audio.input.format.rate, 24000);
   assert.equal(u.session.audio.output.format.rate, 24000);
+  assert.ok(u.session.audio.input.transcription.keyterms.includes('Ivy'));
+  assert.ok(u.session.audio.input.transcription.keyterms.includes('ivy'));
+  assert.ok(u.session.audio.input.transcription.keyterms.includes('IV'));
+  assert.deepEqual(KEYTERMS.slice().sort(), ['IV', 'Ivy', 'ivy'].sort());
   assert.equal(u.session.instructions, 'You are Ivy.');
 });
 
@@ -109,6 +117,8 @@ test('source never reads process.env.XAI_API_KEY or puts the key on a spawn', ()
   assert.match(src, /wss:\/\/api\.x\.ai\/v1\/realtime\?model=/);
   assert.match(src, /tools:\s*\[\]/);
   assert.match(src, /server_vad/);
+  assert.match(src, /threshold:\s*0\.85/);
+  assert.match(src, /interrupt_response:\s*false/);
   assert.match(src, /effort:\s*'none'/);
   assert.match(src, /const VOICE = 'ara'/);
   assert.equal(src.includes('DODLEQ'), false);

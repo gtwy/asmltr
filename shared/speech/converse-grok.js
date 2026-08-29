@@ -7,7 +7,7 @@
  *
  * Locked: session.voice = "ara" (never eve, never an ElevenLabs voice_id).
  *         session.tools = []  (no web_search, no MCP, no functions).
- *         turn_detection = { type: "server_vad" }
+ *         turn_detection = { type: "server_vad", threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false }
  *         reasoning.effort = "none"
  *         PCM 24 kHz mono s16le both ways.
  *
@@ -21,6 +21,7 @@ const MODEL = 'grok-voice-think-fast-2.0';
 const WS_URL = 'wss://api.x.ai/v1/realtime?model=' + MODEL;
 const VOICE = 'ara';
 const VOICES = Object.freeze(['ara', 'eve', 'leo', 'rex', 'sal']);
+const KEYTERMS = Object.freeze(['Ivy', 'ivy', 'IV']); // STT bias; IV is 2 chars (API max 50)
 
 function loadWebSocket(opts) {
   if (opts && typeof opts.WebSocket === 'function') return opts.WebSocket;
@@ -45,10 +46,13 @@ function buildSessionUpdate(opts) {
   const session = {
     voice: VOICE,
     tools: [],
-    turn_detection: { type: 'server_vad' },
+    turn_detection: { type: 'server_vad', threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false },
     reasoning: { effort: 'none' },
     audio: {
-      input: { format: { type: 'audio/pcm', rate: 24000 } },
+      input: {
+        format: { type: 'audio/pcm', rate: 24000 },
+        transcription: { keyterms: KEYTERMS.slice() },
+      },
       output: { format: { type: 'audio/pcm', rate: 24000 } },
     },
   };
@@ -241,7 +245,7 @@ function openSession(handlers, opts) {
 }
 
 module.exports = {
-  KEY_NAME, MODEL, WS_URL, VOICE,
+  KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
   secretValue, buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
   fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, decodeAudioDelta,
 };

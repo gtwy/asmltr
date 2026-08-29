@@ -27,7 +27,17 @@ const dronePlayers = new Map(); // guildId -> looping "working" drone player
 // { cancelled:bool, player:AudioPlayer|null }. speak() no-ops once cancelled, so queued sentences after a
 // barge-in never play; stopSpeech() also stops the sentence playing right now.
 const speech = new Map(); // guildId -> { cancelled, player }
-const pcmOut = new Map(); // guildId -> { pcm, encoder, player } converse PCM playback
+const pcmOut = new Map(); // guildId -> { pcm, encoder, player, acc, queued, primed, conn } converse PCM playback
+const OPUS_FRAME_BYTES = 960 * 2 * 2; // 3840: 20ms @ 48k stereo s16
+const PCM_PREBUFFER_FRAMES = 6;       // ~120ms before player.play / subscribe
+
+/** Split accumulated 48k stereo s16le into complete opus frames; leftover < 3840 is held. */
+function flushPcm48Frames(acc) {
+  const src = Buffer.isBuffer(acc) ? acc : Buffer.from(acc || []);
+  const n = src.length - (src.length % OPUS_FRAME_BYTES);
+  if (n <= 0) return { frames: Buffer.alloc(0), rest: src };
+  return { frames: Buffer.from(src.subarray(0, n)), rest: Buffer.from(src.subarray(n)) };
+}
 const converseSubs = new Map(); // '<guildId>:<userId>' -> { subscribed, name }
 
 async function joinChannel(voiceChannel) {
@@ -177,7 +187,7 @@ function closeConverseSubs(guildId) {
 // onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
 // realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
 // converse = true → skip Flux; relay last-speaker PCM via onPcm24 (Ivy Live).
-function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, realtimeModel, realtimeLive, realtimeProvider, converse, allowPcm, onPcm24, vad = {}, log = () => {} }) {
+function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onBargeEnd, onPartial, realtime, realtimeModel, realtimeLive, realtimeProvider, converse, allowPcm, onPcm24, vad = {}, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;
   const { EndBehaviorType } = lib();
@@ -223,6 +233,12 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
       } catch (e) { log(`stt failed: ${e.message}`); }
     });
   });
+  if (onBargeEnd) {
+    receiver.speaking.on('end', (userId) => {
+      if (!listening.has(guildId)) return;
+      try { onBargeEnd(userId); } catch (_) {}
+    });
+  }
   return true;
 }
 
@@ -234,8 +250,8 @@ function isSpeaking(guildId) { const s = speech.get(guildId); return !!(s && !s.
 function stopSpeech(guildId) {
   const s = speech.get(guildId);
   if (s) { s.cancelled = true; try { s.player && s.player.stop(true); } catch (_) {} }
+  endPcmPlayback(guildId, { hard: true });
   speech.delete(guildId);
-  endPcmPlayback(guildId);
 }
 // Normal end of a reply (all sentences spoken) — clear the session without cancelling.
 function endSpeech(guildId) { speech.delete(guildId); }
@@ -262,21 +278,39 @@ async function speak(guildId, mp3Buffer) {
   return player;
 }
 
-function stopListening(guildId) { listening.delete(guildId); closeRealtime(guildId); closeConverseSubs(guildId); endPcmPlayback(guildId); }
+function stopListening(guildId) { listening.delete(guildId); closeRealtime(guildId); closeConverseSubs(guildId); endPcmPlayback(guildId, { hard: true }); }
 
-function endPcmPlayback(guildId) {
+function endPcmPlayback(guildId, { hard } = {}) {
   const e = pcmOut.get(guildId);
   if (!e) return;
-  try { e.pcm.end(); } catch (_) {}
-  try { e.encoder.destroy(); } catch (_) {}
-  try { e.player.stop(true); } catch (_) {}
   pcmOut.delete(guildId);
+  const forceStop = !!hard;
+  try {
+    let extra = e.acc || Buffer.alloc(0);
+    e.acc = Buffer.alloc(0);
+    if (extra.length) {
+      const pad = (OPUS_FRAME_BYTES - (extra.length % OPUS_FRAME_BYTES)) % OPUS_FRAME_BYTES;
+      if (pad) extra = Buffer.concat([extra, Buffer.alloc(pad)]);
+      e.queued = Buffer.concat([e.queued || Buffer.alloc(0), extra]);
+    }
+    if (!forceStop && !e.primed && e.queued && e.queued.length) primePcmPlayback(e);
+    else if (e.primed && e.pcm && e.queued && e.queued.length) {
+      try { e.pcm.write(e.queued); } catch (_) {}
+      e.queued = Buffer.alloc(0);
+    }
+    if (e.pcm) { try { e.pcm.end(); } catch (_) {} }
+    if (forceStop) {
+      try { e.encoder && e.encoder.destroy(); } catch (_) {}
+      try { e.player && e.player.stop(true); } catch (_) {}
+    }
+  } catch (_) {
+    try { e.encoder && e.encoder.destroy(); } catch (_) {}
+    try { e.player && e.player.stop(true); } catch (_) {}
+  }
 }
 
-function startPcmPlayback(guildId) {
-  const conn = connections.get(guildId);
-  if (!conn) return null;
-  endPcmPlayback(guildId);
+function primePcmPlayback(e) {
+  if (!e || e.primed || !e.conn) return;
   const { PassThrough } = require('stream');
   const prism = require('prism-media');
   const { createAudioPlayer, createAudioResource, StreamType, NoSubscriberBehavior } = lib();
@@ -284,13 +318,36 @@ function startPcmPlayback(guildId) {
   const encoder = new prism.opus.Encoder({ frameSize: 960, channels: 2, rate: 48000 });
   pcm.pipe(encoder);
   const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+  if (e.queued && e.queued.length) {
+    pcm.write(e.queued);
+    e.queued = Buffer.alloc(0);
+  }
   player.play(createAudioResource(encoder, { inputType: StreamType.Opus }));
-  conn.subscribe(player);
-  if (!speech.get(guildId)) startSpeech(guildId);
-  const s = speech.get(guildId);
+  e.conn.subscribe(player);
+  const s = speech.get(e.guildId);
   if (s) s.player = player;
-  pcmOut.set(guildId, { pcm, encoder, player });
-  return player;
+  e.pcm = pcm;
+  e.encoder = encoder;
+  e.player = player;
+  e.primed = true;
+}
+
+function startPcmPlayback(guildId) {
+  const conn = connections.get(guildId);
+  if (!conn) return null;
+  endPcmPlayback(guildId, { hard: true });
+  if (!speech.get(guildId)) startSpeech(guildId);
+  pcmOut.set(guildId, {
+    guildId,
+    conn,
+    acc: Buffer.alloc(0),
+    queued: Buffer.alloc(0),
+    primed: false,
+    pcm: null,
+    encoder: null,
+    player: null,
+  });
+  return null;
 }
 
 function pushPcm24Play(guildId, buf) {
@@ -299,7 +356,18 @@ function pushPcm24Play(guildId, buf) {
   if (!pcmOut.get(guildId)) startPcmPlayback(guildId);
   const e = pcmOut.get(guildId);
   if (!e || !buf || !buf.length) return;
-  try { e.pcm.write(converseGrok.pcm24MonoToPcm48Stereo(buf)); } catch (_) {}
+  try {
+    const converted = converseGrok.pcm24MonoToPcm48Stereo(buf);
+    const { frames, rest } = flushPcm48Frames(Buffer.concat([e.acc, converted]));
+    e.acc = rest;
+    if (!frames.length) return;
+    if (!e.primed) {
+      e.queued = Buffer.concat([e.queued, frames]);
+      if (e.queued.length >= PCM_PREBUFFER_FRAMES * OPUS_FRAME_BYTES) primePcmPlayback(e);
+      return;
+    }
+    if (e.pcm) e.pcm.write(frames);
+  } catch (_) {}
 }
 
 // Soft looping "I'm working on it" drone — played while a turn is being generated, so the
@@ -346,4 +414,5 @@ module.exports = {
   startListening, stopListening, startDrone, stopDrone,
   startSpeech, stopSpeech, endSpeech, isSpeaking,
   startPcmPlayback, pushPcm24Play, endPcmPlayback,
+  flushPcm48Frames, OPUS_FRAME_BYTES, PCM_PREBUFFER_FRAMES,
 };

@@ -8,6 +8,7 @@ const {
   resolveVoiceFollowupMs,
   shouldAcceptFollowUp,
   armFollowUp,
+  lastSpeakerId,
 } = require('../connectors/types/discord/voice-followup');
 
 test('resolveVoiceFollowupMs: missing/0 → 25s; -1/false → strict', () => {
@@ -63,4 +64,29 @@ test('index.js arms after speech with last-speaker userId; 0-or-unset is 25s', (
   assert.match(handle, /userId:\s*speakerId/);
   assert.match(handle, /firstAudio/);
   assert.equal(/voiceActive\.set\(guildId,\s*Date\.now\(\)/.test(handle), false);
+});
+
+test('lastSpeakerId: live converse still returns userId after 25s; without converse, 25s expires', () => {
+  const now = 1_000_000;
+  const window = { expires: now + 25_000, userId: 'james' };
+  assert.equal(lastSpeakerId({ window, now: now + 25_000, converseBound: true }), 'james');
+  assert.equal(lastSpeakerId({ window, now: now + 90_000, converseBound: true }), 'james');
+  assert.equal(lastSpeakerId({ window, now: now + 24_999, converseBound: false }), 'james');
+  assert.equal(lastSpeakerId({ window, now: now + 25_000, converseBound: false }), '');
+  assert.equal(lastSpeakerId({ window: null, now, converseBound: true }), '');
+  assert.equal(lastSpeakerId({ window: { expires: now + 90_000, userId: '' }, now, converseBound: true }), '');
+});
+
+test('shouldAcceptFollowUp: converseBound holds last-speaker past 25s; other users still need the name', () => {
+  const now = 1_000_000;
+  const window = { expires: now + 25_000, userId: 'james' };
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'james', now: now + 90_000, addressed: false, converseBound: true }), true);
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'other', now: now + 90_000, addressed: false, converseBound: true }), false);
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'james', now: now + 25_000, addressed: false, converseBound: false }), false);
+});
+
+test('index.js lastSpeakerId holds while converseSessions is bound', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(src, /lastSpeakerFromWindow/);
+  assert.match(src, /converseBound:\s*converseSessions\.has\(guildId\)/);
 });

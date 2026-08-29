@@ -20,13 +20,21 @@ function norm(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').tri
 // Regex-escape a raw name so it can be embedded in a pattern.
 function esc(s) { return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-/**
- * Does `text` address the assistant by `wakeWord`? Conservative on purpose (avoid interrupting):
- * the name has to LEAD, be greeted ("hey <name>"), be set off by punctuation, or TRAIL the sentence.
- */
-function addresses(text, wakeWord) {
-  const t = norm(text);
-  const w = esc(norm(wakeWord));
+// STT often hears "Ivy" as "IV" / "iv". Same person, word-boundary only (not "divine").
+const IVY_ALIASES = Object.freeze(['ivy', 'iv']);
+
+function wakeTerms(wakeWord) {
+  const primary = norm(wakeWord);
+  if (!primary) return [];
+  const terms = [primary];
+  if (primary === 'ivy') {
+    for (const a of IVY_ALIASES) if (!terms.includes(a)) terms.push(a);
+  }
+  return terms;
+}
+
+function addressesOne(t, word) {
+  const w = esc(word);
   if (!t || !w) return false;
   return new RegExp(`^(hey |hi |ok |okay |yo |so |well |um+ |uh+ |,|\\s)*${w}\\b`).test(t) // leads: "<name>, do X"
     || new RegExp(`\\b(hey|ok|okay|hi|yo) ${w}\\b`).test(t)                                 // "hey <name>" anywhere
@@ -34,15 +42,26 @@ function addresses(text, wakeWord) {
     || new RegExp(`\\b${w}\\b[\\s.?!,]*$`).test(t);                                         // trails: "do X, <name>"
 }
 
+/**
+ * Does `text` address the assistant by `wakeWord`? Conservative on purpose (avoid interrupting):
+ * the name has to LEAD, be greeted ("hey <name>"), be set off by punctuation, or TRAIL the sentence.
+ * When the name is Ivy, also accept IV / iv (same person; word-boundary so "divine" does not match).
+ */
+function addresses(text, wakeWord) {
+  const t = norm(text);
+  if (!t) return false;
+  return wakeTerms(wakeWord).some((w) => addressesOne(t, w));
+}
+
 // Is the utterance essentially JUST the name (name + greeting/filler/punctuation, no real request)?
 // A bare lone name is the highest-risk false trigger, so it gets the strictest confidence gate.
 function isBareName(text, wakeWord) {
-  const w = esc(norm(wakeWord));
-  const stripped = norm(text)
-    .replace(new RegExp(`\\b(hey|hi|ok|okay|yo|so|well|um+|uh+)\\b`, 'g'), ' ')
-    .replace(new RegExp(`\\b${w}\\b`, 'g'), ' ')
-    .replace(/[\p{P}\p{S}]/gu, ' ')
-    .replace(/\s+/g, ' ').trim();
+  let stripped = norm(text)
+    .replace(new RegExp(`\\b(hey|hi|ok|okay|yo|so|well|um+|uh+)\\b`, 'g'), ' ');
+  for (const w of wakeTerms(wakeWord)) {
+    stripped = stripped.replace(new RegExp(`\\b${esc(w)}\\b`, 'g'), ' ');
+  }
+  stripped = stripped.replace(/[\p{P}\p{S}]/gu, ' ').replace(/\s+/g, ' ').trim();
   return stripped.length === 0;
 }
 
@@ -87,4 +106,4 @@ function evaluate({ text, wakeWord, sensitivity = 50, confidence } = {}) {
   return { ...base, addressed: true, bare, risky: true, threshold, reason: 'ok-risky-confident' };
 }
 
-module.exports = { addresses, isBareName, wordCount, minConfidenceForRisky, evaluate, norm };
+module.exports = { addresses, isBareName, wordCount, minConfidenceForRisky, evaluate, norm, wakeTerms, IVY_ALIASES };

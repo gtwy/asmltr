@@ -58,3 +58,76 @@ test('grace starts at first spoken audio, not wake; barge-in stays enabled', () 
   assert.match(first, /voiceReplyStart\.set/);
   assert.equal(/voice_barge_in\s*=\s*false/.test(src), false);
 });
+
+test('short overlap 400ms does not barge', () => {
+  assert.equal(shouldBargeIn({
+    busy: true,
+    speaking: true,
+    replyStartedAt: 10_000,
+    now: 10_000 + GRACE,
+    graceMs: GRACE,
+    userSpeechMs: 400,
+    minSpeechMs: 1500,
+  }), false);
+});
+
+test('sustained 1500ms overlap after grace does barge', () => {
+  assert.equal(shouldBargeIn({
+    busy: true,
+    speaking: true,
+    replyStartedAt: 10_000,
+    now: 10_000 + GRACE,
+    graceMs: GRACE,
+    userSpeechMs: 1500,
+    minSpeechMs: 1500,
+  }), true);
+});
+
+test('sustained overlap still respects 1200ms grace', () => {
+  assert.equal(shouldBargeIn({
+    busy: true,
+    speaking: true,
+    replyStartedAt: 10_000,
+    now: 10_000 + GRACE - 1,
+    graceMs: GRACE,
+    userSpeechMs: 1500,
+    minSpeechMs: 1500,
+  }), false);
+});
+
+test('Live onSpeechStart does not immediately stopVoiceReply', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const i = src.indexOf('onSpeechStart:');
+  assert.ok(i >= 0);
+  const body = src.slice(i, src.indexOf('onAssistantText:', i));
+  assert.equal(/stopVoiceReply\s*\(/.test(body), false);
+  assert.match(body, /armVoiceOverlap/);
+  assert.match(body, /onSpeechStop:/);
+  assert.match(body, /clearVoiceOverlap/);
+});
+
+test('flushPcm48Frames holds leftover bytes under 3840', () => {
+  const { flushPcm48Frames, OPUS_FRAME_BYTES } = require('../connectors/types/discord/voice');
+  assert.equal(OPUS_FRAME_BYTES, 3840);
+  const acc = Buffer.alloc(3840 + 100, 7);
+  const { frames, rest } = flushPcm48Frames(acc);
+  assert.equal(frames.length, 3840);
+  assert.equal(rest.length, 100);
+  const tiny = flushPcm48Frames(Buffer.alloc(100));
+  assert.equal(tiny.frames.length, 0);
+  assert.equal(tiny.rest.length, 100);
+  const exact = flushPcm48Frames(Buffer.alloc(3840 * 2));
+  assert.equal(exact.frames.length, 3840 * 2);
+  assert.equal(exact.rest.length, 0);
+});
+
+test('PCM playback writes 3840-byte frames and prebuffers ~120ms (6 frames)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
+  const { OPUS_FRAME_BYTES, PCM_PREBUFFER_FRAMES } = require('../connectors/types/discord/voice');
+  assert.equal(OPUS_FRAME_BYTES, 3840);
+  assert.equal(PCM_PREBUFFER_FRAMES, 6);
+  assert.equal(PCM_PREBUFFER_FRAMES * 20, 120);
+  assert.match(src, /PCM_PREBUFFER_FRAMES = 6/);
+  assert.match(src, /primePcmPlayback/);
+  assert.match(src, /queued\.length >= PCM_PREBUFFER_FRAMES \* OPUS_FRAME_BYTES/);
+});

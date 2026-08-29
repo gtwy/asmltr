@@ -41,7 +41,7 @@ const { splitResponse } = require('../../../shared/discord-split');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
 const { shouldPlayWakeChime } = require('./wake-chime');
-const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp } = require('./voice-followup');
+const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp, lastSpeakerId: lastSpeakerFromWindow } = require('./voice-followup');
 const {
   isTranscriptOff, setTranscriptOff, serializeTranscriptOff, loadTranscriptOff,
   isTranscriptOffCmd, isTranscriptOnCmd, shouldPostLive, shouldUploadLeaveFile,
@@ -893,6 +893,9 @@ ${referentPromptBlock()}`;
   const voiceActive = new Map(); // guildId -> { expires, userId } last-speaker follow-up window
   const voiceReplyStart = new Map(); // guildId -> ts first spoken audio started (barge-in grace window)
   const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after first spoken audio (don't cut off on the asker's own trailing words)
+  const BARGE_MIN_SPEECH_MS = 1500; // must talk through her this long before barge-in cancels
+  const voiceOverlapArm = new Map();   // guildId -> overlap start ts
+  const voiceOverlapTimer = new Map(); // guildId -> pending barge check
   const voiceMuted = new Set();  // guildIds where Eve is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
   const voiceGen = new Map();    // guildId -> reply generation. stopVoiceReply bumps it; the in-flight reply checks it and bails, so a stopped turn never speaks even if the LLM finishes after the abort.
   // missing/0 = 25s same-speaker follow-up after she talks. -1/false = STRICT (name every turn).
@@ -906,7 +909,60 @@ ${referentPromptBlock()}`;
   const pcmRing = new Map(); // `${guildId}:${userId}` -> Buffer[] last ~4s
   const PCM_RING_BYTES = 24000 * 2 * 4;
 
+  function clearVoiceOverlap(guildId) {
+    voiceOverlapArm.delete(guildId);
+    const t = voiceOverlapTimer.get(guildId);
+    if (t) clearTimeout(t);
+    voiceOverlapTimer.delete(guildId);
+  }
+
+  function armVoiceOverlap(guildId, { live } = {}) {
+    if (cfg.voice_barge_in === false) return;
+    if (!voiceOverlapArm.has(guildId)) voiceOverlapArm.set(guildId, Date.now());
+    if (voiceOverlapTimer.has(guildId)) return;
+    const tick = () => {
+      voiceOverlapTimer.delete(guildId);
+      if (!voiceOverlapArm.has(guildId)) return;
+      let v;
+      try { v = require('./voice'); } catch (_) { return; }
+      const now = Date.now();
+      const arm = voiceOverlapArm.get(guildId);
+      if (!shouldBargeIn({
+        busy: voiceBusy.has(guildId),
+        speaking: v.isSpeaking(guildId),
+        replyStartedAt: voiceReplyStart.get(guildId),
+        now,
+        graceMs: BARGE_GRACE_MS,
+        userSpeechMs: now - arm,
+        minSpeechMs: BARGE_MIN_SPEECH_MS,
+      })) {
+        if (!voiceBusy.has(guildId)) return;
+        const started = voiceReplyStart.get(guildId);
+        const needSpeech = BARGE_MIN_SPEECH_MS - (now - arm);
+        const needGrace = started == null ? 80 : BARGE_GRACE_MS - (now - started);
+        const wait = Math.max(needSpeech, needGrace, 0);
+        if (wait > 0) voiceOverlapTimer.set(guildId, setTimeout(tick, wait));
+        return;
+      }
+      ctx.log(live
+        ? '[voice] converse server_vad barge-in'
+        : '[voice] barge-in: user spoke over the reply → cancelling');
+      stopVoiceReply(guildId, { chime: false });
+      if (live) {
+        const conv = converseSessions.get(guildId);
+        if (conv) { try { conv.cancel(); } catch (_) {} }
+      }
+    };
+    const now = Date.now();
+    const arm = voiceOverlapArm.get(guildId);
+    const started = voiceReplyStart.get(guildId);
+    const needSpeech = BARGE_MIN_SPEECH_MS - (now - arm);
+    const needGrace = started == null ? BARGE_MIN_SPEECH_MS : BARGE_GRACE_MS - (now - started);
+    voiceOverlapTimer.set(guildId, setTimeout(tick, Math.max(needSpeech, needGrace, 0)));
+  }
+
   function closeConverse(guildId) {
+    clearVoiceOverlap(guildId);
     const conv = converseSessions.get(guildId);
     converseSessions.delete(guildId);
     converseSpeaker.delete(guildId);
@@ -916,9 +972,11 @@ ${referentPromptBlock()}`;
   }
 
   function lastSpeakerId(guildId) {
-    const w = voiceActive.get(guildId);
-    if (!w || w.expires == null || Number(w.expires) <= Date.now()) return '';
-    return w.userId != null && w.userId !== '' ? String(w.userId) : '';
+    return lastSpeakerFromWindow({
+      window: voiceActive.get(guildId),
+      now: Date.now(),
+      converseBound: converseSessions.has(guildId),
+    });
   }
 
   // Record a line for the end-of-session transcript file (kept even when live posting is off).
@@ -972,7 +1030,7 @@ ${referentPromptBlock()}`;
     try { voice.endPcmPlayback(guildId); } catch (_) {}
     const convStop = converseSessions.get(guildId);
     if (convStop) { try { convStop.cancel(); } catch (_) {} }
-    voiceBusy.delete(guildId); voiceReplyStart.delete(guildId);
+    voiceBusy.delete(guildId); voiceReplyStart.delete(guildId); clearVoiceOverlap(guildId);
     try { await ctx.core.abort(voiceConvKey(guildId)); } catch (_) {}
     setVoiceStatus(null);
     if (chime && wasBusy) { try { await voice.playChime(guildId); } catch (_) {} }
@@ -1027,7 +1085,7 @@ ${referentPromptBlock()}`;
     let voice; try { voice = require('./voice'); } catch (_) { return; }
     const lc = text.toLowerCase();
     const speakerId = meta.userId != null && meta.userId !== '' ? String(meta.userId) : '';
-    const active = shouldAcceptFollowUp({ window: voiceActive.get(guildId), userId: speakerId, now: Date.now(), addressed: false });
+    const active = shouldAcceptFollowUp({ window: voiceActive.get(guildId), userId: speakerId, now: Date.now(), addressed: false, converseBound: converseSessions.has(guildId) });
 
     // SPOKEN STOP (#138) — highest priority, works mid-reply, before the busy latch. "<name>, stop"
     // (addressed + a stop word) or any configured stop phrase → hard-cancel whatever's speaking/generating.
@@ -1173,7 +1231,7 @@ ${referentPromptBlock()}`;
         if (next) voiceActive.set(guildId, next);
       }
     } catch (e) { voice.stopDrone(guildId); ctx.log(`[voice] reply failed: ${e.message}`); if (ch) ch.send(`⚠️ voice reply failed: ${e.message}`).catch(() => {}); }
-    finally { voice.endSpeech(guildId); voiceReplyStart.delete(guildId); voiceBusy.delete(guildId); releaseAbortTarget(originCid, 'voice'); setVoiceStatus(null); } // back to listening/idle
+    finally { voice.endSpeech(guildId); voiceReplyStart.delete(guildId); voiceBusy.delete(guildId); clearVoiceOverlap(guildId); releaseAbortTarget(originCid, 'voice'); setVoiceStatus(null); } // back to listening/idle
   }
 
   // Voice commands: "the assistant, join" (joins the author's voice channel + chimes + listens) / "the assistant, leave".
@@ -1239,8 +1297,10 @@ ${referentPromptBlock()}`;
         if (cfg.voice_barge_in === false) return;
         const v = require('./voice');
         if (!v.isSpeaking(guildId)) return;
-        ctx.log('[voice] converse server_vad barge-in');
-        stopVoiceReply(guildId, { chime: false });
+        armVoiceOverlap(guildId, { live: true });
+      },
+      onSpeechStop: () => {
+        clearVoiceOverlap(guildId);
       },
       onAssistantText: (text) => {
         const ch = voiceText.get(guildId);
@@ -1262,6 +1322,7 @@ ${referentPromptBlock()}`;
         }
         voiceBusy.delete(guildId);
         voiceReplyStart.delete(guildId);
+        clearVoiceOverlap(guildId);
         setVoiceStatus(null);
       },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
@@ -1305,11 +1366,13 @@ ${referentPromptBlock()}`;
         conv.pushPcm24(pcm);
       } : undefined,
       onBargeIn: () => {
-        const gid = guildId;
         if (cfg.voice_barge_in === false) return;
-        if (!shouldBargeIn({ busy: voiceBusy.has(gid), speaking: voice.isSpeaking(gid), replyStartedAt: voiceReplyStart.get(gid), now: Date.now(), graceMs: BARGE_GRACE_MS })) return;
-        ctx.log('[voice] barge-in: user spoke over the reply → cancelling');
-        stopVoiceReply(gid, { chime: false });
+        if (converseSessions.has(guildId)) return; // Live server_vad owns barge-in
+        armVoiceOverlap(guildId);
+      },
+      onBargeEnd: () => {
+        if (converseSessions.has(guildId)) return;
+        clearVoiceOverlap(guildId);
       },
       log: (m) => ctx.log(`[voice] ${m}`),
     });

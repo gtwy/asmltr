@@ -50,3 +50,15 @@ test('grok CLI launchEnv still strips converse keys (source)', () => {
   assert.match(src, /delete env\.XAI_VOICE_API_KEY/);
   assert.match(src, /delete env\.xai_voice_api_key/);
 });
+
+test('Live name is grab not keepalive: lastSpeakerId converseBound while socket up', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(src, /converseBound:\s*converseSessions\.has\(guildId\)/);
+  assert.match(src, /lastSpeakerFromWindow/);
+  const grok = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
+  assert.match(grok, /keyterms/);
+  assert.match(grok, /'Ivy'/);
+  const wake = fs.readFileSync(path.join(__dirname, '../shared/speech/wake.js'), 'utf8');
+  assert.match(wake, /IVY_ALIASES/);
+  assert.match(wake, /'iv'/);
+});
