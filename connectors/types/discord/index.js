@@ -39,6 +39,7 @@ const { splitResponse } = require('../../../shared/discord-split');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
 const { shouldPlayWakeChime } = require('./wake-chime');
+const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp } = require('./voice-followup');
 const voiceTools = require('./voice-tools');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
@@ -98,7 +99,7 @@ const meta = {
       presence_text: { type: 'string', title: 'Presence/activity text', default: '' },
       elevenlabs_key_name: { type: 'string', title: 'Secret key name for ElevenLabs (voice)', default: 'elevenlabs_api_key' },
       stt_language: { type: 'string', title: 'Voice STT language (ISO code; empty = auto-detect)', default: 'en' },
-      voice_followup_ms: { type: 'integer', title: 'Voice follow-up window (ms) after being addressed, during which follow-ups need no wake word. 0 = STRICT: only respond when directly addressed by name (recommended for meetings).', default: 0 },
+      voice_followup_ms: { type: 'integer', title: 'Voice follow-up window (ms) after she finishes speaking. Same last speaker can continue without the wake word. 0 or unset = 25000. -1 = STRICT (name required every turn).', default: 25000 },
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
       voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
       voice_barge_in: { type: 'boolean', title: 'Voice: barge-in — let someone interrupt a spoken reply by talking over it (off = quieter in noisy/cross-talk meetings)', default: true },
@@ -875,14 +876,13 @@ ${referentPromptBlock()}`;
   }
 
   const voiceBusy = new Set();   // guildIds mid-reply (one spoken reply at a time)
-  const voiceActive = new Map(); // guildId -> expiry ts of the "answering mode" follow-up window
+  const voiceActive = new Map(); // guildId -> { expires, userId } last-speaker follow-up window
   const voiceReplyStart = new Map(); // guildId -> ts first spoken audio started (barge-in grace window)
   const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after first spoken audio (don't cut off on the asker's own trailing words)
   const voiceMuted = new Set();  // guildIds where Eve is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
   const voiceGen = new Map();    // guildId -> reply generation. stopVoiceReply bumps it; the in-flight reply checks it and bails, so a stopped turn never speaks even if the LLM finishes after the abort.
-  // 0 (default) = STRICT: respond ONLY when directly addressed by name, then go passive. A positive
-  // value opens a "keep answering follow-ups without the wake word" window for that many ms.
-  const VOICE_WINDOW_MS = Number.isFinite(Number(cfg.voice_followup_ms)) ? Number(cfg.voice_followup_ms) : 0;
+  // missing/0 = 25s same-speaker follow-up after she talks. -1/false = STRICT (name every turn).
+  const VOICE_WINDOW_MS = resolveVoiceFollowupMs(cfg.voice_followup_ms);
   let voiceDrone = cfg.voice_drone !== false; // ambient "working" drone during a spoken reply (toggleable)
   let voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ lines into the text channel (toggleable)
   const voiceTranscriptFile = cfg.voice_transcript_file !== false; // upload a full transcript .txt on leave
@@ -975,8 +975,9 @@ ${referentPromptBlock()}`;
   }
 
   // Called for EVERY transcribed utterance. Posts the live transcript, then decides if it's for
-  // the assistant — addressed by name OR we're inside an active follow-up window (so follow-ups
-  // need no wake word). A dismissal phrase exits answering mode back to transcription-only.
+  // the assistant — addressed by name OR the SAME last speaker is inside the follow-up window
+  // (so their next line needs no wake word). Other speakers still need the name. A dismissal
+  // phrase exits answering mode back to transcription-only.
   async function handleVoiceUtterance(guildId, name, text, meta = {}) {
     const ch = voiceText.get(guildId);
     logTranscript(guildId, name, text); // always captured for the end-of-session file
@@ -987,7 +988,8 @@ ${referentPromptBlock()}`;
     }
     let voice; try { voice = require('./voice'); } catch (_) { return; }
     const lc = text.toLowerCase();
-    const active = (voiceActive.get(guildId) || 0) > Date.now();
+    const speakerId = meta.userId != null && meta.userId !== '' ? String(meta.userId) : '';
+    const active = shouldAcceptFollowUp({ window: voiceActive.get(guildId), userId: speakerId, now: Date.now(), addressed: false });
 
     // SPOKEN STOP (#138) — highest priority, works mid-reply, before the busy latch. "<name>, stop"
     // (addressed + a stop word) or any configured stop phrase → hard-cancel whatever's speaking/generating.
@@ -1108,7 +1110,11 @@ ${referentPromptBlock()}`;
         logTranscript(guildId, NAME, full.trim());
         if (ch && voicePostTranscript) ch.send(`🔊 **${NAME}:** ${full.trim().slice(0, 1800)}`).catch(() => {});
       }
-      if (VOICE_WINDOW_MS > 0 && live()) voiceActive.set(guildId, Date.now() + VOICE_WINDOW_MS); // open the follow-up window (strict mode: never)
+      // Arm AFTER she actually finishes speaking (await chain = last speak() idle), last-speaker only.
+      if (live() && firstAudio) {
+        const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: speakerId });
+        if (next) voiceActive.set(guildId, next);
+      }
     } catch (e) { voice.stopDrone(guildId); ctx.log(`[voice] reply failed: ${e.message}`); if (ch) ch.send(`⚠️ voice reply failed: ${e.message}`).catch(() => {}); }
     finally { voice.endSpeech(guildId); voiceReplyStart.delete(guildId); voiceBusy.delete(guildId); releaseAbortTarget(originCid, 'voice'); setVoiceStatus(null); } // back to listening/idle
   }
