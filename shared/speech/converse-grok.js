@@ -81,7 +81,7 @@ function buildSessionUpdate(opts) {
   const session = {
     voice: VOICE,
     tools: asRealtimeFunctions(opts && opts.tools),
-    turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false },
+    turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false, create_response: false },
     idle_timeout_ms: 3600000,
     reasoning: { effort: 'none' },
     audio: {
@@ -333,6 +333,7 @@ function openSession(handlers, opts) {
       sendJson(appendPcmEvent(buf));
     },
     cancel() { sendJson({ type: 'response.cancel' }); },
+    commitAudio() { sendJson({ type: 'input_audio_buffer.commit' }); },
     createResponse() {
       sendJson({ type: 'input_audio_buffer.commit' });
       sendJson({ type: 'response.create' });

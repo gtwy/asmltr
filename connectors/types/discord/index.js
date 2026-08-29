@@ -43,7 +43,7 @@ const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
 const { shouldPlayWakeChime } = require('./wake-chime');
 const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp, lastSpeakerId: lastSpeakerFromWindow } = require('./voice-followup');
-const { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote } = require('./live-room');
+const { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote, isGroupAddressee } = require('./live-room');
 const {
   isTranscriptOff, setTranscriptOff, serializeTranscriptOff, loadTranscriptOff,
   isTranscriptOffCmd, isTranscriptOnCmd, shouldPostLive, shouldUploadLeaveFile,
@@ -1465,10 +1465,32 @@ ${referentPromptBlock()}`;
         upsertLiveUserLine(guildId, who, line, final);
         if (final && wasNotForHer(line)) {
           const c = converseSessions.get(guildId);
+          const vMouth = require('./voice');
+          const herMouth = voiceBusy.has(guildId) || !!(vMouth.isMouthPlaying && vMouth.isMouthPlaying(guildId));
           if (c) {
             c._skipNoted = true;
+            c._skipNextCreate = true;
             refreshRoomInstructions(guildId);
-            ctx.log('[voice] skip-noted (not for her); stay open');
+          }
+          if (herMouth) {
+            ctx.log('[voice] stop-while-playing → cancel now');
+            stopVoiceReply(guildId, { chime: false, barge: true });
+            return;
+          }
+          ctx.log('[voice] skip-noted (not for her); stay open');
+        }
+        const cPend = converseSessions.get(guildId);
+        if (final && cPend && cPend._pendingStop) {
+          const humans = countHumansNow(guildId);
+          const named = addressesName(line);
+          const speakerId = (cPend._pendingStop && cPend._pendingStop.userId) || (converseSpeaker.get(guildId) || {}).userId;
+          if (isGroupAddressee({ named, speakerId, lastAnsweredId: cPend._lastAnsweredId, humans })) {
+            cPend._pendingStop = null;
+            cPend._lastAnsweredId = speakerId ? String(speakerId) : cPend._lastAnsweredId;
+            try { cPend.createResponse(); ctx.log('[voice] group addressee → response.create'); } catch (e) { ctx.log('[voice] createResponse: ' + e.message); }
+          } else {
+            cPend._pendingStop = null;
+            ctx.log('[voice] speaking-stop not for her');
           }
         }
       },
@@ -1533,8 +1555,7 @@ ${referentPromptBlock()}`;
         // Phone call: every human in the VC goes to the WS. No last-speaker / wake gate.
         // Mute uplink only while her mouth is actually playing (echo). Not voiceBusy.
         const live = converseSessions.get(guildId);
-        // Echo mute only while she is actually generating audio. After greet, first user PCM must flow.
-        if (voiceBusy.has(guildId)) return;
+        // Keep uplink open while she talks so we hear Stop / hold on. Per-user Discord PCM, not her mix.
         if (!live && vmod.isSpeaking(guildId)) return;
         if (!pcmTurnLogged.has(guildId)) {
           pcmTurnLogged.add(guildId);
@@ -1558,21 +1579,44 @@ ${referentPromptBlock()}`;
         }
         clearVoiceOverlap(guildId);
       },
-      onSpeechEnd: () => {
+      onSpeechEnd: (userId) => {
         const c = converseSessions.get(guildId);
         if (!c || typeof c.createResponse !== 'function') return;
         const humans = countHumansNow(guildId);
         const firstAfterGreet = !!c._awaitFirstUser;
         const vMouth = require('./voice');
         const herMouth = voiceBusy.has(guildId) || !!(vMouth.isMouthPlaying && vMouth.isMouthPlaying(guildId));
-        if (!firstAfterGreet && !shouldForceTurn({ humans, herMouth })) return;
-        c._awaitFirstUser = false;
+        if (herMouth) {
+          ctx.log('[voice] speaking-stop during mouth (barge, no create)');
+          return;
+        }
+        if (c._skipNextCreate) {
+          c._skipNextCreate = false;
+          pcmTurnLogged.delete(guildId);
+          ctx.log('[voice] speaking-stop skipped (stop/hold)');
+          return;
+        }
+        const speakerId = userId || (converseSpeaker.get(guildId) || {}).userId;
+        if (typeof c.commitAudio === 'function') { try { c.commitAudio(); } catch (_) {} }
         pcmTurnLogged.delete(guildId);
         forceTurnAt.set(guildId, Date.now());
-        try {
-          c.createResponse();
-          ctx.log(firstAfterGreet ? '[voice] first-utterance after greet → response.create' : '[voice] speaking-stop → response.create');
-        } catch (e) { ctx.log(`[voice] createResponse: ${e.message}`); }
+        if (firstAfterGreet || shouldForceTurn({ humans, herMouth: false })) {
+          c._awaitFirstUser = false;
+          c._lastAnsweredId = speakerId ? String(speakerId) : c._lastAnsweredId;
+          try {
+            c.createResponse();
+            ctx.log(firstAfterGreet ? '[voice] first-utterance after greet → response.create' : '[voice] 1:1 speaking-stop → response.create');
+          } catch (e) { ctx.log('[voice] createResponse: ' + e.message); }
+          return;
+        }
+        const named = false;
+        if (isGroupAddressee({ named, speakerId, lastAnsweredId: c._lastAnsweredId, humans })) {
+          c._lastAnsweredId = speakerId ? String(speakerId) : c._lastAnsweredId;
+          try { c.createResponse(); ctx.log('[voice] latch speaking-stop → response.create'); } catch (e) { ctx.log('[voice] createResponse: ' + e.message); }
+          return;
+        }
+        c._pendingStop = { userId: speakerId, at: Date.now() };
+        ctx.log('[voice] speaking-stop commit (group, wait addressee)');
       },
       log: (m) => ctx.log(`[voice] ${m}`),
     });
@@ -1701,23 +1745,7 @@ ${referentPromptBlock()}`;
       const newCid = newState.channelId && String(newState.channelId);
       if (oldCid !== ivyChannelId && newCid !== ivyChannelId) return;
       refreshRoomInstructions(guildId);
-      const joined = newCid === ivyChannelId && oldCid !== ivyChannelId;
-      if (!joined) return;
-      const u = (newState.member && newState.member.user) || newState.user;
-      const id = newState.id || (u && u.id);
-      if (id && client.user && String(id) === String(client.user.id)) return;
-      if (u && u.bot) return;
-      const conv = converseSessions.get(guildId);
-      if (!conv || typeof conv.forceMessage !== 'function') return;
-      const mem = newState.member;
-      const name = (mem && (mem.displayName || mem.nickname))
-        || (u && (u.globalName || u.username))
-        || '';
-      const hello = name ? ('hey ' + String(name).split(' ')[0]) : 'hey';
-      try {
-        conv.forceMessage(hello);
-        ctx.log('[voice] join-ack force_message ' + (name || '(unnamed)'));
-      } catch (e) { ctx.log('[voice] join-ack: ' + e.message); }
+      // Room line only when membership changes. No spoken hello on join.
     } catch (_) {}
   });
 

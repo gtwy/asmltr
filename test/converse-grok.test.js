@@ -42,10 +42,11 @@ test('session.update: ara, tools=[], server_vad, reasoning none, PCM 48k, grok-v
   assert.notEqual(u.session.voice, 'eve');
   assert.deepEqual(u.session.tools, []);
   assert.deepEqual(u.session.turn_detection, {
-    type: 'server_vad', threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false,
+    type: 'server_vad', threshold: 0.5, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false, create_response: false,
   });
   assert.equal(u.session.turn_detection.threshold, 0.5);
   assert.equal(u.session.turn_detection.interrupt_response, false);
+  assert.equal(u.session.turn_detection.create_response, false);
   assert.deepEqual(u.session.reasoning, { effort: 'none' });
   assert.equal(u.session.audio.input.format.type, 'audio/pcm');
   assert.equal(u.session.audio.input.format.rate, 48000);

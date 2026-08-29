@@ -24,15 +24,15 @@ function countHumans(channel, selfUserId) {
 }
 
 /**
- * Session instruction suffix. Group and 1:1: she is on the call to talk.
+ * Session instruction suffix. Speak when targeted, not on every pause.
  */
 function roomInstructions(humans) {
   const n = Number(humans);
   const count = Number.isFinite(n) ? n : 0;
   if (count <= 1) {
-    return 'This is a 1:1 voice call. Every utterance is for you. Always answer. No name is required. Err on talking. If they say stop or hold on, skip that bit, stay on the line, and answer the next turn.';
+    return 'This is a 1:1 voice call. Every utterance is for you. Always answer. No name is required. If they say stop or hold on, skip that bit, stay on the line, and answer the next turn.';
   }
-  return 'You are on this group voice call to talk. Every human speaking-stop is a turn for you. Do not wait for your name. Do not default to silence. Err on talking too much. If they say that was not for you, hold on, or stop, skip that bit, stay on the line, and answer the next turn.';
+  return 'This is a group voice call. Speak when you are the target of the comment: named, clearly spoken to, or the same person you just answered continuing. Do not jump in whenever there is a pause. Do not wait to be named every time. Two other people talking to each other: stay out. If they say that was not for you, hold on, or stop, skip that bit, stay on the line, and answer the next turn that is for you.';
 }
 
 /** Spoken skip: that last turn was not for her. Session memory, not mute. */
@@ -48,12 +48,26 @@ function wasNotForHer(text) {
 }
 
 function roomSkipNote() {
-  return 'Someone said to skip that bit (not for you, hold on, or stop). Stay on the call. Answer the next turn. Do not go silent.';
+  return 'Someone said to skip that bit (not for you, hold on, or stop). Stay on the call. Answer the next turn that is for you. Do not go silent.';
 }
 
-/** Discord speaking-stop of a non-bot human must produce a spoken reply. Group same as 1:1. Not while her mouth is playing. */
-function shouldForceTurn({ herMouth } = {}) {
-  return !herMouth;
+/** 1:1: Discord speaking-stop → response.create. Not while her mouth is playing. */
+function shouldForceTurn({ humans, herMouth } = {}) {
+  const n = Number(humans);
+  const count = Number.isFinite(n) ? n : 0;
+  return count <= 1 && !herMouth;
 }
 
-module.exports = { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote };
+/** Group: respond only if named, latched last-answered speaker, or 1:1. */
+function isGroupAddressee({ named, speakerId, lastAnsweredId, humans } = {}) {
+  const n = Number(humans);
+  const count = Number.isFinite(n) ? n : 0;
+  if (count <= 1) return true;
+  if (named) return true;
+  const a = speakerId != null && speakerId !== '' ? String(speakerId) : '';
+  const b = lastAnsweredId != null && lastAnsweredId !== '' ? String(lastAnsweredId) : '';
+  if (a && b && a === b) return true;
+  return false;
+}
+
+module.exports = { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote, isGroupAddressee };
