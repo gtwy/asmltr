@@ -1571,7 +1571,7 @@ ${referentPromptBlock()}`;
         forceTurnAt.set(guildId, Date.now());
         try {
           c.createResponse();
-          ctx.log(firstAfterGreet ? '[voice] first-utterance after greet → response.create' : '[voice] 1:1 speaking-stop → response.create');
+          ctx.log(firstAfterGreet ? '[voice] first-utterance after greet → response.create' : '[voice] speaking-stop → response.create');
         } catch (e) { ctx.log(`[voice] createResponse: ${e.message}`); }
       },
       log: (m) => ctx.log(`[voice] ${m}`),
@@ -1693,13 +1693,31 @@ ${referentPromptBlock()}`;
     try {
       const guildId = String((newState.guild && newState.guild.id) || (oldState.guild && oldState.guild.id) || '');
       if (!guildId || !converseSessions.has(guildId)) return;
+      const voice = require('./voice');
       let ivyChannelId = '';
-      try { ivyChannelId = String(require('./voice').channelIdOf(guildId) || ''); } catch (_) {}
+      try { ivyChannelId = String(voice.channelIdOf(guildId) || ''); } catch (_) {}
       if (!ivyChannelId) return;
       const oldCid = oldState.channelId && String(oldState.channelId);
       const newCid = newState.channelId && String(newState.channelId);
       if (oldCid !== ivyChannelId && newCid !== ivyChannelId) return;
       refreshRoomInstructions(guildId);
+      const joined = newCid === ivyChannelId && oldCid !== ivyChannelId;
+      if (!joined) return;
+      const u = (newState.member && newState.member.user) || newState.user;
+      const id = newState.id || (u && u.id);
+      if (id && client.user && String(id) === String(client.user.id)) return;
+      if (u && u.bot) return;
+      const conv = converseSessions.get(guildId);
+      if (!conv || typeof conv.forceMessage !== 'function') return;
+      const mem = newState.member;
+      const name = (mem && (mem.displayName || mem.nickname))
+        || (u && (u.globalName || u.username))
+        || '';
+      const hello = name ? ('hey ' + String(name).split(' ')[0]) : 'hey';
+      try {
+        conv.forceMessage(hello);
+        ctx.log('[voice] join-ack force_message ' + (name || '(unnamed)'));
+      } catch (e) { ctx.log('[voice] join-ack: ' + e.message); }
     } catch (_) {}
   });
 

@@ -42,10 +42,10 @@ test('roomInstructions 1:1 always answer', () => {
 
 test('roomInstructions group lean-in when welcome', () => {
   const s = roomInstructions(2);
-  assert.match(s, /brought into this voice call to talk/);
+  assert.match(s, /group voice call to talk/);
   assert.match(s, /Do not default to silence/);
   assert.match(s, /Do not wait for your name/);
-  assert.match(s, /question in the air/);
+  assert.match(s, /Err on talking too much/);
   assert.doesNotMatch(s, /Stay silent unless/);
   assert.doesNotMatch(s, /addressed by name/);
 });
@@ -53,13 +53,16 @@ test('wasNotForHer is session skip not mute', () => {
   const { wasNotForHer, roomSkipNote } = require('../connectors/types/discord/live-room');
   assert.equal(wasNotForHer("that wasn't for you"), true);
   assert.equal(wasNotForHer('not you ivy'), true);
+  assert.equal(wasNotForHer('hold on'), true);
+  assert.equal(wasNotForHer('stop'), true);
   assert.equal(wasNotForHer('how are you doing'), false);
-  assert.match(roomSkipNote(), /Stay on the call/);
+  assert.match(roomSkipNote(), /Answer the next turn/);
 });
 
-test("shouldForceTurn 1:1 when her mouth is idle", () => {
+test("shouldForceTurn group same as 1:1 when her mouth is idle", () => {
   assert.equal(shouldForceTurn({ humans: 1, herMouth: false }), true);
   assert.equal(shouldForceTurn({ humans: 0, herMouth: false }), true);
   assert.equal(shouldForceTurn({ humans: 1, herMouth: true }), false);
-  assert.equal(shouldForceTurn({ humans: 2, herMouth: false }), false);
+  assert.equal(shouldForceTurn({ humans: 2, herMouth: false }), true);
+  assert.equal(shouldForceTurn({ humans: 2, herMouth: true }), false);
 });

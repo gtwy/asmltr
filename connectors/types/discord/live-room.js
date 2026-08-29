@@ -24,15 +24,15 @@ function countHumans(channel, selfUserId) {
 }
 
 /**
- * Session instruction suffix. humans <= 1 → every utterance is for her.
+ * Session instruction suffix. Group and 1:1: she is on the call to talk.
  */
 function roomInstructions(humans) {
   const n = Number(humans);
   const count = Number.isFinite(n) ? n : 0;
   if (count <= 1) {
-    return 'This is a 1:1 voice call. Every utterance is for you. Always answer. No name is required. Do not wait to judge whether it was for you.';
+    return 'This is a 1:1 voice call. Every utterance is for you. Always answer. No name is required. Err on talking. If they say stop or hold on, skip that bit, stay on the line, and answer the next turn.';
   }
-  return 'You were brought into this voice call to talk. Default is to engage when input is welcome: a question in the air, a pause for you, or being included. Lean in. Do not default to silence. Do not wait for your name.';
+  return 'You are on this group voice call to talk. Every human speaking-stop is a turn for you. Do not wait for your name. Do not default to silence. Err on talking too much. If they say that was not for you, hold on, or stop, skip that bit, stay on the line, and answer the next turn.';
 }
 
 /** Spoken skip: that last turn was not for her. Session memory, not mute. */
@@ -42,19 +42,18 @@ function wasNotForHer(text) {
   return /\b(that )?(wasn'?t|isn'?t|not) (for you|for ivy|meant for you)\b/.test(t)
     || /\b(didn'?t|did not) (ask|mean) you\b/.test(t)
     || /\bnobody asked you\b/.test(t)
-    || /\bnot you,? ivy\b/.test(t);
+    || /\bnot you,? ivy\b/.test(t)
+    || /\bhold (on|up)\b/.test(t)
+    || /\b(stop|that'?s enough)\b/.test(t);
 }
 
 function roomSkipNote() {
-  return 'Someone said a recent turn was not for you. Do not keep talking over that side conversation. Stay on the call. Speak again when a question is in the air, they pause for you, or they include you.';
+  return 'Someone said to skip that bit (not for you, hold on, or stop). Stay on the call. Answer the next turn. Do not go silent.';
 }
 
-/** 1:1: Discord speaking-stop must produce a spoken reply. Not while her mouth is playing. */
-function shouldForceTurn({ humans, herMouth } = {}) {
-  const n = Number(humans);
-  const count = Number.isFinite(n) ? n : 0;
-  return count <= 1 && !herMouth;
+/** Discord speaking-stop of a non-bot human must produce a spoken reply. Group same as 1:1. Not while her mouth is playing. */
+function shouldForceTurn({ herMouth } = {}) {
+  return !herMouth;
 }
 
 module.exports = { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote };
-

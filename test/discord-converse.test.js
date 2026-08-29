@@ -98,11 +98,18 @@ test("Live 1:1 speaking-stop forces response.create", () => {
   const src = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/index.js"), "utf8");
   assert.match(src, /onSpeechEnd/);
   assert.match(src, /createResponse/);
-  assert.match(src, /1:1 speaking-stop/);
+  assert.match(src, /speaking-stop → response.create/);
   const voice = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/voice.js"), "utf8");
   assert.match(voice, /onSpeechEnd/);
 });
 
+test('join-ack force_message when a human joins the VC', () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/index.js"), "utf8");
+  assert.match(src, /join-ack force_message/);
+  assert.match(src, /voiceStateUpdate/);
+  assert.match(src, /forceMessage\(hello\)/);
+});
 test('Live pack: grok-only, WS reopen, scribe edit, speaking-stop', () => {
   const fs = require('fs');
   const path = require('path');
