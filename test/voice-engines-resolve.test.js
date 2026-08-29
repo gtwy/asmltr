@@ -94,3 +94,9 @@ test('Flux TurnInfo EndOfTurn is a final; Update is a partial', () => {
   assert.deepEqual(partials, ['hello there']);
   assert.deepEqual(finals, ['hello there friend']);
 });
+
+test('Deepgram adapter uses token subprotocol (Node global WebSocket)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../shared/speech/realtime-stt.js'), 'utf8');
+  assert.match(src, /new WebSocket\(url, \['token', key\]\)/);
+  assert.equal(/headers:\s*\{\s*Authorization/.test(src), false);
+});

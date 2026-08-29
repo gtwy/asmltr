@@ -113,7 +113,8 @@ function openDeepgramSession(handlers = {}, opts = {}) {
     const rate = Number(opts.sampleRate) || 24000;
     const url = 'wss://api.deepgram.com/v2/listen?model=' + encodeURIComponent(model)
       + '&encoding=linear16&sample_rate=' + encodeURIComponent(String(rate));
-    ws = new WebSocket(url, { headers: { Authorization: 'Token ' + key } });
+    // Node global WebSocket has no headers option (that is the ws package). Same shape as the OpenAI live adapter: auth rides Sec-WebSocket-Protocol. Deepgram: token, <api_key>.
+    ws = new WebSocket(url, ['token', key]);
     ws.onopen = () => {
       open = true;
       for (const b of queue.splice(0)) {
