@@ -18,6 +18,9 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.match(pcm, /conv.pushPcm24/);
   assert.equal(/shouldRelayPcm/.test(pcm), false);
   assert.equal(/bindLiveSpeaker/.test(pcm), false);
+  assert.match(pcm, /applyLiveSpeaker/);
+  assert.equal(/ctx\.core\.resolve/.test(pcm), false);
+  assert.equal(/recallForInject/.test(pcm), false);
   assert.match(pcm, /isSpeaking\(guildId\)/);
   assert.match(src, /pushPcm24Play/);
   assert.match(src, /voice=ara/);
