@@ -72,32 +72,14 @@ test('classifyRaw is a separate helper; moderate() is unchanged', () => {
   assert.match(log, /image_gen tools still work/);
 });
 
-test('ALL voice turns skip moderation fail-open (Ashy included, not owner-only)', async () => {
-  const { shouldSkipModerationNetwork, moderate, isDiscordVoiceMeta } = require('../core/src/moderation');
-  assert.equal(isDiscordVoiceMeta({ voice: true }), true);
-  assert.equal(isDiscordVoiceMeta({ channel_context: { voice: true } }), true);
-  assert.equal(isDiscordVoiceMeta({ conversation_key: 'discord-voice:ivy:guild:1' }), true);
-  assert.equal(isDiscordVoiceMeta({ platform: 'discord', conversation_key: 'discord:ivy:channel:1' }), false);
-
+test('voice moderation skip: every voice turn skips nano; text still fail-closed', () => {
+  const { shouldSkipModerationNetwork } = require('../core/src/moderation');
   assert.equal(shouldSkipModerationNetwork({ bypass_moderation: true }, {}), true);
   assert.equal(shouldSkipModerationNetwork({ user_key: 'owner' }, { voice: true }), true);
-  assert.equal(shouldSkipModerationNetwork({ user_key: 'ashy', is_default: false, bypass_moderation: false }, { voice: true }), true);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'friend', is_default: false }, { voice: true }), true);
   assert.equal(shouldSkipModerationNetwork({ user_key: 'default', is_default: true }, { voice: true }), true);
-  assert.equal(shouldSkipModerationNetwork({ user_key: 'untrusted-speaker', is_default: true }, { conversation_key: 'discord-voice:ivy:guild:1' }), true);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'untrusted-speaker', is_default: true }, { voice: true }), true);
   assert.equal(shouldSkipModerationNetwork({ user_key: 'owner' }, { voice: false }), false);
-  assert.equal(shouldSkipModerationNetwork({ user_key: 'ashy', bypass_moderation: false }, { platform: 'discord' }), false);
-
-  const ashy = {
-    user_key: 'ashy', display_name: 'Ashy', bypass_moderation: false, is_default: false,
-    permissions: [], requires_approval: [], forbidden: [],
-  };
-  const r = await moderate('hey can you hear me', ashy, {
-    platform: 'discord',
-    conversation_key: 'discord-voice:ivy:guild:1',
-    channel_context: { voice: true, speaker: 'Ashy' },
-  });
-  assert.equal(r.allowed, true);
-  assert.equal(r.skipped, true);
-  assert.equal(r.riskLevel, 0);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'default', is_default: true }, {}), false);
 });
 

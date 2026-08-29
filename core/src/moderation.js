@@ -266,22 +266,13 @@ async function logModerationEvent(event) {
 }
 
 /**
- * Skip gpt-5-nano on EVERY Discord voice turn (Ashy included). Not owner-only.
- * Fail-open when channel_context.voice / discord-voice conversation_key / meta.voice.
- * Non-voice still uses bypass_moderation only.
+ * Voice turns skip gpt-5-nano entirely (latency + spoken lock).
+ * Text: bypass_moderation still skips the network; everyone else is fail-closed.
  */
-function isDiscordVoiceMeta(meta) {
-  if (!meta) return false;
-  if (meta.voice === true) return true;
-  const cc = meta.channel_context || meta.channelContext;
-  if (cc && cc.voice === true) return true;
-  const key = String(meta.conversation_key || meta.conversationKey || '');
-  return /^discord-voice:/i.test(key);
-}
-
 function shouldSkipModerationNetwork(resolved, meta = {}) {
-  if (isDiscordVoiceMeta(meta)) return true;
-  return !!(resolved && resolved.bypass_moderation);
+  if (meta && meta.voice) return true;
+  if (resolved && resolved.bypass_moderation) return true;
+  return false;
 }
 
 /**
@@ -292,10 +283,7 @@ function shouldSkipModerationNetwork(resolved, meta = {}) {
  * @returns {object} { allowed, bypassed?, riskLevel?, concerns?, reasoning?, monitored? }
  */
 async function moderate(userMessage, resolved, meta = {}) {
-  if (isDiscordVoiceMeta(meta)) {
-    return { allowed: true, skipped: true, riskLevel: 0 };
-  }
-  if (resolved.bypass_moderation) {
+  if (shouldSkipModerationNetwork(resolved, meta)) {
     return { allowed: true, bypassed: true, riskLevel: 0 };
   }
 
@@ -407,5 +395,5 @@ async function notifyBlock(resolved, userMessage, moderation, platform) {
 
 module.exports = {
   moderate, notifyBlock, adminAlert, buildAdminAlertCmd, cmdAlertLabel, logModerationEvent, buildOpenAIParams, parseReasoningEffort,
-  classifyRaw, pictureIntentOffLog, moderationKeyPresent, shouldSkipModerationNetwork, isDiscordVoiceMeta,
+  classifyRaw, pictureIntentOffLog, moderationKeyPresent, shouldSkipModerationNetwork,
 };
