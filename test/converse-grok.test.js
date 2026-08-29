@@ -6,7 +6,7 @@ const path = require('path');
 const {
   KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
   buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
-  fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, secretValue,
+  fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, pcm48StereoToPcm48Mono, pcm48MonoToPcm48Stereo, secretValue,
 } = require('../shared/speech/converse-grok');
 
 class MockWS {
@@ -30,7 +30,7 @@ class MockWS {
 }
 MockWS.instances = [];
 
-test('session.update: ara, tools=[], server_vad, reasoning none, PCM 24k, grok-voice-think-fast-2.0 URL', () => {
+test('session.update: ara, tools=[], server_vad, reasoning none, PCM 48k, grok-voice-think-fast-2.0 URL', () => {
   assert.equal(MODEL, 'grok-voice-think-fast-2.0');
   assert.equal(VOICE, 'ara');
   assert.equal(WS_URL, 'wss://api.x.ai/v1/realtime?model=grok-voice-think-fast-2.0');
@@ -47,8 +47,8 @@ test('session.update: ara, tools=[], server_vad, reasoning none, PCM 24k, grok-v
   assert.equal(u.session.turn_detection.interrupt_response, false);
   assert.deepEqual(u.session.reasoning, { effort: 'none' });
   assert.equal(u.session.audio.input.format.type, 'audio/pcm');
-  assert.equal(u.session.audio.input.format.rate, 24000);
-  assert.equal(u.session.audio.output.format.rate, 24000);
+  assert.equal(u.session.audio.input.format.rate, 48000);
+  assert.equal(u.session.audio.output.format.rate, 48000);
   assert.ok(u.session.audio.input.transcription.keyterms.includes('Ivy'));
   assert.ok(u.session.audio.input.transcription.keyterms.includes('ivy'));
   assert.ok(u.session.audio.input.transcription.keyterms.includes('IV'));
@@ -158,3 +158,17 @@ test('discord index.js does not send eve or ElevenLabs voice_id on the xAI socke
   assert.match(src, /getSecret\('xai_voice_api_key'/);
   assert.match(src, /voice=ara tools=\[\]/);
 });
+
+test('pcm48StereoToPcm48Mono averages L/R; pcm48MonoToPcm48Stereo L=R length*2', () => {
+  const stereo = Buffer.alloc(4);
+  stereo.writeInt16LE(1000, 0);
+  stereo.writeInt16LE(3000, 2);
+  const mono = pcm48StereoToPcm48Mono(stereo);
+  assert.equal(mono.length, 2);
+  assert.equal(mono.readInt16LE(0), 2000);
+  const up = pcm48MonoToPcm48Stereo(mono);
+  assert.equal(up.length, mono.length * 2);
+  assert.equal(up.readInt16LE(0), 2000);
+  assert.equal(up.readInt16LE(2), 2000);
+});
+

@@ -9,7 +9,7 @@
  *         session.tools = []  (no web_search, no MCP, no functions).
  *         turn_detection = { type: "server_vad", threshold: 0.85, prefix_padding_ms: 400, silence_duration_ms: 800, interrupt_response: false }
  *         reasoning.effort = "none"
- *         PCM 24 kHz mono s16le both ways.
+ *         PCM 48 kHz mono s16le both ways.
  *
  * Auth: vault secret `xai_voice_api_key` ({ value }) via shared/vault.js getSecret.
  * NEVER process.env.XAI_API_KEY. NEVER pass this key to the grok CLI child.
@@ -50,10 +50,10 @@ function buildSessionUpdate(opts) {
     reasoning: { effort: 'none' },
     audio: {
       input: {
-        format: { type: 'audio/pcm', rate: 24000 },
+        format: { type: 'audio/pcm', rate: 48000 },
         transcription: { keyterms: KEYTERMS.slice() },
       },
-      output: { format: { type: 'audio/pcm', rate: 24000 } },
+      output: { format: { type: 'audio/pcm', rate: 48000 } },
     },
   };
   if (instructions) session.instructions = String(instructions);
@@ -100,6 +100,34 @@ function pcm24MonoToPcm48Stereo(buf) {
     out.writeInt16LE(s, o); o += 2;
     out.writeInt16LE(s, o); o += 2;
     out.writeInt16LE(s, o); o += 2;
+  }
+  return out;
+}
+
+/** Discord 48k stereo s16le → 48k mono s16le (average L/R). No downsample. */
+function pcm48StereoToPcm48Mono(buf) {
+  const src = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
+  const frames = src.length >> 2;
+  const out = Buffer.allocUnsafe(frames * 2);
+  for (let i = 0; i < frames; i++) {
+    const L = src.readInt16LE(i * 4);
+    const R = src.readInt16LE(i * 4 + 2);
+    let m = (L + R) >> 1;
+    if (m > 32767) m = 32767; else if (m < -32768) m = -32768;
+    out.writeInt16LE(m, i * 2);
+  }
+  return out;
+}
+
+/** xAI 48k mono s16le → 48k stereo s16le (L=R). No rate conversion. out.length === in.length * 2. */
+function pcm48MonoToPcm48Stereo(buf) {
+  const src = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
+  const samples = src.length >> 1;
+  const out = Buffer.allocUnsafe(samples * 4);
+  for (let i = 0; i < samples; i++) {
+    const samp = src.readInt16LE(i * 2);
+    out.writeInt16LE(samp, i * 4);
+    out.writeInt16LE(samp, i * 4 + 2);
   }
   return out;
 }
@@ -169,7 +197,7 @@ function attach(ws, ev, fn) {
 
 /**
  * Open a converse WebSocket.
- * @param {object} handlers onOpen, onAudio(pcm24), onSpeechStart, onSpeechStop, onResponseDone,
+ * @param {object} handlers onOpen, onAudio(pcm48), onSpeechStart, onSpeechStop, onResponseDone,
  *   onCancelled, onAssistantText, onAssistantDelta, onUserTranscript, onError, onClose
  * @param {object} [opts] { getKey, apiKey, WebSocket, instructions }
  * @returns {{ pushPcm24(Buffer):void, cancel():void, close():void, isOpen():boolean, ready:Promise }}
@@ -247,5 +275,5 @@ function openSession(handlers, opts) {
 module.exports = {
   KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
   secretValue, buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
-  fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, decodeAudioDelta,
+  fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, pcm48StereoToPcm48Mono, pcm48MonoToPcm48Stereo, decodeAudioDelta,
 };

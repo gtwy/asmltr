@@ -907,7 +907,7 @@ ${referentPromptBlock()}`;
   const converseSessions = new Map(); // guildId -> converse-grok session (Ivy Live)
   const converseSpeaker = new Map(); // guildId -> { userId, name }
   const pcmRing = new Map(); // `${guildId}:${userId}` -> Buffer[] last ~4s
-  const PCM_RING_BYTES = 24000 * 2 * 4;
+  const PCM_RING_BYTES = 48000 * 2 * 4;
 
   function clearVoiceOverlap(guildId) {
     voiceOverlapArm.delete(guildId);

@@ -121,13 +121,17 @@ test('flushPcm48Frames holds leftover bytes under 3840', () => {
   assert.equal(exact.rest.length, 0);
 });
 
-test('PCM playback writes 3840-byte frames and prebuffers ~120ms (6 frames)', () => {
+test('PCM playback writes 3840-byte frames and prebuffers 2-3 frames (~40-60ms), not 120ms', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
   const { OPUS_FRAME_BYTES, PCM_PREBUFFER_FRAMES } = require('../connectors/types/discord/voice');
   assert.equal(OPUS_FRAME_BYTES, 3840);
-  assert.equal(PCM_PREBUFFER_FRAMES, 6);
-  assert.equal(PCM_PREBUFFER_FRAMES * 20, 120);
-  assert.match(src, /PCM_PREBUFFER_FRAMES = 6/);
+  assert.ok(PCM_PREBUFFER_FRAMES >= 2 && PCM_PREBUFFER_FRAMES <= 3);
+  assert.ok(PCM_PREBUFFER_FRAMES * 20 <= 60);
+  assert.match(src, /PCM_PREBUFFER_FRAMES = [23]/);
+  assert.equal(/PCM_PREBUFFER_FRAMES = 6/.test(src), false);
   assert.match(src, /primePcmPlayback/);
   assert.match(src, /queued\.length >= PCM_PREBUFFER_FRAMES \* OPUS_FRAME_BYTES/);
+  const play = src.slice(src.indexOf('function pushPcm24Play'), src.indexOf('function startDrone'));
+  assert.match(play, /pcm48MonoToPcm48Stereo/);
+  assert.equal(/pcm24MonoToPcm48Stereo/.test(play), false);
 });

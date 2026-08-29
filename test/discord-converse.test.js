@@ -24,12 +24,13 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.ok(streamAt > convReturn, 'handleStream still present for Flux fallback, after converse return');
 });
 
-test('voice.js converse listen path skips Flux and plays PCM 24k', () => {
+test('voice.js converse listen path skips Flux and plays PCM 48k native', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
   assert.match(src, /function converseSpeaking/);
   assert.match(src, /if \(converse\)/);
   assert.match(src, /pushPcm24Play/);
-  assert.match(src, /pcm24MonoToPcm48Stereo/);
+  assert.match(src, /pcm48MonoToPcm48Stereo/);
+  assert.match(src, /pcm48StereoToPcm48Mono/);
   assert.match(src, /onPcm24/);
   assert.match(src, /allowPcm/);
 });

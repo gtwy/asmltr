@@ -29,7 +29,7 @@ const dronePlayers = new Map(); // guildId -> looping "working" drone player
 const speech = new Map(); // guildId -> { cancelled, player }
 const pcmOut = new Map(); // guildId -> { pcm, encoder, player, acc, queued, primed, conn } converse PCM playback
 const OPUS_FRAME_BYTES = 960 * 2 * 2; // 3840: 20ms @ 48k stereo s16
-const PCM_PREBUFFER_FRAMES = 6;       // ~120ms before player.play / subscribe
+const PCM_PREBUFFER_FRAMES = 3;       // ~60ms (2–3 frames); not 120ms+
 
 /** Split accumulated 48k stereo s16le into complete opus frames; leftover < 3840 is held. */
 function flushPcm48Frames(acc) {
@@ -129,7 +129,11 @@ function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPa
     let pcm24;
     try { pcm24 = rt.pcm48StereoToPcm24Mono(c); entry.session.pushPcm24(pcm24); }
     catch (e) { log(`realtime push err: ${e.message}`); return; }
-    if (onPcm24) { try { onPcm24(userId, pcm24, { name: entry.name }); } catch (e) { log(`onPcm24 err: ${e.message}`); } }
+    // Live converse: 48k mono (average L/R). Flux STT stays 24k above.
+    if (onPcm24) {
+      try { onPcm24(userId, converseGrok.pcm48StereoToPcm48Mono(c), { name: entry.name }); }
+      catch (e) { log(`onPcm24 err: ${e.message}`); }
+    }
   });
   decoder.on('end', () => {
     entry.subscribed = false;
@@ -169,7 +173,7 @@ function converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24
   decoder.on('data', (c) => {
     try {
       if (typeof allowPcm === 'function' && !allowPcm(userId)) return;
-      const pcm = rt.pcm48StereoToPcm24Mono(c);
+      const pcm = converseGrok.pcm48StereoToPcm48Mono(c);
       if (onPcm24) onPcm24(userId, pcm, { name });
     } catch (e) { log(`converse push err: ${e.message}`); }
   });
@@ -357,7 +361,7 @@ function pushPcm24Play(guildId, buf) {
   const e = pcmOut.get(guildId);
   if (!e || !buf || !buf.length) return;
   try {
-    const converted = converseGrok.pcm24MonoToPcm48Stereo(buf);
+    const converted = converseGrok.pcm48MonoToPcm48Stereo(buf);
     const { frames, rest } = flushPcm48Frames(Buffer.concat([e.acc, converted]));
     e.acc = rest;
     if (!frames.length) return;
