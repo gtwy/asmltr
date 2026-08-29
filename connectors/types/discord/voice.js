@@ -29,7 +29,8 @@ const dronePlayers = new Map(); // guildId -> looping "working" drone player
 const speech = new Map(); // guildId -> { cancelled, player }
 const pcmOut = new Map(); // guildId -> { pcm, encoder, player, acc, queued, primed, conn } converse PCM playback
 const OPUS_FRAME_BYTES = 960 * 2 * 2; // 3840: 20ms @ 48k stereo s16
-const PCM_PREBUFFER_FRAMES = 5;       // ~100ms jitter buffer; underrun pops, not codec recode, not 120ms+
+const PCM_PREBUFFER_FRAMES = 5;       // ~100ms start jitter; underrun pops, not codec recode, not 120ms+
+const PCM_PACER_MS = 20;              // Discord opus packet clock
 
 /** Split accumulated 48k stereo s16le into complete opus frames; leftover < 3840 is held. */
 function flushPcm48Frames(acc) {
@@ -298,7 +299,37 @@ async function speak(guildId, mp3Buffer) {
 
 function stopListening(guildId) { listening.delete(guildId); closeRealtime(guildId); closeConverseSubs(guildId); endPcmPlayback(guildId, { hard: true }); }
 
+function stopPcmPacer(e) {
+  if (!e || !e.pacer) return;
+  try { clearInterval(e.pacer); } catch (_) {}
+  e.pacer = null;
+}
+
+/** One 20ms stereo frame into the encoder. Silence if the jitter queue ran dry (no pop). */
+function feedPcmFrame(e) {
+  if (!e || !e.pcm) return;
+  let frame = null;
+  if (e.queued && e.queued.length >= OPUS_FRAME_BYTES) {
+    frame = Buffer.from(e.queued.subarray(0, OPUS_FRAME_BYTES));
+    e.queued = Buffer.from(e.queued.subarray(OPUS_FRAME_BYTES));
+  } else if (!e.draining) {
+    frame = Buffer.alloc(OPUS_FRAME_BYTES);
+    e.underrunFrames = (e.underrunFrames || 0) + 1;
+  } else {
+    return;
+  }
+  try { e.pcm.write(frame); } catch (_) {}
+}
+
+function startPcmPacer(e) {
+  if (!e || e.pacer) return;
+  feedPcmFrame(e);
+  feedPcmFrame(e);
+  e.pacer = setInterval(() => { feedPcmFrame(e); }, PCM_PACER_MS);
+}
+
 function finishPcmEntry(guildId, e) {
+  stopPcmPacer(e);
   if (e && pcmOut.get(guildId) === e) pcmOut.delete(guildId);
   if (e && e._idleResolve) {
     const r = e._idleResolve;
@@ -339,8 +370,12 @@ function endPcmPlayback(guildId, { hard } = {}) {
       if (pad) extra = Buffer.concat([extra, Buffer.alloc(pad)]);
       e.queued = Buffer.concat([e.queued || Buffer.alloc(0), extra]);
     }
-    if (!forceStop && !e.primed && e.queued && e.queued.length) primePcmPlayback(e);
-    else if (e.primed && e.pcm && e.queued && e.queued.length) {
+    stopPcmPacer(e);
+    if (!forceStop && !e.primed && e.queued && e.queued.length) {
+      primePcmPlayback(e);
+      stopPcmPacer(e);
+    }
+    if (e.primed && e.pcm && e.queued && e.queued.length) {
       try { e.pcm.write(e.queued); } catch (_) {}
       e.queued = Buffer.alloc(0);
     }
@@ -371,10 +406,6 @@ function primePcmPlayback(e) {
   const encoder = new prism.opus.Encoder({ frameSize: 960, channels: 2, rate: 48000 });
   pcm.pipe(encoder);
   const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
-  if (e.queued && e.queued.length) {
-    pcm.write(e.queued);
-    e.queued = Buffer.alloc(0);
-  }
   try { pcm.on('error', () => {}); } catch (_) {}
   try { encoder.on('error', () => {}); } catch (_) {}
   try { player.on('error', () => {}); } catch (_) {}
@@ -386,6 +417,7 @@ function primePcmPlayback(e) {
   e.encoder = encoder;
   e.player = player;
   e.primed = true;
+  startPcmPacer(e);
 }
 
 function startPcmPlayback(guildId) {
@@ -403,6 +435,8 @@ function startPcmPlayback(guildId) {
     queued: Buffer.alloc(0),
     primed: false,
     draining: false,
+    pacer: null,
+    underrunFrames: 0,
     pcm: null,
     encoder: null,
     player: null,
@@ -433,12 +467,8 @@ function pushPcm24Play(guildId, buf) {
     const { frames, rest } = flushPcm48Frames(Buffer.concat([e.acc, converted]));
     e.acc = rest;
     if (!frames.length) return;
-    if (!e.primed) {
-      e.queued = Buffer.concat([e.queued, frames]);
-      if (e.queued.length >= PCM_PREBUFFER_FRAMES * OPUS_FRAME_BYTES) primePcmPlayback(e);
-      return;
-    }
-    if (e.pcm) e.pcm.write(frames);
+    e.queued = Buffer.concat([e.queued, frames]);
+    if (!e.primed && e.queued.length >= PCM_PREBUFFER_FRAMES * OPUS_FRAME_BYTES) primePcmPlayback(e);
   } catch (_) {}
 }
 
@@ -486,5 +516,5 @@ module.exports = {
   startListening, stopListening, startDrone, stopDrone,
   startSpeech, stopSpeech, endSpeech, isSpeaking, isSelfUser,
   startPcmPlayback, pushPcm24Play, endPcmPlayback,
-  flushPcm48Frames, OPUS_FRAME_BYTES, PCM_PREBUFFER_FRAMES,
+  flushPcm48Frames, OPUS_FRAME_BYTES, PCM_PREBUFFER_FRAMES, PCM_PACER_MS,
 };

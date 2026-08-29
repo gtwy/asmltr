@@ -134,9 +134,15 @@ test('PCM playback writes 3840-byte frames and prebuffers ~100ms jitter (5 frame
   assert.equal(/PCM_PREBUFFER_FRAMES = 6/.test(src), false);
   assert.match(src, /primePcmPlayback/);
   assert.match(src, /queued\.length >= PCM_PREBUFFER_FRAMES \* OPUS_FRAME_BYTES/);
+  assert.match(src, /PCM_PACER_MS = 20/);
+  assert.match(src, /function feedPcmFrame/);
+  assert.match(src, /function startPcmPacer/);
+  assert.match(src, /setInterval\(\(\) => \{ feedPcmFrame\(e\); \}, PCM_PACER_MS\)/);
+  assert.match(src, /underrunFrames/);
   const play = src.slice(src.indexOf('function pushPcm24Play'), src.indexOf('function startDrone'));
   assert.match(play, /pcm48MonoToPcm48Stereo/);
   assert.equal(/pcm24MonoToPcm48Stereo/.test(play), false);
+  assert.equal(/e\.pcm\.write\(frames\)/.test(play), false);
 });
 
 test('ignore bot user in recv: isSelfUser + speaking start/end return before subscribe', () => {
