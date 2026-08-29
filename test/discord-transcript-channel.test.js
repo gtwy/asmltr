@@ -19,27 +19,37 @@ const {
 const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
 const ownerBlock = src.slice(src.indexOf('const OWNER_ONLY_CMDS'), src.indexOf('const meta'));
 
-test('transcribe-off / transcript-off are off aliases; transcribe-on / transcript-on are on', () => {
-  for (const a of ['transcribe-off', 'transcribe off', 'transcript-off', 'transcript off']) {
+test('only scribe-off / scribe-on (and spaced forms) are aliases; old transcribe/transcript names are gone', () => {
+  for (const a of ['scribe-off', 'scribe off']) {
     assert.equal(isTranscriptOffCmd(a), true, a);
     assert.equal(isTranscriptOnCmd(a), false, a);
     assert.ok(TRANSCRIPT_OFF_ALIASES.includes(a), a);
   }
-  for (const a of ['transcribe-on', 'transcribe on', 'transcript-on', 'transcript on']) {
+  for (const a of ['scribe-on', 'scribe on']) {
     assert.equal(isTranscriptOnCmd(a), true, a);
     assert.equal(isTranscriptOffCmd(a), false, a);
     assert.ok(TRANSCRIPT_ON_ALIASES.includes(a), a);
+  }
+  for (const dead of [
+    'transcribe-off', 'transcribe off', 'transcript-off', 'transcript off',
+    'transcribe-on', 'transcribe on', 'transcript-on', 'transcript on',
+  ]) {
+    assert.equal(isTranscriptOffCmd(dead), false, dead);
+    assert.equal(isTranscriptOnCmd(dead), false, dead);
   }
   assert.equal(isTranscriptOffCmd('mute'), false);
   assert.equal(isTranscriptOnCmd('unmute'), false);
 });
 
-test('OWNER_ONLY_CMDS lists transcribe and transcript on/off aliases', () => {
-  for (const a of [
+test('OWNER_ONLY_CMDS lists only scribe-off / scribe-on; old names are gone', () => {
+  for (const a of ['scribe-off', 'scribe off', 'scribe-on', 'scribe on']) {
+    assert.ok(ownerBlock.includes(`'${a}'`), a);
+  }
+  for (const dead of [
     'transcribe-off', 'transcribe off', 'transcript-off', 'transcript off',
     'transcribe-on', 'transcribe on', 'transcript-on', 'transcript on',
   ]) {
-    assert.ok(ownerBlock.includes(`'${a}'`), a);
+    assert.equal(ownerBlock.includes(`'${dead}'`), false, dead);
   }
   assert.match(src, /if \(OWNER_ONLY_CMDS\.has\(cmd\) && !\(await isOwner\(message\)\)\)/);
 });
@@ -104,13 +114,13 @@ test('index.js persists transcriptOffChannels and gates live/leave by origin cid
   const handle = src.slice(src.indexOf('async function handleControlCommands'), src.indexOf('function buildSystemExtra'));
   assert.match(handle, /setTranscriptOff\(transcriptOffChannels/);
   assert.match(handle, /saveSettings\(\)/);
-  assert.match(handle, /transcribe-on/);
+  assert.match(handle, /scribe-on/);
   assert.equal(/voicePostTranscript\s*=\s*true/.test(handle), false);
   assert.equal(/voicePostTranscript\s*=\s*false/.test(handle), false);
   // off reply must not promise a leave .txt
   const offReply = handle.slice(handle.indexOf('isTranscriptOffCmd'), handle.indexOf('isTranscriptOnCmd') + 400);
   assert.equal(/upload the full transcript/.test(offReply), false);
-  assert.match(offReply, /transcribe-on/);
+  assert.match(offReply, /scribe-on/);
 
   const partial = src.slice(src.indexOf('async function onVoicePartial'), src.indexOf('async function handleVoiceUtterance'));
   assert.match(partial, /shouldPostLive/);
@@ -127,9 +137,9 @@ test('index.js persists transcriptOffChannels and gates live/leave by origin cid
 
   const join = src.slice(src.indexOf('async function doJoinVoice'), src.indexOf('async function doLeaveVoice'));
   assert.match(join, /isTranscriptOff\(transcriptOffChannels/);
-  assert.match(join, /transcribe-off/);
+  assert.match(join, /scribe-off/);
 
   const help = src.slice(src.indexOf("case 'help'"), src.indexOf("case 'help'") + 900);
-  assert.match(help, /transcribe-off/);
-  assert.match(help, /transcribe-on/);
+  assert.match(help, /scribe-off/);
+  assert.match(help, /scribe-on/);
 });

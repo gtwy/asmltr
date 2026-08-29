@@ -69,8 +69,7 @@ const OWNER_ONLY_CMDS = new Set([
   'unmute', 'unmute here', 'listen here', 'unmute this channel', 'enable', 'enable here',
   'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
   'drone-on', 'drone on', 'drone-off', 'drone off',
-  'transcript-on', 'transcript on', 'transcript-off', 'transcript off',
-  'transcribe-on', 'transcribe on', 'transcribe-off', 'transcribe off',
+  'scribe-on', 'scribe on', 'scribe-off', 'scribe off',
   'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
   'mute-voice', 'mute voice', 'voice-mute', 'unmute-voice', 'unmute voice', 'voice-unmute',
   'update-asmltr', 'update asmltr', 'self-update', 'update yourself',
@@ -335,7 +334,7 @@ async function start(ctx) {
     }
     if (isTranscriptOffCmd(cmd)) {
       setTranscriptOff(transcriptOffChannels, cid, true); saveSettings();
-      await message.channel.send(`🔕 Live transcript **off** in this channel — I'll stay quiet here until \`@${me} transcribe-on\`.`); return true;
+      await message.channel.send(`🔕 Live transcript **off** in this channel — I'll stay quiet here until \`@${me} scribe-on\`.`); return true;
     }
     if (isTranscriptOnCmd(cmd)) {
       setTranscriptOff(transcriptOffChannels, cid, false); saveSettings();
@@ -418,9 +417,9 @@ async function start(ctx) {
         await message.channel.send('🔊 Voice unmuted — I\'ll respond when addressed again.'); return true;
       }
       case 'status':
-        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})\n**Transcript:** ${isTranscriptOff(transcriptOffChannels, cid) ? 'off in this channel (`transcribe-on` to restore)' : 'on in this channel (`transcribe-off` to hide)'}`); return true;
+        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})\n**Transcript:** ${isTranscriptOff(transcriptOffChannels, cid) ? 'off in this channel (`scribe-on` to restore)' : 'on in this channel (`scribe-off` to hide)'}`); return true;
       case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`transcribe-on\` / \`transcribe-off\` (this channel) · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`scribe-on\` / \`scribe-off\` (this channel) · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }
@@ -901,7 +900,7 @@ ${referentPromptBlock()}`;
   // missing/0 = 25s same-speaker follow-up after she talks. -1/false = STRICT (name every turn).
   const VOICE_WINDOW_MS = resolveVoiceFollowupMs(cfg.voice_followup_ms);
   let voiceDrone = cfg.voice_drone !== false; // ambient "working" drone during a spoken reply (toggleable)
-  const voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ default; per-channel transcribe-off wins
+  const voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ default; per-channel scribe-off wins
   const voiceTranscriptFile = cfg.voice_transcript_file !== false; // upload a full transcript .txt on leave
   const voiceLog = new Map(); // guildId -> [{ t, who, text }] accumulated for the whole voice session
   const converseSessions = new Map(); // guildId -> converse-grok session (Ivy Live)
@@ -1459,9 +1458,9 @@ ${referentPromptBlock()}`;
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const originOff = isTranscriptOff(transcriptOffChannels, message.channel.id);
       const transcriptNote = originOff
-        ? `Live transcript is **off** in this channel — I listen quietly. \`@${client.user.username} transcribe-on\` to restore.`
+        ? `Live transcript is **off** in this channel — I listen quietly. \`@${client.user.username} scribe-on\` to restore.`
         : (voicePostTranscript
-          ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `transcribe-off`).'
+          ? 'I post everyone\'s words as `🗣️ name: …` (turn that off with `scribe-off`).'
           : 'Live transcript is **off** — I listen quietly' + (voiceTranscriptFile ? ' and post a full transcript `.txt` when I leave.' : '.'));
       message.channel.send(`🎙️ Joined **${vc.name}** — I'm listening. ${transcriptNote} Say **"${NAME}, …"** out loud to ask something — I'll play a soft "working" drone and answer by voice. After that, **follow-ups need no name** for a bit; say **"that's enough, ${NAME}"** to go back to just listening, or \`@${client.user.username} leave-voice\` to disconnect.`).catch(() => {});
     } catch (e) { ctx.log(`voice join failed: ${e.stack || e.message}`); message.channel.send(`⚠️ Couldn't join voice: ${e.message}`).catch(() => {}); }

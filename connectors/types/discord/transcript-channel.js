@@ -3,10 +3,10 @@
 /** Per-channel Discord voice-transcript hide (persist like mute). */
 
 const TRANSCRIPT_OFF_ALIASES = Object.freeze([
-  'transcribe-off', 'transcribe off', 'transcript-off', 'transcript off',
+  'scribe-off', 'scribe off',
 ]);
 const TRANSCRIPT_ON_ALIASES = Object.freeze([
-  'transcribe-on', 'transcribe on', 'transcript-on', 'transcript on',
+  'scribe-on', 'scribe on',
 ]);
 
 function _cid(cid) {
