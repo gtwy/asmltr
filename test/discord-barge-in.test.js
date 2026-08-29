@@ -101,9 +101,85 @@ test('Live onSpeechStart does not immediately stopVoiceReply', () => {
   assert.ok(i >= 0);
   const body = src.slice(i, src.indexOf('onAssistantText:', i));
   assert.equal(/stopVoiceReply\s*\(/.test(body), false);
-  assert.match(body, /armVoiceOverlap/);
   assert.match(body, /onSpeechStop:/);
   assert.match(body, /clearVoiceOverlap/);
+  // Echo: ignore xAI VAD while she is playing; local Discord barge owns the 1.5s timer.
+  assert.match(body, /isSpeaking\(guildId\)/);
+  assert.match(body, /voiceBusy\.has\(guildId\)/);
+  assert.equal(/armVoiceOverlap/.test(body), false);
+});
+
+test('isSelfUser is true only for the bot id', () => {
+  const { isSelfUser } = require('../connectors/types/discord/voice');
+  assert.equal(isSelfUser({ user: { id: 'bot1' } }, 'bot1'), true);
+  assert.equal(isSelfUser({ user: { id: 'bot1' } }, 'human'), false);
+  assert.equal(isSelfUser({ user: { id: 'bot1' } }, undefined), false);
+  assert.equal(isSelfUser({}, 'bot1'), false);
+  assert.equal(isSelfUser(null, 'bot1'), false);
+});
+
+test('recv ignores bot self: no subscribe, STT, onPcm24, barge', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
+  assert.match(src, /function isSelfUser\(/);
+  const start = src.slice(src.indexOf("receiver.speaking.on('start'"), src.indexOf("if (onBargeEnd)"));
+  assert.match(start, /if \(isSelfUser\(client, userId\)\) return/);
+  const stt = src.indexOf('if (isSelfUser(client, userId)) return');
+  const sub = src.indexOf('receiver.subscribe(userId');
+  assert.ok(stt >= 0 && sub > stt, 'self skip is before subscribe');
+  const end = src.slice(src.indexOf("receiver.speaking.on('end'"), src.indexOf('return true;'));
+  assert.match(end, /if \(isSelfUser\(client, userId\)\) return/);
+  assert.match(src, /function realtimeSpeaking[\s\S]*?if \(isSelfUser\(client, userId\)\) return/);
+  assert.match(src, /function converseSpeaking[\s\S]*?if \(isSelfUser\(client, userId\)\) return/);
+});
+
+test('Live onBargeIn uses local 1.5s arm; does not return when converse is bound', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const barge = src.slice(src.indexOf('onBargeIn:'), src.indexOf('onBargeEnd:'));
+  assert.equal(/converseSessions\.has\(guildId\)\) return/.test(barge), false);
+  assert.match(barge, /armVoiceOverlap/);
+  const end = src.slice(src.indexOf('onBargeEnd:'), src.indexOf('log: (m)'));
+  assert.equal(/converseSessions\.has\(guildId\)\) return/.test(end), false);
+  assert.match(end, /clearVoiceOverlap/);
+  assert.match(src, /BARGE_MIN_SPEECH_MS = 1500/);
+  assert.match(src, /BARGE_GRACE_MS = 1200/);
+});
+
+test('echo mute: no conv.pushPcm24 while isSpeaking/voiceBusy; pcmRing still fills', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const pcm = src.slice(src.indexOf('onPcm24:'), src.indexOf('onBargeIn:'));
+  assert.match(pcm, /pcmRing/);
+  assert.match(pcm, /isSpeaking\(guildId\)/);
+  assert.match(pcm, /voiceBusy\.has\(guildId\)/);
+  const muteAt = pcm.indexOf('voice.isSpeaking(guildId) || voiceBusy.has(guildId)');
+  const pushAt = pcm.lastIndexOf('conv.pushPcm24');
+  assert.ok(muteAt >= 0 && pushAt > muteAt, 'echo mute gates pushPcm24');
+  const handle = src.slice(src.indexOf('async function handleVoiceUtterance'), src.indexOf('async function engineKeys'));
+  assert.match(handle, /echoMute/);
+});
+
+test('onResponseDone drains (onDrain, no player.stop true); startPcmPlayback does not hard-kill unless barged', () => {
+  const voiceSrc = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
+  const start = voiceSrc.slice(voiceSrc.indexOf('function startPcmPlayback'), voiceSrc.indexOf('function pushPcm24Play'));
+  assert.match(start, /existing/);
+  assert.match(start, /cancelled/);
+  assert.match(start, /hard:\s*true/);
+  assert.match(start, /do not hard-kill unless barged/);
+  const end = voiceSrc.slice(voiceSrc.indexOf('function endPcmPlayback'), voiceSrc.indexOf('function primePcmPlayback'));
+  assert.match(end, /onDrain/);
+  assert.match(end, /pcm\.end/);
+  assert.match(end, /AudioPlayerStatus\.Idle/);
+  assert.match(end, /e\.draining = true/);
+  assert.match(end, /tearDownHard/);
+  assert.match(end, /player\.stop\(true\)/);
+  const drainSlice = end.slice(end.indexOf('// Drain'));
+  assert.equal(/player\.stop\(true\)/.test(drainSlice), false);
+  assert.match(drainSlice, /do NOT hard-stop the player/);
+  const idx = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const done = idx.slice(idx.indexOf('onResponseDone:'), idx.indexOf('onError:'));
+  assert.match(done, /endPcmPlayback/);
+  assert.match(done, /onDrain:\s*finish/);
+  assert.match(done, /endSpeech/);
+  assert.equal(/player\.stop\(true\)/.test(done), false);
 });
 
 test('flushPcm48Frames holds leftover bytes under 3840', () => {

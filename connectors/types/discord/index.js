@@ -967,7 +967,7 @@ ${referentPromptBlock()}`;
     converseSpeaker.delete(guildId);
     for (const k of [...pcmRing.keys()]) { if (k.startsWith(String(guildId) + ':')) pcmRing.delete(k); }
     if (conv) { try { conv.close(); } catch (_) {} }
-    try { require('./voice').endPcmPlayback(guildId); } catch (_) {}
+    try { require('./voice').endPcmPlayback(guildId, { hard: true }); } catch (_) {}
   }
 
   function lastSpeakerId(guildId) {
@@ -1157,7 +1157,8 @@ ${referentPromptBlock()}`;
       const ring = pcmRing.get(ringKey);
       pcmRing.delete(ringKey);
       const convTurn = converseSessions.get(guildId);
-      if (ring && ring.length && convTurn) { try { convTurn.pushPcm24(Buffer.concat(ring)); } catch (_) {} }
+      const echoMute = voice.isSpeaking(guildId) || voiceBusy.has(guildId);
+      if (ring && ring.length && convTurn && !echoMute) { try { convTurn.pushPcm24(Buffer.concat(ring)); } catch (_) {} }
       if (!voiceBusy.has(guildId)) voiceBusy.add(guildId);
       try { voice.startSpeech(guildId); } catch (_) {}
       setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
@@ -1295,10 +1296,12 @@ ${referentPromptBlock()}`;
       onSpeechStart: () => {
         if (cfg.voice_barge_in === false) return;
         const v = require('./voice');
-        if (!v.isSpeaking(guildId)) return;
-        armVoiceOverlap(guildId, { live: true });
+        // Echo: server_vad hears her own playback. Local Discord barge (1.5s + 1.2s grace) owns interrupt.
+        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
       },
       onSpeechStop: () => {
+        const v = require('./voice');
+        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
         clearVoiceOverlap(guildId);
       },
       onAssistantText: (text) => {
@@ -1312,17 +1315,19 @@ ${referentPromptBlock()}`;
       },
       onResponseDone: () => {
         const voice = require('./voice');
-        try { voice.endPcmPlayback(guildId); } catch (_) {}
-        voice.endSpeech(guildId);
-        const sp = converseSpeaker.get(guildId);
-        if (sp && sp.userId) {
-          const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: String(sp.userId) });
-          if (next) voiceActive.set(guildId, next);
-        }
-        voiceBusy.delete(guildId);
-        voiceReplyStart.delete(guildId);
-        clearVoiceOverlap(guildId);
-        setVoiceStatus(null);
+        const finish = () => {
+          voice.endSpeech(guildId);
+          const sp = converseSpeaker.get(guildId);
+          if (sp && sp.userId) {
+            const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: String(sp.userId) });
+            if (next) voiceActive.set(guildId, next);
+          }
+          voiceBusy.delete(guildId);
+          voiceReplyStart.delete(guildId);
+          clearVoiceOverlap(guildId);
+          setVoiceStatus(null);
+        };
+        try { voice.endPcmPlayback(guildId, { onDrain: finish }); } catch (_) { finish(); }
       },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
       onClose: () => ctx.log('[voice] converse WS closed'),
@@ -1354,6 +1359,7 @@ ${referentPromptBlock()}`;
       onPartial: (name, text) => onVoicePartial(guildId, name, text),
       onPcm24: conv ? (userId, pcm, meta) => {
         if (!pcm || !pcm.length || !userId) return;
+        if (voice.isSelfUser(client, userId)) return;
         const key = guildId + ':' + userId;
         let arr = pcmRing.get(key);
         if (!arr) { arr = []; pcmRing.set(key, arr); }
@@ -1362,15 +1368,16 @@ ${referentPromptBlock()}`;
         while (arr.length > 1 && total > PCM_RING_BYTES) { total -= arr[0].length; arr.shift(); }
         if (!converseGrok.shouldRelayPcm({ speakerId: lastSpeakerId(guildId), userId, muted: voiceMuted.has(guildId) })) return;
         converseSpeaker.set(guildId, { userId: String(userId), name: (meta && meta.name) || String(userId) });
+        // Echo mute: while she is playing/busy, do not feed PCM into xAI. pcmRing still fills.
+        // Resume after real barge-in (busy/speaking cleared) or drain.
+        if (voice.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
         conv.pushPcm24(pcm);
       } : undefined,
       onBargeIn: () => {
         if (cfg.voice_barge_in === false) return;
-        if (converseSessions.has(guildId)) return; // Live server_vad owns barge-in
-        armVoiceOverlap(guildId);
+        armVoiceOverlap(guildId); // Live too: 1.5s talk-through + 1.2s grace (do not defer to xAI VAD)
       },
       onBargeEnd: () => {
-        if (converseSessions.has(guildId)) return;
         clearVoiceOverlap(guildId);
       },
       log: (m) => ctx.log(`[voice] ${m}`),
