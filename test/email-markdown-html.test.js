@@ -161,6 +161,33 @@ test('pitch line is 12px not italic; assistant line stays italic', () => {
   assert.doesNotMatch(h, /<span style="font-size:12px;font-style:italic;color:#555;"><a href="https:\/\/example.com"/);
 });
 
+test('https markdown image becomes an img; javascript URL does not', () => {
+  const h = markdownToHtml('![cube](https://example.com/sig.png)\n[Example Co](https://example.com) can build an AI assistant like this for your team.');
+  assert.match(h, /<img src="https:\/\/example.com\/sig.png" alt="cube"/);
+  assert.match(h, /width="96"/);
+  assert.match(h, /margin:0;padding:0;line-height:0/);
+  assert.doesNotMatch(h, /<img[^>]*><br>/);
+  const bad = markdownToHtml('![x](javascript:alert(1))');
+  assert.doesNotMatch(bad, /<img/i);
+  assert.doesNotMatch(bad, /javascript/i);
+});
+
+test('signature image sits after two blanks and immediately above the pitch', () => {
+  const h = markdownToHtml(
+    'Gaia\nAI Assistant to Alex\n\n\n![Ivy](https://example.com/sig.png)\n[Example Co](https://example.com) can build an AI assistant like this for your team.',
+  );
+  const spacers = h.match(/<p style="margin:0;padding:0;line-height:1.5;">&nbsp;<\/p>/g) || [];
+  assert.equal(spacers.length, 2);
+  assert.match(
+    h,
+    /AI Assistant to Alex<\/span><\/p>\n<p style="margin:0;padding:0;line-height:1.5;">&nbsp;<\/p>\n<p style="margin:0;padding:0;line-height:1.5;">&nbsp;<\/p>\n<p style="margin:0;padding:0;line-height:0;"><img src="https:\/\/example.com\/sig.png"/,
+  );
+  assert.match(
+    h,
+    /<img src="https:\/\/example.com\/sig.png"[^>]*><\/p>\n<p style="margin:0 0 12px;"><span style="font-size:12px;font-weight:bold;color:#555;"><a href="https:\/\/example.com"/,
+  );
+});
+
 test('letter-only extra is the suffix of the extra string', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/email/index.js'), 'utf8');
   assert.equal(

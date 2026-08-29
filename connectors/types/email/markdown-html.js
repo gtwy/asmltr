@@ -111,6 +111,22 @@ function applyBoldItalic(s) {
   return s;
 }
 
+function replaceImages(s, stash) {
+  return s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (full, alt, url) => {
+    const href = safeHref(url);
+    if (!href) return full;
+    return stash(
+      `<img src="${href}" alt="${alt}" width="96" height="96" ` +
+      'style="display:block;border:0;outline:none;width:96px;height:96px;">',
+    );
+  });
+}
+
+function isBareImageLine(escapedLine) {
+  const raw = unescapeHtml(escapedLine).trim();
+  return /^!\[[^\]]*\]\(https?:\/\/[^)]+\)$/i.test(raw);
+}
+
 function replaceLinks(s, stash) {
   let out = '';
   let i = 0;
@@ -148,6 +164,7 @@ function applyInline(escaped) {
 
   let s = escaped;
   s = s.replace(/`([^`]+)`/g, (_, code) => stash(`<code style="${STYLE.code}">${code}</code>`));
+  s = replaceImages(s, stash);
   s = replaceLinks(s, stash);
   s = applyBoldItalic(s);
   s = s.replace(/\u0000H(\d+)\u0000/g, (_, i) => holes[Number(i)]);
@@ -157,6 +174,7 @@ function applyInline(escaped) {
 function isBlockStart(line) {
   if (/^```/.test(line)) return true;
   if (/^#{1,4} /.test(line)) return true;
+  if (isBareImageLine(line)) return true;
   if (/^&gt;/.test(line)) return true;
   if (/^[-*+] /.test(line)) return true;
   if (/^\d+\. /.test(line)) return true;
@@ -250,6 +268,12 @@ function markdownToHtml(md, opts) {
         i += 1;
       }
       out.push(tag('ol', STYLE.ol, items.join('')));
+      continue;
+    }
+
+    if (isBareImageLine(line)) {
+      out.push(tag('p', 'margin:0;padding:0;line-height:0;', formatLine(line, i, subtextLines)));
+      i += 1;
       continue;
     }
 
