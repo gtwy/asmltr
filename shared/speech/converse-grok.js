@@ -242,7 +242,10 @@ function applyServerEvent(ev, handlers) {
       return 'function_call';
     }
   }
-  if (typ === 'session.updated' || typ === 'session.created') return 'session';
+  if (typ === 'session.updated' || typ === 'session.created') {
+    if (h.onSession) { try { h.onSession(ev); } catch (_) {} }
+    return 'session';
+  }
   return undefined;
 }
 

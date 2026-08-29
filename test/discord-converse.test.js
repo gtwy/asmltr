@@ -119,3 +119,16 @@ test('Live pack: grok-only, WS reopen, scribe edit, speaking-stop', () => {
   const rtAt = voice.indexOf('if (realtime)');
   assert.ok(convAt > 0 && convAt < rtAt, 'converse must win over realtime');
 });
+
+test("greet force_message only after session.updated and listening", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "../connectors/types/discord/index.js"), "utf8");
+  assert.match(src, /armLiveGreet/);
+  assert.match(src, /session.updated, listening/);
+  assert.match(src, /_wantGreet/);
+  assert.match(src, /armLiveGreet\(guildId\)/);
+  assert.doesNotMatch(src, /await session\.ready;[\s\S]{0,80}forceMessage/);
+  const cg = fs.readFileSync(path.join(__dirname, "../shared/speech/converse-grok.js"), "utf8");
+  assert.match(cg, /onSession/);
+});

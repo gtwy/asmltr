@@ -1373,6 +1373,16 @@ ${referentPromptBlock()}`;
       .catch(() => { try { conv.sendFunctionOutput(callId, JSON.stringify({ ok: false, error: 'denied' })); } catch (_) {} });
   }
 
+  function armLiveGreet(guildId) {
+    const conv = converseSessions.get(guildId);
+    if (!conv || conv._greeted || conv._leave || !conv._wantGreet) return;
+    if (!conv._sessionUpdated) return;
+    const voice = require('./voice');
+    if (!voice.isListening(guildId) || !voice.isConnected(guildId)) return;
+    conv._greeted = true;
+    try { conv.forceMessage("ivy's here"); ctx.log('[voice] greet force_message (session.updated, listening)'); } catch (e) { ctx.log(`[voice] greet: ${e.message}`); }
+  }
+
   async function tryOpenConverse(guildId, { greet } = { greet: true }) {
     let voiceKey = '';
     try {
@@ -1450,6 +1460,10 @@ ${referentPromptBlock()}`;
         upsertLiveUserLine(guildId, who, line, final);
       },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
+      onSession: () => {
+        session._sessionUpdated = true;
+        armLiveGreet(guildId);
+      },
       onClose: (info) => {
         const code = info && info.code;
         const reason = (info && info.reason) || '';
@@ -1469,9 +1483,7 @@ ${referentPromptBlock()}`;
       try { session.close(); } catch (_) {}
       return null;
     }
-    if (greet) {
-      try { session.forceMessage("ivy's here"); } catch (e) { ctx.log(`[voice] greet: ${e.message}`); }
-    }
+    session._wantGreet = !!greet;
     return session;
   }
 
@@ -1532,6 +1544,7 @@ ${referentPromptBlock()}`;
       },
       log: (m) => ctx.log(`[voice] ${m}`),
     });
+    armLiveGreet(guildId);
   }
 
   async function getInvokerVoiceChannel(turn) {
