@@ -101,9 +101,12 @@ test('Live onSpeechStart does not immediately stopVoiceReply', () => {
   assert.ok(i >= 0);
   const body = src.slice(i, src.indexOf('onAssistantText:', i));
   assert.equal(/stopVoiceReply\s*\(/.test(body), false);
-  assert.match(body, /armVoiceOverlap/);
   assert.match(body, /onSpeechStop:/);
   assert.match(body, /clearVoiceOverlap/);
+  assert.match(body, /isSpeaking\(guildId\)/);
+  assert.match(body, /voiceBusy\.has\(guildId\)/);
+  // Echo: do not arm 1.5s barge from xAI VAD while she is playing.
+  assert.equal(/armVoiceOverlap/.test(body), false);
 });
 
 test('flushPcm48Frames holds leftover bytes under 3840', () => {

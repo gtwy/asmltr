@@ -102,9 +102,11 @@ function cliEnv(extra) {
   delete env.xai_voice_api_key;
   return env;
 }
-function runCli(argv) {
+function runCli(argv, denyEnv) {
   return new Promise((resolve) => {
-    execFile(process.execPath, [CLI, ...argv], { timeout: 60000, maxBuffer: 4 * 1024 * 1024, env: cliEnv() }, (err, stdout, stderr) => {
+    const extra = {};
+    if (denyEnv) extra.ASMLTR_DENY_TOOLS = String(denyEnv);
+    execFile(process.execPath, [CLI, ...argv], { timeout: 60000, maxBuffer: 4 * 1024 * 1024, env: cliEnv(extra) }, (err, stdout, stderr) => {
       if (err) resolve({ isError: true, text: stripAnsi(stderr || err.message || '').trim() || `exit ${err.code}` });
       else resolve({ isError: false, text: stripAnsi(stdout || '').trim() || '(no output)' });
     });
@@ -118,6 +120,7 @@ function denyObj(deny) {
 
 function listTools(deny) {
   const denied = denyObj(deny);
+  if (denied.all) return [];
   return TOOLS.filter((t) => !t.deny || !denied[t.deny]).map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
 }
 
@@ -125,14 +128,15 @@ async function invokeTool(name, args, { deny, turn } = {}) {
   const t = BY_NAME[name];
   if (!t) return { ok: false, error: 'unknown tool: ' + name, isError: true };
   const denied = denyObj(deny);
-  if (t.deny && denied[t.deny]) return { ok: false, error: 'denied: ' + t.deny, isError: true };
+  if (denied.all || (t.deny && denied[t.deny])) return { ok: false, error: 'denied', isError: true };
   try {
     if (t.handler === 'voice') {
       const voiceTools = require('../connectors/types/discord/voice-tools');
       const r = await voiceTools.invoke(t.name, args || {}, turn || voiceTools.turnFromEnv());
       return r;
     }
-    const r = await runCli(t.argv(args || {}));
+    const { denyToolsEnv } = require('../shared/tool-policy');
+    const r = await runCli(t.argv(args || {}), denyToolsEnv(denied));
     return { ok: !r.isError, text: r.text, isError: r.isError };
   } catch (e) {
     return { ok: false, error: e.message, isError: true };

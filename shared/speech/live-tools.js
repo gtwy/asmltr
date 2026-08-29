@@ -41,7 +41,11 @@ function toolsForSpeaker(resolved, envelope) {
   if (isUntrusted(resolved)) return [];
   const pol = policyFor(envelope, resolved);
   const listed = toolbelt().listTools(pol && pol.deny);
-  return converseGrok.asRealtimeFunctions(listed);
+  let tools = converseGrok.asRealtimeFunctions(listed);
+  if (!(resolved.bypass_moderation || resolved.user_key === 'owner')) {
+    tools = tools.filter((t) => t.name !== 'voice_join');
+  }
+  return tools;
 }
 
 function speakerIdentityLine({ channel, speakerId, speakerName } = {}) {
@@ -74,7 +78,8 @@ async function executeFunctionCall({ name, args, resolved, envelope, turn, invok
   const belt = toolbelt();
   const t = belt.BY_NAME[name];
   if (!t) return JSON.stringify({ ok: false, error: 'unknown tool' });
-  if (t.deny && pol.deny && (pol.deny.all || pol.deny[t.deny])) return denied;
+  if (pol.deny && (pol.deny.all || (t.deny && pol.deny[t.deny]))) return denied;
+  if (name === 'voice_join' && !(resolved.bypass_moderation || resolved.user_key === 'owner')) return denied;
   const inv = invoke || belt.invokeTool;
   const r = await inv(name, args || {}, { deny: pol.deny, turn });
   if (r && r.isError && String(r.error || r.text || '').startsWith('denied')) return denied;

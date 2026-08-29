@@ -1384,10 +1384,12 @@ ${referentPromptBlock()}`;
       onSpeechStart: () => {
         if (cfg.voice_barge_in === false) return;
         const v = require('./voice');
-        // xAI server_vad during playback is echo-contaminated: extra 1.5s arm only, never instant cancel.
-        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) armVoiceOverlap(guildId, { live: true });
+        // Echo: xAI server_vad hears her playback. Ignore while playing. Local Discord 1.5s barge owns interrupt.
+        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
       },
       onSpeechStop: () => {
+        const v = require('./voice');
+        if (v.isSpeaking(guildId) || voiceBusy.has(guildId)) return;
         clearVoiceOverlap(guildId);
       },
       onAssistantText: (text) => {
