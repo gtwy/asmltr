@@ -14,7 +14,8 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.match(src, /if \(converseSessions\.has\(guildId\)\)/);
   assert.match(src, /shouldRelayPcm/);
   assert.match(src, /pushPcm24Play/);
-  assert.match(src, /voice:\s*'eve'/);
+  assert.match(src, /voice=ara/);
+  assert.doesNotMatch(src, /voice:\s*'eve'/);
   assert.doesNotMatch(src, /process\.env\.XAI_API_KEY/);
   const handle = src.slice(src.indexOf('async function handleVoiceUtterance'), src.indexOf('async function engineKeys'));
   const convReturn = handle.indexOf('if (converseSessions.has(guildId))');

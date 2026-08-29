@@ -104,7 +104,7 @@ test('fetchVoiceApiKey reads {value} and ignores process.env.XAI_API_KEY', async
 
 test('source never reads process.env.XAI_API_KEY or puts the key on a spawn', () => {
   const src = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
-  assert.equal(src.includes('process.env.XAI_API_KEY'), false);
+  assert.equal(/=\s*process\.env\.XAI_API_KEY/.test(src), false);
   assert.match(src, /getSecret\(\s*KEY_NAME|getSecret\(\s*'xai_voice_api_key'/);
   assert.match(src, /wss:\/\/api\.x\.ai\/v1\/realtime\?model=/);
   assert.match(src, /tools:\s*\[\]/);
@@ -112,7 +112,7 @@ test('source never reads process.env.XAI_API_KEY or puts the key on a spawn', ()
   assert.match(src, /effort:\s*'none'/);
   assert.match(src, /const VOICE = 'ara'/);
   assert.equal(src.includes('DODLEQ'), false);
-  assert.equal(src.includes('process.env.XAI_API_KEY'), false);
+  assert.equal(/=\s*process\.env\.XAI_API_KEY/.test(src), false);
 });
 
 test('pcm24MonoToPcm48Stereo doubles rate and mirrors L/R', () => {

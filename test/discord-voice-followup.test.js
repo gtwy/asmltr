@@ -56,9 +56,9 @@ test('index.js arms after speech with last-speaker userId; 0-or-unset is 25s', (
   assert.match(src, /voice_followup_ms:[\s\S]{0,400}default:\s*25000/);
   const handle = src.slice(src.indexOf('async function handleVoiceUtterance'), src.indexOf('async function engineKeys'));
   const awaitChain = handle.indexOf('await chain');
-  const armAt = handle.indexOf('voiceActive.set');
+  const armAt = handle.lastIndexOf('voiceActive.set');
   assert.ok(awaitChain >= 0, 'await chain present');
-  assert.ok(armAt > awaitChain, 'window armed after speak chain finishes');
+  assert.ok(armAt > awaitChain, 'CLI fallback still arms after speak chain finishes');
   assert.match(handle, /armFollowUp\(/);
   assert.match(handle, /userId:\s*speakerId/);
   assert.match(handle, /firstAudio/);
