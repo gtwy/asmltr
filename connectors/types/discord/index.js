@@ -24,7 +24,8 @@ const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // 
 const sharedStt = require('../../../shared/speech/stt');
 const sharedWake = require('../../../shared/speech/wake');            // shared confidence-gated wake matcher (#136)
 const voiceEngines = require('../../../shared/speech/voice-engines'); // pluggable STT/TTS role layer (#113/#139)
-const converseGrok = require('../../../shared/speech/converse-grok'); // Live duplex WS (grok-voice) when xai_voice_api_key present
+const converseGrok = require('../../../shared/speech/converse-grok'); // Ivy Live grok-voice-think-fast-2.0 WS
+const vault = require('../../../shared/vault');
 
 // Assistant identity — the display name AND the spoken wake word for voice.
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -900,7 +901,25 @@ ${referentPromptBlock()}`;
   const voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ default; per-channel transcribe-off wins
   const voiceTranscriptFile = cfg.voice_transcript_file !== false; // upload a full transcript .txt on leave
   const voiceLog = new Map(); // guildId -> [{ t, who, text }] accumulated for the whole voice session
-  const converseSessions = new Map(); // guildId -> grok-voice Live WS session (when converse bound)
+  const converseSessions = new Map(); // guildId -> converse-grok session (Ivy Live)
+  const converseSpeaker = new Map(); // guildId -> { userId, name }
+  const pcmRing = new Map(); // `${guildId}:${userId}` -> Buffer[] last ~4s
+  const PCM_RING_BYTES = 24000 * 2 * 4;
+
+  function closeConverse(guildId) {
+    const conv = converseSessions.get(guildId);
+    converseSessions.delete(guildId);
+    converseSpeaker.delete(guildId);
+    for (const k of [...pcmRing.keys()]) { if (k.startsWith(String(guildId) + ':')) pcmRing.delete(k); }
+    if (conv) { try { conv.close(); } catch (_) {} }
+    try { require('./voice').endPcmPlayback(guildId); } catch (_) {}
+  }
+
+  function lastSpeakerId(guildId) {
+    const w = voiceActive.get(guildId);
+    if (!w || w.expires == null || Number(w.expires) <= Date.now()) return '';
+    return w.userId != null && w.userId !== '' ? String(w.userId) : '';
+  }
 
   // Record a line for the end-of-session transcript file (kept even when live posting is off).
   function logTranscript(guildId, who, text) {
@@ -949,10 +968,10 @@ ${referentPromptBlock()}`;
     let voice; try { voice = require('./voice'); } catch (_) { return false; }
     const wasBusy = voiceBusy.has(guildId);
     voiceGen.set(guildId, (voiceGen.get(guildId) || 0) + 1); // invalidate the in-flight reply so it can't speak
-    const conv = converseSessions.get(guildId);
-    if (conv && conv.cancel) { try { conv.cancel(); } catch (_) {} }
     voice.stopSpeech(guildId); voice.stopDrone(guildId);
-    if (voice.stopPcmOut) { try { voice.stopPcmOut(guildId); } catch (_) {} }
+    try { voice.endPcmPlayback(guildId); } catch (_) {}
+    const convStop = converseSessions.get(guildId);
+    if (convStop) { try { convStop.cancel(); } catch (_) {} }
     voiceBusy.delete(guildId); voiceReplyStart.delete(guildId);
     try { await ctx.core.abort(voiceConvKey(guildId)); } catch (_) {}
     setVoiceStatus(null);
@@ -997,12 +1016,6 @@ ${referentPromptBlock()}`;
   // the assistant — addressed by name OR the SAME last speaker is inside the follow-up window
   // (so their next line needs no wake word). Other speakers still need the name. A dismissal
   // phrase exits answering mode back to transcription-only.
-  function armLastSpeaker(guildId, userId) {
-    const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId });
-    if (next) voiceActive.set(guildId, next);
-    return next;
-  }
-
   async function handleVoiceUtterance(guildId, name, text, meta = {}) {
     const ch = voiceText.get(guildId);
     logTranscript(guildId, name, text); // always captured for the end-of-session file
@@ -1073,16 +1086,26 @@ ${referentPromptBlock()}`;
       ctx.log(`[voice] wake fired (${d.reason}; conf=${d.confidence == null ? 'n/a' : d.confidence}): "${text.slice(0, 80)}"`);
     }
 
-    if (voiceMuted.has(guildId)) return; // MUTED (P2): addressed, but stay quiet — transcript already posted
-
-    // Live converse: last-speaker PCM already (or now) on the WS. Skip handleStream + ElevenLabs HTTP TTS.
-    const convLive = converseSessions.get(guildId);
-    if (convLive && speakerId) {
-      armLastSpeaker(guildId, speakerId);
-      try { voice.flushBurstToConverse(guildId, speakerId, convLive); } catch (_) {}
+    if (voiceMuted.has(guildId)) {
+      const convMuted = converseSessions.get(guildId);
+      if (convMuted) { try { convMuted.cancel(); } catch (_) {} }
+      return; // MUTED (P2): addressed, but stay quiet — transcript already posted
+    }
+    // Ivy Live: skip handleStream + ElevenLabs HTTP TTS; last-speaker PCM already on the converse WS.
+    if (converseSessions.has(guildId)) {
+      const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: speakerId });
+      if (next) voiceActive.set(guildId, next);
+      converseSpeaker.set(guildId, { userId: speakerId, name });
+      const ringKey = guildId + ':' + speakerId;
+      const ring = pcmRing.get(ringKey);
+      pcmRing.delete(ringKey);
+      const convTurn = converseSessions.get(guildId);
+      if (ring && ring.length && convTurn) { try { convTurn.pushPcm24(Buffer.concat(ring)); } catch (_) {} }
+      if (!voiceBusy.has(guildId)) voiceBusy.add(guildId);
+      try { voice.startSpeech(guildId); } catch (_) {}
+      setVoiceStatus(`💭 ${String(text).slice(0, 40)}`);
       return;
     }
-
     if (voiceBusy.has(guildId)) return;  // don't stack replies
     voiceBusy.add(guildId);
     const originCid = ch && ch.id;
@@ -1159,7 +1182,10 @@ ${referentPromptBlock()}`;
     const keys = {};
     try { keys.deepgram_api_key = !!(await ctx.secrets.get('deepgram_api_key')); } catch (_) { keys.deepgram_api_key = false; }
     try { keys.elevenlabs_api_key = !!(await ctx.secrets.get(cfg.elevenlabs_key_name || 'elevenlabs_api_key')); } catch (_) { keys.elevenlabs_api_key = false; }
-    try { keys.xai_voice_api_key = !!(await ctx.secrets.get('xai_voice_api_key')); } catch (_) { keys.xai_voice_api_key = false; }
+    try {
+      const data = await vault.getSecret('xai_voice_api_key', 'converse key present');
+      keys.xai_voice_api_key = !!converseGrok.secretValue(data);
+    } catch (_) { keys.xai_voice_api_key = false; }
     return keys;
   }
 
@@ -1187,59 +1213,76 @@ ${referentPromptBlock()}`;
     return { rtModel, rtLive, rtProvider, vad, realtime: cfg.voice_realtime !== false };
   }
 
-  async function openConverse(guildId) {
-    if (converseSessions.has(guildId)) return converseSessions.get(guildId);
-    let keys = {};
-    try { keys = await engineKeys(); } catch (_) { keys = {}; }
-    if (!keys.xai_voice_api_key) return null;
-    let bound;
-    try { bound = voiceEngines.resolve('converse', { keys }); } catch (_) { return null; }
-    if (!bound || bound.engine_id !== 'grok-voice') return null;
-    const voice = require('./voice');
+  async function tryOpenConverse(guildId) {
+    let voiceKey = '';
+    try {
+      const data = await vault.getSecret('xai_voice_api_key', 'ivy live converse');
+      voiceKey = converseGrok.secretValue(data);
+    } catch (_) { voiceKey = ''; }
+    const r = voiceEngines.resolve('converse', { keys: { xai_voice_api_key: !!voiceKey } });
+    if (!voiceKey || !r.engine_id || !voiceEngines.IMPLEMENTED.has(r.engine_id)) return null;
+    let WS;
+    try { WS = require('ws'); } catch (_) { WS = undefined; }
     const session = converseGrok.openSession({
-      onOpen: () => ctx.log('[voice] converse OPEN grok-voice ara'),
-      onAudioStart: () => {
-        voice.startSpeech(guildId);
-        voice.stopDrone(guildId);
-        voiceBusy.add(guildId);
-        setVoiceStatus('speaking');
-        voiceReplyStart.set(guildId, Date.now());
+      onOpen: () => ctx.log(`[voice] converse OPEN ${converseGrok.MODEL} voice=ara tools=[]`),
+      onAudio: (pcm) => {
+        if (voiceMuted.has(guildId)) return;
+        const voice = require('./voice');
+        if (!voiceBusy.has(guildId)) {
+          voiceBusy.add(guildId);
+          voice.startSpeech(guildId);
+          voiceReplyStart.set(guildId, Date.now());
+        }
+        try { voice.pushPcm24Play(guildId, pcm); } catch (e) { ctx.log(`[voice] converse play: ${e.message}`); }
       },
-      onAudio: (pcm) => { try { voice.pushPcm24Out(guildId, pcm); } catch (_) {} },
-      onAudioEnd: (text) => {
-        try { if (voice.endPcmOut) voice.endPcmOut(guildId); } catch (_) {}
+      onSpeechStart: () => {
+        if (cfg.voice_barge_in === false) return;
+        const v = require('./voice');
+        if (!v.isSpeaking(guildId)) return;
+        ctx.log('[voice] converse server_vad barge-in');
+        stopVoiceReply(guildId, { chime: false });
+      },
+      onAssistantText: (text) => {
+        const ch = voiceText.get(guildId);
+        const t = String(text || '').trim();
+        if (!t) return;
+        logTranscript(guildId, NAME, t);
+        if (ch && shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) {
+          ch.send(`🔊 **${NAME}:** ${t.slice(0, 1800)}`).catch(() => {});
+        }
+      },
+      onResponseDone: () => {
+        const voice = require('./voice');
+        try { voice.endPcmPlayback(guildId); } catch (_) {}
         voice.endSpeech(guildId);
+        const sp = converseSpeaker.get(guildId);
+        if (sp && sp.userId) {
+          const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: String(sp.userId) });
+          if (next) voiceActive.set(guildId, next);
+        }
         voiceBusy.delete(guildId);
         voiceReplyStart.delete(guildId);
         setVoiceStatus(null);
-        const w = voiceActive.get(guildId);
-        const uid = (w && w.userId) || '';
-        armLastSpeaker(guildId, uid);
-        if (text) {
-          logTranscript(guildId, NAME, text);
-          const ch = voiceText.get(guildId);
-          if (ch && shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) {
-            ch.send(`🔊 **${NAME}:** ${String(text).slice(0, 1800)}`).catch(() => {});
-          }
-        }
       },
-      onError: (e) => ctx.log('[voice] converse ERROR: ' + e),
-    }, { instructions: 'You are ' + NAME + '. ' + VOICE_GUIDANCE });
-    converseSessions.set(guildId, session);
+      onError: (e) => ctx.log(`[voice] converse error: ${e}`),
+      onClose: () => ctx.log('[voice] converse WS closed'),
+    }, { getKey: async () => voiceKey, WebSocket: WS, instructions: VOICE_GUIDANCE });
+    try { await session.ready; } catch (e) {
+      ctx.log(`[voice] converse unavailable (${e.message}) — Flux+CLI+TTS`);
+      try { session.close(); } catch (_) {}
+      return null;
+    }
     return session;
-  }
-
-  function closeConverse(guildId) {
-    const s = converseSessions.get(guildId);
-    if (!s) return;
-    try { s.close(); } catch (_) {}
-    converseSessions.delete(guildId);
   }
 
   async function startVoiceListening(guildId) {
     const voice = require('./voice');
-    const conv = (await openConverse(guildId)) || null;
+    const conv = await tryOpenConverse(guildId);
     const { rtModel, rtLive, rtProvider, vad, realtime } = await realtimeListenConfig();
+    if (conv) {
+      converseSessions.set(guildId, conv);
+      ctx.log(`[voice] converse bound ${converseGrok.MODEL} voice=ara tools=[] — skip handleStream + ElevenLabs TTS`);
+    }
     voice.startListening(guildId, client, {
       transcribe: sttTranscribe,
       realtime,
@@ -1247,12 +1290,20 @@ ${referentPromptBlock()}`;
       realtimeLive: rtLive,
       realtimeProvider: rtProvider,
       vad,
-      converse: conv,
-      shouldRelayPcm: (userId) => converseGrok.isLastSpeakerRelay({
-        window: voiceActive.get(guildId), userId, now: Date.now(), muted: voiceMuted.has(guildId),
-      }),
       onUtterance: (name, text, meta) => handleVoiceUtterance(guildId, name, text, meta),
       onPartial: (name, text) => onVoicePartial(guildId, name, text),
+      onPcm24: conv ? (userId, pcm, meta) => {
+        if (!pcm || !pcm.length || !userId) return;
+        const key = guildId + ':' + userId;
+        let arr = pcmRing.get(key);
+        if (!arr) { arr = []; pcmRing.set(key, arr); }
+        arr.push(pcm);
+        let total = 0; for (const b of arr) total += b.length;
+        while (arr.length > 1 && total > PCM_RING_BYTES) { total -= arr[0].length; arr.shift(); }
+        if (!converseGrok.shouldRelayPcm({ speakerId: lastSpeakerId(guildId), userId, muted: voiceMuted.has(guildId) })) return;
+        converseSpeaker.set(guildId, { userId: String(userId), name: (meta && meta.name) || String(userId) });
+        conv.pushPcm24(pcm);
+      } : undefined,
       onBargeIn: () => {
         const gid = guildId;
         if (cfg.voice_barge_in === false) return;
@@ -1315,7 +1366,9 @@ ${referentPromptBlock()}`;
       const keys = await engineKeys();
       try { transcribeEngine = voiceEngines.resolve('realtime_transcribe', { keys }).engine_id || ''; } catch (_) {}
       try { ttsEngine = voiceEngines.resolve('synthesize', { keys }).engine_id || ''; } catch (_) {}
-      return { transcribeEngine, ttsEngine };
+      let converseEngine = '';
+      try { converseEngine = voiceEngines.resolve('converse', { keys }).engine_id || ''; } catch (_) {}
+      return { transcribeEngine, ttsEngine, converseEngine };
     },
   });
   } catch (e) { ctx.log("voice-tools bind failed: " + e.message); }
@@ -1339,7 +1392,6 @@ ${referentPromptBlock()}`;
       const { rtModel, rtLive, rtProvider, vad } = await realtimeListenConfig();
       ctx.log(`[voice] realtime role → ${rtProvider}:${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
       await startVoiceListening(message.guild.id);
-      if (converseSessions.get(message.guild.id)) ctx.log('[voice] converse bound: grok-voice ara (skip handleStream + ElevenLabs HTTP TTS)');
       ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${!isTranscriptOff(transcriptOffChannels, message.channel.id) && voicePostTranscript})`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const originOff = isTranscriptOff(transcriptOffChannels, message.channel.id);

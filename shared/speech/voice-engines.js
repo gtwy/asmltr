@@ -63,12 +63,11 @@ const ENGINES = {
     roles: ['synthesize'], caps: { voices: 'premium', cloning: true },
   },
   'grok-voice': {
-    provider: 'xai', label: 'Grok Voice (Live)', key: 'xai_voice_api_key', model: 'grok-voice-think-fast-2.0',
+    provider: 'xai', label: 'Grok Voice (Ivy Live)', key: 'xai_voice_api_key', model: 'grok-voice-think-fast-2.0',
     roles: ['converse'],
-    caps: { duplex: true, streaming: true, vad: true, voice: 'ara' },
+    caps: { duplex: true, streaming: true, vad: true, voices: ['ara', 'eve', 'leo', 'rex', 'sal'] },
   },
 };
-
 
 const DEFAULT_BINDINGS = {
   transcribe: 'openai-transcribe',
@@ -116,13 +115,20 @@ function enginesForRole(role) { return Object.entries(ENGINES).filter(([, e]) =>
 function resolve(role, opts) {
   if (!ROLES.includes(role)) throw new Error('unknown voice role: ' + role);
   const fileB = readFileBindings();
-  const fromFile = Object.prototype.hasOwnProperty.call(fileB, role);
-  let id = fromFile ? fileB[role] : implicitBinding(role, opts);
+  let id = Object.prototype.hasOwnProperty.call(fileB, role) ? fileB[role] : implicitBinding(role, opts);
+  // converse: a file value of null still implicit-binds when xai_voice_api_key is present.
+  // Never fall through to "first engine for role" — that would bind grok-voice without a key
+  // and skip the Flux+CLI+TTS fallback.
+  if (role === 'converse') {
+    if (!id || !ENGINES[id] || !ENGINES[id].roles.includes(role)) id = implicitBinding(role, opts);
+    if (!id || !ENGINES[id] || !ENGINES[id].roles.includes(role)) {
+      return { role, engine_id: null, engine: null, capabilities: null };
+    }
+    const engine = ENGINES[id];
+    return { role, engine_id: id, engine, capabilities: { ...engine.caps, model: engine.model, provider: engine.provider } };
+  }
   if (!id || !ENGINES[id] || !ENGINES[id].roles.includes(role)) {
-    // converse is opt-in (vault xai_voice_api_key). Do not fall back to the catalog entry
-    // when the key is missing -- that would steal the Flux+CLI+TTS path.
-    if (role === 'converse' && !fromFile) id = null;
-    else { const first = enginesForRole(role)[0]; id = first ? first.id : null; }
+    const first = enginesForRole(role)[0]; id = first ? first.id : null;
   }
   const engine = id ? ENGINES[id] : null;
   return { role, engine_id: id, engine, capabilities: engine ? { ...engine.caps, model: engine.model, provider: engine.provider } : null };

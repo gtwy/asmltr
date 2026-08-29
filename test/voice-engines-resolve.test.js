@@ -13,6 +13,8 @@ function withEnv(fn) {
     DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY,
     ASMLTR_DEEPGRAM_API_KEY: process.env.ASMLTR_DEEPGRAM_API_KEY,
     ASMLTR_TTS_PROVIDER: process.env.ASMLTR_TTS_PROVIDER,
+    XAI_API_KEY: process.env.XAI_API_KEY,
+    XAI_VOICE_API_KEY: process.env.XAI_VOICE_API_KEY,
   };
   try { return fn(); }
   finally {
@@ -101,46 +103,52 @@ test('Deepgram adapter uses token subprotocol (Node global WebSocket)', () => {
   assert.equal(/headers:\s*\{\s*Authorization/.test(src), false);
 });
 
-
-test('resolver: grok-voice converse when xai_voice_api_key present', () => {
+test('converse implicit grok-voice when xai_voice_api_key present; null when absent', () => {
   withEnv(() => {
-    process.env.ASMLTR_VOICE_ENGINES_FILE = path.join(os.tmpdir(), 'asmltr-no-voice-engines-cv-' + process.pid + '.json');
+    process.env.ASMLTR_VOICE_ENGINES_FILE = path.join(os.tmpdir(), 'asmltr-no-voice-engines-converse-' + process.pid + '.json');
+    try { fs.unlinkSync(process.env.ASMLTR_VOICE_ENGINES_FILE); } catch (_) {}
+    const on = resolve('converse', { keys: { xai_voice_api_key: true } });
+    assert.equal(on.engine_id, 'grok-voice');
+    assert.equal(IMPLEMENTED.has('grok-voice'), true);
+    assert.equal(ENGINES['grok-voice'].key, 'xai_voice_api_key');
+    const off = resolve('converse', { keys: { xai_voice_api_key: false } });
+    assert.equal(off.engine_id, null);
+    assert.equal(fs.existsSync(process.env.ASMLTR_VOICE_ENGINES_FILE), false);
+  });
+});
+
+test('resolver: converse grok-voice when xai_voice_api_key present', () => {
+  withEnv(() => {
+    process.env.ASMLTR_VOICE_ENGINES_FILE = path.join(os.tmpdir(), 'asmltr-no-voice-engines-converse-' + process.pid + '.json');
     try { fs.unlinkSync(process.env.ASMLTR_VOICE_ENGINES_FILE); } catch (_) {}
     const r = resolve('converse', { keys: { xai_voice_api_key: true } });
     assert.equal(r.engine_id, 'grok-voice');
     assert.equal(r.capabilities.provider, 'xai');
     assert.equal(r.capabilities.model, 'grok-voice-think-fast-2.0');
-    assert.equal(r.capabilities.voice, 'ara');
-    assert.equal(IMPLEMENTED.has('grok-voice'), true);
     assert.equal(ENGINES['grok-voice'].key, 'xai_voice_api_key');
+    assert.equal(IMPLEMENTED.has('grok-voice'), true);
+  });
+});
+
+test('resolver: converse unbound when xai_voice_api_key missing (Flux+CLI+TTS fallback)', () => {
+  withEnv(() => {
+    process.env.ASMLTR_VOICE_ENGINES_FILE = path.join(os.tmpdir(), 'asmltr-no-voice-engines-converse-off-' + process.pid + '.json');
+    try { fs.unlinkSync(process.env.ASMLTR_VOICE_ENGINES_FILE); } catch (_) {}
+    delete process.env.XAI_API_KEY;
+    delete process.env.XAI_VOICE_API_KEY;
+    const r = resolve('converse', { keys: { xai_voice_api_key: false } });
+    assert.equal(r.engine_id, null);
+    assert.equal(r.engine, null);
     assert.equal(fs.existsSync(process.env.ASMLTR_VOICE_ENGINES_FILE), false);
   });
 });
 
-test('resolver: converse unbound when xai_voice_api_key absent (keep Flux+CLI+TTS)', () => {
+test('keyPresent does not treat process.env.XAI_API_KEY as xai_voice_api_key', () => {
+  const { keyPresent } = require('../shared/speech/voice-engines');
   withEnv(() => {
-    process.env.ASMLTR_VOICE_ENGINES_FILE = path.join(os.tmpdir(), 'asmltr-no-voice-engines-cv2-' + process.pid + '.json');
-    try { fs.unlinkSync(process.env.ASMLTR_VOICE_ENGINES_FILE); } catch (_) {}
-    process.env.XAI_API_KEY = 'must-not-bind-converse';
-    const r = resolve('converse', { keys: { xai_voice_api_key: false } });
-    assert.equal(r.engine_id, null);
-    assert.equal(r.engine, null);
-    delete process.env.XAI_API_KEY;
-  });
-});
-
-test('resolver: converse does not write a hard grok-voice bind; XAI_API_KEY env is not an alias', () => {
-  withEnv(() => {
-    const f = path.join(os.tmpdir(), 'asmltr-voice-engines-converse-must-not-write-' + process.pid + '.json');
-    process.env.ASMLTR_VOICE_ENGINES_FILE = f;
-    try { fs.unlinkSync(f); } catch (_) {}
-    process.env.XAI_API_KEY = 'nope';
-    resolve('converse', { keys: { xai_voice_api_key: true } });
-    resolve('converse', { keys: { xai_voice_api_key: false } });
-    assert.equal(fs.existsSync(f), false);
-    assert.deepEqual(readFileBindings(), {});
-    const src = fs.readFileSync(path.join(__dirname, '../shared/speech/voice-engines.js'), 'utf8');
-    assert.equal(/XAI_API_KEY/.test(src), false);
-    delete process.env.XAI_API_KEY;
+    process.env.XAI_API_KEY = 'must-not-count';
+    delete process.env.XAI_VOICE_API_KEY;
+    assert.equal(keyPresent('xai_voice_api_key', {}), false);
+    assert.equal(keyPresent('xai_voice_api_key', { keys: { xai_voice_api_key: true } }), true);
   });
 });

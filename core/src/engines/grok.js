@@ -394,6 +394,8 @@ function bin() {
 function launchEnv(base) {
   const env = { ...(base || process.env) };
   delete env.XAI_API_KEY;
+  delete env.XAI_VOICE_API_KEY;
+  delete env.xai_voice_api_key;
   try { return require('../../../shared/bounce').withGuardPath(env); } catch (_) { return env; }
 }
 

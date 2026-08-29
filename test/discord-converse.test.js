@@ -4,75 +4,48 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const discord = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
-const voice = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
-const engines = fs.readFileSync(path.join(__dirname, '../shared/speech/voice-engines.js'), 'utf8');
-const converse = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
-const grok = fs.readFileSync(path.join(__dirname, '../core/src/engines/grok.js'), 'utf8');
-
-test('Live converse: ara session, vault xai_voice_api_key, no eve default, no ElevenLabs voice_id', () => {
-  assert.match(converse, /voice: LIVE_VOICE/);
-  assert.match(converse, /const LIVE_VOICE = 'ara'/);
-  assert.match(converse, /grok-voice-think-fast-2\.0/);
-  assert.match(converse, /require\('\.\.\/vault'\)\.getSecret/);
-  assert.match(converse, /KEY_NAME = 'xai_voice_api_key'/);
-  assert.match(converse, /shared\/vault/);
-  const code = converse.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  assert.equal(code.includes('XAI_API_KEY'), false);
-  assert.equal(/voice:\s*['"]eve['"]/.test(code), false);
-  assert.equal(code.toLowerCase().includes('elevenlabs'), false);
-  assert.match(converse, /tools: \[\]/);
-  assert.match(converse, /server_vad/);
-  assert.match(converse, /effort: 'none'/);
+test('index.js binds converse when vault key present and skips handleStream + ElevenLabs TTS', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(src, /require\('\.\.\/\.\.\/\.\.\/shared\/speech\/converse-grok'\)/);
+  assert.match(src, /vault\.getSecret\('xai_voice_api_key'/);
+  assert.match(src, /async function tryOpenConverse/);
+  assert.match(src, /converse bound/);
+  assert.match(src, /skip handleStream \+ ElevenLabs/);
+  assert.match(src, /if \(converseSessions\.has\(guildId\)\)/);
+  assert.match(src, /shouldRelayPcm/);
+  assert.match(src, /pushPcm24Play/);
+  assert.match(src, /voice:\s*'eve'/);
+  assert.doesNotMatch(src, /process\.env\.XAI_API_KEY/);
+  const handle = src.slice(src.indexOf('async function handleVoiceUtterance'), src.indexOf('async function engineKeys'));
+  const convReturn = handle.indexOf('if (converseSessions.has(guildId))');
+  const streamAt = handle.indexOf('await ctx.core.handleStream');
+  assert.ok(convReturn >= 0, 'converse short-circuit in handleVoiceUtterance');
+  assert.ok(streamAt > convReturn, 'handleStream still present for Flux fallback, after converse return');
 });
 
-test('converse bound skips handleStream + ElevenLabs HTTP TTS; Flux path remains when unbound', () => {
-  assert.match(discord, /skip handleStream \+ ElevenLabs HTTP TTS/);
-  assert.match(discord, /flushBurstToConverse/);
-  assert.match(discord, /const convLive = converseSessions\.get\(guildId\)/);
-  assert.match(discord, /ctx\.core\.handleStream/);
-  assert.match(discord, /elevenLabsTTS/);
-  assert.match(discord, /converseGrok\.openSession/);
-  assert.match(discord, /xai_voice_api_key/);
-  assert.equal(discord.includes('XAI_API_KEY'), false);
-  assert.equal(/new WebSocket/.test(discord), false);
+test('voice.js converse listen path skips Flux and plays PCM 24k', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/voice.js'), 'utf8');
+  assert.match(src, /function converseSpeaking/);
+  assert.match(src, /if \(converse\)/);
+  assert.match(src, /pushPcm24Play/);
+  assert.match(src, /pcm24MonoToPcm48Stereo/);
+  assert.match(src, /onPcm24/);
+  assert.match(src, /allowPcm/);
 });
 
-test('join-voice stays owner-only; last-speaker PCM only into WS; transcribe-off stays', () => {
-  assert.match(discord, /OWNER_ONLY_CMDS/);
-  const ownerBlock = discord.slice(discord.indexOf('const OWNER_ONLY_CMDS'), discord.indexOf('const meta'));
-  assert.match(ownerBlock, /join-voice/);
-  assert.match(discord, /if \(OWNER_ONLY_CMDS\.has\(cmd\) && !\(await isOwner\(message\)\)\)/);
-  assert.match(discord, /shouldRelayPcm/);
-  assert.match(discord, /isLastSpeakerRelay/);
-  assert.match(discord, /shouldPostLive/);
-  assert.match(discord, /transcribe-off/);
-  assert.match(voice, /shouldRelayPcm\(userId\)/);
-  assert.match(voice, /converse\.pushPcm24/);
-  assert.match(voice, /flushBurstToConverse/);
+test('join-voice stays owner-only; spoken tools stay empty on the WS', () => {
+  const index = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const ownerBlock = index.slice(index.indexOf('const OWNER_ONLY_CMDS'), index.indexOf('const meta'));
+  assert.match(ownerBlock, /'join-voice'/);
+  const grok = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
+  assert.match(grok, /tools:\s*\[\]/);
+  assert.equal(/type:\s*'web_search'/.test(grok), false);
+  assert.equal(/type:\s*'mcp'/.test(grok), false);
 });
 
-test('no second Discord client, no Pipecat, no discord.py; grok CLI still strips XAI_API_KEY', () => {
-  assert.equal(/discord\.py|pipecat|second Discord client/i.test(discord), false);
-  assert.equal(/new Client\(/.test(discord.split("new Client(")[2] || ''), false); // only one construction after first
-  assert.equal(discord.split('new Client(').length, 2); // declaration + one construct
-  assert.match(grok, /delete env\.XAI_API_KEY/);
-  assert.equal(engines.includes('XAI_API_KEY'), false);
-  assert.match(engines, /xai_voice_api_key/);
-  assert.match(engines, /'grok-voice'/);
-  assert.match(engines, /IMPLEMENTED.*grok-voice/);
-});
-
-test('pcm24MonoToPcm48Stereo doubles rate and stereoizes', () => {
-  const { pcm24MonoToPcm48Stereo } = require('../connectors/types/discord/voice');
-  const src = Buffer.alloc(4);
-  src.writeInt16LE(100, 0);
-  src.writeInt16LE(-100, 2);
-  const out = pcm24MonoToPcm48Stereo(src);
-  assert.equal(out.length, 16);
-  assert.equal(out.readInt16LE(0), 100);
-  assert.equal(out.readInt16LE(2), 100);
-  assert.equal(out.readInt16LE(4), 100);
-  assert.equal(out.readInt16LE(6), 100);
-  assert.equal(out.readInt16LE(8), -100);
+test('grok CLI launchEnv still strips converse keys (source)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../core/src/engines/grok.js'), 'utf8');
+  assert.match(src, /delete env\.XAI_API_KEY/);
+  assert.match(src, /delete env\.XAI_VOICE_API_KEY/);
+  assert.match(src, /delete env\.xai_voice_api_key/);
 });

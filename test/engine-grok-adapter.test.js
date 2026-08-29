@@ -178,6 +178,19 @@ test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
   assert.ok(!('XAI_API_KEY' in env));
 });
 
+test('launchEnv strips xai_voice_api_key / XAI_VOICE_API_KEY so grok CLI never sees the converse key', () => {
+  const env = grok.launchEnv({
+    PATH: '/bin',
+    XAI_API_KEY: 'nope',
+    XAI_VOICE_API_KEY: 'voice-should-never-leak',
+    xai_voice_api_key: 'voice-should-never-leak-lower',
+    HOME: '/tmp',
+  });
+  assert.ok(!('XAI_API_KEY' in env));
+  assert.ok(!('XAI_VOICE_API_KEY' in env));
+  assert.ok(!('xai_voice_api_key' in env));
+});
+
 test('buildArgs omits a turn-cap flag; runTurn/complete do not arm a kill timer', () => {
   const args = grok.buildArgs({ prompt: 'hello' });
   assert.equal(args.includes('--max-turns'), false);

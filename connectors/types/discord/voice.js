@@ -10,6 +10,7 @@
 const path = require('path');
 
 const rt = require('../../../shared/speech/realtime-stt'); // shared streaming STT (server-VAD turn-taking, #140)
+const converseGrok = require('../../../shared/speech/converse-grok');
 
 const CHIME = path.join(__dirname, 'assets', 'chime.ogg');
 const DRONE = path.join(__dirname, 'assets', 'drone.ogg');
@@ -26,6 +27,8 @@ const dronePlayers = new Map(); // guildId -> looping "working" drone player
 // { cancelled:bool, player:AudioPlayer|null }. speak() no-ops once cancelled, so queued sentences after a
 // barge-in never play; stopSpeech() also stops the sentence playing right now.
 const speech = new Map(); // guildId -> { cancelled, player }
+const pcmOut = new Map(); // guildId -> { pcm, encoder, player } converse PCM playback
+const converseSubs = new Map(); // '<guildId>:<userId>' -> { subscribed, name }
 
 async function joinChannel(voiceChannel) {
   const { joinVoiceChannel, entersState, VoiceConnectionStatus } = lib();
@@ -84,7 +87,7 @@ function meaningful(t) {
 // Stream one speaker's audio into a persistent realtime STT session (#140). Opened lazily, kept open
 // across short pauses so server-VAD segments turns; flushed with trailing silence when a burst ends;
 // idle-closed after prolonged silence. onFinal → onUtterance; deltas → onPartial (live captions).
-function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model, live, provider, endpointMs, log, converse, shouldRelayPcm }) {
+function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, onPcm24, model, live, provider, endpointMs, log }) {
   const { EndBehaviorType } = lib();
   const prism = require('prism-media');
   const key = rtKey(guildId, userId);
@@ -99,14 +102,12 @@ function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPa
       onFinal: (t) => { log(`realtime FINAL(${name}): ${String(t).slice(0, 60)}`); if (t && onUtterance) { try { onUtterance(name, t, { confidence: 1, realtime: true, userId }); } catch (_) {} } },
       onError: (e) => log(`realtime stt ERROR: ${e}`),
     }, { model, live, provider }); // deepgram Flux uses same pushPcm24 path; live streaming model → partials + commit
-    entry = { session, name, live, subscribed: false, idleTimer: null, burstFrames: 0, burst: [], relayed: false };
+    entry = { session, name, live, subscribed: false, idleTimer: null, burstFrames: 0 };
     rtSessions.set(key, entry);
   }
   if (entry.subscribed) return; // already streaming this burst
   entry.subscribed = true;
   entry.burstFrames = 0;
-  entry.burst = [];
-  entry.relayed = false;
   clearTimeout(entry.idleTimer);
   const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: Number.isFinite(endpointMs) ? endpointMs : 800 } });
   const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
@@ -116,13 +117,9 @@ function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPa
     entry.burstFrames++;
     if (entry.burstFrames === 1) log(`realtime: first audio frame from ${entry.name}`);
     let pcm24;
-    try { pcm24 = rt.pcm48StereoToPcm24Mono(c); } catch (e) { log(`realtime push err: ${e.message}`); return; }
-    if (entry.burst.length < 800) entry.burst.push(pcm24);
-    try { entry.session.pushPcm24(pcm24); } catch (e) { log(`realtime push err: ${e.message}`); }
-    if (converse && shouldRelayPcm && shouldRelayPcm(userId)) {
-      entry.relayed = true;
-      try { converse.pushPcm24(pcm24); } catch (e) { log(`converse push err: ${e.message}`); }
-    }
+    try { pcm24 = rt.pcm48StereoToPcm24Mono(c); entry.session.pushPcm24(pcm24); }
+    catch (e) { log(`realtime push err: ${e.message}`); return; }
+    if (onPcm24) { try { onPcm24(userId, pcm24, { name: entry.name }); } catch (e) { log(`onPcm24 err: ${e.message}`); } }
   });
   decoder.on('end', () => {
     entry.subscribed = false;
@@ -144,11 +141,43 @@ function closeRealtime(guildId) {
   }
 }
 
+// Converse path: per-user 48k stereo → 24k mono PCM into the grok-voice WS (last-speaker gated by allowPcm).
+function converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24, endpointMs, log }) {
+  if (typeof allowPcm === 'function' && !allowPcm(userId)) return;
+  const { EndBehaviorType } = lib();
+  const prism = require('prism-media');
+  const key = rtKey(guildId, userId);
+  if (converseSubs.get(key) && converseSubs.get(key).subscribed) return;
+  const u = client.users.cache.get(userId);
+  const name = (u && (u.globalName || u.username)) || userId;
+  const entry = { subscribed: true, name };
+  converseSubs.set(key, entry);
+  const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: Number.isFinite(endpointMs) ? endpointMs : 800 } });
+  const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
+  opus.on('error', (e) => log(`converse opus err: ${e.message}`)); decoder.on('error', (e) => log(`converse decode err: ${e.message}`));
+  opus.pipe(decoder);
+  decoder.on('data', (c) => {
+    try {
+      if (typeof allowPcm === 'function' && !allowPcm(userId)) return;
+      const pcm = rt.pcm48StereoToPcm24Mono(c);
+      if (onPcm24) onPcm24(userId, pcm, { name });
+    } catch (e) { log(`converse push err: ${e.message}`); }
+  });
+  decoder.on('end', () => { entry.subscribed = false; });
+}
+
+function closeConverseSubs(guildId) {
+  for (const [k, e] of converseSubs) {
+    if (k.startsWith(guildId + ':')) converseSubs.delete(k);
+  }
+}
+
 // transcribe = async (wavBuffer) -> text | { text, confidence } ; onUtterance = (name, text, meta) => {}
 // onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply.
 // onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
 // realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
-function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, realtimeModel, realtimeLive, realtimeProvider, converse, shouldRelayPcm, vad = {}, log = () => {} }) {
+// converse = true → skip Flux; relay last-speaker PCM via onPcm24 (Ivy Live).
+function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, realtimeModel, realtimeLive, realtimeProvider, converse, allowPcm, onPcm24, vad = {}, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;
   const { EndBehaviorType } = lib();
@@ -166,7 +195,10 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
     // Barge-in: the bot only ever RECEIVES other humans (never its own playback), so any speech that
     // starts while a reply is playing is someone talking over it → interrupt. The handler debounces.
     if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
-    if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model: realtimeModel || 'gpt-live-transcribe', live: realtimeLive !== false, provider: realtimeProvider, endpointMs, log, converse, shouldRelayPcm }); return; }
+    // Converse PCM is tapped off the Flux decoder (onPcm24) — do NOT skip STT: spoken-stop /
+    // mute / leave / name-gate / 🗣️ still need transcripts. Last-speaker gating is in onPcm24.
+    if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, onPcm24, model: realtimeModel || 'gpt-live-transcribe', live: realtimeLive !== false, provider: realtimeProvider, endpointMs, log }); return; }
+    if (converse) { converseSpeaking(guildId, client, userId, receiver, { allowPcm, onPcm24, endpointMs, log }); return; }
     if (active.has(userId)) return;
     active.add(userId);
     const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: endpointMs } });
@@ -174,12 +206,7 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
     const chunks = [];
     opus.on('error', () => {}); decoder.on('error', () => {});
     opus.pipe(decoder);
-    decoder.on('data', (c) => {
-      chunks.push(c);
-      if (converse && shouldRelayPcm && shouldRelayPcm(userId)) {
-        try { converse.pushPcm24(rt.pcm48StereoToPcm24Mono(c)); } catch (_) {}
-      }
-    });
+    decoder.on('data', (c) => chunks.push(c));
     decoder.on('end', async () => {
       active.delete(userId);
       const pcm = Buffer.concat(chunks);
@@ -208,7 +235,7 @@ function stopSpeech(guildId) {
   const s = speech.get(guildId);
   if (s) { s.cancelled = true; try { s.player && s.player.stop(true); } catch (_) {} }
   speech.delete(guildId);
-  stopPcmOut(guildId);
+  endPcmPlayback(guildId);
 }
 // Normal end of a reply (all sentences spoken) — clear the session without cancelling.
 function endSpeech(guildId) { speech.delete(guildId); }
@@ -235,7 +262,45 @@ async function speak(guildId, mp3Buffer) {
   return player;
 }
 
-function stopListening(guildId) { listening.delete(guildId); closeRealtime(guildId); stopPcmOut(guildId); }
+function stopListening(guildId) { listening.delete(guildId); closeRealtime(guildId); closeConverseSubs(guildId); endPcmPlayback(guildId); }
+
+function endPcmPlayback(guildId) {
+  const e = pcmOut.get(guildId);
+  if (!e) return;
+  try { e.pcm.end(); } catch (_) {}
+  try { e.encoder.destroy(); } catch (_) {}
+  try { e.player.stop(true); } catch (_) {}
+  pcmOut.delete(guildId);
+}
+
+function startPcmPlayback(guildId) {
+  const conn = connections.get(guildId);
+  if (!conn) return null;
+  endPcmPlayback(guildId);
+  const { PassThrough } = require('stream');
+  const prism = require('prism-media');
+  const { createAudioPlayer, createAudioResource, StreamType, NoSubscriberBehavior } = lib();
+  const pcm = new PassThrough({ highWaterMark: 64 * 1024 });
+  const encoder = new prism.opus.Encoder({ frameSize: 960, channels: 2, rate: 48000 });
+  pcm.pipe(encoder);
+  const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+  player.play(createAudioResource(encoder, { inputType: StreamType.Opus }));
+  conn.subscribe(player);
+  if (!speech.get(guildId)) startSpeech(guildId);
+  const s = speech.get(guildId);
+  if (s) s.player = player;
+  pcmOut.set(guildId, { pcm, encoder, player });
+  return player;
+}
+
+function pushPcm24Play(guildId, buf) {
+  const s = speech.get(guildId);
+  if (s && s.cancelled) return;
+  if (!pcmOut.get(guildId)) startPcmPlayback(guildId);
+  const e = pcmOut.get(guildId);
+  if (!e || !buf || !buf.length) return;
+  try { e.pcm.write(converseGrok.pcm24MonoToPcm48Stereo(buf)); } catch (_) {}
+}
 
 // Soft looping "I'm working on it" drone — played while a turn is being generated, so the
 // speaker knows something is happening between the chime and the spoken reply.
@@ -276,80 +341,9 @@ function channelIdOf(guildId) {
   return (c.joinConfig && c.joinConfig.channelId) || null;
 }
 
-
-// 24kHz mono s16le -> 48kHz stereo s16le for @discordjs/voice StreamType.Raw.
-function pcm24MonoToPcm48Stereo(buf) {
-  if (!buf || !buf.length) return Buffer.alloc(0);
-  const n = buf.length >> 1;
-  const out = Buffer.allocUnsafe(n * 8);
-  for (let i = 0; i < n; i++) {
-    const s = buf.readInt16LE(i * 2);
-    const o = i * 8;
-    out.writeInt16LE(s, o);
-    out.writeInt16LE(s, o + 2);
-    out.writeInt16LE(s, o + 4);
-    out.writeInt16LE(s, o + 6);
-  }
-  return out;
-}
-
-const pcmOut = new Map(); // guildId -> { stream, player, ended }
-
-function ensurePcmOut(guildId) {
-  const conn = connections.get(guildId);
-  if (!conn) return null;
-  let e = pcmOut.get(guildId);
-  if (e && e.stream && !e.ended) return e;
-  const { createAudioPlayer, createAudioResource, NoSubscriberBehavior, StreamType } = lib();
-  const { PassThrough } = require('stream');
-  const stream = new PassThrough();
-  const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
-  const s = speech.get(guildId);
-  if (s) s.player = player;
-  player.play(createAudioResource(stream, { inputType: StreamType.Raw }));
-  conn.subscribe(player);
-  e = { stream, player, ended: false };
-  pcmOut.set(guildId, e);
-  return e;
-}
-
-function pushPcm24Out(guildId, pcm24) {
-  const e = ensurePcmOut(guildId);
-  if (!e) return;
-  try { e.stream.write(pcm24MonoToPcm48Stereo(pcm24)); } catch (_) {}
-}
-
-function stopPcmOut(guildId) {
-  const e = pcmOut.get(guildId);
-  if (!e) return;
-  e.ended = true;
-  try { e.stream.end(); } catch (_) {}
-  try { e.player.stop(true); } catch (_) {}
-  pcmOut.delete(guildId);
-}
-
-function endPcmOut(guildId) {
-  const e = pcmOut.get(guildId);
-  if (!e) return;
-  e.ended = true;
-  try { e.stream.end(); } catch (_) {}
-  pcmOut.delete(guildId);
-}
-
-function flushBurstToConverse(guildId, userId, session) {
-  if (!session || !userId) return;
-  const entry = rtSessions.get(rtKey(guildId, userId));
-  if (!entry || entry.relayed) return;
-  const chunks = entry.burst || [];
-  entry.relayed = true;
-  for (const b of chunks) {
-    try { session.pushPcm24(b); } catch (_) {}
-  }
-}
-
 module.exports = {
   joinChannel, playChime, speak, leave, isConnected, isListening, channelIdOf,
   startListening, stopListening, startDrone, stopDrone,
   startSpeech, stopSpeech, endSpeech, isSpeaking,
-  pushPcm24Out, stopPcmOut, endPcmOut, flushBurstToConverse, pcm24MonoToPcm48Stereo,
+  startPcmPlayback, pushPcm24Play, endPcmPlayback,
 };
