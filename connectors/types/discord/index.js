@@ -43,7 +43,7 @@ const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
 const { shouldPlayWakeChime } = require('./wake-chime');
 const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp, lastSpeakerId: lastSpeakerFromWindow } = require('./voice-followup');
-const { countHumans, roomInstructions, shouldForceTurn } = require('./live-room');
+const { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote } = require('./live-room');
 const {
   isTranscriptOff, setTranscriptOff, serializeTranscriptOff, loadTranscriptOff,
   isTranscriptOffCmd, isTranscriptOnCmd, shouldPostLive, shouldUploadLeaveFile,
@@ -929,7 +929,10 @@ ${referentPromptBlock()}`;
     } catch (_) { return 1; }
   }
   function liveRoomLine(guildId) {
-    return roomInstructions(countHumansNow(guildId));
+    const conv = converseSessions.get(guildId);
+    const base = roomInstructions(countHumansNow(guildId));
+    if (conv && conv._skipNoted) return base + ' ' + roomSkipNote();
+    return base;
   }
 
   function clearVoiceOverlap(guildId) {
@@ -1460,6 +1463,14 @@ ${referentPromptBlock()}`;
         const who = sp.name || 'speaker';
         const final = !!(meta && meta.final) || (ev && String(ev.type || '').endsWith('completed'));
         upsertLiveUserLine(guildId, who, line, final);
+        if (final && wasNotForHer(line)) {
+          const c = converseSessions.get(guildId);
+          if (c) {
+            c._skipNoted = true;
+            refreshRoomInstructions(guildId);
+            ctx.log('[voice] skip-noted (not for her); stay open');
+          }
+        }
       },
       onError: (e) => ctx.log(`[voice] converse error: ${e}`),
       onSession: () => {

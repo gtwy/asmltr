@@ -32,7 +32,21 @@ function roomInstructions(humans) {
   if (count <= 1) {
     return 'This is a 1:1 voice call. Every utterance is for you. Always answer. No name is required. Do not wait to judge whether it was for you.';
   }
-  return 'This is a group voice call. Talk when context indicates your input is welcome: a question in the air, a pause for you, or being included. Lean in when welcome. Do not wait for your name. Stay quiet only when they are clearly talking among themselves and do not want you.';
+  return 'You were brought into this voice call to talk. Default is to engage when input is welcome: a question in the air, a pause for you, or being included. Lean in. Do not default to silence. Do not wait for your name.';
+}
+
+/** Spoken skip: that last turn was not for her. Session memory, not mute. */
+function wasNotForHer(text) {
+  const t = String(text || '').toLowerCase();
+  if (!t) return false;
+  return /\b(that )?(wasn'?t|isn'?t|not) (for you|for ivy|meant for you)\b/.test(t)
+    || /\b(didn'?t|did not) (ask|mean) you\b/.test(t)
+    || /\bnobody asked you\b/.test(t)
+    || /\bnot you,? ivy\b/.test(t);
+}
+
+function roomSkipNote() {
+  return 'Someone said a recent turn was not for you. Do not keep talking over that side conversation. Stay on the call. Speak again when a question is in the air, they pause for you, or they include you.';
 }
 
 /** 1:1: Discord speaking-stop must produce a spoken reply. Not while her mouth is playing. */
@@ -42,5 +56,5 @@ function shouldForceTurn({ humans, herMouth } = {}) {
   return count <= 1 && !herMouth;
 }
 
-module.exports = { countHumans, roomInstructions, shouldForceTurn };
+module.exports = { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote };
 

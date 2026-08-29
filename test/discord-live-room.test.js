@@ -42,12 +42,19 @@ test('roomInstructions 1:1 always answer', () => {
 
 test('roomInstructions group lean-in when welcome', () => {
   const s = roomInstructions(2);
-  assert.match(s, /group voice call/);
-  assert.match(s, /Lean in when welcome/);
+  assert.match(s, /brought into this voice call to talk/);
+  assert.match(s, /Do not default to silence/);
   assert.match(s, /Do not wait for your name/);
   assert.match(s, /question in the air/);
   assert.doesNotMatch(s, /Stay silent unless/);
   assert.doesNotMatch(s, /addressed by name/);
+});
+test('wasNotForHer is session skip not mute', () => {
+  const { wasNotForHer, roomSkipNote } = require('../connectors/types/discord/live-room');
+  assert.equal(wasNotForHer("that wasn't for you"), true);
+  assert.equal(wasNotForHer('not you ivy'), true);
+  assert.equal(wasNotForHer('how are you doing'), false);
+  assert.match(roomSkipNote(), /Stay on the call/);
 });
 
 test("shouldForceTurn 1:1 when her mouth is idle", () => {

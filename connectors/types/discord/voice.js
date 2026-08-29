@@ -29,7 +29,7 @@ const dronePlayers = new Map(); // guildId -> looping "working" drone player
 const speech = new Map(); // guildId -> { cancelled, player }
 const pcmOut = new Map(); // guildId -> { pcm, encoder, player, acc, queued, primed, conn } converse PCM playback
 const OPUS_FRAME_BYTES = 960 * 2 * 2; // 3840: 20ms @ 48k stereo s16
-const PCM_PREBUFFER_FRAMES = 3;       // ~60ms (2–3 frames); not 120ms+
+const PCM_PREBUFFER_FRAMES = 5;       // ~100ms jitter buffer; underrun pops, not codec recode, not 120ms+
 
 /** Split accumulated 48k stereo s16le into complete opus frames; leftover < 3840 is held. */
 function flushPcm48Frames(acc) {
