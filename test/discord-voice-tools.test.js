@@ -322,3 +322,18 @@ test('discord connector binds voice-tools; toolbelt lists voice_* and phone stub
   assert.match(belt, /phone_call/);
   assert.match(belt, /phone_sms/);
 });
+
+test('join-voice, voice_join, spoken join stay owner-only; not loosened', () => {
+  const idx = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(idx, /OWNER_ONLY_CMDS/);
+  const ownerBlock = idx.slice(idx.indexOf('const OWNER_ONLY_CMDS'), idx.indexOf('const meta'));
+  assert.match(ownerBlock, /join-voice/);
+  assert.match(ownerBlock, /join voice/);
+  assert.match(idx, /if \(OWNER_ONLY_CMDS\.has\(cmd\) && !\(await isOwner\(message\)\)\)/);
+  assert.match(idx, /Only my owner can run that command/);
+  const voiceAt = idx.indexOf("app.post('/voice'");
+  assert.ok(voiceAt >= 0);
+  const voiceHttp = idx.slice(voiceAt, voiceAt + 900);
+  assert.match(voiceHttp, /voice_join/);
+  assert.match(voiceHttp, /if \(!\(await isOwner\(fake\)\)\)/);
+});

@@ -266,20 +266,22 @@ async function logModerationEvent(event) {
 }
 
 /**
- * Skip gpt-5-nano when we already know the speaker is trusted.
- * Fail-closed: unknown / default / untrusted still hit the network.
- * Bypass already skipped the network; voice+owner/trusted cannot regress that.
+ * Skip gpt-5-nano on EVERY Discord voice turn (Ashy included). Not owner-only.
+ * Fail-open when channel_context.voice / discord-voice conversation_key / meta.voice.
+ * Non-voice still uses bypass_moderation only.
  */
+function isDiscordVoiceMeta(meta) {
+  if (!meta) return false;
+  if (meta.voice === true) return true;
+  const cc = meta.channel_context || meta.channelContext;
+  if (cc && cc.voice === true) return true;
+  const key = String(meta.conversation_key || meta.conversationKey || '');
+  return /^discord-voice:/i.test(key);
+}
+
 function shouldSkipModerationNetwork(resolved, meta = {}) {
-  if (resolved && resolved.bypass_moderation) return true;
-  if (!meta || !meta.voice) return false;
-  if (!resolved || resolved.is_default) return false;
-  if (resolved.user_key === 'owner' || resolved.owner === true) return true;
-  const tokens = [];
-  if (Array.isArray(resolved.permissions)) tokens.push(...resolved.permissions);
-  if (Array.isArray(resolved.roles)) tokens.push(...resolved.roles);
-  if (typeof resolved.trust_tier === 'string' && /^(trusted|owner)$/i.test(resolved.trust_tier)) return true;
-  return tokens.some((t) => /^(trusted|owner|\*)$/i.test(String(t)));
+  if (isDiscordVoiceMeta(meta)) return true;
+  return !!(resolved && resolved.bypass_moderation);
 }
 
 /**
@@ -290,7 +292,10 @@ function shouldSkipModerationNetwork(resolved, meta = {}) {
  * @returns {object} { allowed, bypassed?, riskLevel?, concerns?, reasoning?, monitored? }
  */
 async function moderate(userMessage, resolved, meta = {}) {
-  if (shouldSkipModerationNetwork(resolved, meta)) {
+  if (isDiscordVoiceMeta(meta)) {
+    return { allowed: true, skipped: true, riskLevel: 0 };
+  }
+  if (resolved.bypass_moderation) {
     return { allowed: true, bypassed: true, riskLevel: 0 };
   }
 
@@ -402,5 +407,5 @@ async function notifyBlock(resolved, userMessage, moderation, platform) {
 
 module.exports = {
   moderate, notifyBlock, adminAlert, buildAdminAlertCmd, cmdAlertLabel, logModerationEvent, buildOpenAIParams, parseReasoningEffort,
-  classifyRaw, pictureIntentOffLog, moderationKeyPresent, shouldSkipModerationNetwork,
+  classifyRaw, pictureIntentOffLog, moderationKeyPresent, shouldSkipModerationNetwork, isDiscordVoiceMeta,
 };

@@ -403,7 +403,7 @@ async function handle(envelope, opts = {}) {
   });
 
   const voiceTurn = isDiscordVoice(e);
-  const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel, voice: voiceTurn });
+  const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel, voice: voiceTurn, conversation_key: e.conversation_key, channel_context: e.channel_context });
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',
     payload: { decision: mod.allowed ? 'ALLOW' : 'BLOCK', riskLevel: mod.riskLevel, monitored: !!mod.monitored, bypassed: !!mod.bypassed } });
