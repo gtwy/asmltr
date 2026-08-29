@@ -23,6 +23,7 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.match(src, /voice=ara/);
   assert.match(src, /realtime: conv \? false/);
   assert.match(src, /converse: !!conv/);
+  assert.match(src, /forceMessage\("ivy.s here"\)/);
   assert.doesNotMatch(src, /voice:\s*'eve'/);
   assert.doesNotMatch(src, /process\.env\.XAI_API_KEY/);
   const handle = src.slice(src.indexOf('async function handleVoiceUtterance'), src.indexOf('async function engineKeys'));

@@ -327,11 +327,16 @@ function openSession(handlers, opts) {
     forceMessage(text) {
       const line = String(text || '').trim();
       if (!line) return;
+      // xAI extension: verbatim TTS, no model, do NOT follow with response.create.
       sendJson({
         type: 'conversation.item.create',
-        item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: line }] },
+        item: {
+          type: 'force_message',
+          role: 'assistant',
+          interruptible: false,
+          content: [{ type: 'output_text', text: line }],
+        },
       });
-      sendJson({ type: 'response.create' });
     },
     update(next) { sendJson(buildSessionUpdate(next || {})); },
     sendFunctionOutput(callId, output) {

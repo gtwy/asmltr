@@ -227,14 +227,17 @@ test('function_call event → output item sent', async () => {
   assert.equal(asRealtimeFunctions([{ type: 'web_search' }]).length, 0);
 });
 
-test('forceMessage sends conversation.item.create then response.create', async () => {
+test('forceMessage is xAI force_message, no response.create', async () => {
   MockWS.instances = [];
   const session = openSession({}, { getKey: async () => 'vault-test-key', WebSocket: MockWS });
   await session.ready;
   session.forceMessage("ivy's here");
-  const types = MockWS.instances[0].sent.map((x) => JSON.parse(x).type);
-  assert.ok(types.includes('conversation.item.create'));
-  assert.ok(types.includes('response.create'));
-  const item = JSON.parse(MockWS.instances[0].sent.find((x) => JSON.parse(x).type === 'conversation.item.create'));
+  const parsed = MockWS.instances[0].sent.map((x) => JSON.parse(x));
+  const item = parsed.find((x) => x.type === 'conversation.item.create');
+  assert.ok(item);
+  assert.equal(item.item.type, 'force_message');
+  assert.equal(item.item.role, 'assistant');
+  assert.equal(item.item.interruptible, false);
   assert.equal(item.item.content[0].text, "ivy's here");
+  assert.equal(parsed.some((x) => x.type === 'response.create' && parsed.indexOf(x) > parsed.indexOf(item)), false);
 });
