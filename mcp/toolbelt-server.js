@@ -128,7 +128,8 @@ async function invokeTool(name, args, { deny, turn } = {}) {
   const t = BY_NAME[name];
   if (!t) return { ok: false, error: 'unknown tool: ' + name, isError: true };
   const denied = denyObj(deny);
-  if (denied.all || (t.deny && denied[t.deny])) return { ok: false, error: 'denied', isError: true };
+  if (denied.all) return { ok: false, error: 'denied', isError: true };
+  if (t.deny && denied[t.deny]) return { ok: false, error: 'denied: ' + t.deny, isError: true };
   try {
     if (t.handler === 'voice') {
       const voiceTools = require('../connectors/types/discord/voice-tools');
