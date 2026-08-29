@@ -238,3 +238,11 @@ test('Live play path uses pcm48MonoToPcm48Stereo not pcm24MonoToPcm48Stereo; ses
   assert.equal(u.session.audio.input.format.rate, 48000);
   assert.equal(u.session.audio.output.format.rate, 48000);
 });
+
+test('stopVoiceReply clears _responseOpen so next idle turn can create after barge', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const stop = src.slice(src.indexOf('async function stopVoiceReply'), src.indexOf('return wasBusy') + 40);
+  assert.match(stop, /convStop\._responseOpen = false/);
+  assert.match(stop, /_skipNextCreate = true/);
+  assert.match(src, /BARGE_MIN_SPEECH_MS = 3000/);
+});

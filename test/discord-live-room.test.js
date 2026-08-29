@@ -74,3 +74,17 @@ test("isGroupAddressee named or latch, not other humans", () => {
   assert.equal(isGroupAddressee({ humans: 2, named: true, speakerId: 'derek', lastSpeakerId: 'james', lastAnsweredId: 'james' }), true);
   assert.equal(isGroupAddressee({ humans: 2, named: false, speakerId: 'james', lastAnsweredId: 'james', lastSpeakerId: 'derek' }), true);
 });
+
+test('countHumansNow cache miss must not return 1 (group would become 1:1)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const fn = src.slice(src.indexOf('function countHumansNow'), src.indexOf('function liveRoomLine'));
+  assert.match(fn, /never fake 1:1/);
+  assert.equal(/return 1/.test(fn), false);
+  assert.match(fn, /return 2/);
+  // countHumans itself still returns 0 on empty; shouldForceTurn(0) is 1:1, so Now must not pass 0/1 on miss.
+  assert.equal(shouldForceTurn({ humans: 0, herMouth: false }), true);
+  assert.equal(shouldForceTurn({ humans: 1, herMouth: false }), true);
+  assert.equal(shouldForceTurn({ humans: 2, herMouth: false }), false);
+});

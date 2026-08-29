@@ -272,3 +272,26 @@ test("createResponse commits the audio buffer then response.create", async () =>
   assert.ok(types.includes("input_audio_buffer.commit"));
   assert.ok(types.includes("response.create"));
 });
+
+test('response.cancelled fires onCancelled, not onResponseDone', () => {
+  const got = { done: 0, cancelled: 0 };
+  applyServerEvent({ type: 'response.cancelled' }, {
+    onResponseDone: () => { got.done += 1; },
+    onCancelled: () => { got.cancelled += 1; },
+  });
+  applyServerEvent({ type: 'response.output_audio.interrupted' }, {
+    onResponseDone: () => { got.done += 1; },
+    onCancelled: () => { got.cancelled += 1; },
+  });
+  applyServerEvent({ type: 'response.done' }, {
+    onResponseDone: () => { got.done += 1; },
+    onCancelled: () => { got.cancelled += 1; },
+  });
+  assert.equal(got.done, 1);
+  assert.equal(got.cancelled, 2);
+  const src = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
+  assert.match(src, /onCancelled/);
+  const cancelBlock = src.slice(src.indexOf("typ === 'response.cancelled'"), src.indexOf("typ === 'response.cancelled'") + 280);
+  assert.match(cancelBlock, /onCancelled/);
+  assert.equal(/onResponseDone/.test(cancelBlock), false);
+});

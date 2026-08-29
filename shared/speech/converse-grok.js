@@ -199,6 +199,7 @@ function applyServerEvent(ev, handlers) {
     if (h.onResponseDone) { try { h.onResponseDone(ev); } catch (_) {} }
     return 'done';
   }
+  // response.cancelled is NOT response.done — do not reuse onResponseDone here.
   if (typ === 'response.cancelled' || typ === 'response.output_audio.interrupted') {
     if (h.onCancelled) { try { h.onCancelled(ev); } catch (_) {} }
     return 'cancelled';

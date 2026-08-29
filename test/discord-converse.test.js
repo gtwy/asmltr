@@ -15,7 +15,9 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.match(src, /open-line/);
   assert.match(src, /Just talk/);
   const pcm = src.slice(src.indexOf("onPcm24:"), src.indexOf("onBargeIn:"));
-  assert.match(pcm, /conv.pushPcm24/);
+  assert.match(pcm, /converseSessions\.get\(guildId\)/);
+  assert.match(pcm, /live.pushPcm24/);
+  assert.equal(/conv\.pushPcm24/.test(pcm), false);
   assert.equal(/shouldRelayPcm/.test(pcm), false);
   assert.equal(/bindLiveSpeaker/.test(pcm), false);
   assert.equal(/applyLiveSpeaker/.test(pcm), false);
@@ -158,4 +160,69 @@ test('scribe-on logs and clears live origin off', () => {
   assert.match(src, /scribe-on cid=/);
   assert.match(src, /🗣️ skip \(scribe off\)/);
   assert.match(src, /grok-transcript final=/);
+});
+
+test('B1 stopVoiceReply and onCancelled clear _responseOpen; cancelled is not done', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const stop = src.slice(src.indexOf('async function stopVoiceReply'), src.indexOf('// Live streaming captions'));
+  assert.match(stop, /_responseOpen = false/);
+  assert.match(stop, /_skipNextCreate = true/);
+  assert.match(src, /onCancelled:/);
+  assert.match(src, /response\.cancelled → _responseOpen=false/);
+  const cg = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
+  const cancelAt = cg.indexOf("typ === 'response.cancelled'");
+  const doneAt = cg.indexOf("typ === 'response.done'");
+  assert.ok(cancelAt > 0 && doneAt > 0 && cancelAt !== doneAt, 'cancelled is a separate branch from done');
+  assert.match(cg, /if \(h\.onCancelled\)/);
+});
+
+test('B2 onPcm24 pushes to converseSessions.get current session', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const pcm = src.slice(src.indexOf('onPcm24:'), src.indexOf('onBargeIn:'));
+  assert.match(pcm, /const live = converseSessions\.get\(guildId\)/);
+  assert.match(pcm, /live\.pushPcm24\(pcm\)/);
+  assert.equal(/conv\.pushPcm24/.test(pcm), false);
+});
+
+test('C-greet speaking-stop during greet is pending first, flushed when mouth idle', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.match(src, /_pendingFirst/);
+  assert.match(src, /speaking-stop during greet → pending first/);
+  assert.match(src, /flushDeferredCreate/);
+  assert.match(src, /function flushDeferredCreate/);
+  const end = src.slice(src.indexOf('onSpeechEnd:'), src.indexOf('log: (m)'));
+  assert.match(end, /_awaitFirstUser/);
+  assert.match(end, /_pendingFirst/);
+  const done = src.slice(src.indexOf('onResponseDone:'), src.indexOf('onUserTranscript:'));
+  assert.match(done, /flushDeferredCreate\(guildId\)/);
+});
+
+test('C-stop idle speaking-stop after barge waits transcript; skipNextCreate skips stop/hold', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const end = src.slice(src.indexOf('onSpeechEnd:'), src.indexOf('log: (m)'));
+  assert.match(end, /_bargeAwaitTranscript/);
+  assert.match(end, /speaking-stop after barge → wait transcript/);
+  assert.match(end, /speaking-stop skipped \(stop\/hold\)/);
+  assert.match(end, /speaking-stop during mouth \(barge, no create\)/);
+  assert.match(src, /1:1 speaking-stop → response.create/);
+});
+
+test('C-named group speaking-stop creates without waiting for named transcript', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const end = src.slice(src.indexOf('onSpeechEnd:'), src.indexOf('log: (m)'));
+  assert.match(end, /const named = false/);
+  assert.match(end, /isGroupAddressee\(\{ named, speakerId/);
+  assert.match(end, /commitAudio/);
+  assert.match(end, /shouldForceTurn\(\{ humans, herMouth: false \}\)/);
+  assert.match(end, /group speaking-stop → response.create/);
+});
+
+test('C-humans countHumansNow miss returns 2 never 1', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const fn = src.slice(src.indexOf('function countHumansNow'), src.indexOf('function liveRoomLine'));
+  assert.match(fn, /never fake 1:1/);
+  assert.match(fn, /return 2/);
+  assert.equal(/return 1/.test(fn), false);
+  assert.match(fn, /if \(!cid\) return 2/);
+  assert.match(fn, /catch \(_\) \{ return 2; \}/);
 });

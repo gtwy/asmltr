@@ -937,20 +937,57 @@ ${referentPromptBlock()}`;
   const PCM_RING_BYTES = 48000 * 2 * 4;
 
   function countHumansNow(guildId) {
+    // Cache/members miss → treat as group (2), never fake 1:1.
+    // Returning 1 here would shouldForceTurn every speaking-stop while the
+    // Discord member list is still empty, so a group got answered as solo.
     try {
       const voice = require('./voice');
       const cid = voice.channelIdOf && voice.channelIdOf(guildId);
-      if (!cid) return 1; // can't see the room: answer (1:1)
+      if (!cid) return 2;
       const ch = client.channels.cache && client.channels.cache.get(cid);
+      if (!ch || ch.members == null) return 2;
       const selfId = client.user && client.user.id;
-      return countHumans(ch, selfId);
-    } catch (_) { return 1; }
+      const n = countHumans(ch, selfId);
+      if (n === 0) return 2;
+      return n;
+    } catch (_) { return 2; }
   }
   function liveRoomLine(guildId) {
     const conv = converseSessions.get(guildId);
     const base = roomInstructions(countHumansNow(guildId));
     if (conv && conv._skipNoted) return base + ' ' + roomSkipNote();
     return base;
+  }
+
+  function mouthBusy(guildId) {
+    const vMouth = require('./voice');
+    return voiceBusy.has(guildId) || !!(vMouth.isMouthPlaying && vMouth.isMouthPlaying(guildId));
+  }
+
+  // After greet/pacer idle: one response.create for speech that arrived during "ivy's here".
+  function flushDeferredCreate(guildId) {
+    const c = converseSessions.get(guildId);
+    if (!c || typeof c.createResponse !== 'function') return;
+    if (c._responseOpen || mouthBusy(guildId)) return;
+    if (!c._pendingFirst) return;
+    if (c._skipNextCreate) {
+      c._skipNextCreate = false;
+      c._pendingFirst = null;
+      ctx.log('[voice] pending first dropped (stop/hold)');
+      return;
+    }
+    const speakerId = (c._pendingFirst && c._pendingFirst.userId) || (converseSpeaker.get(guildId) || {}).userId;
+    c._pendingFirst = null;
+    c._awaitFirstUser = false;
+    c._lastAnsweredId = speakerId ? String(speakerId) : c._lastAnsweredId;
+    c._responseOpen = true;
+    try {
+      c.createResponse();
+      ctx.log('[voice] first-utterance after greet → response.create');
+    } catch (e) {
+      c._responseOpen = false;
+      ctx.log('[voice] createResponse: ' + e.message);
+    }
   }
 
   function clearVoiceOverlap(guildId) {
@@ -1072,7 +1109,15 @@ ${referentPromptBlock()}`;
     voice.stopSpeech(guildId); voice.stopDrone(guildId);
     try { voice.endPcmPlayback(guildId, { hard: true }); } catch (_) {}
     const convStop = converseSessions.get(guildId);
-    if (convStop) { try { convStop.cancel(); } catch (_) {} }
+    if (convStop) {
+      try { convStop.cancel(); } catch (_) {}
+      // response.cancelled is not response.done — clear so the next idle turn can create.
+      convStop._responseOpen = false;
+      // Stop/hold: skip create on this utterance. After a 3s barge, speaking-stop
+      // waits for transcript first (_bargeAwaitTranscript) so a real talk-over can still answer.
+      convStop._skipNextCreate = true;
+      if (barge) convStop._bargeAwaitTranscript = true;
+    }
     voiceBusy.delete(guildId); voiceReplyStart.delete(guildId); clearVoiceOverlap(guildId);
     // After a real barge, resume uplink with the talk-through PCM sitting in pcmRing.
     if (barge && convStop) {
@@ -1477,7 +1522,13 @@ ${referentPromptBlock()}`;
             voiceReplyStart.delete(guildId);
             clearVoiceOverlap(guildId);
             setVoiceStatus(null);
+            flushDeferredCreate(guildId);
           });
+      },
+      onCancelled: () => {
+        const convDone = converseSessions.get(guildId);
+        if (convDone) convDone._responseOpen = false;
+        ctx.log('[voice] response.cancelled → _responseOpen=false');
       },
       onUserTranscript: (text, ev, meta) => {
         const line = String(text || '').trim();
@@ -1489,28 +1540,45 @@ ${referentPromptBlock()}`;
         upsertLiveUserLine(guildId, who, line, final);
         if (final && wasNotForHer(line)) {
           const c = converseSessions.get(guildId);
-          const vMouth = require('./voice');
-          const herMouth = voiceBusy.has(guildId) || !!(vMouth.isMouthPlaying && vMouth.isMouthPlaying(guildId));
+          const herMouth = mouthBusy(guildId);
           if (c) {
             c._skipNoted = true;
             c._skipNextCreate = true;
+            c._bargeAwaitTranscript = false;
+            c._pendingStop = null;
+            c._pendingFirst = null;
             refreshRoomInstructions(guildId);
           }
-          if (herMouth) {
+          if (herMouth || (c && c._responseOpen)) {
             ctx.log('[voice] stop-while-playing → cancel now');
             stopVoiceReply(guildId, { chime: false, barge: true });
+            // Transcript already identified stop/hold — do not wait for it again.
+            if (c) { c._bargeAwaitTranscript = false; c._skipNextCreate = true; }
             return;
           }
           ctx.log('[voice] skip-noted (not for her); stay open');
+          return;
         }
         const cPend = converseSessions.get(guildId);
         if (final && cPend && cPend._pendingStop) {
           const humans = countHumansNow(guildId);
           const named = addressesName(line);
           const speakerId = (cPend._pendingStop && cPend._pendingStop.userId) || (converseSpeaker.get(guildId) || {}).userId;
-          if (isGroupAddressee({ named, speakerId, lastAnsweredId: cPend._lastAnsweredId, lastSpeakerId: cPend._lastSpeakerId, humans })) {
+          if (cPend._skipNextCreate && !cPend._bargeAwaitTranscript) {
+            cPend._skipNextCreate = false;
             cPend._pendingStop = null;
+            ctx.log('[voice] speaking-stop skipped (stop/hold)');
+            return;
+          }
+          const afterBarge = !!(cPend._pendingStop && cPend._pendingStop.afterBarge);
+          const want = afterBarge
+            || isGroupAddressee({ named, speakerId, lastAnsweredId: cPend._lastAnsweredId, lastSpeakerId: cPend._lastSpeakerId, humans });
+          if (want) {
+            cPend._pendingStop = null;
+            cPend._skipNextCreate = false;
+            cPend._bargeAwaitTranscript = false;
             cPend._lastAnsweredId = speakerId ? String(speakerId) : cPend._lastAnsweredId;
+            cPend._awaitFirstUser = false;
             cPend._responseOpen = true;
             try { cPend.createResponse(); ctx.log('[voice] group addressee → response.create'); } catch (e) {
               cPend._responseOpen = false;
@@ -1582,15 +1650,16 @@ ${referentPromptBlock()}`;
         converseSpeaker.set(guildId, { userId: String(userId), name: (meta && meta.name) || String(userId) });
         // Phone call: every human in the VC goes to the WS. No last-speaker / wake gate.
         // Mute uplink only while her mouth is actually playing (echo). Not voiceBusy.
+        // Reopen replaces the Map entry — PCM must go to the CURRENT session, not the join-time conv.
         const live = converseSessions.get(guildId);
-        // Keep uplink open while she talks so we hear Stop / hold on. Per-user Discord PCM, not her mix.
-        if (!live && vmod.isSpeaking(guildId)) return;
+        if (!live) return;
+        // Keep uplink open while isSpeaking(guildId) so we hear Stop / hold on. Per-user Discord PCM, not her mix.
         if (!pcmTurnLogged.has(guildId)) {
           pcmTurnLogged.add(guildId);
           pcmTurnAt.set(guildId, Date.now());
           ctx.log(`[voice] PCM → WS bytes=${pcm.length}`);
         }
-        conv.pushPcm24(pcm);
+        live.pushPcm24(pcm);
       } : undefined,
       onBargeIn: () => {
         if (cfg.voice_barge_in === false) return;
@@ -1612,10 +1681,23 @@ ${referentPromptBlock()}`;
         if (!c || typeof c.createResponse !== 'function') return;
         const humans = countHumansNow(guildId);
         const firstAfterGreet = !!c._awaitFirstUser;
-        const vMouth = require('./voice');
-        const herMouth = voiceBusy.has(guildId) || !!(vMouth.isMouthPlaying && vMouth.isMouthPlaying(guildId));
+        const herMouth = mouthBusy(guildId);
+        const speakerId = userId || (converseSpeaker.get(guildId) || {}).userId;
+        // C-named: commit always so a late/missing transcript still has audio.
+        if (typeof c.commitAudio === 'function') { try { c.commitAudio(); } catch (_) {} }
         if (herMouth) {
+          if (firstAfterGreet) {
+            c._pendingFirst = { userId: speakerId, at: Date.now() };
+            ctx.log('[voice] speaking-stop during greet → pending first');
+            return;
+          }
           ctx.log('[voice] speaking-stop during mouth (barge, no create)');
+          return;
+        }
+        if (c._bargeAwaitTranscript) {
+          pcmTurnLogged.delete(guildId);
+          c._pendingStop = { userId: speakerId, at: Date.now(), afterBarge: true };
+          ctx.log('[voice] speaking-stop after barge → wait transcript');
           return;
         }
         if (c._skipNextCreate) {
@@ -1628,7 +1710,6 @@ ${referentPromptBlock()}`;
           ctx.log('[voice] speaking-stop skipped (response already open)');
           return;
         }
-        const speakerId = userId || (converseSpeaker.get(guildId) || {}).userId;
         pcmTurnLogged.delete(guildId);
         forceTurnAt.set(guildId, Date.now());
         const named = false;
@@ -1637,12 +1718,12 @@ ${referentPromptBlock()}`;
           || isGroupAddressee({ named, speakerId, lastAnsweredId: c._lastAnsweredId, lastSpeakerId: c._lastSpeakerId, humans });
         c._lastSpeakerId = speakerId ? String(speakerId) : c._lastSpeakerId;
         if (!want) {
-          if (typeof c.commitAudio === 'function') { try { c.commitAudio(); } catch (_) {} }
           c._pendingStop = { userId: speakerId, at: Date.now() };
           ctx.log('[voice] speaking-stop commit (group, other humans)');
           return;
         }
         c._awaitFirstUser = false;
+        c._pendingFirst = null;
         c._lastAnsweredId = speakerId ? String(speakerId) : c._lastAnsweredId;
         c._responseOpen = true;
         try {
