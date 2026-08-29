@@ -68,7 +68,9 @@ test("shouldForceTurn 1:1 when her mouth is idle", () => {
 test("isGroupAddressee named or latch, not other humans", () => {
   const { isGroupAddressee } = require('../connectors/types/discord/live-room');
   assert.equal(isGroupAddressee({ humans: 1, named: false, speakerId: 'a' }), true);
-  assert.equal(isGroupAddressee({ humans: 2, named: false, speakerId: 'derek', lastAnsweredId: 'james' }), false);
-  assert.equal(isGroupAddressee({ humans: 2, named: true, speakerId: 'derek', lastAnsweredId: 'james' }), true);
-  assert.equal(isGroupAddressee({ humans: 2, named: false, speakerId: 'james', lastAnsweredId: 'james' }), true);
+  assert.equal(isGroupAddressee({ humans: 2, named: false, speakerId: 'james' }), true);
+  assert.equal(isGroupAddressee({ humans: 2, named: false, speakerId: 'james', lastSpeakerId: 'james' }), true);
+  assert.equal(isGroupAddressee({ humans: 2, named: false, speakerId: 'derek', lastSpeakerId: 'james', lastAnsweredId: 'james' }), false);
+  assert.equal(isGroupAddressee({ humans: 2, named: true, speakerId: 'derek', lastSpeakerId: 'james', lastAnsweredId: 'james' }), true);
+  assert.equal(isGroupAddressee({ humans: 2, named: false, speakerId: 'james', lastAnsweredId: 'james', lastSpeakerId: 'derek' }), true);
 });

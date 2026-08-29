@@ -58,16 +58,18 @@ function shouldForceTurn({ humans, herMouth } = {}) {
   return count <= 1 && !herMouth;
 }
 
-/** Group: respond only if named, latched last-answered speaker, or 1:1. */
-function isGroupAddressee({ named, speakerId, lastAnsweredId, humans } = {}) {
+/** Group: answer this speaker unless it is clearly two other humans talking. */
+function isGroupAddressee({ named, speakerId, lastAnsweredId, lastSpeakerId, humans } = {}) {
   const n = Number(humans);
   const count = Number.isFinite(n) ? n : 0;
   if (count <= 1) return true;
   if (named) return true;
-  const a = speakerId != null && speakerId !== '' ? String(speakerId) : '';
-  const b = lastAnsweredId != null && lastAnsweredId !== '' ? String(lastAnsweredId) : '';
-  if (a && b && a === b) return true;
-  return false;
+  const cur = speakerId != null && speakerId !== '' ? String(speakerId) : '';
+  const latched = lastAnsweredId != null && lastAnsweredId !== '' ? String(lastAnsweredId) : '';
+  if (cur && latched && cur === latched) return true;
+  const prev = lastSpeakerId != null && lastSpeakerId !== '' ? String(lastSpeakerId) : '';
+  if (prev && cur && prev !== cur && cur !== latched) return false;
+  return true;
 }
 
 module.exports = { countHumans, roomInstructions, shouldForceTurn, wasNotForHer, roomSkipNote, isGroupAddressee };

@@ -99,6 +99,8 @@ test("Live 1:1 speaking-stop forces response.create", () => {
   assert.match(src, /onSpeechEnd/);
   assert.match(src, /createResponse/);
   assert.match(src, /1:1 speaking-stop → response.create/);
+  assert.match(src, /group speaking-stop → response.create/);
+  assert.match(src, /_responseOpen/);
   const voice = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/voice.js"), "utf8");
   assert.match(voice, /onSpeechEnd/);
 });
@@ -148,4 +150,12 @@ test("first utterance after greet forces response.create even in a group", () =>
   assert.match(src, /_awaitFirstUser/);
   assert.match(src, /first-utterance after greet/);
   assert.match(src, /Keep mouth\/busy until the pacer actually finishes/);
+});
+
+test('scribe-on logs and clears live origin off', () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require("path").join(__dirname, "../connectors/types/discord/index.js"), "utf8");
+  assert.match(src, /scribe-on cid=/);
+  assert.match(src, /🗣️ skip \(scribe off\)/);
+  assert.match(src, /grok-transcript final=/);
 });

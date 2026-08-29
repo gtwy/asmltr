@@ -335,11 +335,29 @@ async function start(ctx) {
       await message.channel.send('🔒 Only my owner can run that command.'); return true;
     }
     if (isTranscriptOffCmd(cmd)) {
-      setTranscriptOff(transcriptOffChannels, cid, true); saveSettings();
+      setTranscriptOff(transcriptOffChannels, cid, true);
+      if (message.guild) {
+        for (const och of voiceText.values()) {
+          if (och && och.guild && String(och.guild.id) === String(message.guild.id) && och.id) {
+            setTranscriptOff(transcriptOffChannels, och.id, true);
+          }
+        }
+      }
+      saveSettings();
+      ctx.log('[voice] scribe-off cid=' + cid);
       await message.channel.send(`🔕 Live transcript **off** in this channel — I'll stay quiet here until \`@${me} scribe-on\`.`); return true;
     }
     if (isTranscriptOnCmd(cmd)) {
-      setTranscriptOff(transcriptOffChannels, cid, false); saveSettings();
+      setTranscriptOff(transcriptOffChannels, cid, false);
+      if (message.guild) {
+        for (const och of voiceText.values()) {
+          if (och && och.guild && String(och.guild.id) === String(message.guild.id) && och.id) {
+            setTranscriptOff(transcriptOffChannels, och.id, false);
+          }
+        }
+      }
+      saveSettings();
+      ctx.log('[voice] scribe-on cid=' + cid);
       await message.channel.send('📝 Live transcript **on** — I\'ll post 🗣️ lines as people speak.'); return true;
     }
     switch (cmd) {
@@ -1110,7 +1128,10 @@ ${referentPromptBlock()}`;
     const line = String(text || '').slice(0, 1800);
     if (!line) return;
     if (final) logTranscript(guildId, name, line);
-    if (!ch || !shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) return;
+    if (!ch || !shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) {
+      ctx.log('[voice] 🗣️ skip (scribe off) cid=' + (ch && ch.id));
+      return;
+    }
     const key = `${guildId}:${name}`;
     const body = () => `🗣️ **${name}:** ${cap.pending}`;
     let cap = liveCaptions.get(key);
@@ -1444,6 +1465,8 @@ ${referentPromptBlock()}`;
           .catch(() => {})
           .then(() => {
             voiceBusy.delete(guildId);
+            const convDone = converseSessions.get(guildId);
+            if (convDone) convDone._responseOpen = false;
             voice.endSpeech(guildId);
             const sp = converseSpeaker.get(guildId);
             if (sp && sp.userId) {
@@ -1462,6 +1485,7 @@ ${referentPromptBlock()}`;
         const sp = converseSpeaker.get(guildId) || {};
         const who = sp.name || 'speaker';
         const final = !!(meta && meta.final) || (ev && String(ev.type || '').endsWith('completed'));
+        ctx.log('[voice] grok-transcript final=' + (final ? '1' : '0') + ' chars=' + line.length);
         upsertLiveUserLine(guildId, who, line, final);
         if (final && wasNotForHer(line)) {
           const c = converseSessions.get(guildId);
@@ -1484,10 +1508,14 @@ ${referentPromptBlock()}`;
           const humans = countHumansNow(guildId);
           const named = addressesName(line);
           const speakerId = (cPend._pendingStop && cPend._pendingStop.userId) || (converseSpeaker.get(guildId) || {}).userId;
-          if (isGroupAddressee({ named, speakerId, lastAnsweredId: cPend._lastAnsweredId, humans })) {
+          if (isGroupAddressee({ named, speakerId, lastAnsweredId: cPend._lastAnsweredId, lastSpeakerId: cPend._lastSpeakerId, humans })) {
             cPend._pendingStop = null;
             cPend._lastAnsweredId = speakerId ? String(speakerId) : cPend._lastAnsweredId;
-            try { cPend.createResponse(); ctx.log('[voice] group addressee → response.create'); } catch (e) { ctx.log('[voice] createResponse: ' + e.message); }
+            cPend._responseOpen = true;
+            try { cPend.createResponse(); ctx.log('[voice] group addressee → response.create'); } catch (e) {
+              cPend._responseOpen = false;
+              ctx.log('[voice] createResponse: ' + e.message);
+            }
           } else {
             cPend._pendingStop = null;
             ctx.log('[voice] speaking-stop not for her');
@@ -1596,27 +1624,35 @@ ${referentPromptBlock()}`;
           ctx.log('[voice] speaking-stop skipped (stop/hold)');
           return;
         }
+        if (c._responseOpen) {
+          ctx.log('[voice] speaking-stop skipped (response already open)');
+          return;
+        }
         const speakerId = userId || (converseSpeaker.get(guildId) || {}).userId;
-        if (typeof c.commitAudio === 'function') { try { c.commitAudio(); } catch (_) {} }
         pcmTurnLogged.delete(guildId);
         forceTurnAt.set(guildId, Date.now());
-        if (firstAfterGreet || shouldForceTurn({ humans, herMouth: false })) {
-          c._awaitFirstUser = false;
-          c._lastAnsweredId = speakerId ? String(speakerId) : c._lastAnsweredId;
-          try {
-            c.createResponse();
-            ctx.log(firstAfterGreet ? '[voice] first-utterance after greet → response.create' : '[voice] 1:1 speaking-stop → response.create');
-          } catch (e) { ctx.log('[voice] createResponse: ' + e.message); }
-          return;
-        }
         const named = false;
-        if (isGroupAddressee({ named, speakerId, lastAnsweredId: c._lastAnsweredId, humans })) {
-          c._lastAnsweredId = speakerId ? String(speakerId) : c._lastAnsweredId;
-          try { c.createResponse(); ctx.log('[voice] latch speaking-stop → response.create'); } catch (e) { ctx.log('[voice] createResponse: ' + e.message); }
+        const want = firstAfterGreet
+          || shouldForceTurn({ humans, herMouth: false })
+          || isGroupAddressee({ named, speakerId, lastAnsweredId: c._lastAnsweredId, lastSpeakerId: c._lastSpeakerId, humans });
+        c._lastSpeakerId = speakerId ? String(speakerId) : c._lastSpeakerId;
+        if (!want) {
+          if (typeof c.commitAudio === 'function') { try { c.commitAudio(); } catch (_) {} }
+          c._pendingStop = { userId: speakerId, at: Date.now() };
+          ctx.log('[voice] speaking-stop commit (group, other humans)');
           return;
         }
-        c._pendingStop = { userId: speakerId, at: Date.now() };
-        ctx.log('[voice] speaking-stop commit (group, wait addressee)');
+        c._awaitFirstUser = false;
+        c._lastAnsweredId = speakerId ? String(speakerId) : c._lastAnsweredId;
+        c._responseOpen = true;
+        try {
+          c.createResponse();
+          ctx.log(firstAfterGreet ? '[voice] first-utterance after greet → response.create'
+            : (humans <= 1 ? '[voice] 1:1 speaking-stop → response.create' : '[voice] group speaking-stop → response.create'));
+        } catch (e) {
+          c._responseOpen = false;
+          ctx.log('[voice] createResponse: ' + e.message);
+        }
       },
       log: (m) => ctx.log(`[voice] ${m}`),
     });
