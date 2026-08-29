@@ -1110,29 +1110,46 @@ ${referentPromptBlock()}`;
 
   // Voice commands: "the assistant, join" (joins the author's voice channel + chimes + listens) / "the assistant, leave".
   // All voice work is sandboxed so it can never crash the text presence.
-  function realtimeListenConfig() {
+  async function engineKeys() {
+    const keys = {};
+    try { keys.deepgram_api_key = !!(await ctx.secrets.get('deepgram_api_key')); } catch (_) { keys.deepgram_api_key = false; }
+    try { keys.elevenlabs_api_key = !!(await ctx.secrets.get(cfg.elevenlabs_key_name || 'elevenlabs_api_key')); } catch (_) { keys.elevenlabs_api_key = false; }
+    return keys;
+  }
+
+  async function realtimeListenConfig() {
     let rtModel = 'gpt-live-transcribe';
+    let rtProvider = 'openai';
+    let rtLive = true;
     try {
-      const c = voiceEngines.resolve('realtime_transcribe').capabilities;
-      if (c && c.provider === 'openai' && c.model && !/diarize/i.test(c.model)) rtModel = c.model;
+      const r = voiceEngines.resolve('realtime_transcribe', { keys: await engineKeys() });
+      const c = r.capabilities;
+      if (c && c.provider === 'deepgram') {
+        rtProvider = 'deepgram';
+        rtModel = c.model || 'flux-general-en';
+        rtLive = true;
+      } else if (c && c.provider === 'openai' && c.model && !/diarize/i.test(c.model)) {
+        rtModel = c.model;
+        rtLive = /live-transcribe/i.test(rtModel);
+      }
     } catch (_) {}
-    const rtLive = /live-transcribe/i.test(rtModel);
     const vcfg = sharedStt.config();
     const vad = {
       endpointMs: Math.max(400, Math.min(4000, Number(vcfg.vad_endpoint_ms) || 1000)),
       rmsGate: Math.max(80, Math.round(600 - (Number(vcfg.vad_sensitivity) || 50) * 5)),
     };
-    return { rtModel, rtLive, vad, realtime: cfg.voice_realtime !== false };
+    return { rtModel, rtLive, rtProvider, vad, realtime: cfg.voice_realtime !== false };
   }
 
-  function startVoiceListening(guildId) {
+  async function startVoiceListening(guildId) {
     const voice = require('./voice');
-    const { rtModel, rtLive, vad, realtime } = realtimeListenConfig();
+    const { rtModel, rtLive, rtProvider, vad, realtime } = await realtimeListenConfig();
     voice.startListening(guildId, client, {
       transcribe: sttTranscribe,
       realtime,
       realtimeModel: rtModel,
       realtimeLive: rtLive,
+      realtimeProvider: rtProvider,
       vad,
       onUtterance: (name, text, meta) => handleVoiceUtterance(guildId, name, text, meta),
       onPartial: (name, text) => onVoicePartial(guildId, name, text),
@@ -1193,11 +1210,12 @@ ${referentPromptBlock()}`;
       }
       return { channelId: String(channelId || ''), channelName };
     },
-    engines: () => {
+    engines: async () => {
       let transcribeEngine = '';
       let ttsEngine = '';
-      try { transcribeEngine = voiceEngines.resolve('realtime_transcribe').engine_id || ''; } catch (_) {}
-      try { ttsEngine = voiceEngines.resolve('synthesize').engine_id || ''; } catch (_) {}
+      const keys = await engineKeys();
+      try { transcribeEngine = voiceEngines.resolve('realtime_transcribe', { keys }).engine_id || ''; } catch (_) {}
+      try { ttsEngine = voiceEngines.resolve('synthesize', { keys }).engine_id || ''; } catch (_) {}
       return { transcribeEngine, ttsEngine };
     },
   });
@@ -1219,9 +1237,9 @@ ${referentPromptBlock()}`;
       // Resolve the realtime_transcribe ROLE (voice-engine layer, #113/#140) instead of hard-wiring a
       // model, so Settings picks the engine. `live` = a streaming model (partials during speech + we
       // finalize on commit); otherwise a server-VAD model (finalizes per turn on the server's VAD).
-      const { rtModel, rtLive, vad } = realtimeListenConfig();
-      ctx.log(`[voice] realtime role → ${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
-      startVoiceListening(message.guild.id);
+      const { rtModel, rtLive, rtProvider, vad } = await realtimeListenConfig();
+      ctx.log(`[voice] realtime role → ${rtProvider}:${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
+      await startVoiceListening(message.guild.id);
       ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${voicePostTranscript})`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const transcriptNote = voicePostTranscript
@@ -1465,6 +1483,26 @@ ${referentPromptBlock()}`;
       await g.leave();
       ctx.log(`left guild ${name} (${guildId})`);
       res.json({ ok: true, left: { id: String(guildId), name } });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+  app.post('/voice', requireConnectorToken, async (req, res) => {
+    try {
+      const tool = req.body && req.body.tool;
+      const args = (req.body && req.body.args) || {};
+      const turn = Object.assign({ channel: 'discord' }, (req.body && req.body.turn) || {});
+      if (!voiceTools.BY_NAME[tool]) return res.status(400).json({ ok: false, error: 'unknown tool: ' + tool });
+      const mutating = /^(voice_join|voice_leave|voice_listen|voice_speak)$/.test(tool);
+      if (mutating) {
+        const fake = {
+          author: { id: voiceTools.senderIdFromTurn(turn), username: '' },
+          guild: { id: voiceTools.guildIdFromTurn(turn) },
+        };
+        if (!(await isOwner(fake))) {
+          return res.status(403).json({ ok: false, error: 'Only my owner can run that command.' });
+        }
+      }
+      const r = await voiceTools.invokeLocal(tool, args, turn);
+      res.json(r);
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   const httpServer = app.listen(cfg.http_port || 3016, '127.0.0.1', () => ctx.log(`send-message API on 127.0.0.1:${cfg.http_port || 3016}`));

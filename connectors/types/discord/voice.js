@@ -84,7 +84,7 @@ function meaningful(t) {
 // Stream one speaker's audio into a persistent realtime STT session (#140). Opened lazily, kept open
 // across short pauses so server-VAD segments turns; flushed with trailing silence when a burst ends;
 // idle-closed after prolonged silence. onFinal → onUtterance; deltas → onPartial (live captions).
-function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model, live, endpointMs, log }) {
+function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model, live, provider, endpointMs, log }) {
   const { EndBehaviorType } = lib();
   const prism = require('prism-media');
   const key = rtKey(guildId, userId);
@@ -98,7 +98,7 @@ function realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPa
       onPartial: (t) => { if (onPartial) { try { onPartial(name, t); } catch (_) {} } },
       onFinal: (t) => { log(`realtime FINAL(${name}): ${String(t).slice(0, 60)}`); if (t && onUtterance) { try { onUtterance(name, t, { confidence: 1, realtime: true, userId }); } catch (_) {} } },
       onError: (e) => log(`realtime stt ERROR: ${e}`),
-    }, { model, live }); // live streaming model → partials during speech + commit finalizes; else server-VAD
+    }, { model, live, provider }); // deepgram Flux uses same pushPcm24 path; live streaming model → partials + commit
     entry = { session, name, live, subscribed: false, idleTimer: null, burstFrames: 0 };
     rtSessions.set(key, entry);
   }
@@ -135,7 +135,7 @@ function closeRealtime(guildId) {
 // onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply.
 // onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
 // realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
-function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, realtimeModel, realtimeLive, vad = {}, log = () => {} }) {
+function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onPartial, realtime, realtimeModel, realtimeLive, realtimeProvider, vad = {}, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;
   const { EndBehaviorType } = lib();
@@ -153,7 +153,7 @@ function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, o
     // Barge-in: the bot only ever RECEIVES other humans (never its own playback), so any speech that
     // starts while a reply is playing is someone talking over it → interrupt. The handler debounces.
     if (onBargeIn && isSpeaking(guildId)) { try { onBargeIn(userId); } catch (_) {} }
-    if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model: realtimeModel || 'gpt-live-transcribe', live: realtimeLive !== false, endpointMs, log }); return; }
+    if (realtime) { realtimeSpeaking(guildId, client, userId, receiver, { onUtterance, onPartial, model: realtimeModel || 'gpt-live-transcribe', live: realtimeLive !== false, provider: realtimeProvider, endpointMs, log }); return; }
     if (active.has(userId)) return;
     active.add(userId);
     const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: endpointMs } });

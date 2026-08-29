@@ -1350,7 +1350,8 @@ app.get('/v2/voice/engines', async (req, res) => {
   const c = voiceEngines.catalog();
   let avail = {};
   try { avail = await voiceEngines.availability(async (n) => { try { return !!(await secrets.get(n)); } catch (_) { return false; } }); } catch (_) {}
-  const resolved = {}; for (const role of c.roles) resolved[role] = voiceEngines.resolve(role);
+  const keys = { deepgram_api_key: !!avail.deepgram, elevenlabs_api_key: !!avail.elevenlabs, openai_api_key: !!avail['openai-tts'] || !!avail['openai-live-transcribe'] || !!avail['openai-transcribe'] };
+  const resolved = {}; for (const role of c.roles) resolved[role] = voiceEngines.resolve(role, { keys });
   const status = {}; for (const id of Object.keys(c.engines)) status[id] = voiceEngines.statusOf(id, avail[id]);
   res.json({ roles: c.roles, engines: c.engines, availability: avail, status, bindings: c.bindings, resolved });
 });

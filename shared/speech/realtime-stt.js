@@ -15,6 +15,7 @@
  * convert with `pcm48StereoToPcm24Mono()` before `pushPcm24()`.
  */
 const stt = require('./stt');
+const secrets = require('../secrets');
 
 // The live streaming model (gpt-live-transcribe) emits each delta as a SLIDING WINDOW of the most
 // recent words (it drops words off the front as it advances), not an incremental token — and never
@@ -66,7 +67,95 @@ function pcm48StereoToPcm24Mono(buf) {
  * @param {object} [opts] { model } — transcription model (default from stt.config)
  * @returns {{ pushPcm24(Buffer):void, close():void, isOpen():boolean, ready:Promise }}
  */
+function fluxEventName(m) {
+  return String((m && (m.event || m.event_type || m.EventType || m.eventType)) || '');
+}
+
+function applyDeepgramMessage(m, handlers) {
+  if (!m || typeof m !== 'object') return;
+  const h = handlers || {};
+  const typ = String(m.type || m.event || '');
+  if (/^error$/i.test(typ) || m.code === 'ERROR') {
+    if (h.onError) {
+      try { h.onError((m.message || m.description || m.error || 'deepgram error')); } catch (_) {}
+    }
+    return 'error';
+  }
+  if (/^connected$/i.test(typ)) {
+    if (h.onOpen) { try { h.onOpen(); } catch (_) {} }
+    return 'open';
+  }
+  const text = String(m.transcript || (m.channel && m.channel.alternatives && m.channel.alternatives[0] && m.channel.alternatives[0].transcript) || '').trim();
+  const ev = fluxEventName(m);
+  if (/EndOfTurn/i.test(ev) || (typ === 'Results' && m.is_final)) {
+    if (text && h.onFinal) { try { h.onFinal(text); } catch (_) {} }
+    return 'final';
+  }
+  if (text && (typ === 'TurnInfo' || typ === 'Results' || /StartOfTurn|Update|EagerEndOfTurn|TurnResumed/i.test(ev))) {
+    if (h.onPartial) { try { h.onPartial(text); } catch (_) {} }
+    return 'partial';
+  }
+  return 'ignore';
+}
+
+function openDeepgramSession(handlers = {}, opts = {}) {
+  const h = handlers;
+  let ws = null;
+  let open = false;
+  let closed = false;
+  const queue = [];
+
+  const ready = (async () => {
+    const key = await secrets.get(opts.keyName || 'deepgram_api_key');
+    if (!key) throw new Error('no deepgram_api_key');
+    if (closed) return;
+    const model = opts.model || 'flux-general-en';
+    const rate = Number(opts.sampleRate) || 24000;
+    const url = 'wss://api.deepgram.com/v2/listen?model=' + encodeURIComponent(model)
+      + '&encoding=linear16&sample_rate=' + encodeURIComponent(String(rate));
+    ws = new WebSocket(url, { headers: { Authorization: 'Token ' + key } });
+    ws.onopen = () => {
+      open = true;
+      for (const b of queue.splice(0)) {
+        try { ws.send(b); } catch (_) {}
+      }
+      if (h.onOpen) { try { h.onOpen(); } catch (_) {} }
+    };
+    ws.onmessage = (ev) => {
+      const raw = (ev && ev.data != null) ? ev.data : ev;
+      const s = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw || ''));
+      let m;
+      try { m = JSON.parse(s); } catch (_) { return; }
+      applyDeepgramMessage(m, h);
+    };
+    ws.onerror = (e) => { if (h.onError) { try { h.onError((e && e.message) || 'ws error'); } catch (_) {} } };
+    ws.onclose = (e) => { open = false; if (h.onClose) { try { h.onClose({ code: e && e.code }); } catch (_) {} } };
+  })().catch((e) => { if (h.onError) { try { h.onError(e.message || String(e)); } catch (_) {} } });
+
+  return {
+    ready,
+    isOpen: () => open,
+    pushPcm24(buf) {
+      if (closed || !buf || !buf.length) return;
+      if (open && ws && ws.readyState === 1) {
+        try { ws.send(buf); } catch (_) {}
+      } else if (queue.length < 400) queue.push(buf);
+    },
+    commit() {},
+    endTurn() {},
+    close() {
+      closed = true;
+      open = false;
+      try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'CloseStream' })); } catch (_) {}
+      try { ws && ws.close(); } catch (_) {}
+    },
+  };
+}
+
+
 function openSession(handlers = {}, opts = {}) {
+  const provider = String(opts.provider || '').toLowerCase();
+  if (provider === 'deepgram') return openDeepgramSession(handlers, opts);
   const h = handlers;
   let ws = null;
   let open = false;
@@ -127,4 +216,4 @@ function openSession(handlers = {}, opts = {}) {
   };
 }
 
-module.exports = { openSession, pcm48StereoToPcm24Mono, mergeWindow };
+module.exports = { openSession, openDeepgramSession, applyDeepgramMessage, fluxEventName, pcm48StereoToPcm24Mono, mergeWindow };

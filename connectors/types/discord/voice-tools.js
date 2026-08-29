@@ -267,7 +267,8 @@ function createRuntime(deps) {
     if (!channelId && typeof v.channelIdOf === 'function') {
       channelId = String(v.channelIdOf(guildId) || '');
     }
-    const engines = (typeof d.engines === 'function' ? d.engines() : d.engines) || defaultEngines();
+    const rawEngines = (typeof d.engines === 'function' ? d.engines() : d.engines);
+    const engines = ((rawEngines && typeof rawEngines.then === 'function') ? await rawEngines : rawEngines) || defaultEngines();
     return {
       connected,
       listening,
@@ -297,17 +298,57 @@ function createRuntime(deps) {
 }
 
 let _bound = createRuntime({});
+let _live = false;
 
 function bind(deps) {
   _bound = createRuntime(deps || {});
+  _live = !!(deps && typeof deps.getInvokerVoiceChannel === 'function');
   return _bound;
 }
 
-function invoke(name, args, turn) {
+function invokeLocal(name, args, turn) {
   return _bound.invoke(name, args, turn);
 }
 
-const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\\n');
+async function findDiscordVoiceUrl() {
+  if (process.env.ASMLTR_DISCORD_VOICE_URL) return String(process.env.ASMLTR_DISCORD_VOICE_URL);
+  if (process.env.ASMLTR_DISCORD_HTTP_PORT) {
+    return 'http://127.0.0.1:' + String(process.env.ASMLTR_DISCORD_HTTP_PORT) + '/voice';
+  }
+  const manager = String(process.env.ASMLTR_MANAGER_BASE || 'http://127.0.0.1:3024').replace(/\/+$/, '');
+  try {
+    const { connectorAuthHeaders } = require('../../../shared/connector-http-auth');
+    const r = await fetch(manager + '/instances', { headers: connectorAuthHeaders() });
+    const j = await r.json();
+    const inst = (j.instances || []).find((i) => i && i.type === 'discord' && i.enabled !== false);
+    const port = (inst && inst.config && inst.config.http_port) || 3016;
+    return 'http://127.0.0.1:' + String(port) + '/voice';
+  } catch (_) {
+    return 'http://127.0.0.1:3016/voice';
+  }
+}
+
+async function postDiscord(name, args, turn) {
+  const { connectorAuthHeaders } = require('../../../shared/connector-http-auth');
+  const url = await findDiscordVoiceUrl();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: connectorAuthHeaders(),
+    body: JSON.stringify({ tool: name, args: args || {}, turn: turn || turnFromEnv() }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!j) return { ok: false, error: 'discord voice HTTP ' + r.status };
+  return j;
+}
+
+function invoke(name, args, turn) {
+  if (name === 'phone_call' || name === 'phone_sms') return invokeLocal(name, args, turn);
+  if (_live) return invokeLocal(name, args, turn);
+  return postDiscord(name, args, turn);
+}
+
+
+const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');
 const mcpOk = (id, result) => send({ jsonrpc: '2.0', id, result });
 const mcpFail = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
 
@@ -364,5 +405,6 @@ module.exports = {
   createRuntime,
   bind,
   invoke,
+  invokeLocal,
   handleMcp,
 };

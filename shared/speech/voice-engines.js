@@ -45,9 +45,9 @@ const ENGINES = {
     caps: { streaming: true, vad: true, diarization: false, low_latency: true, cost_per_min: 0.006 },
   },
   deepgram: {
-    provider: 'deepgram', label: 'Deepgram', key: 'deepgram_api_key', model: 'nova-3',
+    provider: 'deepgram', label: 'Deepgram', key: 'deepgram_api_key', model: 'flux-general-en',
     roles: ['transcribe', 'realtime_transcribe'],
-    caps: { streaming: true, vad: true, diarization: true, word_timestamps: true, known_speakers: false },
+    caps: { streaming: true, vad: true, diarization: true, word_timestamps: true, known_speakers: false, low_latency: true },
   },
   'local-whisper': {
     provider: 'local', label: 'Local Whisper (offline)', key: null, model: 'whisper',
@@ -73,9 +73,30 @@ const DEFAULT_BINDINGS = {
 };
 
 function file() { return process.env.ASMLTR_VOICE_ENGINES_FILE || path.join(os.homedir(), '.asmltr', 'voice-engines.json'); }
+function readFileBindings() {
+  try { const j = JSON.parse(fs.readFileSync(file(), 'utf8')); return (j && j.bindings) || {}; }
+  catch (_) { return {}; }
+}
 function readBindings() {
-  try { const j = JSON.parse(fs.readFileSync(file(), 'utf8')); return { ...DEFAULT_BINDINGS, ...(j.bindings || {}) }; }
-  catch (_) { return { ...DEFAULT_BINDINGS }; }
+  return { ...DEFAULT_BINDINGS, ...readFileBindings() };
+}
+
+const ENV_KEY_ALIASES = {
+  deepgram_api_key: ['DEEPGRAM_API_KEY', 'ASMLTR_DEEPGRAM_API_KEY'],
+};
+
+function keyPresent(name, opts) {
+  if (opts && opts.keys && Object.prototype.hasOwnProperty.call(opts.keys, name)) return !!opts.keys[name];
+  if (opts && typeof opts.has === 'function') return !!opts.has(name);
+  for (const e of (ENV_KEY_ALIASES[name] || [])) {
+    if (process.env[e]) return true;
+  }
+  return false;
+}
+
+function implicitBinding(role, opts) {
+  if (role === 'realtime_transcribe' && keyPresent('deepgram_api_key', opts)) return 'deepgram';
+  return DEFAULT_BINDINGS[role];
 }
 function writeBindings(b) {
   const f = file(); fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -86,10 +107,10 @@ function enginesForRole(role) { return Object.entries(ENGINES).filter(([, e]) =>
 
 // Resolve a role → the engine bound to it (or the first engine that can fill it as a fallback). Returns
 // { role, engine_id, engine, capabilities } — surfaces use `capabilities` to gate features.
-function resolve(role) {
+function resolve(role, opts) {
   if (!ROLES.includes(role)) throw new Error('unknown voice role: ' + role);
-  const b = readBindings();
-  let id = b[role];
+  const fileB = readFileBindings();
+  let id = Object.prototype.hasOwnProperty.call(fileB, role) ? fileB[role] : implicitBinding(role, opts);
   if (!id || !ENGINES[id] || !ENGINES[id].roles.includes(role)) {
     const first = enginesForRole(role)[0]; id = first ? first.id : null;
   }
@@ -116,7 +137,7 @@ async function availability(has) {
 // Which engines actually have their I/O adapter wired in asmltr TODAY. Catalog entries NOT in this set are
 // real/plannable configs but their adapter isn't built yet — the GUI shows them as "planned" so the list
 // never overpromises. As adapters land (diarize, live, deepgram, local-whisper), add them here.
-const IMPLEMENTED = new Set(['openai-transcribe', 'openai-transcribe-diarize', 'openai-live-transcribe', 'openai-tts', 'elevenlabs']);
+const IMPLEMENTED = new Set(['openai-transcribe', 'openai-transcribe-diarize', 'openai-live-transcribe', 'deepgram', 'openai-tts', 'elevenlabs']);
 // Per-engine status: 'ready' (adapter built + key ok) · 'needs_key' (built but key missing) · 'planned'
 // (adapter not built yet). `keyOk` is the caller's availability result for this engine.
 function statusOf(id, keyOk) {
@@ -128,4 +149,4 @@ function statusOf(id, keyOk) {
 
 function catalog() { return { roles: ROLES, engines: ENGINES, bindings: readBindings() }; }
 
-module.exports = { ROLES, ENGINES, IMPLEMENTED, resolve, capabilities, bind, enginesForRole, availability, statusOf, catalog, readBindings };
+module.exports = { ROLES, ENGINES, IMPLEMENTED, resolve, capabilities, bind, enginesForRole, availability, statusOf, catalog, readBindings, readFileBindings, keyPresent, implicitBinding };
