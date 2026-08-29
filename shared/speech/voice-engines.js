@@ -62,8 +62,13 @@ const ENGINES = {
     provider: 'elevenlabs', label: 'ElevenLabs', key: 'elevenlabs_api_key', model: 'eleven_turbo_v2_5',
     roles: ['synthesize'], caps: { voices: 'premium', cloning: true },
   },
-  // converse (duplex speech-to-speech) has no engine yet — the role exists so one can be bound later.
+  'grok-voice': {
+    provider: 'xai', label: 'Grok Voice (Live)', key: 'xai_voice_api_key', model: 'grok-voice-think-fast-2.0',
+    roles: ['converse'],
+    caps: { duplex: true, streaming: true, vad: true, voice: 'ara' },
+  },
 };
+
 
 const DEFAULT_BINDINGS = {
   transcribe: 'openai-transcribe',
@@ -96,6 +101,7 @@ function keyPresent(name, opts) {
 
 function implicitBinding(role, opts) {
   if (role === 'realtime_transcribe' && keyPresent('deepgram_api_key', opts)) return 'deepgram';
+  if (role === 'converse' && keyPresent('xai_voice_api_key', opts)) return 'grok-voice';
   return DEFAULT_BINDINGS[role];
 }
 function writeBindings(b) {
@@ -110,9 +116,13 @@ function enginesForRole(role) { return Object.entries(ENGINES).filter(([, e]) =>
 function resolve(role, opts) {
   if (!ROLES.includes(role)) throw new Error('unknown voice role: ' + role);
   const fileB = readFileBindings();
-  let id = Object.prototype.hasOwnProperty.call(fileB, role) ? fileB[role] : implicitBinding(role, opts);
+  const fromFile = Object.prototype.hasOwnProperty.call(fileB, role);
+  let id = fromFile ? fileB[role] : implicitBinding(role, opts);
   if (!id || !ENGINES[id] || !ENGINES[id].roles.includes(role)) {
-    const first = enginesForRole(role)[0]; id = first ? first.id : null;
+    // converse is opt-in (vault xai_voice_api_key). Do not fall back to the catalog entry
+    // when the key is missing -- that would steal the Flux+CLI+TTS path.
+    if (role === 'converse' && !fromFile) id = null;
+    else { const first = enginesForRole(role)[0]; id = first ? first.id : null; }
   }
   const engine = id ? ENGINES[id] : null;
   return { role, engine_id: id, engine, capabilities: engine ? { ...engine.caps, model: engine.model, provider: engine.provider } : null };
@@ -137,7 +147,7 @@ async function availability(has) {
 // Which engines actually have their I/O adapter wired in asmltr TODAY. Catalog entries NOT in this set are
 // real/plannable configs but their adapter isn't built yet — the GUI shows them as "planned" so the list
 // never overpromises. As adapters land (diarize, live, deepgram, local-whisper), add them here.
-const IMPLEMENTED = new Set(['openai-transcribe', 'openai-transcribe-diarize', 'openai-live-transcribe', 'deepgram', 'openai-tts', 'elevenlabs']);
+const IMPLEMENTED = new Set(['openai-transcribe', 'openai-transcribe-diarize', 'openai-live-transcribe', 'deepgram', 'openai-tts', 'elevenlabs', 'grok-voice']);
 // Per-engine status: 'ready' (adapter built + key ok) · 'needs_key' (built but key missing) · 'planned'
 // (adapter not built yet). `keyOk` is the caller's availability result for this engine.
 function statusOf(id, keyOk) {

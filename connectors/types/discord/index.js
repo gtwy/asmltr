@@ -24,6 +24,7 @@ const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // 
 const sharedStt = require('../../../shared/speech/stt');
 const sharedWake = require('../../../shared/speech/wake');            // shared confidence-gated wake matcher (#136)
 const voiceEngines = require('../../../shared/speech/voice-engines'); // pluggable STT/TTS role layer (#113/#139)
+const converseGrok = require('../../../shared/speech/converse-grok'); // Live duplex WS (grok-voice) when xai_voice_api_key present
 
 // Assistant identity — the display name AND the spoken wake word for voice.
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -899,6 +900,7 @@ ${referentPromptBlock()}`;
   const voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ default; per-channel transcribe-off wins
   const voiceTranscriptFile = cfg.voice_transcript_file !== false; // upload a full transcript .txt on leave
   const voiceLog = new Map(); // guildId -> [{ t, who, text }] accumulated for the whole voice session
+  const converseSessions = new Map(); // guildId -> grok-voice Live WS session (when converse bound)
 
   // Record a line for the end-of-session transcript file (kept even when live posting is off).
   function logTranscript(guildId, who, text) {
@@ -947,7 +949,10 @@ ${referentPromptBlock()}`;
     let voice; try { voice = require('./voice'); } catch (_) { return false; }
     const wasBusy = voiceBusy.has(guildId);
     voiceGen.set(guildId, (voiceGen.get(guildId) || 0) + 1); // invalidate the in-flight reply so it can't speak
+    const conv = converseSessions.get(guildId);
+    if (conv && conv.cancel) { try { conv.cancel(); } catch (_) {} }
     voice.stopSpeech(guildId); voice.stopDrone(guildId);
+    if (voice.stopPcmOut) { try { voice.stopPcmOut(guildId); } catch (_) {} }
     voiceBusy.delete(guildId); voiceReplyStart.delete(guildId);
     try { await ctx.core.abort(voiceConvKey(guildId)); } catch (_) {}
     setVoiceStatus(null);
@@ -992,6 +997,12 @@ ${referentPromptBlock()}`;
   // the assistant — addressed by name OR the SAME last speaker is inside the follow-up window
   // (so their next line needs no wake word). Other speakers still need the name. A dismissal
   // phrase exits answering mode back to transcription-only.
+  function armLastSpeaker(guildId, userId) {
+    const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId });
+    if (next) voiceActive.set(guildId, next);
+    return next;
+  }
+
   async function handleVoiceUtterance(guildId, name, text, meta = {}) {
     const ch = voiceText.get(guildId);
     logTranscript(guildId, name, text); // always captured for the end-of-session file
@@ -1036,7 +1047,7 @@ ${referentPromptBlock()}`;
 
     // spoken "leave voice" → actually disconnect from the voice channel
     if ((addressesName(text) || active) && LEAVE_RE.test(lc)) {
-      voiceActive.delete(guildId); voiceText.delete(guildId); voiceMuted.delete(guildId); voice.leave(guildId); setVoiceStatus(null);
+      voiceActive.delete(guildId); voiceText.delete(guildId); voiceMuted.delete(guildId); closeConverse(guildId); voice.leave(guildId); setVoiceStatus(null);
       if (ch) ch.send('👋 Left the voice channel.').catch(() => {});
       await uploadTranscript(guildId, ch); // ship the full-session .txt to the origin channel
       return;
@@ -1063,6 +1074,15 @@ ${referentPromptBlock()}`;
     }
 
     if (voiceMuted.has(guildId)) return; // MUTED (P2): addressed, but stay quiet — transcript already posted
+
+    // Live converse: last-speaker PCM already (or now) on the WS. Skip handleStream + ElevenLabs HTTP TTS.
+    const convLive = converseSessions.get(guildId);
+    if (convLive && speakerId) {
+      armLastSpeaker(guildId, speakerId);
+      try { voice.flushBurstToConverse(guildId, speakerId, convLive); } catch (_) {}
+      return;
+    }
+
     if (voiceBusy.has(guildId)) return;  // don't stack replies
     voiceBusy.add(guildId);
     const originCid = ch && ch.id;
@@ -1139,6 +1159,7 @@ ${referentPromptBlock()}`;
     const keys = {};
     try { keys.deepgram_api_key = !!(await ctx.secrets.get('deepgram_api_key')); } catch (_) { keys.deepgram_api_key = false; }
     try { keys.elevenlabs_api_key = !!(await ctx.secrets.get(cfg.elevenlabs_key_name || 'elevenlabs_api_key')); } catch (_) { keys.elevenlabs_api_key = false; }
+    try { keys.xai_voice_api_key = !!(await ctx.secrets.get('xai_voice_api_key')); } catch (_) { keys.xai_voice_api_key = false; }
     return keys;
   }
 
@@ -1166,8 +1187,58 @@ ${referentPromptBlock()}`;
     return { rtModel, rtLive, rtProvider, vad, realtime: cfg.voice_realtime !== false };
   }
 
+  async function openConverse(guildId) {
+    if (converseSessions.has(guildId)) return converseSessions.get(guildId);
+    let keys = {};
+    try { keys = await engineKeys(); } catch (_) { keys = {}; }
+    if (!keys.xai_voice_api_key) return null;
+    let bound;
+    try { bound = voiceEngines.resolve('converse', { keys }); } catch (_) { return null; }
+    if (!bound || bound.engine_id !== 'grok-voice') return null;
+    const voice = require('./voice');
+    const session = converseGrok.openSession({
+      onOpen: () => ctx.log('[voice] converse OPEN grok-voice ara'),
+      onAudioStart: () => {
+        voice.startSpeech(guildId);
+        voice.stopDrone(guildId);
+        voiceBusy.add(guildId);
+        setVoiceStatus('speaking');
+        voiceReplyStart.set(guildId, Date.now());
+      },
+      onAudio: (pcm) => { try { voice.pushPcm24Out(guildId, pcm); } catch (_) {} },
+      onAudioEnd: (text) => {
+        try { if (voice.endPcmOut) voice.endPcmOut(guildId); } catch (_) {}
+        voice.endSpeech(guildId);
+        voiceBusy.delete(guildId);
+        voiceReplyStart.delete(guildId);
+        setVoiceStatus(null);
+        const w = voiceActive.get(guildId);
+        const uid = (w && w.userId) || '';
+        armLastSpeaker(guildId, uid);
+        if (text) {
+          logTranscript(guildId, NAME, text);
+          const ch = voiceText.get(guildId);
+          if (ch && shouldPostLive({ offSet: transcriptOffChannels, cid: ch.id, instanceDefault: voicePostTranscript })) {
+            ch.send(`🔊 **${NAME}:** ${String(text).slice(0, 1800)}`).catch(() => {});
+          }
+        }
+      },
+      onError: (e) => ctx.log('[voice] converse ERROR: ' + e),
+    }, { instructions: 'You are ' + NAME + '. ' + VOICE_GUIDANCE });
+    converseSessions.set(guildId, session);
+    return session;
+  }
+
+  function closeConverse(guildId) {
+    const s = converseSessions.get(guildId);
+    if (!s) return;
+    try { s.close(); } catch (_) {}
+    converseSessions.delete(guildId);
+  }
+
   async function startVoiceListening(guildId) {
     const voice = require('./voice');
+    const conv = (await openConverse(guildId)) || null;
     const { rtModel, rtLive, rtProvider, vad, realtime } = await realtimeListenConfig();
     voice.startListening(guildId, client, {
       transcribe: sttTranscribe,
@@ -1176,6 +1247,10 @@ ${referentPromptBlock()}`;
       realtimeLive: rtLive,
       realtimeProvider: rtProvider,
       vad,
+      converse: conv,
+      shouldRelayPcm: (userId) => converseGrok.isLastSpeakerRelay({
+        window: voiceActive.get(guildId), userId, now: Date.now(), muted: voiceMuted.has(guildId),
+      }),
       onUtterance: (name, text, meta) => handleVoiceUtterance(guildId, name, text, meta),
       onPartial: (name, text) => onVoicePartial(guildId, name, text),
       onBargeIn: () => {
@@ -1264,6 +1339,7 @@ ${referentPromptBlock()}`;
       const { rtModel, rtLive, rtProvider, vad } = await realtimeListenConfig();
       ctx.log(`[voice] realtime role → ${rtProvider}:${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
       await startVoiceListening(message.guild.id);
+      if (converseSessions.get(message.guild.id)) ctx.log('[voice] converse bound: grok-voice ara (skip handleStream + ElevenLabs HTTP TTS)');
       ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${!isTranscriptOff(transcriptOffChannels, message.channel.id) && voicePostTranscript})`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const originOff = isTranscriptOff(transcriptOffChannels, message.channel.id);
@@ -1282,6 +1358,7 @@ ${referentPromptBlock()}`;
     const originCh = voiceText.get(message.guild.id) || message.channel;
     voiceText.delete(message.guild.id);
     voiceMuted.delete(message.guild.id);
+    closeConverse(message.guild.id);
     const left = voice.leave(message.guild.id);
     setVoiceStatus(null); // back to idle/config presence
     message.channel.send(left ? '👋 Left the voice channel.' : "I'm not in a voice channel.").catch(() => {});
