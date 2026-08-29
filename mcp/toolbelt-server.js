@@ -77,6 +77,20 @@ const TOOLS = [
     inputSchema: { type: 'object', required: ['path'],
       properties: { path: { type: 'string' } }, additionalProperties: false },
     argv: (a) => ['silo', 'get', a.path], deny: 'silo' },
+  { name: 'voice_join', handler: 'voice', description: 'Join the invoker current Discord voice channel and start listening. No channel-name argument. Replaces any prior connection for that guild.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'voice_leave', handler: 'voice', description: 'Leave the voice channel for this Discord turn guild. Safe if already left.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'voice_listen', handler: 'voice', description: 'Start or stop listening in the current guild voice connection. Does not leave the channel.',
+    inputSchema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['start', 'stop'] } }, additionalProperties: false } },
+  { name: 'voice_speak', handler: 'voice', description: 'Speak short text in the current guild voice connection using the bound TTS engine. Honors barge-in/cancel. Fails if not connected.',
+    inputSchema: { type: 'object', required: ['text'], properties: { text: { type: 'string', description: 'Spoken-style text; keep it short.' } }, additionalProperties: false } },
+  { name: 'voice_status', handler: 'voice', description: 'Voice connection status for this Discord turn guild. No secrets.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'phone_call', handler: 'voice', description: 'Place a phone call. Not configured.',
+    inputSchema: { type: 'object', properties: { to: { type: 'string' }, text: { type: 'string' } }, additionalProperties: false } },
+  { name: 'phone_sms', handler: 'voice', description: 'Send an SMS. Not configured.',
+    inputSchema: { type: 'object', required: ['to', 'text'], properties: { to: { type: 'string' }, text: { type: 'string' } }, additionalProperties: false } },
 ];
 const BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
@@ -110,6 +124,11 @@ async function handle(msg) {
       const denied = parseDenyEnv(process.env.ASMLTR_DENY_TOOLS);
       if (t.deny && denied[t.deny]) return ok(msg.id, { content: [{ type: 'text', text: 'denied: ' + t.deny }], isError: true });
       try {
+        if (t.handler === 'voice') {
+          const voiceTools = require('../connectors/types/discord/voice-tools');
+          const r = await voiceTools.invoke(t.name, msg.params.arguments || {}, voiceTools.turnFromEnv());
+          return ok(msg.id, { content: [{ type: 'text', text: JSON.stringify(r) }], isError: !!(r && r.ok === false) });
+        }
         const r = await runCli(t.argv(msg.params.arguments || {}));
         return ok(msg.id, { content: [{ type: 'text', text: r.text }], isError: r.isError });
       } catch (e) { return ok(msg.id, { content: [{ type: 'text', text: e.message }], isError: true }); }

@@ -250,8 +250,15 @@ function leave(guildId) {
 }
 
 const isConnected = (guildId) => connections.has(guildId);
+const isListening = (guildId) => listening.has(guildId);
+function channelIdOf(guildId) {
+  const c = connections.get(guildId);
+  if (!c) return null;
+  return (c.joinConfig && c.joinConfig.channelId) || null;
+}
 
 module.exports = {
-  joinChannel, playChime, speak, leave, isConnected, startListening, stopListening, startDrone, stopDrone,
+  joinChannel, playChime, speak, leave, isConnected, isListening, channelIdOf,
+  startListening, stopListening, startDrone, stopDrone,
   startSpeech, stopSpeech, endSpeech, isSpeaking,
 };

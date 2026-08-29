@@ -37,6 +37,7 @@ const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speaker
 const { injectBy } = require('./inject-by');
 const { splitResponse } = require('../../../shared/discord-split');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
+const voiceTools = require('./voice-tools');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
 const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
@@ -1091,7 +1092,8 @@ ${referentPromptBlock()}`;
         capabilities: { max_message_chars: 700, supports_markdown: false },
         public: true, // spoken into a room → redaction applies (never speak secrets aloud)
         system_prompt_extra: VOICE_GUIDANCE,
-        channel_context: { voice: true, speaker: name },
+        context: { scope_id: `guild:${guildId}` },
+        channel_context: { voice: true, speaker: name, guildId: String(guildId) },
       }, (delta) => { buf += delta; full += delta; flush(false); });
       flush(true);
       await chain; // wait until every sentence has finished speaking
@@ -1108,6 +1110,99 @@ ${referentPromptBlock()}`;
 
   // Voice commands: "the assistant, join" (joins the author's voice channel + chimes + listens) / "the assistant, leave".
   // All voice work is sandboxed so it can never crash the text presence.
+  function realtimeListenConfig() {
+    let rtModel = 'gpt-live-transcribe';
+    try {
+      const c = voiceEngines.resolve('realtime_transcribe').capabilities;
+      if (c && c.provider === 'openai' && c.model && !/diarize/i.test(c.model)) rtModel = c.model;
+    } catch (_) {}
+    const rtLive = /live-transcribe/i.test(rtModel);
+    const vcfg = sharedStt.config();
+    const vad = {
+      endpointMs: Math.max(400, Math.min(4000, Number(vcfg.vad_endpoint_ms) || 1000)),
+      rmsGate: Math.max(80, Math.round(600 - (Number(vcfg.vad_sensitivity) || 50) * 5)),
+    };
+    return { rtModel, rtLive, vad, realtime: cfg.voice_realtime !== false };
+  }
+
+  function startVoiceListening(guildId) {
+    const voice = require('./voice');
+    const { rtModel, rtLive, vad, realtime } = realtimeListenConfig();
+    voice.startListening(guildId, client, {
+      transcribe: sttTranscribe,
+      realtime,
+      realtimeModel: rtModel,
+      realtimeLive: rtLive,
+      vad,
+      onUtterance: (name, text, meta) => handleVoiceUtterance(guildId, name, text, meta),
+      onPartial: (name, text) => onVoicePartial(guildId, name, text),
+      onBargeIn: () => {
+        const gid = guildId;
+        if (cfg.voice_barge_in === false) return;
+        if (!voiceBusy.has(gid)) return;
+        if (Date.now() - (voiceReplyStart.get(gid) || 0) < BARGE_GRACE_MS) return;
+        ctx.log('[voice] barge-in: user spoke over the reply → cancelling');
+        stopVoiceReply(gid, { chime: false });
+      },
+      log: (m) => ctx.log(`[voice] ${m}`),
+    });
+  }
+
+  async function getInvokerVoiceChannel(turn) {
+    const guildId = voiceTools.guildIdFromTurn(turn);
+    const userId = voiceTools.senderIdFromTurn(turn);
+    if (!guildId || !userId) return null;
+    try {
+      const guild = await client.guilds.fetch(guildId);
+      const member = await guild.members.fetch(String(userId));
+      return (member && member.voice && member.voice.channel) || null;
+    } catch (_) { return null; }
+  }
+
+  async function currentSynthesize(text) {
+    let id = 'openai-tts';
+    try { id = voiceEngines.resolve('synthesize').engine_id || id; } catch (_) {}
+    if (id === 'elevenlabs') {
+      const { audio } = await sharedTts.synthesize(text, {
+        provider: 'elevenlabs',
+        voice: cfg.voice_id || undefined,
+        model: cfg.tts_model || undefined,
+        keyName: cfg.elevenlabs_key_name || 'elevenlabs_api_key',
+      });
+      return audio;
+    }
+    const { audio } = await sharedTts.synthesize(text);
+    return audio;
+  }
+
+  try {
+  voiceTools.bind({
+    voice: require('./voice'),
+    getInvokerVoiceChannel,
+    startListening: startVoiceListening,
+    synthesize: currentSynthesize,
+    getChannelInfo: async (guildId) => {
+      let voice; try { voice = require('./voice'); } catch (_) { return { channelId: '', channelName: '' }; }
+      const channelId = (voice.channelIdOf && voice.channelIdOf(guildId)) || '';
+      let channelName = '';
+      if (channelId) {
+        try {
+          const ch = await client.channels.fetch(channelId);
+          channelName = (ch && ch.name) || '';
+        } catch (_) {}
+      }
+      return { channelId: String(channelId || ''), channelName };
+    },
+    engines: () => {
+      let transcribeEngine = '';
+      let ttsEngine = '';
+      try { transcribeEngine = voiceEngines.resolve('realtime_transcribe').engine_id || ''; } catch (_) {}
+      try { ttsEngine = voiceEngines.resolve('synthesize').engine_id || ''; } catch (_) {}
+      return { transcribeEngine, ttsEngine };
+    },
+  });
+  } catch (e) { ctx.log("voice-tools bind failed: " + e.message); }
+
   // Join the requester's voice channel + start listening. Triggered by the `join-voice`
   // command (@mention driven, in handleControlCommands).
   async function doJoinVoice(message) {
@@ -1124,39 +1219,9 @@ ${referentPromptBlock()}`;
       // Resolve the realtime_transcribe ROLE (voice-engine layer, #113/#140) instead of hard-wiring a
       // model, so Settings picks the engine. `live` = a streaming model (partials during speech + we
       // finalize on commit); otherwise a server-VAD model (finalizes per turn on the server's VAD).
-      let rtModel = 'gpt-live-transcribe';
-      try {
-        const c = voiceEngines.resolve('realtime_transcribe').capabilities;
-        // Diarize models need the batch diarized_json endpoint — not usable as a realtime session model;
-        // fall back to the live streaming model if the role resolves to one.
-        if (c && c.provider === 'openai' && c.model && !/diarize/i.test(c.model)) rtModel = c.model;
-      } catch (_) {}
-      const rtLive = /live-transcribe/i.test(rtModel);
-      // Shared VAD tunables (#141) from stt.config → Discord turn-taking tunes with the app in Settings.
-      const vcfg = sharedStt.config();
-      const vad = {
-        endpointMs: Math.max(400, Math.min(4000, Number(vcfg.vad_endpoint_ms) || 1000)),
-        rmsGate: Math.max(80, Math.round(600 - (Number(vcfg.vad_sensitivity) || 50) * 5)), // higher sensitivity → lower gate
-      };
+      const { rtModel, rtLive, vad } = realtimeListenConfig();
       ctx.log(`[voice] realtime role → ${rtModel} (live=${rtLive}) · endpoint=${vad.endpointMs}ms rmsGate=${vad.rmsGate}`);
-      voice.startListening(message.guild.id, client, {
-        transcribe: sttTranscribe,
-        realtime: cfg.voice_realtime !== false, // streaming STT + turn-taking (batch fallback if off)
-        realtimeModel: rtModel,
-        realtimeLive: rtLive,
-        vad,
-        onUtterance: (name, text, meta) => handleVoiceUtterance(message.guild.id, name, text, meta),
-        onPartial: (name, text) => onVoicePartial(message.guild.id, name, text),
-        onBargeIn: () => {
-          const gid = message.guild.id;
-          if (cfg.voice_barge_in === false) return;        // disabled for noisy/cross-talk meetings
-          if (!voiceBusy.has(gid)) return;                 // nothing speaking → nothing to interrupt
-          if (Date.now() - (voiceReplyStart.get(gid) || 0) < BARGE_GRACE_MS) return; // let the reply get going
-          ctx.log('[voice] barge-in: user spoke over the reply → cancelling');
-          stopVoiceReply(gid, { chime: false });
-        },
-        log: (m) => ctx.log(`[voice] ${m}`),
-      });
+      startVoiceListening(message.guild.id);
       ctx.log(`[voice] JOINED ${vc.name} — listening (realtime=${cfg.voice_realtime !== false}, post_transcript=${voicePostTranscript})`);
       setVoiceStatus(`🎧 listening · ${vc.name}`);
       const transcriptNote = voicePostTranscript
