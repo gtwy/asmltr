@@ -34,9 +34,23 @@ const UPLOAD_STAGING = (() => {
   try { return require('../shared/uploads').stagingDir(); } catch (_) { return null; }
 })();
 
+const CHROME_LOCK_NAMES = new Set(['SingletonCookie', 'SingletonLock', 'SingletonSocket']);
+
 /** True when `p` is a path we deliberately keep out of the home-store snapshot. */
 function excludedFromHome(p) {
-  return [BACKUP_DIR, UPLOAD_STAGING].some((dir) => dir && (p === dir || p.startsWith(dir + path.sep)));
+  if ([BACKUP_DIR, UPLOAD_STAGING].some((dir) => dir && (p === dir || p.startsWith(dir + path.sep)))) return true;
+  const base = path.basename(p);
+  if (CHROME_LOCK_NAMES.has(base)) return true;
+  try {
+    const st = fs.lstatSync(p);
+    if (st.isSocket() || st.isFIFO()) return true;
+    if (st.isSymbolicLink()) {
+      try { fs.statSync(p); } catch (_) { return true; }
+    }
+  } catch (_) {
+    /* missing path is not an exclude rule — cpSync just will not copy it */
+  }
+  return false;
 }
 const SCHEDULE_FILE = process.env.ASMLTR_BACKUP_SCHEDULE_FILE || path.join(ASMLTR, 'backup-schedule.json');
 const REMOTE_PREFIX = 'asmltr-backups'; // subfolder within a destination integration's root
@@ -302,11 +316,19 @@ async function createBackup(opts = {}) {
       const dest = path.join(stage, 'home');
       fs.cpSync(ASMLTR, dest, { recursive: true, filter: (s) => !excludedFromHome(s) });
       let files = 0, bytes = 0;
-      const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { files++; bytes += fs.statSync(p).size; } } };
+      const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { try { bytes += fs.lstatSync(p).size; files++; } catch (_) {} } } };
       walk(dest);
       manifest.components['home'] = { present: true, files, bytes };
       log(`home: ${files} files (${bytes} bytes)`);
     } else { manifest.components['home'] = { present: false }; }
+
+    const grokSkills = path.join(HOME, '.grok', 'skills');
+    if (fs.existsSync(grokSkills)) {
+      const dest = path.join(stage, 'grok-skills');
+      fs.cpSync(grokSkills, dest, { recursive: true });
+      manifest.components['grok-skills'] = { present: true };
+      log('grok-skills: copied');
+    } else { manifest.components['grok-skills'] = { present: false }; }
 
     fs.writeFileSync(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
