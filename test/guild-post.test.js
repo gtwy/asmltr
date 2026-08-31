@@ -1,20 +1,23 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/guild-post');
-const { policyFor } = require('../shared/tool-policy');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+process.env.ASMLTR_OVERLAY_DIR = path.join(os.tmpdir(), 'no-asmltr-overlay-' + process.pid);
+const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/guild-post');
+const { policyFor } = require('../shared/tool-policy');
 
-test('preface tags asker then two blank lines then body', () => {
-  const r = prefaceOnBehalf('999000111222333002', '1½ inch addendum');
+test('public preface prefixes when id present; overlay requires id', () => {
+  const r = prefaceOnBehalf('100000000000000001', '1½ inch addendum');
   assert.equal(r.ok, true);
-  assert.equal(r.text, 'Posting on behalf of <@999000111222333002>\n\n\n1½ inch addendum');
+  assert.equal(r.text, 'Posting on behalf of <@100000000000000001>\n\n\n1½ inch addendum');
   const dup = prefaceOnBehalf('1', 'posting on behalf of <@99>\n\nhello');
   assert.equal(dup.text.startsWith('Posting on behalf of <@1>\n\n\n'), true);
   assert.equal(dup.text.includes('<@99>'), false);
   assert.equal(dup.body, 'hello');
-  assert.equal(prefaceOnBehalf('', 'hi').ok, false);
+  assert.equal(prefaceOnBehalf('', 'hi').ok, true);
+  assert.equal(prefaceOnBehalf('', 'hi').text, 'hi');
   assert.equal(prefaceOnBehalf('1', '  ').ok, false);
   const chips = prefaceOnBehalf('1', '-# Working\n-# 💭 thinking\nThe addendum.');
   assert.equal(chips.text.includes('-#'), false);
@@ -22,12 +25,10 @@ test('preface tags asker then two blank lines then body', () => {
   assert.match(chips.text, /The addendum/);
 });
 
-test('sameGuild: this server only', () => {
+test('public sameGuild is not fenced; overlay restores Ivy same-guild', () => {
   assert.equal(sameGuild('aaa', 'aaa').ok, true);
-  assert.equal(sameGuild('aaa', 'bbb').ok, false);
-  assert.match(sameGuild('aaa', 'bbb').error, /off server/);
-  assert.equal(sameGuild('', 'aaa').ok, false);
-  assert.equal(sameGuild('aaa', '').ok, false);
+  assert.equal(sameGuild('aaa', 'bbb').ok, true);
+  assert.equal(sameGuild('', 'aaa').ok, true);
 });
 
 test('forum parent vs thread', () => {
@@ -48,14 +49,14 @@ test('forum parent vs thread', () => {
   assert.equal(destGuildId({ guild: { id: 'g2' } }), 'g2');
 });
 
-test('public guild: send denied; guildPost trusted/allow or owner (no tier fallback)', () => {
+test('public guild: guildPost from Cast grants or owner (no Access 1-5, no V31 send-deny)', () => {
   const env = {
     channel: 'discord', public: true,
     context: { scope_id: 'guild:g1' },
     channel_context: { channelId: 'ch1' },
   };
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0 }).deny.guildPost, true);
-  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.send, true);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.send, false);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.guildPost, true);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 6 }).deny.guildPost, true);
   assert.equal(policyFor(env, { bypass_moderation: true, trust_tier: 0, user_key: 'owner' }).deny.guildPost, false);
@@ -80,7 +81,7 @@ test('names are not snowflakes; 666 steak matches a thread title', () => {
   assert.equal(ranked[0].kind, 'thread');
 });
 
-test('discord /out handles guild_post and forum threads', () => {
+test('discord /out keeps send + fuzzy resolve; no parallel guild_post MCP tool', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   assert.match(src, /kind === 'guild_post'/);
   assert.match(src, /isForumChannel/);
@@ -99,7 +100,6 @@ test('discord /out handles guild_post and forum threads', () => {
   assert.match(cli, /deliverSameGuildPost/);
   assert.match(cli, /ASMLTR_ATTACH_GUILD/);
   const belt = fs.readFileSync(path.join(__dirname, '../mcp/toolbelt-server.js'), 'utf8');
-  assert.match(belt, /asmltr_guild_post/);
-  assert.match(belt, /deny: 'guildPost'/);
+  assert.equal(belt.includes('asmltr_guild_post'), false);
   assert.match(belt, /asmltr_send/);
 });

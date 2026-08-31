@@ -1,27 +1,22 @@
 'use strict';
 /**
- * Same-guild Discord post used by asmltr send (guild-post stays an alias).
- * Trusted role or resolve() allow (guild-post / send / *). Owner always can.
- * No email, no telegram, no other Discord servers, never the same channel
- * they asked from. Mute/disable is inbound only — posting into a muted
- * channel still works. Remote body has no thought chips. Ask-channel reply is
- * a short "Post complete." — not a copy of the post.
- *
- * Connector always prepends: Posting on behalf of <@speakerId>
- * then two blank lines, then the body. Forum: target the THREAD
- * to comment; targeting the forum channel starts a NEW post.
+ * Public Discord send helpers: fuzzy name→channel resolver + channel-type checks.
+ * Confirm / on-behalf-of / same-guild fence live in the host overlay.
+ * Mute/disable is inbound only. Forum: thread comments; forum channel = new post.
  */
 
 const { stripThoughtChrome } = require('./step-public');
 
 function prefaceOnBehalf(speakerId, text) {
+  // Public product: prefix when an id is present; overlay requires id.
   const id = String(speakerId || '').replace(/[^\d]/g, '');
   let body = String(text || '').replace(/^\s*posting on behalf of\s+<@\d+>\s*/i, '');
   body = stripThoughtChrome(body).trim();
-  if (!id) return { ok: false, error: 'on_behalf_of speaker id required' };
   if (!body) return { ok: false, error: 'text required' };
+  if (!id) return { ok: true, body, text: body };
   return { ok: true, body, text: 'Posting on behalf of <@' + id + '>\n\n\n' + body };
 }
+
 
 function sameChannel(sourceId, destId) {
   const a = String(sourceId || '').trim();
@@ -30,13 +25,11 @@ function sameChannel(sourceId, destId) {
 }
 
 function sameGuild(sourceGuild, destGuild) {
-  const a = String(sourceGuild || '').trim();
-  const b = String(destGuild || '').trim();
-  if (!a) return { ok: false, error: 'source guild required (this turn must be in a Discord server)' };
-  if (!b) return { ok: false, error: 'target is not in a Discord server (no DMs, no off-server)' };
-  if (a !== b) return { ok: false, error: 'no sending off server' };
+  // Public product: send is not fenced to one guild. Overlay wrap restores Ivy same-guild.
+  void sourceGuild; void destGuild;
   return { ok: true };
 }
+
 
 function forumTitle(title, body) {
   const raw = String(title || '').trim() || String(body || '').split(/\n/)[0].trim();
@@ -122,3 +115,8 @@ module.exports = {
   isThreadChannel, isPostableGuildChannel, shouldFetchThreads,
   looksLikeSnowflake, normName, matchScore, rankTargets,
 };
+
+try {
+  const ov = require('./load-host-overlay').load('guild-post-fence');
+  if (ov && typeof ov.wrapGuildPost === 'function') ov.wrapGuildPost(module.exports);
+} catch (_) {}

@@ -178,7 +178,7 @@ Mute/disable is **inbound only**. The bot will not *listen* in a muted channel (
 Public Discord **always** denies cross-system `asmltr send` (email, Telegram, other Discord
 servers). Same-server posting uses the same verb:
 
-`asmltr send discord <id-or-name> "<text>"` (MCP `asmltr_send`; alias `asmltr_guild_post`).
+`asmltr send discord <id-or-name> "<text>"` (MCP `asmltr_send`).
 
 | Rule | What |
 |---|---|

@@ -1,12 +1,8 @@
 'use strict';
 /**
- * V31: per-turn tool policy. Restricted Discord cannot shell/streams/send/cwd-write.
- * Channel-public / isRestricted-before-principal deny is not a public gate.
- * Default product path is not channel-deny. Host overlays may wrap isRestricted.
- * Silo read/write is not part of that deny (James 21 Aug 2026). Do not fold
- * silo denies into a V31 PR — privacy.md is the silo safeguard.
- * Video/image gen and writing programs for a caller are owner/bypass unless
- * tool-policy.json videoAllow / imageAllow / mediaAllow / codeAllow names them.
+ * Media/code allowlists + deny-env helpers. Not a capability plane — Cast grants are.
+ * Host overlays wrap isRestricted / policyFor for V31 (public Discord even owner;
+ * non-owner Discord DMs no-shell). Video/code/silo lists stay here under this boring name.
  */
 const fs = require('fs');
 const path = require('path');
@@ -87,10 +83,9 @@ function siloAllowlisted(envelope, allow) {
   return !!(g && a.guilds.includes(g)) || !!(c && a.channels.includes(c));
 }
 
-function isRestricted(envelope, resolved) {
-  const ch = String((envelope && envelope.channel) || '');
-  if (ch !== 'discord') return false;
-  return !(resolved && resolved.bypass_moderation);
+function isRestricted(_envelope, _resolved) {
+  // Public product: Cast grants are the plane. Overlay wraps this for V31.
+  return false;
 }
 
 function senderRawId(envelope) {
@@ -183,9 +178,10 @@ function policyFor(envelope, resolved, allow) {
     deny.shell = true;
     deny.write = true;
   }
-  // Same-guild Discord post: in a guild, trusted role / resolve allow.
+  // Same-guild Discord post: Cast grant (trusted / send / guild-post / *). Overlay may still V31-deny send.
   if (!guildIdFrom(envelope) || !guildPostAuthorized(resolved)) deny.guildPost = true;
-  if (!isRestricted(envelope, resolved)) return { deny, restricted: false };
+  const restricted = isRestricted(envelope, resolved);
+  if (!restricted) return { deny, restricted: false };
   deny.shell = true;
   deny.streams = true;
   deny.send = true;

@@ -241,6 +241,20 @@ const engagement = {
 // --- resolution --------------------------------------------------------------
 const _identBySurfaceVal = db.prepare('SELECT principal_id FROM identifiers WHERE surface=? AND value=?');
 
+/** Connector sets envelope.public only. Core resolve combines principal + surface. */
+function decorateResolved(resolved, envelope) {
+  const pub = !!(envelope && envelope.public);
+  resolved.public = pub;
+  resolved.surface = envelope && envelope.channel ? String(envelope.channel) : '';
+  // Product owner-always-bypass: unspoofable principal id from identifier match, never a connector claim.
+  if (resolved.user_key === 'owner' && !resolved.revoked) resolved.bypass_moderation = true;
+  // Grants may narrow on public: wildcard * is owner-bypass only on a public surface.
+  if (pub && !resolved.bypass_moderation && Array.isArray(resolved.permissions)) {
+    resolved.permissions = resolved.permissions.filter((t) => t !== '*');
+  }
+  return resolved;
+}
+
 /** Resolve an inbound envelope to effective trust. DEFAULT-DENY for unknowns. */
 function resolve(envelope) {
   const surface = envelope.channel;
@@ -255,15 +269,15 @@ function resolve(envelope) {
   }
 
   if (!pid) {
-    return { user_key: 'default', display_name: raw_username || 'Unknown', trust_tier: 0,
+    return decorateResolved({ user_key: 'default', display_name: raw_username || 'Unknown', trust_tier: 0,
       permissions: [], requires_approval: [], forbidden: [], bypass_moderation: false, strict_mode: false,
-      revoked: false, is_default: true, scope_label: null };
+      revoked: false, is_default: true, scope_label: null }, envelope);
   }
 
   const p = db.prepare('SELECT * FROM principals WHERE id=?').get(pid);
   if (p.revoked) {
-    return { user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier, permissions: [],
-      requires_approval: [], forbidden: ['*'], bypass_moderation: false, strict_mode: false, revoked: true, is_default: false, scope_label: null };
+    return decorateResolved({ user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier, permissions: [],
+      requires_approval: [], forbidden: ['*'], bypass_moderation: false, strict_mode: false, revoked: true, is_default: false, scope_label: null }, envelope);
   }
 
   // union grants matching context (scope null = global)
@@ -291,10 +305,10 @@ function resolve(envelope) {
   const rel = relationships.forPrincipal(SELF_ID, { surface, scopeId }).find((r) => r.other === pid) || null;
   const engagementPolicy = engagement.policy(pid, surface, scopeId);
 
-  return { user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier,
+  return decorateResolved({ user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier,
     permissions: [...eff.allow], requires_approval: [...eff.requires_approval], forbidden: [...eff.forbidden],
     bypass_moderation: eff.bypass, strict_mode: eff.strict, revoked: false, is_default: false, scope_label: scopeLabel,
-    kind: (prof && prof.kind) || 'human', profile: prof || null, identities, relationship: rel, engagement: engagementPolicy };
+    kind: (prof && prof.kind) || 'human', profile: prof || null, identities, relationship: rel, engagement: engagementPolicy }, envelope);
 }
 
 /**

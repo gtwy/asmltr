@@ -29,7 +29,7 @@ const TOOLS = [
       properties: { path: { type: 'string', description: 'absolute file or directory path to check' } },
       additionalProperties: false },
     argv: (a) => ['who', a.path] },
-  { name: 'asmltr_send', deny: 'send', description: 'Deliver a message OUT through any connector (discord, telegram, email, …) to a target. In a Discord server, same-guild post: name looks up (confirm first), then id posts on-behalf-of. Email send is fire-and-forget (queued). On accept, reply on THIS channel immediately and stop. Do not wait on SMTP or another session. Email: --new-thread is a blank new letter (no quote, no In-Reply-To). --no-reply-all only drops extra recipients and still quotes this thread.',
+  { name: 'asmltr_send', deny: 'send', description: 'Deliver a message OUT through any connector (discord, telegram, email, …) to a target. Discord: a channel name looks up (does not post) until they confirm the id. Host overlay may add on-behalf-of and same-guild fence. Email send is fire-and-forget (queued). On accept, reply on THIS channel immediately and stop. Do not wait on SMTP or another session. Email: --new-thread is a blank new letter (no quote, no In-Reply-To). --no-reply-all only drops extra recipients and still quotes this thread.',
     inputSchema: { type: 'object', required: ['channel', 'target', 'text'],
       properties: {
         channel: { type: 'string', description: 'discord | telegram | email | …' },
@@ -46,15 +46,6 @@ const TOOLS = [
       ...(a.cc ? ['--cc', a.cc] : []),
       ...(a.new_thread ? ['--new-thread'] : []),
       ...(a.no_reply_all ? ['--no-reply-all'] : [])] },
-  { name: 'asmltr_guild_post', deny: 'guildPost', description: 'Alias of asmltr send for THIS Discord server only (trusted role / resolve allow). Target may be a name ("666 degree steak thread") or a snowflake. Names NEVER post — they return best-guess matches; ask the person to confirm, THEN call again with the id. Normal channels post in the channel (not a thread). Forum: thread = comment, forum channel = new post (pass title). Never this same channel. Works if the destination is muted for listening. Prefixed Posting on behalf of the asker. After a real post: Post complete. then [[NO_REPLY]].',
-    inputSchema: { type: 'object', required: ['target', 'text'],
-      properties: {
-        target: { type: 'string', description: 'channel/thread id, or a name to look up (lookup does not post)' },
-        text: { type: 'string' },
-        title: { type: 'string', description: 'new forum post title when target is the forum channel' },
-        reply_to: { type: 'string', description: 'optional message id in that thread to Discord-reply' },
-      }, additionalProperties: false },
-    argv: (a) => ['guild-post', a.target, a.text, ...(a.title ? ['--title', a.title] : []), ...(a.reply_to ? ['--reply-to', a.reply_to] : [])] },
   { name: 'asmltr_post', deny: 'attach', description: 'Post a generated image/video to THIS channel without Bash. Same right as image/video gen — no extra grant. Only generator output or files already in attach-stage. Stages a safe name, posts, deletes after confirm. Missed delivery: retry=true.',
     inputSchema: { type: 'object', properties: {
       file: { type: 'string', description: 'absolute path of the file to post' },

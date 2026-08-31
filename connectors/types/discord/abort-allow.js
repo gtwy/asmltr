@@ -1,10 +1,8 @@
 'use strict';
 
-/** Who may abort an in-flight Discord turn. Owner any; starter their own; third person / steerer no. */
-function canAbortTurn({ isOwner, authorId, starterId }) {
-  if (isOwner) return true;
-  if (starterId == null || starterId === '') return false;
-  return String(authorId) === String(starterId);
+/** Public: anyone may abort an in-flight turn (humans always win). Host overlay wraps to starter-or-owner. */
+function canAbortTurn(_opts) {
+  return true;
 }
 
 function starterIdFromSlot(slot) {
@@ -13,3 +11,8 @@ function starterIdFromSlot(slot) {
 }
 
 module.exports = { canAbortTurn, starterIdFromSlot };
+
+try {
+  const ov = require('../../../shared/load-host-overlay').load('stop-starter-or-owner');
+  if (ov && typeof ov.wrapAbortAllow === 'function') ov.wrapAbortAllow(module.exports);
+} catch (_) {}

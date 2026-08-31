@@ -3,37 +3,31 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+process.env.ASMLTR_OVERLAY_DIR = path.join(os.tmpdir(), 'no-asmltr-overlay-' + process.pid);
 const { canAbortTurn, starterIdFromSlot } = require('../connectors/types/discord/abort-allow');
 
-test('owner can abort any turn', () => {
+test('public: anyone can abort a processing turn (humans always win)', () => {
   assert.equal(canAbortTurn({ isOwner: true, authorId: 'owner', starterId: 'friend' }), true);
-  assert.equal(canAbortTurn({ isOwner: true, authorId: 'owner', starterId: 'owner' }), true);
-});
-
-test('starter can abort even if not owner', () => {
   assert.equal(canAbortTurn({ isOwner: false, authorId: '111', starterId: '111' }), true);
-  assert.equal(canAbortTurn({ isOwner: false, authorId: 111, starterId: '111' }), true);
+  assert.equal(canAbortTurn({ isOwner: false, authorId: '333', starterId: '111' }), true);
+  assert.equal(canAbortTurn({ isOwner: false, authorId: 'steerer', starterId: '111' }), true);
+  assert.equal(canAbortTurn({ isOwner: false, authorId: '111', starterId: null }), true);
 });
 
-test('third person cannot abort', () => {
-  assert.equal(canAbortTurn({ isOwner: false, authorId: '333', starterId: '111' }), false);
-});
-
-test('steerer is not starter and cannot abort', () => {
-  assert.equal(canAbortTurn({ isOwner: false, authorId: 'steerer', starterId: '111' }), false);
-});
-
-test('missing starter: only owner (fail closed)', () => {
-  assert.equal(canAbortTurn({ isOwner: false, authorId: '111', starterId: null }), false);
-  assert.equal(canAbortTurn({ isOwner: true, authorId: 'owner', starterId: null }), true);
+test('starterIdFromSlot still reads the processing slot', () => {
   assert.equal(starterIdFromSlot(true), null);
   assert.equal(starterIdFromSlot({ starterId: '111' }), '111');
 });
 
-test('discord stop is not in OWNER_ONLY_CMDS; processing stores starterId', () => {
+test('discord stop is not in OWNER_ONLY_CMDS; processing stores starterId; overlay hook present', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
-  assert.match(src, /canAbortTurn/);
+  assert.match(src, /abortAllow\.canAbortTurn/);
   assert.match(src, /starterId:/);
+  assert.match(src, /humans always win/);
+  const abortSrc = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/abort-allow.js'), 'utf8');
+  assert.match(abortSrc, /load-host-overlay/);
+  assert.match(abortSrc, /stop-starter-or-owner/);
   const block = src.match(/const OWNER_ONLY_CMDS = new Set\((\[[\s\S]*?\])\)/);
   assert.ok(block);
   assert.equal(/['\"]stop['\"]/.test(block[1]), false);

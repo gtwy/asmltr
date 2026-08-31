@@ -12,7 +12,8 @@ test('toolbelt lists silo wrappers and honor ASMLTR_DENY_TOOLS', () => {
   assert.match(src, /asmltr_silo_find/);
   assert.match(src, /asmltr_silo_get/);
   assert.match(src, /asmltr_post/);
-  assert.match(src, /asmltr_guild_post/);
+  assert.match(src, /asmltr_send/);
+  assert.equal(src.includes('asmltr_guild_post'), false);
   assert.match(src, /asmltr_uploads/);
   assert.match(src, /deny: 'uploads'/);
   assert.match(src, /parseDenyEnv/);

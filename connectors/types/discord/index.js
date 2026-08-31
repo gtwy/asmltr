@@ -39,7 +39,7 @@ const { parseReact } = require('../../../shared/react-token');
 const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { splitResponse } = require('../../../shared/discord-split');
-const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
+const abortAllow = require('./abort-allow');
 const { shouldBargeIn } = require('./barge-in');
 const { shouldPlayWakeChime } = require('./wake-chime');
 const { shouldAcceptFollowUp, resolveVoiceFollowupMs, armFollowUp, lastSpeakerId: lastSpeakerFromWindow } = require('./voice-followup');
@@ -118,6 +118,10 @@ const meta = {
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
+      pii_gate: { type: 'string', title: 'PII gate: off (default), classify_redact, or trust_store. Whole-reply drop is nuclear (whole_reply_drop).', enum: ['off', 'classify_redact', 'trust_store'], default: 'off' },
+      whole_reply_drop: { type: 'boolean', title: 'Nuclear: drop the whole public reply on a PII hit. Default off. Prefer classify-then-redact.', default: false },
+      attachments: { type: 'string', title: 'Inbound attachments: all_files (default) or media_only (image/video only).', enum: ['all_files', 'media_only'], default: 'all_files' },
+      thought_chips: { type: 'string', title: 'Thought chips: off (default), smart (sanitized), or raw.', enum: ['off', 'smart', 'raw'], default: 'off' },
     },
   },
   // Interactive settings panels this connector exposes beyond plain config — the TUI/GUI
@@ -134,6 +138,15 @@ const RELEVANT_TOPICS = ['consciousness','ai','artificial intelligence','machine
 
 async function start(ctx) {
   const cfg = ctx.config;
+  let hostPin = {};
+  try {
+    const ov = require('../../../shared/load-host-overlay').load('host-settings');
+    if (ov && typeof ov.loadSpec === 'function') hostPin = ov.loadSpec() || {};
+  } catch (_) {}
+  const piiGate = String(hostPin.pii_gate || cfg.pii_gate || 'off');
+  const wholeReplyDrop = hostPin.whole_reply_drop != null ? !!hostPin.whole_reply_drop : !!cfg.whole_reply_drop;
+  const attachmentsMode = String(hostPin.attachments || cfg.attachments || 'all_files');
+  const thoughtChips = String(hostPin.thought_chips || cfg.thought_chips || (cfg.stream_steps === false ? 'off' : (cfg.stream_steps ? 'smart' : 'off')));
   // Bots are ignored unless their username matches the allowlist — OR engage-all-bots
   // mode is on (a runtime toggle for multi-agent group chats; see the mention commands).
   const allowedBotNames = (cfg.allowed_bot_names || []).map((s) => String(s).toLowerCase());
@@ -180,6 +193,9 @@ async function start(ctx) {
   let identityHintKinds = new Map();
   let identityHintsAt = 0;
   async function loadIdentityHints() {
+    // Connector is I/O. Do not poll trust principals to re-derive policy.
+    // PII sanitizer only, and only when the host pin / setting asks for trust_store.
+    if (piiGate !== 'trust_store') return [];
     if (Date.now() - identityHintsAt < 60 * 1000) return identityHints;
     try {
       const list = ctx.core.trustPrincipals ? await ctx.core.trustPrincipals() : [];
@@ -386,18 +402,20 @@ async function start(ctx) {
         await doLeaveVoice(message); return true;
       case 'stop': case 'cancel': case 'abort': case 'halt': {
         // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
-        // joined from this channel (#138). Starter or owner only for a running text turn (V2) —
-        // a mid-turn steerer who did not start it cannot abort. Do not put stop in OWNER_ONLY_CMDS.
+        // joined from this channel (#138). Public: anyone may stop a processing turn (humans always win).
+        // Overlay wrap of abort-allow + /v2/abort keeps Ivy starter-or-owner. Do not put stop in OWNER_ONLY_CMDS.
         // Session survives; next message continues it.
         const slot = processing.get(cid);
         const gid = message.guild?.id;
         let voice; try { voice = require('./voice'); } catch (_) {}
         const originCh = gid ? voiceText.get(gid) : null;
         const voiceHere = !!(gid && voice && voice.isConnected(gid) && (!originCh || originCh.id === message.channel.id));
+        let starterId = null;
+        let owner = false;
         if (slot) {
-          const starterId = starterIdFromSlot(slot);
-          const owner = await isOwner(message);
-          if (!canAbortTurn({ isOwner: owner, authorId: message.author.id, starterId })) {
+          starterId = abortAllow.starterIdFromSlot(slot);
+          owner = await isOwner(message);
+          if (!abortAllow.canAbortTurn({ isOwner: owner, authorId: message.author.id, starterId })) {
             await message.react('🙅').catch(() => {});
             await message.channel.send('Only the person who started this turn (or my owner) can stop it.').catch(() => {});
             return true;
@@ -482,7 +500,7 @@ ${referentPromptBlock()}`;
   }
 
   // Subdued Discord line helper. Tool chips are built in shared/step-public (not raw thoughts).
-  const streamSteps = cfg.stream_steps !== false;
+  const streamSteps = thoughtChips === 'smart' || thoughtChips === 'raw' || (thoughtChips !== 'off' && cfg.stream_steps !== false);
   const streamTools = cfg.stream_tools === true;
   function renderStep(t) {
     const clamped = t.length > 700 ? t.slice(0, 700) + '…' : t;
@@ -508,7 +526,11 @@ ${referentPromptBlock()}`;
         const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
         const cls = inboundMedia.classify(buf, mt, a.name);
         if (!cls.kind) {
-          savedNotes.push(`- ignored ${a.name} (${mt || 'unknown'}): not a still image or video — not opened`);
+          if (attachmentsMode === 'media_only') {
+            savedNotes.push(`- ignored ${a.name} (${mt || 'unknown'}): not a still image or video — not opened`);
+            continue;
+          }
+          savedNotes.push(`- file: ${a.name} (${mt || 'unknown'}) — stored, not executed`);
           continue;
         }
         const saved = inboundMedia.saveRef(buf, { name: a.name, mime: mt });
@@ -667,7 +689,7 @@ ${referentPromptBlock()}`;
           const clean = String(t || '').trim();
           if (!clean) { pending = ''; return; }
           if (isSilence(clean)) { sawNoReply = true; pending = ''; stopBeat(); return; }
-          if (looksLikePromptRestatement(clean) || (envelope.public && privacyHitKind(clean, hints, hintKinds))) {
+          if (looksLikePromptRestatement(clean) || (envelope.public && wholeReplyDrop && piiGate !== 'off' && privacyHitKind(clean, hints, hintKinds))) {
             pending = '';
             leakDropped = true;
             return;
@@ -719,7 +741,7 @@ ${referentPromptBlock()}`;
           pending,
           replyText: reply ? reply.text.trim() : '',
           leakDropped,
-          publicSurface: !!envelope.public,
+          publicSurface: !!envelope.public && piiGate !== 'off' && wholeReplyDrop,
           hints,
           hintKinds,
         });
@@ -730,7 +752,7 @@ ${referentPromptBlock()}`;
           pending: '',
           replyText: reply ? reply.text.trim() : '',
           leakDropped: false,
-          publicSurface: !!envelope.public,
+          publicSurface: !!envelope.public && piiGate !== 'off' && wholeReplyDrop,
           hints,
           hintKinds,
         });
@@ -2110,6 +2132,10 @@ ${referentPromptBlock()}`;
       res.json(r);
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
+  try {
+    const stageOv = require('../../../shared/load-host-overlay').load('outbound-stage');
+    if (stageOv && typeof stageOv.wrapOutRoute === 'function') stageOv.wrapOutRoute(app);
+  } catch (_) {}
   const httpServer = app.listen(cfg.http_port || 3016, '127.0.0.1', () => ctx.log(`send-message API on 127.0.0.1:${cfg.http_port || 3016}`));
 
   await client.login(token);

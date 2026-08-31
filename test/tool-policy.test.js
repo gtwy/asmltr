@@ -15,29 +15,33 @@ fs.writeFileSync(allowFile, JSON.stringify({
 }));
 process.env.ASMLTR_TOOL_POLICY_FILE = allowFile;
 
-test('public discord denies shell/streams/send/write, not silo', () => {
+test('public discord: Cast/allowlists only — not a V31 channel-deny plane', () => {
   const p = policyFor({
     channel: 'discord', public: true,
     context: { scope_id: 'guild:other-guild' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
-  assert.equal(p.restricted, true);
-  assert.deepEqual(p.deny, {
-    shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true, guildPost: true,
-  });
+  assert.equal(p.restricted, false);
+  assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: false }), false);
+  assert.equal(p.deny.send, false);
+  assert.equal(p.deny.streams, false);
+  assert.equal(p.deny.uploads, false);
+  assert.equal(p.deny.silo, false);
+  assert.equal(p.deny.video, true);
+  assert.equal(p.deny.code, true);
+  assert.equal(p.deny.shell, true);
+  assert.equal(p.deny.guildPost, true);
 });
 
-test('allowlisted guild same denies; silo still on', () => {
+test('allowlisted guild still not a channel-deny; silo still on', () => {
   const p = policyFor({
     channel: 'discord', public: true,
     context: { scope_id: 'guild:guild-allow-1' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
-  assert.deepEqual(p.deny, {
-    shell: true, streams: true, send: true, silo: false, write: true,
-    siloWrite: false, video: true, image: true, code: true, attach: true, uploads: true, guildPost: true,
-  });
+  assert.equal(p.restricted, false);
+  assert.equal(p.deny.silo, false);
+  assert.equal(p.deny.send, false);
 });
 
 test('discord DM + bypass_moderation denies nothing', () => {
@@ -52,14 +56,15 @@ test('discord DM + bypass_moderation denies nothing', () => {
   });
 });
 
-test('discord DM without bypass is restricted', () => {
+test('discord DM without bypass is not a public V31 plane (overlay keeps no-shell)', () => {
   const p = policyFor({
     channel: 'discord', public: false,
     context: { scope_id: 'dm:stranger' },
   }, { bypass_moderation: false });
-  assert.equal(p.restricted, true);
-  assert.equal(p.deny.shell, true);
-  assert.equal(p.deny.send, true);
+  assert.equal(p.restricted, false);
+  assert.equal(isRestricted({ channel: 'discord', public: false }, { bypass_moderation: false }), false);
+  assert.equal(p.deny.send, false);
+  assert.equal(p.deny.shell, true); // code allowlist, not V31
 });
 
 test('email and mcp are not Discord-restricted but deny video/image/code without authorization', () => {
@@ -79,12 +84,12 @@ test('email and mcp are not Discord-restricted but deny video/image/code without
 test('videoAllow principal may generate video without bypass', () => {
   const allow = {
     guilds: [], channels: [],
-    videoPrincipals: ['dave-graham'],
+    videoPrincipals: ['friend-a'],
     videoDiscordIds: [],
   };
   const p = policyFor(
     { channel: 'email', public: false },
-    { bypass_moderation: false, user_key: 'dave-graham' },
+    { bypass_moderation: false, user_key: 'friend-a' },
     allow,
   );
   assert.equal(p.deny.video, false);
@@ -97,16 +102,16 @@ test('videoAllow discord id may generate video', () => {
   const allow = {
     guilds: [], channels: [],
     videoPrincipals: [],
-    videoDiscordIds: ['999000111222333005'],
+    videoDiscordIds: ['000000000000000001'],
   };
   const p = policyFor(
-    { channel: 'discord', public: true, sender: { raw_id: '999000111222333005' } },
-    { bypass_moderation: false, user_key: 'dave-graham' },
+    { channel: 'discord', public: true, sender: { raw_id: '000000000000000001' } },
+    { bypass_moderation: false, user_key: 'friend-a' },
     allow,
   );
   assert.equal(p.deny.video, false);
   assert.equal(p.deny.image, false);
-  assert.equal(p.restricted, true);
+  assert.equal(p.restricted, false);
 });
 
 test('photoAllow / imageAllow host lists are not a public stills gate', () => {
@@ -123,18 +128,18 @@ test('photoAllow / imageAllow host lists are not a public stills gate', () => {
   assert.equal(p.deny.image, true);
   assert.equal(p.deny.attach, true);
   assert.equal(p.deny.video, true);
-  assert.equal(p.restricted, true);
+  assert.equal(p.restricted, false);
 });
 
 test('codeAllow may receive programs without bypass; still no video/image', () => {
   const allow = {
     guilds: [], channels: [],
     videoPrincipals: [], videoDiscordIds: [],
-    codePrincipals: ['nick-myers'], codeDiscordIds: [],
+    codePrincipals: ['friend-b'], codeDiscordIds: [],
   };
   const p = policyFor(
     { channel: 'email', public: false },
-    { bypass_moderation: false, user_key: 'nick-myers' },
+    { bypass_moderation: false, user_key: 'friend-b' },
     allow,
   );
   assert.equal(p.deny.code, false);
@@ -154,8 +159,7 @@ test('restricted prompt omits send/streams/silo/bash-silo', () => {
     chTarget: 'ch1',
   });
   assert.ok(text.includes('asmltr send discord'));
-  assert.ok(text.includes('asmltr_guild_post'));
-  assert.ok(text.includes('Post complete'));
+  assert.ok(text.includes('asmltr_send'));
   assert.equal(text.includes('asmltr streams'), false);
   assert.equal(text.includes('asmltr announce'), false);
   assert.equal(text.includes('SELF SILO'), false);
@@ -248,7 +252,7 @@ test('public default is not channel-deny: bypass + public stays unrestricted', (
   });
   withEnv({ ASSISTANT_NAME: undefined, HOST_CHANNEL_POLICY: '1' }, () => {
     assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), false);
-    assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: false }), true);
+    assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: false }), false);
   });
 });
 

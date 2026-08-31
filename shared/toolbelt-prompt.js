@@ -42,7 +42,7 @@ function buildToolbeltPrompt({
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n';
   }
   if (!d.guildPost) {
-    s += '• `asmltr send discord <id-or-name> "<text>"` (MCP `asmltr_send` / alias `asmltr_guild_post`) — post in THIS Discord server only (trusted role or resolve allow). If they named a thread ("the 666 degree steak thread"), pass that name: it LOOKS UP and does not post. Tell them your best guess and wait for confirm, then call again with the id. Normal text channels: posts in the channel, not a thread. Forum: thread id comments; forum channel id = new post. Never this same channel. Works even if the destination is muted for listening. Prefixed `Posting on behalf of @asker`. After a real post: `Post complete.` then [[NO_REPLY]].\n';
+    s += '• `asmltr send discord <id-or-name> "<text>"` (MCP `asmltr_send`) — Discord send. A name LOOKS UP and does not post until they confirm the id. Forum: thread id comments; forum channel id = new post.\n';
   }
   if (!d.send) {
     s += '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists pending notes.\n';
