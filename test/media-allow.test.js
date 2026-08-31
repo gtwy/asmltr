@@ -7,8 +7,8 @@ const path = require('path');
 const { describe } = require('node:test');
 const { policyFor, denyToolsEnv, isRestricted } = require('../shared/media-allow');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-tool-policy-'));
-const allowFile = path.join(tmp, 'tool-policy.json');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-media-allow-'));
+const allowFile = path.join(tmp, 'media-allow.json');
 fs.writeFileSync(allowFile, JSON.stringify({
   siloAllow: { guilds: ['guild-allow-1'], channels: [] },
 }));
