@@ -1,10 +1,11 @@
 'use strict';
+process.env.ASSISTANT_NAME = 'gaia';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const {
-  KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
+  KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS, keytermsFromName,
   buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
   asRealtimeFunctions, functionOutputItem,
   fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, pcm48StereoToPcm48Mono, pcm48MonoToPcm48Stereo, secretValue,
@@ -36,7 +37,7 @@ test('session.update: ara, tools=[], server_vad, reasoning none, PCM 48k, grok-v
   assert.equal(VOICE, 'ara');
   assert.equal(WS_URL, 'wss://api.x.ai/v1/realtime?model=grok-voice-think-fast-2.0');
   assert.equal(KEY_NAME, 'xai_voice_api_key');
-  const u = buildSessionUpdate({ instructions: 'You are Ivy.', voice: 'eve' });
+  const u = buildSessionUpdate({ instructions: 'You are Gaia.', voice: 'eve', assistantName: 'Gaia' });
   assert.equal(u.type, 'session.update');
   assert.equal(u.session.voice, 'ara');
   assert.notEqual(u.session.voice, 'eve');
@@ -51,19 +52,18 @@ test('session.update: ara, tools=[], server_vad, reasoning none, PCM 48k, grok-v
   assert.equal(u.session.audio.input.format.type, 'audio/pcm');
   assert.equal(u.session.audio.input.format.rate, 48000);
   assert.equal(u.session.audio.output.format.rate, 48000);
-  assert.ok(u.session.audio.input.transcription.keyterms.includes('Ivy'));
-  assert.ok(u.session.audio.input.transcription.keyterms.includes('ivy'));
-  assert.ok(u.session.audio.input.transcription.keyterms.includes('IV'));
-  assert.deepEqual(KEYTERMS.slice().sort(), ['IV', 'Ivy', 'ivy'].sort());
-  assert.equal(u.session.instructions, 'You are Ivy.');
+  assert.ok(u.session.audio.input.transcription.keyterms.includes('Gaia'));
+  assert.ok(u.session.audio.input.transcription.keyterms.includes('gaia'));
+  assert.ok(keytermsFromName('gaia').map((x) => x.toLowerCase()).includes('gaia'));
+  assert.equal(u.session.instructions, 'You are Gaia.');
 });
 
 test('shouldRelayPcm: last-speaker only; empty speakerId does not forward; mute blocks', () => {
-  assert.equal(shouldRelayPcm({ speakerId: '', userId: 'james' }), false);
-  assert.equal(shouldRelayPcm({ speakerId: 'james', userId: 'james' }), true);
-  assert.equal(shouldRelayPcm({ speakerId: 'james', userId: 'other' }), false);
+  assert.equal(shouldRelayPcm({ speakerId: '', userId: 'owner' }), false);
+  assert.equal(shouldRelayPcm({ speakerId: 'owner', userId: 'owner' }), true);
+  assert.equal(shouldRelayPcm({ speakerId: 'owner', userId: 'other' }), false);
   assert.equal(shouldRelayPcm({ speakerId: '', userId: '' }), false);
-  assert.equal(shouldRelayPcm({ speakerId: '', userId: 'james', muted: true }), false);
+  assert.equal(shouldRelayPcm({ speakerId: '', userId: 'owner', muted: true }), false);
 });
 
 test('openSession uses vault-shaped getKey, never process.env.XAI_API_KEY; mocked WS only', async () => {
@@ -143,12 +143,12 @@ test('applyServerEvent maps output audio + input transcript', () => {
   applyServerEvent({ type: 'response.output_audio.delta', delta: Buffer.from('x').toString('base64') }, {
     onAudio: () => { got.audio += 1; },
   });
-  applyServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'Ivy hello' }, {
+  applyServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'Gaia hello' }, {
     onUserTranscript: (t) => { got.user = t; },
   });
   applyServerEvent({ type: 'response.done' }, { onResponseDone: () => { got.done += 1; } });
   assert.equal(got.audio, 1);
-  assert.equal(got.user, 'Ivy hello');
+  assert.equal(got.user, 'Gaia hello');
   assert.equal(got.done, 1);
 });
 
@@ -232,14 +232,14 @@ test('forceMessage is xAI force_message, no response.create', async () => {
   MockWS.instances = [];
   const session = openSession({}, { getKey: async () => 'vault-test-key', WebSocket: MockWS });
   await session.ready;
-  session.forceMessage("ivy's here");
+  session.forceMessage("gaia's here");
   const parsed = MockWS.instances[0].sent.map((x) => JSON.parse(x));
   const item = parsed.find((x) => x.type === 'conversation.item.create');
   assert.ok(item);
   assert.equal(item.item.type, 'force_message');
   assert.equal(item.item.role, 'assistant');
   assert.equal(item.item.interruptible, false);
-  assert.equal(item.item.content[0].text, "ivy's here");
+  assert.equal(item.item.content[0].text, "gaia's here");
   assert.equal(parsed.some((x) => x.type === 'response.create' && parsed.indexOf(x) > parsed.indexOf(item)), false);
 });
 
@@ -249,17 +249,17 @@ test('input_audio_transcription.updated is partial; completed is final', () => {
   applyServerEvent({ type: 'conversation.item.input_audio_transcription.updated', transcript: 'How you doing?' }, {
     onUserTranscript: (t, ev, meta) => { got.push({ t, final: !!(meta && meta.final) }); },
   });
-  applyServerEvent({ type: 'conversation.item.input_audio_transcription.updated', transcript: 'How you doing? Ivy how are you doing' }, {
+  applyServerEvent({ type: 'conversation.item.input_audio_transcription.updated', transcript: 'How you doing? Gaia how are you doing' }, {
     onUserTranscript: (t, ev, meta) => { got.push({ t, final: !!(meta && meta.final) }); },
   });
-  applyServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'How you doing? Ivy how are you doing' }, {
+  applyServerEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'How you doing? Gaia how are you doing' }, {
     onUserTranscript: (t, ev, meta) => { got.push({ t, final: !!(meta && meta.final) }); },
   });
   assert.equal(got.length, 3);
   assert.equal(got[0].final, false);
   assert.equal(got[1].final, false);
   assert.equal(got[2].final, true);
-  assert.equal(got[2].t, 'How you doing? Ivy how are you doing');
+  assert.equal(got[2].t, 'How you doing? Gaia how are you doing');
 });
 
 test("createResponse commits the audio buffer then response.create", async () => {

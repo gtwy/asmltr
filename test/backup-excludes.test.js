@@ -27,21 +27,21 @@ test('the backups directory is still excluded (no recursion)', () => {
 });
 
 test('Chrome process lockfiles and dangling symlinks are excluded', () => {
-  const profile = path.join(os.homedir(), '.asmltr', 'browser', 'ivy-profile');
+  const profile = path.join(os.homedir(), '.asmltr', 'browser', 'assistant-profile');
   assert.ok(backup.excludedFromHome(path.join(profile, 'SingletonCookie')));
   assert.ok(backup.excludedFromHome(path.join(profile, 'SingletonLock')));
   assert.ok(backup.excludedFromHome(path.join(profile, 'SingletonSocket')));
   const dest = path.join(os.tmpdir(), `asmltr-backup-chrome-${process.pid}`);
   fs.rmSync(HOME_FIXTURE, { recursive: true, force: true });
   fs.rmSync(dest, { recursive: true, force: true });
-  const prof = path.join(HOME_FIXTURE, 'browser', 'ivy-profile');
+  const prof = path.join(HOME_FIXTURE, 'browser', 'assistant-profile');
   fs.mkdirSync(prof, { recursive: true });
   fs.writeFileSync(path.join(prof, 'Preferences'), '{}');
   fs.symlinkSync('missing-target', path.join(prof, 'SingletonCookie'));
   try {
     fs.cpSync(HOME_FIXTURE, dest, { recursive: true, filter: (s) => !backup.excludedFromHome(s) });
-    assert.equal(fs.readFileSync(path.join(dest, 'browser', 'ivy-profile', 'Preferences'), 'utf8'), '{}');
-    assert.equal(fs.existsSync(path.join(dest, 'browser', 'ivy-profile', 'SingletonCookie')), false);
+    assert.equal(fs.readFileSync(path.join(dest, 'browser', 'assistant-profile', 'Preferences'), 'utf8'), '{}');
+    assert.equal(fs.existsSync(path.join(dest, 'browser', 'assistant-profile', 'SingletonCookie')), false);
   } finally {
     fs.rmSync(dest, { recursive: true, force: true });
   }

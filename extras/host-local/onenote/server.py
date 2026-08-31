@@ -4,7 +4,7 @@
 Secrets live at ~/.asmltr/onenote/{token.json,.client.json} (mode 600). Never print them.
 Override with ONENOTE_HOME. Optional ownership_site in .client.json (or ONENOTE_OWNERSHIP_SITE)
 selects a SharePoint site; if unset, Graph calls use /me/onenote only.
-Eve: skip extras/ivy-local unless you want these extras.
+Eve: skip extras/host-local unless you want these extras.
 """
 
 from __future__ import annotations

@@ -36,7 +36,7 @@ test('public product js does not require overlay modules or retired planes', () 
     for (const n of needles) {
       if (src.includes(n)) hits.push(rel + ': ' + n);
     }
-    if (/require\([^)]*ivy-local/.test(src)) hits.push(rel + ': require ivy-local');
+    if (/require\([^)]*(ivy-local|host-local)/.test(src)) hits.push(rel + ': require host overlay extras');
     if (src.includes("shared/tool-policy'") || src.includes("require('../tool-policy')") || src.includes("require('./tool-policy')")) {
       hits.push(rel + ': require tool-policy');
     }

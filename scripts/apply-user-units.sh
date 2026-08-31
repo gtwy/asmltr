@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Apply gaia localhost as systemd --user units (public example).
-# Live host stays ivy via off-git config. Do not change live systemd from this tree.
+# Live ASSISTANT_NAME stays in off-git config. Do not change live systemd from this tree.
 # Do not install pm2. Do not start Discord.
 # Do not touch corona.service or rolodex.service. Do not push. Do not cat ~/.grok/auth.json.
 set -euo pipefail
@@ -71,4 +71,4 @@ fi
 echo "== talk to gaia =="
 echo "  $NODE24 $REPO/cli/asmltr.js ask \"Reply with exactly the word pong and nothing else.\""
 echo "DONE. Do not start connector-manager. Do not git push. Do not install pm2."
-echo "Optional Corona/OneNote wrappers: bash $REPO/extras/ivy-local/register.sh"
+echo "Optional Corona/OneNote wrappers: bash $REPO/extras/host-local/register.sh"

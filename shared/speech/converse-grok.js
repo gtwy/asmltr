@@ -1,6 +1,6 @@
 'use strict';
 /**
- * shared/speech/converse-grok.js — Ivy Live duplex speech-to-speech.
+ * shared/speech/converse-grok.js — Live duplex speech-to-speech.
  *
  * ONE WebSocket replaces Flux → grok CLI spawn → sentence HTTP TTS:
  *   wss://api.x.ai/v1/realtime?model=grok-voice-think-fast-2.0  (alias grok-voice-latest)
@@ -21,7 +21,17 @@ const MODEL = 'grok-voice-think-fast-2.0';
 const WS_URL = 'wss://api.x.ai/v1/realtime?model=' + MODEL;
 const VOICE = 'ara';
 const VOICES = Object.freeze(['ara', 'eve', 'leo', 'rex', 'sal']);
-const KEYTERMS = Object.freeze(['Ivy', 'ivy', 'IV']); // STT bias; IV is 2 chars (API max 50)
+function keytermsFromName(name) {
+  const n = String(name == null ? (process.env.ASSISTANT_NAME || 'gaia') : name).trim() || 'gaia';
+  const out = [];
+  const add = (x) => { if (x && !out.includes(x)) out.push(x); };
+  add(n);
+  const lower = n.toLowerCase();
+  add(lower);
+  if (lower.length) add(lower.charAt(0).toUpperCase() + lower.slice(1));
+  return Object.freeze(out);
+}
+const KEYTERMS = keytermsFromName(); // STT bias from ASSISTANT_NAME (API max 50)
 
 function loadWebSocket(opts) {
   if (opts && typeof opts.WebSocket === 'function') return opts.WebSocket;
@@ -87,7 +97,7 @@ function buildSessionUpdate(opts) {
     audio: {
       input: {
         format: { type: 'audio/pcm', rate: 48000 },
-        transcription: { keyterms: KEYTERMS.slice() },
+        transcription: { keyterms: keytermsFromName(opts && opts.assistantName).slice() },
       },
       output: { format: { type: 'audio/pcm', rate: 48000 } },
     },
@@ -115,7 +125,7 @@ async function fetchVoiceApiKey(opts) {
     return k ? String(k) : '';
   }
   if (opts && opts.apiKey) return String(opts.apiKey);
-  const v = await require('../vault').getSecret(KEY_NAME, 'ivy live converse');
+  const v = await require('../vault').getSecret(KEY_NAME, 'live converse');
   return secretValue(v);
 }
 
@@ -370,7 +380,7 @@ function openSession(handlers, opts) {
 }
 
 module.exports = {
-  KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS,
+  KEY_NAME, MODEL, WS_URL, VOICE, KEYTERMS, keytermsFromName,
   secretValue, buildSessionUpdate, appendPcmEvent, shouldRelayPcm, applyServerEvent,
   asRealtimeFunctions, functionOutputItem, isNativeTool,
   fetchVoiceApiKey, openSession, pcm24MonoToPcm48Stereo, pcm48StereoToPcm48Mono, pcm48MonoToPcm48Stereo, decodeAudioDelta,

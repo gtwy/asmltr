@@ -20,15 +20,17 @@ function norm(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').tri
 // Regex-escape a raw name so it can be embedded in a pattern.
 function esc(s) { return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-// STT often hears "Ivy" as "IV" / "iv". Same person, word-boundary only (not "divine").
-const IVY_ALIASES = Object.freeze(['ivy', 'iv']);
+// Optional extra STT spellings keyed by normalized wake word. Public product has none;
+// a host overlay may wrap wakeTerms.
+const STT_ALIASES = Object.freeze({});
 
 function wakeTerms(wakeWord) {
   const primary = norm(wakeWord);
   if (!primary) return [];
   const terms = [primary];
-  if (primary === 'ivy') {
-    for (const a of IVY_ALIASES) if (!terms.includes(a)) terms.push(a);
+  const extra = STT_ALIASES[primary];
+  if (Array.isArray(extra)) {
+    for (const a of extra) if (!terms.includes(a)) terms.push(a);
   }
   return terms;
 }
@@ -45,7 +47,7 @@ function addressesOne(t, word) {
 /**
  * Does `text` address the assistant by `wakeWord`? Conservative on purpose (avoid interrupting):
  * the name has to LEAD, be greeted ("hey <name>"), be set off by punctuation, or TRAIL the sentence.
- * When the name is Ivy, also accept IV / iv (same person; word-boundary so "divine" does not match).
+ * Extra STT spellings come from STT_ALIASES when present.
  */
 function addresses(text, wakeWord) {
   const t = norm(text);
@@ -106,4 +108,4 @@ function evaluate({ text, wakeWord, sensitivity = 50, confidence } = {}) {
   return { ...base, addressed: true, bare, risky: true, threshold, reason: 'ok-risky-confident' };
 }
 
-module.exports = { addresses, isBareName, wordCount, minConfidenceForRisky, evaluate, norm, wakeTerms, IVY_ALIASES };
+module.exports = { addresses, isBareName, wordCount, minConfidenceForRisky, evaluate, norm, wakeTerms, STT_ALIASES };

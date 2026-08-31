@@ -173,14 +173,14 @@ test('https markdown image becomes an img; javascript URL does not', () => {
 });
 
 test('cid markdown image is mailed src, not an http link', () => {
-  const h = markdownToHtml('![Ivy](cid:ivy-sig)\n[Example Co](https://example.com) can build an AI assistant like this for your team.');
-  assert.match(h, /<img src="cid:ivy-sig" alt="Ivy"/);
+  const h = markdownToHtml('![Gaia](cid:assistant-sig)\n[Example Co](https://example.com) can build an AI assistant like this for your team.');
+  assert.match(h, /<img src="cid:assistant-sig" alt="Gaia"/);
   assert.doesNotMatch(h, /<a href="cid:/);
 });
 
 test('signature image sits after two blanks and immediately above the pitch', () => {
   const h = markdownToHtml(
-    'Gaia\nAI Assistant to Alex\n\n\n![Ivy](https://example.com/sig.png)\n[Example Co](https://example.com) can build an AI assistant like this for your team.',
+    'Gaia\nAI Assistant to Alex\n\n\n![Gaia](https://example.com/sig.png)\n[Example Co](https://example.com) can build an AI assistant like this for your team.',
   );
   const spacers = h.match(/<p style="margin:0;padding:0;line-height:1.5;">&nbsp;<\/p>/g) || [];
   assert.equal(spacers.length, 2);

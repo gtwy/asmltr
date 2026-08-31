@@ -4,21 +4,21 @@
 set -euo pipefail
 
 REPO="${ASMLTR_REPO:-$HOME/src/asmltr}"
-IVY="${IVY_LOCAL:-$REPO/extras/ivy-local}"
+HOST="${HOST_LOCAL:-$REPO/extras/host-local}"
 GROK_BIN="${ASMLTR_GROK_BIN:-$HOME/.grok/bin/grok}"
 MCP_FILE="${ASMLTR_MCP_FILE:-$HOME/.asmltr/mcp.json}"
 ONENOTE_HOME="${ONENOTE_HOME:-$HOME/.asmltr/onenote}"
 
-echo "== ivy-local register as $(whoami) =="
-test -d "$IVY" || { echo "NEED $IVY"; exit 1; }
+echo "== host-local register as $(whoami) =="
+test -d "$HOST" || { echo "NEED $HOST"; exit 1; }
 export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
 
 echo "== venv =="
-if [[ ! -x "$IVY/.venv/bin/python" ]]; then
-  python3 -m venv "$IVY/.venv"
+if [[ ! -x "$HOST/.venv/bin/python" ]]; then
+  python3 -m venv "$HOST/.venv"
 fi
-"$IVY/.venv/bin/pip" -q install -r "$IVY/requirements.txt"
-"$IVY/.venv/bin/python" -c "from mcp.server import MCPServer; print('mcp ok')"
+"$HOST/.venv/bin/pip" -q install -r "$HOST/requirements.txt"
+"$HOST/.venv/bin/python" -c "from mcp.server import MCPServer; print('mcp ok')"
 
 echo "== onenote creds (mode only, no print) =="
 mkdir -p "$ONENOTE_HOME" "$HOME/.asmltr"
@@ -44,24 +44,24 @@ if [[ -f "$HOME/.asmltr/corona.env" ]]; then
 fi
 
 echo "== ~/.asmltr/mcp.json =="
-"$IVY/.venv/bin/python" - "$MCP_FILE" "$IVY" << 'PY'
+"$HOST/.venv/bin/python" - "$MCP_FILE" "$HOST" << 'PY'
 import json
 import os
 import sys
 from pathlib import Path
 
 mcp_path = Path(sys.argv[1])
-ivy = Path(sys.argv[2])
+host = Path(sys.argv[2])
 servers = {
     "corona": {
         "type": "stdio",
-        "command": str(ivy / "corona" / "run.sh"),
+        "command": str(host / "corona" / "run.sh"),
         "args": [],
         "env": ({"CORONA_URL": os.environ["CORONA_URL"]} if os.environ.get("CORONA_URL") else {}),
     },
     "onenote": {
         "type": "stdio",
-        "command": str(ivy / "onenote" / "run.sh"),
+        "command": str(host / "onenote" / "run.sh"),
         "args": [],
         "env": {},
     },
@@ -105,7 +105,7 @@ if [[ -x "$GROK_BIN" ]]; then
     if [[ "$name" == corona && -n "${CORONA_URL:-}" ]]; then
       add_args+=(-e "CORONA_URL=${CORONA_URL}")
     fi
-    if "$GROK_BIN" mcp add "${add_args[@]}" -- "$IVY/$dir/run.sh"; then
+    if "$GROK_BIN" mcp add "${add_args[@]}" -- "$HOST/$dir/run.sh"; then
       echo "grok mcp added $name"
     else
       echo "WARN: grok mcp add $name failed"

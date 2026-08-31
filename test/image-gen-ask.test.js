@@ -12,7 +12,7 @@ test('mentionsImageKind: kind list only, not verb+kind', () => {
   assert.equal(mentionsImageKind('can you make a new picture'), true);
   assert.equal(mentionsImageKind('I liked the picture you made yesterday'), true);
   assert.equal(mentionsImageKind('I attached an image, please generate a report'), true);
-  assert.equal(mentionsImageKind('take the picture you made of Steve yesterday as a puppet in the cape and sit him on the bench in the arboretum photo you made a few lines above'), true);
+  assert.equal(mentionsImageKind('take the picture you made of Alex yesterday as a puppet in the cape and sit him on the bench in the arboretum photo you made a few lines above'), true);
   assert.equal(mentionsImageKind('make a graphic of the cube'), true);
   assert.equal(mentionsImageKind('I want some graphics for the site'), true);
   assert.equal(mentionsImageKind('generate a report'), false);
@@ -40,7 +40,7 @@ test('classifyImageGenAsk: kind gate then completeFn; fail closed', async () => 
   assert.equal(called, 0);
   assert.equal(await classifyImageGenAsk('make a new picture', async () => 'YES'), true);
   assert.equal(await classifyImageGenAsk('I liked the picture', async () => 'NO'), false);
-  assert.equal(await classifyImageGenAsk('a photo of Steve', async () => { throw new Error('boom'); }), false);
+  assert.equal(await classifyImageGenAsk('a photo of Alex', async () => { throw new Error('boom'); }), false);
   assert.equal(await classifyImageGenAsk('a photo', null), false);
   const prompt = buildImageGenClassifyPrompt('sit him on the bench in the arboretum photo');
   assert.match(prompt, /ONLY YES or NO/);

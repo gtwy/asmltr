@@ -200,8 +200,7 @@ function lineNeedsSmallItalic(escapedLine, idx, subtextLines) {
 
 function lineNeedsPitchSize(escapedLine) {
   const raw = unescapeHtml(escapedLine).trim();
-  return /Example Co can build an AI assistant/i.test(raw)
-    || /^\[Example Co\]\(https:\/\/techdirect\.ai\)/i.test(raw);
+  return /can build an AI assistant like this for your team/i.test(raw);
 }
 
 function formatLine(escapedLine, idx, subtextLines) {

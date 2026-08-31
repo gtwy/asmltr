@@ -12,7 +12,7 @@ const { listTools } = require('../mcp/toolbelt-server');
 const { policyFor, isDiscordVoice } = require('../shared/media-allow');
 
 test('untrusted speaker → [] tools; owner gets function-type asmltr tools', () => {
-  const env = textEnvelope({ instanceId: 'ivy', guildId: 'g1', channelId: 'c1', userId: '42', username: 'james' });
+  const env = textEnvelope({ instanceId: 'gaia', guildId: 'g1', channelId: 'c1', userId: '42', username: 'alex' });
   assert.equal(isDiscordVoice(env), false);
   assert.equal(env.conversation_key.startsWith('discord-voice:'), false);
   assert.equal(env.channel_context.voice, undefined);
@@ -32,7 +32,7 @@ test('untrusted speaker → [] tools; owner gets function-type asmltr tools', ()
 });
 
 test('denied tool is not executed (mock)', async () => {
-  const env = textEnvelope({ instanceId: 'ivy', guildId: 'g1', channelId: 'c1', userId: '99', username: 'guest' });
+  const env = textEnvelope({ instanceId: 'gaia', guildId: 'g1', channelId: 'c1', userId: '99', username: 'guest' });
   const resolved = { is_default: false, bypass_moderation: false, user_key: 'guest', permissions: [] };
   let ran = 0;
   const out = await executeFunctionCall({
@@ -47,7 +47,7 @@ test('denied tool is not executed (mock)', async () => {
 });
 
 test('owner tool executes through invoke; native names denied', async () => {
-  const env = textEnvelope({ instanceId: 'ivy', guildId: 'g1', channelId: 'c1', userId: '1', username: 'owner' });
+  const env = textEnvelope({ instanceId: 'gaia', guildId: 'g1', channelId: 'c1', userId: '1', username: 'owner' });
   const owner = { bypass_moderation: true, user_key: 'owner', is_default: false };
   let ran = 0;
   const out = await executeFunctionCall({
@@ -71,14 +71,14 @@ test('owner tool executes through invoke; native names denied', async () => {
 });
 
 test('instructions contain identity/silo when speaker bound', () => {
-  const line = speakerIdentityLine({ channel: 'discord', speakerId: '42', speakerName: 'James' });
+  const line = speakerIdentityLine({ channel: 'discord', speakerId: '42', speakerName: 'Alex' });
   assert.match(line, /CURRENT SPEAKER/);
-  assert.match(line, /James/);
+  assert.match(line, /Alex/);
   assert.match(line, /discord:42/);
   const silo = siloRecallBlock('## turn one');
   assert.match(silo, /PRIOR CONVERSATION/);
   assert.match(silo, /turn one/);
-  const ident = '## IDENTITY\nYou are **Ivy**.';
+  const ident = '## IDENTITY\nYou are **Gaia**.';
   const built = buildLiveInstructions({
     voiceGuidance: 'Keep it short.',
     identity: ident,
@@ -93,13 +93,13 @@ test('instructions contain identity/silo when speaker bound', () => {
 test('Flux handleStream voice deny-all remains; Live text envelope does not trip it', () => {
   const voiceEnv = {
     channel: 'discord',
-    conversation_key: 'discord-voice:ivy:guild:1',
+    conversation_key: 'discord-voice:gaia:guild:1',
     channel_context: { voice: true },
   };
   const owner = { bypass_moderation: true, user_key: 'owner' };
   const v = policyFor(voiceEnv, owner);
   assert.equal(v.deny.all, true);
-  const text = textEnvelope({ instanceId: 'ivy', guildId: '1', channelId: 'c', userId: '1' });
+  const text = textEnvelope({ instanceId: 'gaia', guildId: '1', channelId: 'c', userId: '1' });
   const t = policyFor(text, owner);
   assert.equal(!!t.deny.all, false);
 });

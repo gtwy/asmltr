@@ -203,7 +203,7 @@ function closeConverseSubs(guildId) {
 // onBargeIn = (userId) => {}  — fired the instant a human starts speaking WHILE the bot is mid-reply.
 // onPartial = (name, text) => {}  — live streaming caption (realtime mode only). Optional.
 // realtime = true → stream to the shared realtime STT (server-VAD turns); false → batch per-utterance.
-// converse = true → skip Flux; relay last-speaker PCM via onPcm24 (Ivy Live).
+// converse = true → skip Flux; relay last-speaker PCM via onPcm24 (Live).
 function startListening(guildId, client, { transcribe, onUtterance, onBargeIn, onBargeEnd, onPartial, onSpeechEnd, realtime, realtimeModel, realtimeLive, realtimeProvider, converse, allowPcm, onPcm24, vad = {}, log = () => {} }) {
   const conn = connections.get(guildId);
   if (!conn) return false;

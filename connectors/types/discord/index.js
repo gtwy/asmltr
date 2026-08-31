@@ -24,7 +24,7 @@ const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // 
 const sharedStt = require('../../../shared/speech/stt');
 const sharedWake = require('../../../shared/speech/wake');            // shared confidence-gated wake matcher (#136)
 const voiceEngines = require('../../../shared/speech/voice-engines'); // pluggable STT/TTS role layer (#113/#139)
-const converseGrok = require('../../../shared/speech/converse-grok'); // Ivy Live grok-voice-think-fast-2.0 WS
+const converseGrok = require('../../../shared/speech/converse-grok'); // Live grok-voice-think-fast-2.0 WS
 const liveTools = require('../../../shared/speech/live-tools');
 const vault = require('../../../shared/vault');
 
@@ -381,7 +381,7 @@ async function start(ctx) {
       case 'stop': case 'cancel': case 'abort': case 'halt': {
         // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
         // joined from this channel (#138). Public: anyone may stop a processing turn (humans always win).
-        // Public anyone-can-stop. Overlay wrapAbortRoute on core /v2/abort keeps Ivy starter-or-owner. Do not put stop in OWNER_ONLY_CMDS.
+        // Public anyone-can-stop. Overlay wrapAbortRoute on core /v2/abort keeps host starter-or-owner. Do not put stop in OWNER_ONLY_CMDS.
         // Session survives; next message continues it.
         const slot = processing.get(cid);
         const gid = message.guild?.id;
@@ -928,7 +928,7 @@ ${referentPromptBlock()}`;
   const voicePostTranscript = cfg.voice_post_transcript !== false; // live 🗣️ default; per-channel scribe-off wins
   const voiceTranscriptFile = cfg.voice_transcript_file !== false; // upload a full transcript .txt on leave
   const voiceLog = new Map(); // guildId -> [{ t, who, text }] accumulated for the whole voice session
-  const converseSessions = new Map(); // guildId -> converse-grok session (Ivy Live)
+  const converseSessions = new Map(); // guildId -> converse-grok session (Live)
   const converseSpeaker = new Map(); // guildId -> { userId, name }
   const pcmRing = new Map(); // `${guildId}:${userId}` -> Buffer[] last ~4s
   const pcmTurnLogged = new Set();
@@ -964,7 +964,7 @@ ${referentPromptBlock()}`;
     return voiceBusy.has(guildId) || !!(vMouth.isMouthPlaying && vMouth.isMouthPlaying(guildId));
   }
 
-  // After greet/pacer idle: one response.create for speech that arrived during "ivy's here".
+  // After greet/pacer idle: one response.create for speech that arrived during the greet.
   function flushDeferredCreate(guildId) {
     const c = converseSessions.get(guildId);
     if (!c || typeof c.createResponse !== 'function') return;
@@ -1274,7 +1274,7 @@ ${referentPromptBlock()}`;
     }
 
     // For me? Live: the model decides (1:1 = always; group = lean in when welcome). Flux path still uses
-    // the follow-up window or the wake matcher, except 1:1 (just James) where every line is for her.
+    // the follow-up window or the wake matcher, except 1:1 (just the owner) where every line is for her.
     const solo = countHumansNow(guildId) <= 1;
     if (!converseSessions.has(guildId) && !active && !solo) {
       const d = wakeDecision(text, meta.confidence);
@@ -1292,7 +1292,7 @@ ${referentPromptBlock()}`;
       if (convMuted) { try { convMuted.cancel(); } catch (_) {} }
       return; // MUTED (P2): addressed, but stay quiet — transcript already posted
     }
-    // Ivy Live: skip handleStream + ElevenLabs HTTP TTS; last-speaker PCM already on the converse WS.
+    // Live: skip handleStream + ElevenLabs HTTP TTS; last-speaker PCM already on the converse WS.
     if (converseSessions.has(guildId)) {
       const next = armFollowUp({ now: Date.now(), windowMs: VOICE_WINDOW_MS, userId: speakerId });
       if (next) voiceActive.set(guildId, next);
@@ -1449,13 +1449,13 @@ ${referentPromptBlock()}`;
     if (!voice.isListening(guildId) || !voice.isConnected(guildId)) return;
     conv._greeted = true;
     conv._awaitFirstUser = true;
-    try { conv.forceMessage("ivy's here"); ctx.log('[voice] greet force_message (session.updated, listening)'); } catch (e) { ctx.log(`[voice] greet: ${e.message}`); }
+    try { const greetName = (process.env.ASSISTANT_NAME || 'gaia').trim() || 'gaia'; conv.forceMessage(greetName + "'s here"); ctx.log('[voice] greet force_message (session.updated, listening)'); } catch (e) { ctx.log(`[voice] greet: ${e.message}`); }
   }
 
   async function tryOpenConverse(guildId, { greet } = { greet: true }) {
     let voiceKey = '';
     try {
-      const data = await vault.getSecret('xai_voice_api_key', 'ivy live converse');
+      const data = await vault.getSecret('xai_voice_api_key', 'live converse');
       voiceKey = converseGrok.secretValue(data);
     } catch (_) { voiceKey = ''; }
     const r = voiceEngines.resolve('converse', { keys: { xai_voice_api_key: !!voiceKey } });
@@ -1855,12 +1855,12 @@ ${referentPromptBlock()}`;
       const guildId = String((newState.guild && newState.guild.id) || (oldState.guild && oldState.guild.id) || '');
       if (!guildId || !converseSessions.has(guildId)) return;
       const voice = require('./voice');
-      let ivyChannelId = '';
-      try { ivyChannelId = String(voice.channelIdOf(guildId) || ''); } catch (_) {}
-      if (!ivyChannelId) return;
+      let voiceChannelId = '';
+      try { voiceChannelId = String(voice.channelIdOf(guildId) || ''); } catch (_) {}
+      if (!voiceChannelId) return;
       const oldCid = oldState.channelId && String(oldState.channelId);
       const newCid = newState.channelId && String(newState.channelId);
-      if (oldCid !== ivyChannelId && newCid !== ivyChannelId) return;
+      if (oldCid !== voiceChannelId && newCid !== voiceChannelId) return;
       refreshRoomInstructions(guildId);
       // Room line only when membership changes. No spoken hello on join.
     } catch (_) {}

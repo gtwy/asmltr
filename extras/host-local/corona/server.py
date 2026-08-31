@@ -2,7 +2,7 @@
 """Stdio MCP: Corona localhost API.
 
 Read-only. No /say. Base URL from CORONA_URL (default http://127.0.0.1:12701).
-Eve: skip extras/ivy-local unless you want these extras.
+Eve: skip extras/host-local unless you want these extras.
 """
 
 from __future__ import annotations

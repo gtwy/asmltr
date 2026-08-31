@@ -12,9 +12,9 @@ const {
 } = require('../connectors/types/email');
 
 test('parseAddrList extracts and lowercases from strings, arrays, and Name <addr> form', () => {
-  assert.deepEqual(parseAddrList('James <owner@example.com>'), ['owner@example.com']);
+  assert.deepEqual(parseAddrList('Alex <owner@example.com>'), ['owner@example.com']);
   assert.deepEqual(
-    parseAddrList(['other@example.com', 'James <owner@example.com>, other@example.com']),
+    parseAddrList(['other@example.com', 'Alex <owner@example.com>, other@example.com']),
     ['other@example.com', 'owner@example.com'],
   );
 });
@@ -68,40 +68,40 @@ test('queueOutboundMail still returns before sendMail finishes', async () => {
   assert.equal(finished, true);
 });
 
-test('mergeReplyAll keeps Tim/Joey/James when send targeted only Angela', () => {
+test('mergeReplyAll keeps owner/staff when send targeted only Casey', () => {
   const thread = {
-    from: ['angela@example.com'],
-    to: ['assistant@example.com', 'owner@example.com', 'tim@example.com'],
-    cc: ['joey@example.com'],
+    from: ['casey@example.com'],
+    to: ['assistant@example.com', 'owner@example.com', 'staff1@example.com'],
+    cc: ['staff2@example.com'],
   };
   const p = mergeReplyAll(
-    { to: 'angela@example.com', text: 'hi' },
+    { to: 'casey@example.com', text: 'hi' },
     thread,
     'assistant@example.com',
     [],
   );
   const all = (p.to + ' ' + (p.cc || '')).toLowerCase();
-  assert.match(p.to, /angela@example.com/);
+  assert.match(p.to, /casey@example.com/);
   assert.match(all, /owner@example.com/);
-  assert.match(all, /tim@example.com/);
-  assert.match(all, /joey@example.com/);
+  assert.match(all, /staff1@example.com/);
+  assert.match(all, /staff2@example.com/);
   assert.equal(all.includes('assistant@example.com'), false);
 });
 
 test('mergeReplyAll honors --drop', () => {
   const thread = {
-    from: ['angela@example.com'],
-    to: ['owner@example.com', 'tim@example.com', 'assistant@example.com'],
+    from: ['casey@example.com'],
+    to: ['owner@example.com', 'staff1@example.com', 'assistant@example.com'],
     cc: [],
   };
   const p = mergeReplyAll(
-    { to: 'angela@example.com', text: 'hi' },
+    { to: 'casey@example.com', text: 'hi' },
     thread,
     'assistant@example.com',
-    'tim@example.com',
+    'staff1@example.com',
   );
   const all = (p.to + ' ' + (p.cc || '')).toLowerCase();
-  assert.equal(all.includes('tim@example.com'), false);
+  assert.equal(all.includes('staff1@example.com'), false);
   assert.match(all, /owner@example.com/);
 });
 
@@ -112,7 +112,7 @@ test('mergeReplyAll drops automated vendors but keeps real Microsoft employees',
     cc: ['alerts@example.com', 'alice@microsoft.com'],
   };
   const p = mergeReplyAll(
-    { to: 'owner@example.com, joey@example.com, tim@example.com', text: 'staff' },
+    { to: 'owner@example.com, staff2@example.com, staff1@example.com', text: 'staff' },
     thread,
     'assistant@example.com',
     [],
@@ -121,8 +121,8 @@ test('mergeReplyAll drops automated vendors but keeps real Microsoft employees',
   assert.equal(all.includes('microsoft-noreply@microsoft.com'), false);
   assert.equal(all.includes('alerts@example.com'), false);
   assert.match(all, /owner@example.com/);
-  assert.match(all, /joey@example.com/);
-  assert.match(all, /tim@example.com/);
+  assert.match(all, /staff2@example.com/);
+  assert.match(all, /staff1@example.com/);
   assert.match(all, /alice@microsoft.com/);
 });
 

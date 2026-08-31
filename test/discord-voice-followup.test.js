@@ -25,18 +25,18 @@ test('resolveVoiceFollowupMs: missing/0 → 25s; -1/false → strict', () => {
 
 test('shouldAcceptFollowUp: same user inside window; expire; other user still needs name', () => {
   const now = 1_000_000;
-  const window = { expires: now + 25_000, userId: 'james' };
+  const window = { expires: now + 25_000, userId: 'owner' };
 
-  assert.equal(shouldAcceptFollowUp({ window, userId: 'james', now, addressed: false }), true);
-  assert.equal(shouldAcceptFollowUp({ window, userId: 'james', now: now + 24_999, addressed: false }), true);
-  assert.equal(shouldAcceptFollowUp({ window, userId: 'james', now: now + 25_000, addressed: false }), false);
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'owner', now, addressed: false }), true);
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'owner', now: now + 24_999, addressed: false }), true);
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'owner', now: now + 25_000, addressed: false }), false);
   assert.equal(shouldAcceptFollowUp({ window, userId: 'other', now, addressed: false }), false);
   assert.equal(shouldAcceptFollowUp({ window, userId: 'other', now, addressed: true }), true);
-  assert.equal(shouldAcceptFollowUp({ window: null, userId: 'james', now, addressed: false }), false);
+  assert.equal(shouldAcceptFollowUp({ window: null, userId: 'owner', now, addressed: false }), false);
   assert.equal(shouldAcceptFollowUp({ window, userId: '', now, addressed: false }), false);
   assert.equal(shouldAcceptFollowUp({
     window: { expires: now + 1000, userId: '' },
-    userId: 'james',
+    userId: 'owner',
     now,
     addressed: false,
   }), false);
@@ -68,10 +68,10 @@ test('index.js arms after speech with last-speaker userId; 0-or-unset is 25s', (
 
 test('lastSpeakerId: live converse still returns userId after 25s; without converse, 25s expires', () => {
   const now = 1_000_000;
-  const window = { expires: now + 25_000, userId: 'james' };
-  assert.equal(lastSpeakerId({ window, now: now + 25_000, converseBound: true }), 'james');
-  assert.equal(lastSpeakerId({ window, now: now + 90_000, converseBound: true }), 'james');
-  assert.equal(lastSpeakerId({ window, now: now + 24_999, converseBound: false }), 'james');
+  const window = { expires: now + 25_000, userId: 'owner' };
+  assert.equal(lastSpeakerId({ window, now: now + 25_000, converseBound: true }), 'owner');
+  assert.equal(lastSpeakerId({ window, now: now + 90_000, converseBound: true }), 'owner');
+  assert.equal(lastSpeakerId({ window, now: now + 24_999, converseBound: false }), 'owner');
   assert.equal(lastSpeakerId({ window, now: now + 25_000, converseBound: false }), '');
   assert.equal(lastSpeakerId({ window: null, now, converseBound: true }), '');
   assert.equal(lastSpeakerId({ window: { expires: now + 90_000, userId: '' }, now, converseBound: true }), '');
@@ -79,10 +79,10 @@ test('lastSpeakerId: live converse still returns userId after 25s; without conve
 
 test('shouldAcceptFollowUp: converseBound holds last-speaker past 25s; other users still need the name', () => {
   const now = 1_000_000;
-  const window = { expires: now + 25_000, userId: 'james' };
-  assert.equal(shouldAcceptFollowUp({ window, userId: 'james', now: now + 90_000, addressed: false, converseBound: true }), true);
+  const window = { expires: now + 25_000, userId: 'owner' };
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'owner', now: now + 90_000, addressed: false, converseBound: true }), true);
   assert.equal(shouldAcceptFollowUp({ window, userId: 'other', now: now + 90_000, addressed: false, converseBound: true }), false);
-  assert.equal(shouldAcceptFollowUp({ window, userId: 'james', now: now + 25_000, addressed: false, converseBound: false }), false);
+  assert.equal(shouldAcceptFollowUp({ window, userId: 'owner', now: now + 25_000, addressed: false, converseBound: false }), false);
 });
 
 test('index.js lastSpeakerId holds while converseSessions is bound', () => {

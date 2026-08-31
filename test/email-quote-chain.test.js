@@ -26,7 +26,7 @@ test('reply with last inbound → quote after conversion, markdown not applied t
 });
 
 test('quoted inbound stays after conversion, markdown not applied to inbound', () => {
-  const c = buildMailContent('A loaf on the sill.\n', SIG, { subject: 'Re: James Test', quote: QUOTE });
+  const c = buildMailContent('A loaf on the sill.\n', SIG, { subject: 'Re: Owner Test', quote: QUOTE });
   assert.match(c.html, /gmail_quote/);
   assert.match(c.html, /gmail_attr/);
   const above = c.html.slice(0, c.html.indexOf('gmail_quote'));
@@ -71,7 +71,7 @@ test('wraps inbound HTML after signature, not through markdown', () => {
     ...QUOTE,
     html: '<p>Cleveland then</p><img src="https://example.com/x.jpg"><div class="gmail_quote">nested</div>',
   };
-  const c = buildMailContent('New letter.\n', SIG, { subject: 'Re: James Test', quote });
+  const c = buildMailContent('New letter.\n', SIG, { subject: 'Re: Owner Test', quote });
   const qat = c.html.indexOf('gmail_quote');
   const above = c.html.slice(0, qat);
   assert.match(above, /New letter/);

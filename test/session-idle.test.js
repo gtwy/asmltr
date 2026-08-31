@@ -53,7 +53,7 @@ test('idlePolicyFromEnv defaults to infinite; POLICY wins; IDLE_MS is Live-only'
 });
 
 test('resolveForTurn persists grok resume UUID then clears it after idle', () => {
-  const key = 'cli:local:james';
+  const key = 'cli:local:alex';
   const uuid = '01234567-89ab-cdef-0123-456789abcdef';
   const r1 = sessions.resolveForTurn(key, 'cli', 'idle:15');
   assert.equal(r1.resume, null);

@@ -74,7 +74,7 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
       'lookup the Corona cigar notes',
       'pull the cigar writeup from Corona',
       'what is the recipe',
-      'search my contacts for Steve',
+      'search my contacts for Alex',
       'why is nginx slow tonight',
       'troubleshoot the alerts',
       'can you diagnose this hang',
@@ -111,7 +111,7 @@ test('visual kind words are not xhigh in the sync picker', () => {
     for (const p of [
       'Please generate an image of a corgi',
       'can you make a new picture',
-      'the picture you made of Steve',
+      'the picture you made of Alex',
       'generate a report',
       'I attached an image, please generate a report',
       'make a list',
@@ -372,7 +372,7 @@ test('email channel forces xhigh even without code words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const prompt = 'Thanks for the update, see you Monday';
-    const chatty = 'Hi Gaia,\n\nJust circling back on dinner Thursday and whether Jess is free. Nothing urgent — hope you had a quiet weekend.\n\nThanks for the update, see you Monday\n';
+    const chatty = 'Hi Gaia,\n\nJust circling back on dinner Thursday and whether Sam is free. Nothing urgent — hope you had a quiet weekend.\n\nThanks for the update, see you Monday\n';
     for (const p of [prompt, chatty]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), 'xhigh', p.slice(0, 40));
       assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 'xhigh');
@@ -669,7 +669,7 @@ test('next-turn session flag: xhigh once then reset to baseline', () => {
 test('discord-voice stays low even with lookup-ish words; discord text stays picker', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
-    const voiceKey = { conversationKey: 'discord-voice:ivy:guild:1', channel: 'discord', cwd: noGit };
+    const voiceKey = { conversationKey: 'discord-voice:gaia:guild:1', channel: 'discord', cwd: noGit };
     const voiceCtx = { channel: 'discord', channel_context: { voice: true, guildId: '1' }, cwd: noGit };
     const voiceFlag = { channel: 'discord', voice: true, cwd: noGit };
     for (const p of ['ok thanks', 'look up the Padron 1964 in Corona', 'search my contacts', 'can you hear me']) {

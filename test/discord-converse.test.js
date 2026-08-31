@@ -28,7 +28,8 @@ test('index.js binds converse when vault key present and skips handleStream + El
   assert.match(src, /voice=ara/);
   assert.match(src, /realtime: conv \? false/);
   assert.match(src, /converse: !!conv/);
-  assert.match(src, /forceMessage\("ivy.s here"\)/);
+  assert.match(src, /ASSISTANT_NAME/);
+  assert.match(src, /forceMessage\(/);
   assert.doesNotMatch(src, /voice:\s*'eve'/);
   assert.doesNotMatch(src, /process\.env\.XAI_API_KEY/);
   const handle = src.slice(src.indexOf('async function handleVoiceUtterance'), src.indexOf('async function engineKeys'));
@@ -79,10 +80,10 @@ test('Live name is grab not keepalive: lastSpeakerId converseBound while socket 
   assert.match(src, /lastSpeakerFromWindow/);
   const grok = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
   assert.match(grok, /keyterms/);
-  assert.match(grok, /'Ivy'/);
+  assert.match(grok, /keytermsFromName/);
   const wake = fs.readFileSync(path.join(__dirname, '../shared/speech/wake.js'), 'utf8');
-  assert.match(wake, /IVY_ALIASES/);
-  assert.match(wake, /'iv'/);
+  assert.match(wake, /STT_ALIASES/);
+  assert.doesNotMatch(wake, /IVY_ALIASES/);
 });
 
 test('Live user transcript edits in place; 1:1 room line; no stay-silent-among-themselves default', () => {

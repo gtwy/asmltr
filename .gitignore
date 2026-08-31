@@ -29,8 +29,8 @@ connectors/types/discord/channel-aliases.json
 CLAUDE.local.md
 
 # Live nginx vhost files — commit only *.example.conf
-extras/ivy-local/nginx/*
-!extras/ivy-local/nginx/*.example.conf
+extras/host-local/nginx/*
+!extras/host-local/nginx/*.example.conf
 insights/docker-compose.*.yml
 connectors/types/openai/keys.json
 connectors/types/android/keys.json

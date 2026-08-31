@@ -9,22 +9,22 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
-- **Email `--new-thread`.** Blank new letter: no last-inbound quote, no `In-Reply-To`/`References`, no reply-all merge. `--no-reply-all` still only drops extra recipients and still quotes this thread. Sidebar (other customers / personal / internal SKUs) and customer mail after a tainted chain use `--new-thread` so Gmail does not staple that history. Clean human reply-all is unchanged. James 31 Aug 2026.
+- **Email `--new-thread`.** Blank new letter: no last-inbound quote, no `In-Reply-To`/`References`, no reply-all merge. `--no-reply-all` still only drops extra recipients and still quotes this thread. Sidebar (other customers / personal / internal SKUs) and customer mail after a tainted chain use `--new-thread` so Gmail does not staple that history. Clean human reply-all is unchanged. 31 Aug 2026.
 
 ### Changed
-- **Email signature image.** After `AI Assistant to …`, two blank lines, then a markdown image, then the Example Co pitch with no extra blank. HTML is 96×96, block, flush above the pitch. `cid:ivy-sig` is mailed inline (`signature_image` path); https images still render. javascript: image URLs are dropped. Inbound quote sanitizer still strips quoted `cid:` so we do not replay someone else's inline parts.
+- **Email signature image.** After `AI Assistant to …`, two blank lines, then a markdown image, then the Example Co pitch with no extra blank. HTML is 96×96, block, flush above the pitch. `cid:assistant-sig` is mailed inline (`signature_image` path); https images still render. javascript: image URLs are dropped. Inbound quote sanitizer still strips quoted `cid:` so we do not replay someone else's inline parts.
 - **Same-guild Discord post is `asmltr send`.** Confirm-first name lookup, on-behalf-of preface, and fuzzy channel match stay. Capability is trusted role or `resolve()` allow (`guild-post` / `send` / `*`). `asmltr guild-post` is a CLI alias of send. Discord/Telegram `/out` and manager `/send` use public attach-stage. Host path deny-list is overlay `hostGate` on manager `/send` and Discord `/out`.
 - **Stop actually halts send/voice/stream/inject.** Those paths register a processing abort target. Starter may abort their turn (not owner-only). SDK `/v2/abort` can pass speaker/starter/owner so a host overlay can fail-closed.
 
 ### Removed
-- **extras/ivy-local Rolodex MCP.** Contacts are gworkspace People API. `register.sh` no longer adds Rolodex or the ivy-rolodex-sync timer. Host dumps under `~/rolodex` / `~/.asmltr/rolodex-cache/` are left on disk.
+- **extras/host-local Rolodex MCP.** Contacts are gworkspace People API. `register.sh` no longer adds Rolodex or a rolodex sync timer. Host dumps under `~/rolodex` / `~/.asmltr/rolodex-cache/` are left on disk.
 
 ### Fixed
-- **Email: reply-all drops automated senders.** `noreply` / `no-reply` / `alerts@` / `notifications@` are not people on the chain (James 26 Aug 2026). Real vendor employees stay. Staff outreach from an automated-alert turn still uses `--no-reply-all`.
+- **Email: reply-all drops automated senders.** `noreply` / `no-reply` / `alerts@` / `notifications@` are not people on the chain (26 Aug 2026). Real vendor employees stay. Staff outreach from an automated-alert turn still uses `--no-reply-all`.
 - **Email: do not owner-forward thread participants as strangers.** A From that is already on the chain (In-Reply-To/References + we are To/Cc), stored on the persisted thread, or present in the optional Rolodex/contacts file creates a turn. Cold mail from an address we have never seen still forwards to `owner_forward_to`.
 - **Email: no auto-reply of session text.** The connector no longer SMTPs the assistant `reply` action. Letters go out only via `asmltr send` / `/out` (in context: spoken to, or told to do something). CC-only chains are listen-unless-asked. `owner_forward_to` is still a visible Cc when To is someone else. No 30-minute duplicate timer.
 - **Email: chain reply-all.** `/out` with a thread `ref` keeps everyone on inbound From/To/Cc (minus the mailbox). `--drop` / `--no-reply-all` only if asked to omit someone. `asmltr send email` from an email turn passes the conversation `ref`.
-- **Email signature pitch** (Ivy): extra blank before the name; name and `AI Assistant to …` on adjacent lines; two blanks; then `[Example Co](https://example.com) can build an AI assistant like this for your team.` HTML keeps consecutive blank source lines (`&nbsp;` paragraphs) so Gmail does not collapse `\n\n\n` to one gap.
+- **Email signature pitch** (Gaia): extra blank before the name; name and `AI Assistant to …` on adjacent lines; two blanks; then `[Example Co](https://example.com) can build an AI assistant like this for your team.` HTML keeps consecutive blank source lines (`&nbsp;` paragraphs) so Gmail does not collapse `\n\n\n` to one gap.
 
 ### Added
 - **Example configs for gaia exceptions (no PII):** `shared/media-allow.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.gaia.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_MEDIA_ALLOW_FILE` in `.env.example` / `env.gaia.example`.

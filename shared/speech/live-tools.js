@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Ivy Live function tools + speaker identity/silo for converse-grok.
+ * Live function tools + speaker identity/silo for converse-grok.
  *
  * session.tools are asmltr function tools from mcp/toolbelt-server.js (same names),
  * converted to realtime `{type:'function', name, description, parameters}`.
@@ -17,7 +17,7 @@ function toolbelt() {
 }
 
 function textEnvelope({ instanceId, guildId, channelId, userId, username } = {}) {
-  const iid = instanceId || 'ivy';
+  const iid = instanceId || (process.env.ASSISTANT_NAME || 'gaia').trim() || 'gaia';
   const gid = guildId != null ? String(guildId) : '';
   const cid = channelId != null ? String(channelId) : '';
   return {

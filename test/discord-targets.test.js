@@ -24,7 +24,7 @@ test('public preface prefixes when id present; overlay requires id', () => {
   assert.match(chips.text, /The addendum/);
 });
 
-test('public sameGuild is not fenced; overlay restores Ivy same-guild', () => {
+test('public sameGuild is not fenced; overlay restores host same-guild', () => {
   assert.equal(sameGuild('aaa', 'aaa').ok, true);
   assert.equal(sameGuild('aaa', 'bbb').ok, true);
   assert.equal(sameGuild('', 'aaa').ok, true);
@@ -67,7 +67,7 @@ test('public guild: guildPost from Cast grants or owner (no Access 1-5, no V31 s
 });
 
 test('names are not snowflakes; 666 steak matches a thread title', () => {
-  assert.equal(looksLikeSnowflake('999000111222333001'), true);
+  assert.equal(looksLikeSnowflake('123456789012345678'), true);
   assert.equal(looksLikeSnowflake('666 degree steak thread'), false);
   assert.equal(normName('666 degree steak thread'), '666 steak');
   assert.ok(matchScore('666 degree steak thread', '666 Degree Steak') >= 90);

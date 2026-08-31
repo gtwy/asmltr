@@ -70,7 +70,7 @@ test('Rolodex/contacts hit does not owner-forward', () => {
   }), false);
 });
 
-test('reply on a chain we are on does not owner-forward (Angela case)', () => {
+test('reply on a chain we are on does not owner-forward (Casey case)', () => {
   const p = parsed({
     from: [angela],
     to: [assistant, 'owner@example.com'],

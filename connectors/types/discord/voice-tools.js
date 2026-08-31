@@ -2,7 +2,7 @@
 /**
  * Grok-callable Discord voice tools on the existing voice.js layer.
  * Bind live deps from the Discord connector process. Tests inject a mock voice.
- * Phone stubs live here and always refuse. No VoiceConnection in ivy-local MCP.
+ * Phone stubs live here and always refuse. No VoiceConnection in host-local MCP.
  */
 const readline = require('readline');
 

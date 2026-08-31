@@ -63,7 +63,7 @@ const ENGINES = {
     roles: ['synthesize'], caps: { voices: 'premium', cloning: true },
   },
   'grok-voice': {
-    provider: 'xai', label: 'Grok Voice (Ivy Live)', key: 'xai_voice_api_key', model: 'grok-voice-think-fast-2.0',
+    provider: 'xai', label: 'Grok Voice (Live)', key: 'xai_voice_api_key', model: 'grok-voice-think-fast-2.0',
     roles: ['converse'],
     caps: { duplex: true, streaming: true, vad: true, voices: ['ara', 'eve', 'leo', 'rex', 'sal'] },
   },

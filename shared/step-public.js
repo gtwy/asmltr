@@ -374,7 +374,7 @@ function stripThoughtChrome(text) {
     const head = paras[0];
     if (looksLikePromptLeak(head)
       || /not an ops-desk alert/i.test(head)
-      || /^(the user|james) asked\b/i.test(head)) {
+      || /^(the user|the owner) asked\b/i.test(head)) {
       s = paras.slice(1).join('\n\n').trim();
     }
   }

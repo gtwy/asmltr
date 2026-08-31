@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const PII = /techdirect|gtwy\.net|james@|@jess|example town|example borough|999000111222333002/i;
+const PII = /techdirect|gtwy\.net|james@|ivy@|@jess|clientary|888-?261-?2258|50\.226\.|2001:559/i;
 
 function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8');

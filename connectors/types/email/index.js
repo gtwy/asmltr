@@ -37,7 +37,7 @@ const { simpleParser } = require('mailparser');
 // How often the IMAP watcher proves it's genuinely alive (a NOOP round-trip). Below the manager's
 // default 120s stale threshold so a healthy watcher clears it with room to spare.
 const IMAP_PROBE_MS = Number(process.env.ASMLTR_EMAIL_IMAP_PROBE_MS) || 60000;
-const SIG_IMAGE_CID = 'ivy-sig';
+const SIG_IMAGE_CID = 'assistant-sig';
 
 function signatureImageAttachment(filePath) {
   const p = String(filePath || '').trim();
@@ -236,7 +236,7 @@ const meta = {
       mailbox: { type: 'string', title: 'IMAP mailbox to watch', default: 'INBOX' },
       approval_policy: { type: 'string', title: 'Send policy', default: 'always_draft', enum: ['always_draft', 'auto_send_full_trust', 'always_send', 'trust_tier:1', 'trust_tier:2', 'trust_tier:3'] },
       signature: { type: 'string', title: 'Signature (blank = auto from from_name)', default: '' },
-      signature_image: { type: 'string', title: 'Filesystem PNG mailed inline as cid:ivy-sig (blank = no CID attach)', default: '' },
+      signature_image: { type: 'string', title: 'Filesystem PNG mailed inline as cid:assistant-sig (blank = no CID attach)', default: '' },
       process_backlog: { type: 'boolean', title: 'On first connect, process existing unread mail (off = only react to NEW arrivals)', default: false },
       owner_forward_to: { type: 'string', title: 'Forward unknown senders here (blank = do not forward)', default: '' },
       authserv_id: {
@@ -257,13 +257,13 @@ function root32(refs, inReplyTo, messageId) {
 function isAutomatedSender(addr) {
   const a = String(addr || '');
   if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(a)) return true;
-  // alerts@example.com and similar — not a person on the chain (James 26 Aug 2026).
+  // alerts@example.com and similar — not a person on the chain (26 Aug 2026).
   if (/^(alerts|notifications?|notify)@/i.test(a)) return true;
   return false;
 }
 
 /**
- * Vacation / out-of-office auto-reply (James 23 Aug 2026).
+ * Vacation / out-of-office auto-reply (23 Aug 2026).
  * RFC 3834 `auto-replied` only — `auto-generated` is Microsoft alerts and DSNs, not OOO.
  * Subject prefixes cover Exchange/Gmail vacation even when Auto-Submitted is missing.
  */
@@ -558,9 +558,9 @@ function emailsFromContactsDoc(doc) {
 }
 
 function contactsCliPython() {
-  const envPy = String(process.env.IVY_LOCAL_PYTHON || '').trim();
+  const envPy = String(process.env.HOST_LOCAL_PYTHON || '').trim();
   if (envPy) return envPy;
-  const venv = path.join(os.homedir(), 'src', 'asmltr', 'extras', 'ivy-local', '.venv', 'bin', 'python');
+  const venv = path.join(os.homedir(), 'src', 'asmltr', 'extras', 'host-local', '.venv', 'bin', 'python');
   try { fs.accessSync(venv, fs.constants.X_OK); return venv; } catch (_) {}
   return 'python3';
 }
@@ -568,7 +568,7 @@ function contactsCliPython() {
 function contactsCliScript() {
   const override = String(process.env.ASMLTR_CONTACTS_CLI || '').trim();
   if (override) return override;
-  return path.join(os.homedir(), '.asmltr', 'ivy-local', 'gworkspace', 'contacts_cli.py');
+  return path.join(os.homedir(), '.asmltr', 'host-local', 'gworkspace', 'contacts_cli.py');
 }
 
 function parseContactsHasStdout(stdout) {
@@ -794,7 +794,7 @@ function shouldOwnerForwardUnknown({
 }
 
 /** Reply-all: keep everyone on the inbound From/To/Cc except us, --drop, and automated senders.
- * Discord-originated sends (no thread) are unchanged. James 26 Aug 2026: noreply Microsoft/Barracuda
+ * Discord-originated sends (no thread) are unchanged. 26 Aug 2026: noreply Microsoft/Barracuda
  * (and alerts@ / notifications@) are not people on the chain. Real vendor employees stay. */
 function mergeReplyAll(payload, thread, selfAddr, dropList) {
   const self = String(selfAddr || '').trim().toLowerCase();
@@ -835,7 +835,7 @@ function isTruthyFlag(v) {
 
 /** Build the SMTP payload for /out. `--new-thread` is a blank new email: no quote, no
  * In-Reply-To/References, no reply-all merge. `--no-reply-all` only drops extra recipients;
- * it still quotes this thread. James 31 Aug 2026: quote-on-send stays for clean human replies. */
+ * it still quotes this thread. 31 Aug 2026: quote-on-send stays for clean human replies. */
 function buildOutPayload({
   target, text, subject, caption, cc, inReplyTo, references, drop, reply_all, new_thread,
   tc, selfAddr, fromName, attachments,
@@ -912,8 +912,8 @@ async function start(ctx) {
   const policy = sendPolicyFromConfig(cfg);
   const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
   const signature = cfg.signature || (
-    `\n\n\n${fromName}\nAI Assistant to Example Owner\n\n\n` +
-    `![Ivy](cid:${SIG_IMAGE_CID})\n` +
+    `\n\n\n${fromName}\nAI Assistant to the owner\n\n\n` +
+    `![${fromName}](cid:${SIG_IMAGE_CID})\n` +
     '[Example Co](https://example.com) can build an AI assistant like this for your team.\n'
   );
   const coreBase = String(process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle').replace(/\/v2\/handle\/?$/i, '');
@@ -1103,24 +1103,24 @@ async function start(ctx) {
     let extra =
       `You are answering an EMAIL as ${fromName}. Your assistant text is NOT mailed — there is no auto-reply. ` +
       `To send a letter: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"]. ` +
-      `On a chain, the connector reply-alls everyone already on To/Cc (minus you) unless you pass --drop <addr> or --no-reply-all. Check To and Cc before sending. Do not drop Tim/Joey/James/the customer unless asked. ` +
-      '--no-reply-all only drops extra recipients; it still quotes this thread and still sets In-Reply-To. --new-thread is a blank new email: no quote, no In-Reply-To, no reply-all merge. Use --new-thread for Ivy↔James sidebar (other customers, personal notes, internal SKUs) and for any letter to a customer after that sidebar has been on this chain. Do not reply-all a tainted thread to a customer. Customer letter after sidebar: --new-thread --cc james@ with a clean subject (not Re:/Fwd: of the sidebar). Flow: memory/ops/email-threads.md. ' +
+      `On a chain, the connector reply-alls everyone already on To/Cc (minus you) unless you pass --drop <addr> or --no-reply-all. Check To and Cc before sending. Do not drop the owner, staff, or the customer unless asked. ` +
+      '--no-reply-all only drops extra recipients; it still quotes this thread and still sets In-Reply-To. --new-thread is a blank new email: no quote, no In-Reply-To, no reply-all merge. Use --new-thread for gaia↔owner sidebar (other customers, personal notes, internal SKUs) and for any letter to a customer after that sidebar has been on this chain. Do not reply-all a tainted thread to a customer. Customer letter after sidebar: --new-thread --cc owner@example.com with a clean subject (not Re:/Fwd: of the sidebar). Flow: memory/ops/email-threads.md. ' +
       `Automated alert senders (noreply Microsoft/Barracuda, alerts@LogMeIn, and similar) are not people on the chain. Never include them on replies for those alerts. Real vendor employees on a support ticket stay. Staff outreach from an automated-alert turn is a blank new email (--new-thread --no-reply-all): facts in your own words, no quote of the vendor message. ` +
       `Then reply with exactly [[NO_REPLY]]. Do not type a name or signature block — "${fromName}" and the rest of the signature are appended on send. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
       (ccOnly
         ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]]. `
         : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
-      `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at @example.com (James, Tim, Joey, or Steve) says so. Do not add those staff to a thread they are not already on. ` +
+      `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at staff@example.com (the owner) says so. Do not add those staff to a thread they are not already on. ` +
       `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Google Contacts, are not strangers. ` +
-      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where and any body notes, and wait for James to confirm. First letter to others: do not say you cannot book until James confirms or that a workflow blocks you. If someone (e.g. Steve) later sends a change, repeat the corrected details; a short still-waiting-on-James is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or Ivy/TDS closer in the letter — those go on the Google event only. If James does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to James: say there is a conflict and James should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Stay on this email thread — do not also ping James on Discord about the same invite. Do not tell anyone else he is free. Remote only if James says remote (blank location). Remote description never uses Ivy's "I": one Example Co employee attending → "{FirstName} will not be on-site"; more than one → "we will not be on-site". If he says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If James clearly says Joey and/or Tim (or both) will be going and he will not: the repeat-back says he is not attending; on create pass organizer_going=false (leave his RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the guys who are going, not James's number. People James names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default; Shot Blasting Tip). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on James on the first pass). Event details and exceptions only. Full flowchart: memory/ops/calendar-schedule.md. ` +
-      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. Do not add Tim, Joey, or Steve unless they were already on To/Cc. ` +
+      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where and any body notes, and wait for the owner to confirm. First letter to others: do not say you cannot book until the owner confirms or that a workflow blocks you. If someone later sends a change, repeat the corrected details; a short still-waiting-on-owner is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or assistant/company closer in the letter — those go on the Google event only. If the owner does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to the owner: say there is a conflict and the owner should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Stay on this email thread — do not also ping the owner on Discord about the same invite. Do not tell anyone else they are free. Remote only if the owner says remote (blank location). Remote description never uses the assistant's "I": one team member attending → "{FirstName} will not be on-site"; more than one → "we will not be on-site". If the owner says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If the owner clearly says other staff will be going and they will not: the repeat-back says the owner is not attending; on create pass organizer_going=false (leave the owner's RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the people who are going, not the owner's number. People the owner names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on the owner on the first pass). Event details and exceptions only. Full flowchart: memory/ops/calendar-schedule.md. ` +
+      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. Do not add other staff unless they were already on To/Cc. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
       extra += ` This message matched ops matcher '${hit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
       if (hit.id === 'out-of-office') {
-        extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. @example.com is always silent. Customer we already emailed on an open ticket: one notice to Example Co staff only.';
+        extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. example.com is always silent. Customer we already emailed on an open ticket: one notice to the operator only.';
       }
     }
     extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags.';

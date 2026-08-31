@@ -38,7 +38,7 @@ test('speaker hints are runtime-only; thoughts mentioning them are dropped', () 
   assert.equal(mentionsSpeaker('Checking the recipe board', hints), false);
   assert.equal(discordThoughtLine('The user is Ada Lovelace (wx412) asking in #food', hints, hintKinds), '');
   assert.equal(discordThoughtLine('Let me search more thoroughly', hints, hintKinds), '-# 💭 Let me search more thoroughly');
-  assert.equal(discordThoughtLine('James asked about the recipe', hints, hintKinds), '-# 💭 James asked about the recipe');
+  assert.equal(discordThoughtLine('Morgan asked about the recipe', hints, hintKinds), '-# 💭 Morgan asked about the recipe');
 });
 
 test('thoughtBudget: xhigh uncapped; high/medium 2; below medium 0', () => {
@@ -80,14 +80,14 @@ test('human chips: start only, no paths or ACP type names', () => {
 });
 
 test('stripThoughtChrome: email/mcp drop chips and thought preamble, keep the answer', () => {
-  const leaked = "James asked how the TECHDIRECT.AI negotiation is going. That is not an ops-desk alert — I'll answer the thread directly.You did well on the first two replies.";
+  const leaked = "The user asked how the EXAMPLE.COM negotiation is going. That is not an ops-desk alert — I'll answer the thread directly.You did well on the first two replies.";
   const out = stripThoughtChrome(leaked);
   assert.equal(out.startsWith('You did well'), true, out.slice(0, 80));
   assert.equal(out.includes('ops-desk'), false);
   assert.equal(stripThoughtChrome('-# Working\n-# 💭 Checking mail\nThe SPF is fixed.'), 'The SPF is fixed.');
   assert.equal(stripThoughtChrome('You did well on the first two replies.'), 'You did well on the first two replies.');
   const q = quietReplyFromResult({
-    segments: ['James asked how the deal is going.', '**What worked**\nYou did not take $1,000.'],
+    segments: ['The user asked how the deal is going.', '**What worked**\nYou did not take $1,000.'],
     text: 'glued should not win',
   });
   assert.equal(q, '**What worked**\nYou did not take $1,000.');
@@ -101,7 +101,7 @@ test('stripThoughtChrome: glued plan+letter in one last segment survives (no nam
   assert.equal(stripThoughtChrome(glued), glued);
   assert.equal(quietReplyFromResult({ segments: [glued], text: glued }), glued);
   assert.equal(stripThoughtChrome("I'll send the invoice tomorrow."), "I'll send the invoice tomorrow.");
-  const greeted = 'James,\n\n' + letter;
+  const greeted = 'Alex,\n\n' + letter;
   assert.equal(stripThoughtChrome(greeted), greeted);
   assert.equal(stripThoughtChrome(letter), letter);
 });
@@ -209,11 +209,11 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
   }), 'Sent to ada@example.com');
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'James picked Watt as a last name.',
+    replyText: 'Alex picked Rivera as a last name.',
     leakDropped: false,
     publicSurface: true,
-    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
-    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Alex Rivera' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Alex Rivera' }]),
   }), 'response blocked due to privacy rules: no last name');
   assert.equal(pickPublicReply({
     pending: '',
@@ -246,45 +246,45 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
   assert.equal(notice.includes('ada@example.com'), false);
   assert.equal(notice.includes('Lovelace'), false);
   assert.equal(pickPublicReply({
-    pending: 'James picked it.',
+    pending: 'Alex picked it.',
     replyText: '',
     leakDropped: true,
     publicSurface: true,
-    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
-    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
-  }), 'James picked it.');
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Alex Rivera' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Alex Rivera' }]),
+  }), 'Alex picked it.');
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'Yes, Watt is the correct spelling.',
+    replyText: 'Yes, Rivera is the correct spelling.',
     leakDropped: false,
     publicSurface: true,
-    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
-    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Alex Rivera' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Alex Rivera' }]),
   }), 'response blocked due to privacy rules: no last name');
-  const wattOwner = {
-    hints: identityHintsFrom([{ id: 'owner', display_name: 'Example Owner' }]),
-    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]),
+  const grayOwner = {
+    hints: identityHintsFrom([{ id: 'owner', display_name: 'Alex Gray' }]),
+    hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Alex Gray' }]),
   };
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'Don’t get a regular 60 Watt bulb — look for A19 LED.',
+    replyText: 'Don’t get a regular 60 Gray reading — look for SI units.',
     leakDropped: false,
     publicSurface: true,
-    ...wattOwner,
-  }), 'Don’t get a regular 60 Watt bulb — look for A19 LED.');
+    ...grayOwner,
+  }), 'Don’t get a regular 60 Gray reading — look for SI units.');
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'The industry mixed base, shape, watt-equivalent, and color temp.',
+    replyText: 'The industry mixed base, shape, gray-equivalent, and color temp.',
     leakDropped: false,
     publicSurface: true,
-    ...wattOwner,
-  }), 'The industry mixed base, shape, watt-equivalent, and color temp.');
+    ...grayOwner,
+  }), 'The industry mixed base, shape, gray-equivalent, and color temp.');
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'A 50/100/150 Watt 3-way. Real watts, not equivalent.',
+    replyText: 'A 50/100/150 Gray 3-way. Real grays, not equivalent.',
     leakDropped: false,
     publicSurface: true,
-    ...wattOwner,
+    ...grayOwner,
   }).startsWith('response blocked'), false);
   const blackCard = {
     hints: identityHintsFrom([{ id: 'neighbor', display_name: 'Ada Black' }]),
@@ -318,36 +318,36 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     publicSurface: true,
     ...opts,
   }), 'response blocked due to privacy rules: no last name');
-  const allisonStaff = {
-    hints: identityHintsFrom([{ id: 'staff', display_name: 'Riley Example' }]),
-    hintKinds: identityHintKindMap([{ id: 'staff', display_name: 'Riley Example' }]),
+  const parkStaff = {
+    hints: identityHintsFrom([{ id: 'staff', display_name: 'Riley Park' }]),
+    hintKinds: identityHintKindMap([{ id: 'staff', display_name: 'Riley Park' }]),
   };
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'Pittsburgh / Example Town — tonight into Friday (EDT)',
+    replyText: 'North / Lincoln Park — tonight into Friday (EDT)',
     leakDropped: false,
     publicSurface: true,
-    ...allisonStaff,
-  }), 'Pittsburgh / Example Town — tonight into Friday (EDT)');
+    ...parkStaff,
+  }), 'North / Lincoln Park — tonight into Friday (EDT)');
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'Riley Example is on site.',
+    replyText: 'Riley Park is on site.',
     leakDropped: false,
     publicSurface: true,
-    ...allisonStaff,
+    ...parkStaff,
   }), 'response blocked due to privacy rules: no last name');
   assert.equal(pickPublicReply({
     pending: '',
-    replyText: 'Is Allison the correct spelling?',
+    replyText: 'Is Park the correct spelling?',
     leakDropped: false,
     publicSurface: true,
-    ...allisonStaff,
+    ...parkStaff,
   }), 'response blocked due to privacy rules: no last name');
-  const kinds = identityHintKindMap([{ id: 'owner', display_name: 'Example Owner' }]);
-  assert.equal(kinds.get('james'), 'first-name');
-  assert.equal(kinds.get('watt'), 'last-name');
-  assert.equal(identityHintKindMap([{ id: 'solo', display_name: 'Derek' }]).get('derek'), 'first-name');
+  const kinds = identityHintKindMap([{ id: 'owner', display_name: 'Alex Rivera' }]);
+  assert.equal(kinds.get('alex'), 'first-name');
+  assert.equal(kinds.get('rivera'), 'last-name');
+  assert.equal(identityHintKindMap([{ id: 'solo', display_name: 'Casey' }]).get('casey'), 'first-name');
   assert.equal(identityHintKindMap([{ id: 'ada', display_name: 'Ada Lovelace' }]).get('lovelace'), 'last-name');
-  assert.deepEqual(publicBlockHints(['James', 'Watt', 'wx412'], kinds).map((h) => h.toLowerCase()), ['watt']);
+  assert.deepEqual(publicBlockHints(['Alex', 'Rivera', 'wx412'], kinds).map((h) => h.toLowerCase()), ['rivera']);
 });
 

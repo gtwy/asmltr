@@ -4,6 +4,8 @@ Worktree only. Do not apply host cutover. Live product stays on `ivy` /
 ivy-local `main`. Public persona examples stay Gaia. Host identity stays
 the configured `ASSISTANT_NAME`.
 
+Public extras live in `extras/host-local` (renamed from `extras/ivy-local`). The private overlay repo is still ivy-local; do not confuse the two.
+
 ## Public product
 
 - Stop: anyone may abort a processing turn. Overlay wrapAbortRoute on

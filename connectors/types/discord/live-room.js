@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Humans in a Discord voice channel, not counting Ivy (selfUserId) and not counting bots.
+ * Humans in a Discord voice channel, not counting the assistant (selfUserId) and not counting bots.
  */
 function countHumans(channel, selfUserId) {
   if (!channel || channel.members == null) return 0;
@@ -36,13 +36,20 @@ function roomInstructions(humans) {
 }
 
 /** Spoken skip: that last turn was not for her. Session memory, not mute. */
-function wasNotForHer(text) {
+function assistantName() {
+  return String(process.env.ASSISTANT_NAME || 'gaia').trim().toLowerCase() || 'gaia';
+}
+
+function wasNotForHer(text, name) {
   const t = String(text || '').toLowerCase();
   if (!t) return false;
-  return /\b(that )?(wasn'?t|isn'?t|not) (for you|for ivy|meant for you)\b/.test(t)
+  const n = String(name != null && name !== '' ? name : assistantName()).trim().toLowerCase();
+  const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const forName = n ? `|for ${esc}` : '';
+  return new RegExp(`\\b(that )?(wasn'?t|isn'?t|not) (for you${forName}|meant for you)\\b`).test(t)
     || /\b(didn'?t|did not) (ask|mean) you\b/.test(t)
     || /\bnobody asked you\b/.test(t)
-    || /\bnot you,? ivy\b/.test(t)
+    || (n ? new RegExp(`\\bnot you,? ${esc}\\b`).test(t) : false)
     || /\bhold (on|up)\b/.test(t)
     || /\b(stop|that'?s enough)\b/.test(t);
 }

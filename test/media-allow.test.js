@@ -200,12 +200,12 @@ test('voice handleStream denies all tools; discord text is unchanged', () => {
   const voiceEnv = {
     channel: 'discord',
     public: true,
-    conversation_key: 'discord-voice:ivy:guild:99',
+    conversation_key: 'discord-voice:gaia:guild:99',
     channel_context: { voice: true, guildId: '99' },
     context: { scope_id: 'guild:99' },
   };
   assert.equal(isDiscordVoice(voiceEnv), true);
-  assert.equal(isDiscordVoice({ channel: 'discord', conversation_key: 'discord:ivy:channel:7' }), false);
+  assert.equal(isDiscordVoice({ channel: 'discord', conversation_key: 'discord:gaia:channel:7' }), false);
   const owner = policyFor(voiceEnv, { bypass_moderation: true, user_key: 'owner' });
   assert.equal(owner.deny.all, true);
   for (const k of ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost']) {
@@ -215,7 +215,7 @@ test('voice handleStream denies all tools; discord text is unchanged', () => {
 
   const text = policyFor({
     channel: 'discord', public: false,
-    conversation_key: 'discord:ivy:channel:7',
+    conversation_key: 'discord:gaia:channel:7',
     context: { scope_id: 'dm:someone' },
   }, { bypass_moderation: true });
   assert.equal(text.deny.all, undefined);

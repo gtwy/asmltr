@@ -25,7 +25,7 @@ function sameChannel(sourceId, destId) {
 }
 
 function sameGuild(sourceGuild, destGuild) {
-  // Public product: send is not fenced to one guild. Overlay wrap restores Ivy same-guild.
+  // Public product: send is not fenced to one guild. Overlay wrap restores host same-guild.
   void sourceGuild; void destGuild;
   return { ok: true };
 }
