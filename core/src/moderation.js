@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { isDiscordVoice } = require('../../shared/tool-policy');
+const { isDiscordVoice } = require('../../shared/media-allow');
 const { execFile } = require('child_process');
 let OpenAI = null;
 function loadOpenAI() { if (!OpenAI) OpenAI = require('openai'); return OpenAI; }

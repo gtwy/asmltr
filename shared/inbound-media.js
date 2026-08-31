@@ -8,7 +8,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const { mediaKind, sanitizeFilename } = require('./outbound-stage');
+const { mediaKind, sanitizeFilename } = require('./attach-stage');
 
 const MAX_IMAGE = 8 * 1024 * 1024;
 const MAX_VIDEO = 25 * 1024 * 1024;

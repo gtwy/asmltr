@@ -13,7 +13,7 @@ const path = require('path');
 const readline = require('readline');
 
 const CLI = path.join(__dirname, '..', 'cli', 'asmltr.js');
-const { parseDenyEnv } = require('../shared/tool-policy');
+const { parseDenyEnv } = require('../shared/media-allow');
 const NAME = process.env.ASSISTANT_NAME || 'asmltr';
 
 // Tool definitions → (args) => argv for `node cli/asmltr.js …`. Keep names stable + engine-agnostic.
@@ -139,7 +139,7 @@ async function invokeTool(name, args, { deny, turn } = {}) {
       const r = await voiceTools.invoke(t.name, args || {}, turn || voiceTools.turnFromEnv());
       return r;
     }
-    const { denyToolsEnv } = require('../shared/tool-policy');
+    const { denyToolsEnv } = require('../shared/media-allow');
     const r = await runCli(t.argv(args || {}), denyToolsEnv(denied));
     return { ok: !r.isError, text: r.text, isError: r.isError };
   } catch (e) {

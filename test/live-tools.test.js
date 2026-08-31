@@ -9,7 +9,7 @@ const {
 } = require('../shared/speech/live-tools');
 const { asRealtimeFunctions, buildSessionUpdate } = require('../shared/speech/converse-grok');
 const { listTools } = require('../mcp/toolbelt-server');
-const { policyFor, isDiscordVoice } = require('../shared/tool-policy');
+const { policyFor, isDiscordVoice } = require('../shared/media-allow');
 
 test('untrusted speaker → [] tools; owner gets function-type asmltr tools', () => {
   const env = textEnvelope({ instanceId: 'ivy', guildId: 'g1', channelId: 'c1', userId: '42', username: 'james' });

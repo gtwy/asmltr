@@ -199,7 +199,7 @@ Do **not** put harness flags in the connector or the dispatcher. Ingest is share
 | Discord/Telegram/… | Magic-classify stills/video, save gen-ref, put `content.attachments` (base64 stills) + `content.media_files` (paths) on the envelope | No |
 | `server.js` `runTurn` | Passes `images` + `mediaFiles` through. Extra fields are ignored by engines that don't read them | No |
 | `shared/inbound-media.js` | `classify` / `saveRef` / `promptBlock` | No |
-| `shared/outbound-stage.js` | `asmltr post` ingest/stage | No |
+| `shared/attach-stage.js` | `asmltr post` ingest/stage | No |
 | **`engines/grok.js`** | ACP JSON via `--prompt-file` (never argv `--prompt-json` — ARG_MAX / spawn E2BIG) + ffmpeg downscale. Re-magics before ffmpeg. | **Yes — Grok CLI only** |
 | **`engines/claude.js`** | SDK `{ type: 'image', source: { type: 'base64', … } }` from `images` | **Yes — Claude SDK only** |
 | Gemini / Codex | No vision serialize yet (intentional). Envelope fields are there; adapters ignore them. **This is where a Gemini or Codex implementer should program that harness's image payload** — not Grok `--prompt-file` and not Claude SDK blocks. Comments in `engines/gemini.js` and `engines/codex.js` `runTurn`. | Wire here later |

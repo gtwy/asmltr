@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const { healthPayload } = require('./health-payload');
-const { policyFor, isDiscordVoice } = require('../../shared/tool-policy');
-const { buildToolbeltPrompt } = require('../../shared/toolbelt-prompt');
+const { policyFor, isDiscordVoice } = require('../../shared/media-allow');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
 /**
@@ -348,22 +347,8 @@ async function handle(envelope, opts = {}) {
   const pExtra = e.system_prompt_extra || ''; // connector-supplied per-turn context (e.g. Discord)
   const voiceTurn = isDiscordVoice(e);
   const toolPolicy = policyFor(e, resolved);
-  let pToolbelt = '';                          // STABLE: asmltr toolbelt / silo / vault / attachments awareness
+  let pToolbelt = '';                          // Grants render through buildAuthzPrompt. No second TOOLBELT builder.
   let pUploadsInstr = '', pUploadsList = '', pAnnounce = ''; // uploads-instr = STABLE; uploads-list + announce = VOLATILE
-  // Voice handleStream: do not load toolbelt (or advertise asmltr CLI / MCP). deny.all is the core flag.
-  if (!voiceTurn && process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
-    const chTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || '<this channel id>';
-    pToolbelt = buildToolbeltPrompt({
-      deny: toolPolicy.deny,
-      meshSteer: /^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || ''),
-      selfSiloDir: SELF_SILO_DIR,
-      vaultLocked: VAULT_LOCKED,
-      attachments: !!(e.capabilities && e.capabilities.supports_attachments_out),
-      channel: e.channel,
-      chTarget,
-      bypassModeration: !!(resolved && resolved.bypass_moderation),
-    });
-  }
   // Shared upload store; the in-prompt list is THIS conversation only so a photo ID in
   // one Discord channel does not grab last night's still from another room. Other rooms
   // stay available on purpose via `asmltr uploads`. Trust-gated: owner sessions only.
@@ -2185,11 +2170,15 @@ if (require.main === module) {
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
     console.log(`idle_policy=${sessions.idlePolicyFromEnv()} assistant=${process.env.ASSISTANT_NAME || 'the assistant'} engine=${require('../../shared/engines').getDefault()}`);
     console.log('substrate: configured reasoning engine (grok = subscription CLI; no XAI_API_KEY)');
-    try {
-      const g = require('../../shared/gc-temps').run();
-      const n = g.attach + g.genRef + g.visPrompt + g.tmpLeftover;
-      if (n) console.log('temp gc: attach=' + g.attach + ' gen-ref=' + g.genRef + ' vis-prompt=' + g.visPrompt + ' tmp=' + g.tmpLeftover);
-    } catch (e) { console.log('temp gc: ' + e.message); }
+    // Public product: temp GC is opt-in (ASMLTR_GC_TEMPS=on). Directories via
+    // ASMLTR_ATTACH_STAGE / ASMLTR_GEN_REF / ASMLTR_GROK_PROMPT_DIR. Default off.
+    if (/^(1|on|true|yes)$/i.test(String(process.env.ASMLTR_GC_TEMPS || ''))) {
+      try {
+        const g = require('../../shared/gc-temps').run();
+        const n = g.attach + g.genRef + g.visPrompt + g.tmpLeftover;
+        if (n) console.log('temp gc: attach=' + g.attach + ' gen-ref=' + g.genRef + ' vis-prompt=' + g.visPrompt + ' tmp=' + g.tmpLeftover);
+      } catch (e) { console.log('temp gc: ' + e.message); }
+    }
     try {
       require('../../shared/media-log').ensureDir();
     } catch (e) { console.log('media-out mkdir: ' + e.message); }

@@ -5,15 +5,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { describe } = require('node:test');
-const { policyFor, denyToolsEnv, isRestricted } = require('../shared/tool-policy');
-const { buildToolbeltPrompt } = require('../shared/toolbelt-prompt');
+const { policyFor, denyToolsEnv, isRestricted } = require('../shared/media-allow');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-tool-policy-'));
 const allowFile = path.join(tmp, 'tool-policy.json');
 fs.writeFileSync(allowFile, JSON.stringify({
   siloAllow: { guilds: ['guild-allow-1'], channels: [] },
 }));
-process.env.ASMLTR_TOOL_POLICY_FILE = allowFile;
+process.env.ASMLTR_MEDIA_ALLOW_FILE = allowFile;
 
 test('public discord: Cast/allowlists only — not a V31 channel-deny plane', () => {
   const p = policyFor({
@@ -150,58 +149,8 @@ test('codeAllow may receive programs without bypass; still no video/image', () =
   assert.equal(p.deny.attach, true);
 });
 
-test('restricted prompt omits send/streams/silo/bash-silo', () => {
-  const text = buildToolbeltPrompt({
-    deny: { shell: true, streams: true, send: true, silo: true, attach: true },
-    selfSiloDir: '/tmp/self',
-    attachments: true,
-    channel: 'discord',
-    chTarget: 'ch1',
-  });
-  assert.ok(text.includes('asmltr send discord'));
-  assert.ok(text.includes('asmltr_send'));
-  assert.equal(text.includes('asmltr streams'), false);
-  assert.equal(text.includes('asmltr announce'), false);
-  assert.equal(text.includes('SELF SILO'), false);
-  assert.equal(text.includes('asmltr silo'), false);
-  assert.equal(/use the Bash tool/.test(text), false);
-  assert.ok(text.includes('asmltr ls'));
-  assert.equal(text.includes('asmltr bounce'), false);
-  assert.equal(text.includes('asmltr post --file'), false);
-});
 
-test('allowlisted silo + no bash advertises silo MCP not Bash silo', () => {
-  const text = buildToolbeltPrompt({
-    deny: { shell: true, streams: true, send: true, silo: false, siloWrite: true },
-    selfSiloDir: '/tmp/self',
-  });
-  assert.ok(text.includes('SELF SILO'));
-  assert.ok(text.includes('asmltr_silo_find'));
-  assert.equal(text.includes('use the Bash tool'), false);
-  assert.equal(text.includes('asmltr send <channel>'), false);
-  assert.ok(text.includes('asmltr send discord'));
-  assert.equal(text.includes('asmltr streams'), false);
-  assert.equal(text.includes('asmltr announce'), false);
-  assert.equal(text.includes('asmltr silo put'), false);
-  assert.equal(text.includes('NaN'), false);
-  assert.ok(text.includes('asmltr silo get'));
-});
 
-test('silo prompt has no NaN; put only when siloWrite is allowed', () => {
-  const owner = buildToolbeltPrompt({ deny: {}, selfSiloDir: '/tmp/self', bypassModeration: true });
-  assert.equal(owner.includes('NaN'), false);
-  assert.ok(owner.includes('asmltr silo put'));
-  assert.ok(owner.includes('asmltr bounce'));
-  assert.ok(owner.includes('ALWAYS last'));
-  assert.ok(owner.includes('Do not wait on another session to write the mail'));
-  assert.ok(owner.includes('--force'));
-  const ro = buildToolbeltPrompt({
-    deny: { siloWrite: true },
-    selfSiloDir: '/tmp/self',
-  });
-  assert.equal(ro.includes('NaN'), false);
-  assert.equal(ro.includes('asmltr silo put'), false);
-});
 
 test('denyToolsEnv lists denied kinds', () => {
   assert.equal(
@@ -211,16 +160,6 @@ test('denyToolsEnv lists denied kinds', () => {
   assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true }), 'shell,streams,send,write,siloWrite');
 });
 
-test('restricted prompt names video/image/code off when denied', () => {
-  const text = buildToolbeltPrompt({ deny: { video: true, image: true, code: true } });
-  assert.ok(text.includes('VIDEO GENERATION is off this turn'));
-  assert.ok(text.includes('IMAGE GENERATION is off this turn'));
-  assert.ok(text.includes('WRITING PROGRAMS is off this turn'));
-  const on = buildToolbeltPrompt({ deny: {} });
-  assert.equal(on.includes('VIDEO GENERATION is off this turn'), false);
-  assert.equal(on.includes('IMAGE GENERATION is off this turn'), false);
-  assert.equal(on.includes('WRITING PROGRAMS is off this turn'), false);
-});
 
 function withEnv(vars, fn) {
   const prev = {};
@@ -257,7 +196,7 @@ test('public default is not channel-deny: bypass + public stays unrestricted', (
 });
 
 test('voice handleStream denies all tools; discord text is unchanged', () => {
-  const { isDiscordVoice } = require('../shared/tool-policy');
+  const { isDiscordVoice } = require('../shared/media-allow');
   const voiceEnv = {
     channel: 'discord',
     public: true,

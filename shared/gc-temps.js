@@ -1,7 +1,9 @@
 'use strict';
 /**
- * Bounce + weekly GC for asmltr temp dirs (attach-stage, gen-ref, vis-prompt).
- * Default age 24h — same as core listen. Prefix-guarded; never walks $HOME.
+ * Opt-in GC for asmltr temp dirs (attach-stage, gen-ref, vis-prompt).
+ * Core listen runs this only when ASMLTR_GC_TEMPS is on (public default off).
+ * Directories: ASMLTR_ATTACH_STAGE, ASMLTR_GEN_REF, ASMLTR_GROK_PROMPT_DIR.
+ * Prefix-guarded; never walks $HOME.
  */
 const fs = require('fs');
 const os = require('os');
@@ -53,7 +55,7 @@ function run(maxAgeMs) {
   const age = maxAgeMs == null ? DAY_MS : Number(maxAgeMs);
   const out = { attach: 0, genRef: 0, visPrompt: 0, tmpLeftover: 0 };
   try {
-    const r = require('./outbound-stage').gc(age);
+    const r = require('./attach-stage').gc(age);
     out.attach = (r.removed || []).length;
   } catch (_) {}
   try {

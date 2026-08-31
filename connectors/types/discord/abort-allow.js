@@ -1,6 +1,6 @@
 'use strict';
 
-/** Public: anyone may abort an in-flight turn (humans always win). Host overlay wraps to starter-or-owner. */
+/** Public: anyone may abort an in-flight turn (humans always win). Host overlay wraps core /v2/abort. */
 function canAbortTurn(_opts) {
   return true;
 }
@@ -11,8 +11,3 @@ function starterIdFromSlot(slot) {
 }
 
 module.exports = { canAbortTurn, starterIdFromSlot };
-
-try {
-  const ov = require('../../../shared/load-host-overlay').load('stop-starter-or-owner');
-  if (ov && typeof ov.wrapAbortAllow === 'function') ov.wrapAbortAllow(module.exports);
-} catch (_) {}

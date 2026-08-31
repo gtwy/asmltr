@@ -3,6 +3,7 @@
  * Stage files for THIS-channel attach without Bash.
  * Post only files already in attach-stage (or generator output ingested into it).
  * Delete only after a confirmed post. Bounce GC > 1 day.
+ * Path deny-list (ssh/vault/env/silos) is host overlay, not this file.
  */
 const fs = require('fs');
 const path = require('path');

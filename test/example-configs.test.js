@@ -17,7 +17,7 @@ test('example configs exist, parse, and have no personal identifiers', () => {
     'env.gaia.example',
     'core/src/trust/seed.example.json',
     'core/src/trust/seed.gaia.example.json',
-    'shared/tool-policy.example.json',
+    'shared/media-allow.example.json',
   ];
   for (const rel of files) {
     const body = read(rel);
@@ -33,13 +33,13 @@ test('example configs exist, parse, and have no personal identifiers', () => {
   assert.ok(gaiaFriend);
   assert.equal(gaiaFriend.default_tier, 3);
   assert.equal(gaiaFriend.identifiers.length, 0);
-  const policy = JSON.parse(read('shared/tool-policy.example.json'));
+  const policy = JSON.parse(read('shared/media-allow.example.json'));
   assert.deepEqual(policy.photoAllow.principals, ['friend']);
   assert.deepEqual(policy.videoAllow.principals, []);
   assert.deepEqual(policy.photoAllow.discordIds, []);
   const envEx = read('.env.example');
   assert.match(envEx, /ASMLTR_IMAGE_GEN_CLASSIFY/);
-  assert.match(envEx, /ASMLTR_TOOL_POLICY_FILE/);
+  assert.match(envEx, /ASMLTR_MEDIA_ALLOW_FILE/);
   assert.match(envEx, /docs\/security\/moderation\.md/);
   const gaiaEnv = read('env.gaia.example');
   assert.match(gaiaEnv, /ASMLTR_IMAGE_GEN_CLASSIFY/);

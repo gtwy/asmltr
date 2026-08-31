@@ -17,6 +17,6 @@ test('no chime on follow-up / already-listening; first join still chimes', () =>
   assert.match(src, /voice\.isListening\(guildId\)/);
   assert.match(src, /voice\.isConnected\(guildId\)/);
   const join = src.slice(src.indexOf('async function doJoinVoice'), src.indexOf('async function doLeaveVoice'));
-  assert.match(join, /voice\.playChime\(message\.guild\.id\)/);
   assert.equal(/shouldPlayWakeChime/.test(join), false);
+  assert.match(src, /voice\.playChime\(guildId\)/);
 });

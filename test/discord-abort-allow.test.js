@@ -3,8 +3,6 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-process.env.ASMLTR_OVERLAY_DIR = path.join(os.tmpdir(), 'no-asmltr-overlay-' + process.pid);
 const { canAbortTurn, starterIdFromSlot } = require('../connectors/types/discord/abort-allow');
 
 test('public: anyone can abort a processing turn (humans always win)', () => {
@@ -20,17 +18,17 @@ test('starterIdFromSlot still reads the processing slot', () => {
   assert.equal(starterIdFromSlot({ starterId: '111' }), '111');
 });
 
-test('discord stop is not in OWNER_ONLY_CMDS; processing stores starterId; overlay hook present', () => {
+test('discord stop is not in OWNER_ONLY_CMDS; processing stores starterId; no overlay require', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   assert.match(src, /abortAllow\.canAbortTurn/);
   assert.match(src, /starterId:/);
   assert.match(src, /humans always win/);
   const abortSrc = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/abort-allow.js'), 'utf8');
-  assert.match(abortSrc, /load-host-overlay/);
-  assert.match(abortSrc, /stop-starter-or-owner/);
+  assert.equal(abortSrc.includes('load-host-overlay'), false);
+  assert.equal(abortSrc.includes('wrapAbortAllow'), false);
   const block = src.match(/const OWNER_ONLY_CMDS = new Set\((\[[\s\S]*?\])\)/);
   assert.ok(block);
-  assert.equal(/['\"]stop['\"]/.test(block[1]), false);
+  assert.equal(/['"]stop['"]/.test(block[1]), false);
 });
 
 test('send voice stream inject register abortTarget; stop passes identities; not owner-only', () => {
@@ -38,7 +36,7 @@ test('send voice stream inject register abortTarget; stop passes identities; not
   assert.match(src, /function abortTarget\(/);
   const sendSlice = src.slice(src.indexOf("app.post('/out'"), src.indexOf("app.post('/out'") + 3500);
   assert.match(sendSlice, /abortTarget\(/);
-  assert.match(src, /loadOutboundStage/);
+  assert.match(src, /attach-stage/);
   const voiceSlice = src.slice(src.indexOf('voiceBusy.add(guildId)'), src.indexOf('voiceBusy.add(guildId)') + 400);
   assert.match(voiceSlice, /abortTarget\(/);
   assert.match(src, /abortTarget\(cid, message\.author\.id, 'stream'\)/);

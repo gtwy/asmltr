@@ -7,9 +7,9 @@
  * Native xAI web_search / x_search / mcp are never advertised — those skip asmltr TRUST.
  *
  * Execution uses the existing toolbelt invoke path (CLI / voice HTTP) gated by
- * tool-policy for a Discord TEXT principal (NOT the handleStream voice deny-all).
+ * media-allow for a Discord TEXT principal (NOT the handleStream voice deny-all).
  */
-const { policyFor, grantTokens } = require('../tool-policy');
+const { policyFor, grantTokens } = require('../media-allow');
 const converseGrok = require('./converse-grok');
 
 function toolbelt() {

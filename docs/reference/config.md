@@ -100,11 +100,11 @@ The classifier resolves its key **by name** through the secret provider (never
 
 ## Tool policy (stills / video / code)
 
-Not env-driven except the path. Copy `shared/tool-policy.example.json` to `~/.asmltr/tool-policy.json` and list **trust principal ids** (and optionally Discord user ids) locally — never real ids in git.
+Not env-driven except the path. Copy `shared/media-allow.example.json` to `~/.asmltr/media-allow.json` and list **trust principal ids** (and optionally Discord user ids) locally — never real ids in git.
 
 | Variable | Default | What |
 |---|---|---|
-| `ASMLTR_TOOL_POLICY_FILE` | `~/.asmltr/tool-policy.json` | Example allowlists: `photoAllow` / `imageAllow` (format only; not a public stills gate), `videoAllow` (clips **and** stills), `mediaAllow` (both), `codeAllow` (write-a-program). Empty = owner/bypass only. Same-guild Discord post is **not** this file — it is trusted role or `resolve()` allow. |
+| `ASMLTR_MEDIA_ALLOW_FILE` | `~/.asmltr/media-allow.json` | Example allowlists: `photoAllow` / `imageAllow` (format only; not a public stills gate), `videoAllow` (clips **and** stills), `mediaAllow` (both), `codeAllow` (write-a-program). Empty = owner/bypass only. Same-guild Discord post is **not** this file — it is trusted role or `resolve()` allow. |
 
 ## Admin / security alerts
 

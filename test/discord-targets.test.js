@@ -4,9 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-process.env.ASMLTR_OVERLAY_DIR = path.join(os.tmpdir(), 'no-asmltr-overlay-' + process.pid);
-const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/guild-post');
-const { policyFor } = require('../shared/tool-policy');
+const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/discord-targets');
+const { policyFor } = require('../shared/media-allow');
 
 test('public preface prefixes when id present; overlay requires id', () => {
   const r = prefaceOnBehalf('100000000000000001', '1½ inch addendum');

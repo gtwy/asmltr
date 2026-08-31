@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const grok = require('../core/src/engines/grok');
-const { policyFor, denyToolsEnv, parseDenyEnv, exitIfDenied } = require('../shared/tool-policy');
+const { policyFor, denyToolsEnv, parseDenyEnv, exitIfDenied } = require('../shared/media-allow');
 
 const voiceKey = 'discord-voice:ivy:guild:1';
 

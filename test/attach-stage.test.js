@@ -8,7 +8,7 @@ const path = require('path');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-stage-'));
 const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-outside-'));
 process.env.ASMLTR_ATTACH_STAGE = tmp;
-const stage = require('../shared/outbound-stage');
+const stage = require('../shared/attach-stage');
 
 const PNG = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

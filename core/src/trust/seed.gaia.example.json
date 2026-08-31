@@ -1,5 +1,5 @@
 {
-  "_comment": "Example seed. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner`. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No real Discord snowflakes, names, or emails in git. default_tier is a schema field, not the send gate. Same-guild Discord post is trusted role or resolve() allow; add a discord identifier locally before they can match. Stills/video/code example allowlists live in shared/tool-policy.example.json, not here.",
+  "_comment": "Example seed. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner`. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No real Discord snowflakes, names, or emails in git. default_tier is a schema field, not the send gate. Same-guild Discord post is trusted role or resolve() allow; add a discord identifier locally before they can match. Stills/video/code example allowlists live in shared/media-allow.example.json, not here.",
   "roles": [],
   "principals": [
     {

@@ -31,7 +31,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const engines = require('../../../shared/engines');
-const { isDiscordVoice } = require('../../../shared/tool-policy');
+const { isDiscordVoice } = require('../../../shared/media-allow');
 const { composePrompt } = require('../../../shared/prompt-compose');
 const gcTemps = require('../../../shared/gc-temps');
 const { buildImageGenClassifyPrompt, parseImageGenVerdict, hasStillThisTurn, pictureIntentClassifyText, shouldClassifyPictureIntent } = require('../../../shared/image-gen-ask');
@@ -800,7 +800,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   // Do not consume ~/.asmltr/next-effort on email/mcp/voice — those channels force their effort.
   const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel) || voiceTurn) ? null : takeNextEffort(conversationKey);
   const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, conversationKey, channel_context, voice };
-  const { denyToolsEnv } = require('../../../shared/tool-policy');
+  const { denyToolsEnv } = require('../../../shared/media-allow');
   const deny = denyTools || {};
   const denyAll = !!deny.all || voiceTurn;
   let classified = classifyEffort(effortOpts);

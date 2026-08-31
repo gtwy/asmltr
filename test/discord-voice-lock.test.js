@@ -14,8 +14,8 @@ test('no follow-up chime when already listening; join-once chime stays', () => {
   assert.match(discord, /voice\.isListening\(guildId\)/);
   assert.match(discord, /voice\.isConnected\(guildId\)/);
   const join = discord.slice(discord.indexOf('async function doJoinVoice'), discord.indexOf('async function doLeaveVoice'));
-  assert.match(join, /voice\.playChime\(message\.guild\.id\)/);
   assert.equal(/shouldPlayWakeChime/.test(join), false);
+  assert.match(discord, /voice\.playChime\(guildId\)/);
 });
 
 test('voice handleStream skips toolbelt; denyAll empties tools before grok spawn', () => {
@@ -24,7 +24,8 @@ test('voice handleStream skips toolbelt; denyAll empties tools before grok spawn
   assert.match(discord, /Do not use tools/);
   assert.equal(discord.includes('You may use tools if truly needed'), false);
   assert.match(server, /const voiceTurn = isDiscordVoice\(e\)/);
-  assert.match(server, /if \(!voiceTurn && process\.env\.ASMLTR_SELF_AWARE/);
+  assert.equal(server.includes('buildToolbeltPrompt'), false);
+  assert.match(server, /buildAuthzPrompt/);
   assert.match(server, /denyTools: toolPolicy\.deny/);
   assert.match(grok, /const denyAll = !!opts\.denyAll \|\| isDiscordVoice\(opts\)/);
   assert.match(grok, /args\.push\('--tools', ''\)/);

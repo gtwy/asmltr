@@ -91,7 +91,7 @@ Add teammates as additional principals (optionally with a limited `role_id`). An
 
 ```bash
 mkdir -p ~/.asmltr
-cp shared/tool-policy.example.json ~/.asmltr/tool-policy.json   # edit locally; no real ids in git
+cp shared/media-allow.example.json ~/.asmltr/media-allow.json   # edit locally; no real ids in git
 ```
 
 ## 4. Start the host services

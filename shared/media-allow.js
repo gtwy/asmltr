@@ -1,16 +1,20 @@
 'use strict';
 /**
  * Media/code allowlists + deny-env helpers. Not a capability plane — Cast grants are.
- * Host overlays wrap isRestricted / policyFor for V31 (public Discord even owner;
- * non-owner Discord DMs no-shell). Video/code/silo lists stay here under this boring name.
+ * Host overlays wrap policyFor for V31. Video/code/silo lists live here.
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 function policyFile() {
-  return process.env.ASMLTR_TOOL_POLICY_FILE
-    || path.join(os.homedir(), '.asmltr', 'tool-policy.json');
+  const env = String(process.env.ASMLTR_MEDIA_ALLOW_FILE || process.env.ASMLTR_MEDIA_ALLOW_FILE || '').trim();
+  if (env) return env;
+  const home = path.join(os.homedir(), '.asmltr');
+  const neu = path.join(home, 'media-allow.json');
+  const old = path.join(home, 'tool-policy.json');
+  try { if (fs.existsSync(neu)) return neu; } catch (_) {}
+  return old;
 }
 
 function loadAllowlist(file) {

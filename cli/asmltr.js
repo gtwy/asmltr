@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 try { require('../shared/loadenv'); } catch (_) {}
-const { exitIfDenied } = require('../shared/tool-policy');
+const { exitIfDenied } = require('../shared/media-allow');
 /**
  * asmltr — terminal client + TUI (plan §B9).
  *
@@ -250,7 +250,7 @@ async function cmdRelease(key) {
 
 async function deliverSameGuildPost({ target, text, title, replyTo }) {
   exitIfDenied('guildPost');
-  const gp = require('../shared/guild-post');
+  const gp = require('../shared/discord-targets');
   const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
   const on_behalf_of = process.env.ASMLTR_ATTACH_SENDER || '';
   const here = process.env.ASMLTR_ATTACH_TARGET || '';
@@ -401,7 +401,7 @@ async function deliverFile(channel, target, filePath, caption) {
 function attachHere() {
   const channel = process.env.ASMLTR_ATTACH_CHANNEL;
   const target = process.env.ASMLTR_ATTACH_TARGET;
-  const sendDenied = require('../shared/tool-policy').parseDenyEnv(process.env.ASMLTR_DENY_TOOLS).send;
+  const sendDenied = require('../shared/media-allow').parseDenyEnv(process.env.ASMLTR_DENY_TOOLS).send;
   return { channel, target, sendDenied };
 }
 
@@ -411,7 +411,7 @@ async function postStaged(rec, channel, target, caption) {
     console.log(A.red('post failed: ' + (r.error || JSON.stringify(r)) + ' — staged as ' + rec.name + ' (asmltr post retry ' + rec.name + ')'));
     return 1;
   }
-  const stage = require('../shared/outbound-stage');
+  const stage = require('../shared/attach-stage');
   stage.markPosted(rec.name, { messageId: r.messageId || r.message_id || null, channel, target });
   try {
     require('../shared/media-log').appendPosted({
@@ -431,7 +431,7 @@ async function cmdPost(rest) {
   exitIfDenied('attach');
   const fs = require('fs');
   const path = require('path');
-  const stage = require('../shared/outbound-stage');
+  const stage = require('../shared/attach-stage');
   const verb = rest[0];
   if (verb === 'list') {
     const rows = stage.listUnposted();

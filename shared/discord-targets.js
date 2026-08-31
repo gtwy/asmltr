@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Public Discord send helpers: fuzzy name→channel resolver + channel-type checks.
+ * Public Discord name→channel helpers used by asmltr send.
  * Confirm / on-behalf-of / same-guild fence live in the host overlay.
  * Mute/disable is inbound only. Forum: thread comments; forum channel = new post.
  */
@@ -116,7 +116,3 @@ module.exports = {
   looksLikeSnowflake, normName, matchScore, rankTargets,
 };
 
-try {
-  const ov = require('./load-host-overlay').load('guild-post-fence');
-  if (ov && typeof ov.wrapGuildPost === 'function') ov.wrapGuildPost(module.exports);
-} catch (_) {}

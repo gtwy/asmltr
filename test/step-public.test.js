@@ -140,7 +140,9 @@ test('Discord never renderSteps raw thought text', () => {
   assert.match(src, /meta && meta.imageGen/);
   assert.match(src, /thoughtBudget\(effort, \{ imageGen: quietImageGen \}\)/);
   assert.match(src, /pickPublicReply/);
-  assert.match(src, /identityHintsFrom/);
+  assert.equal(src.includes('identityHintsFrom'), false);
+  assert.equal(src.includes('loadIdentityHints'), false);
+  assert.match(src, /speakerHintsFrom/);
   assert.match(src, /publicBlockHints/);
   assert.match(src, /mergeSpeakerLastNames/);
   assert.match(src, /leakDropped/);

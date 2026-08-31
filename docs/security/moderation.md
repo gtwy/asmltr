@@ -124,7 +124,7 @@ A **separate** YES/NO call (`classifyRaw` in `core/src/moderation.js`) runs **be
 - **YES** → Discord/Telegram raise that turn to `xhigh` (web/email/MCP keep their own effort; email/MCP skip classify).
 - **Missing `openai_api_key`:** log once, classify stays OFF, `image_gen` tools still work.
 - **Kill switch:** `ASMLTR_IMAGE_GEN_CLASSIFY=off` (also `0` / `false` / `no`).
-- Who may actually **call** `image_gen` on the public path is owner/bypass or `videoAllow`. `photoAllow` / `imageAllow` in the example file are format only (not a public stills gate). Host overlays may honor photo grants. See `shared/tool-policy.example.json`.
+- Who may actually **call** `image_gen` on the public path is owner/bypass or `videoAllow`. `photoAllow` / `imageAllow` in the example file are format only (not a public stills gate). Host overlays may honor photo grants. See `shared/media-allow.example.json`.
 
 ### Examples
 

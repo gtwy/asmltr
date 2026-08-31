@@ -109,7 +109,7 @@ Seed file shape (`seed.example.json`):
 }
 ```
 
-Same-guild Discord post is `asmltr send discord` (alias `asmltr guild-post`): trusted role or `resolve()` allow (`guild-post` / `send` / `*`). Not other servers, not DMs/email. Owner (`bypass_moderation`) always can. `default_tier` is a schema field, not the send gate. Discord ids in the example are placeholders — replace locally; never commit real snowflakes. Stills/video/code example allowlists are `shared/tool-policy.example.json` (copy locally).
+Same-guild Discord post is `asmltr send discord` (alias `asmltr guild-post`): trusted role or `resolve()` allow (`guild-post` / `send` / `*`). Not other servers, not DMs/email. Owner (`bypass_moderation`) always can. `default_tier` is a schema field, not the send gate. Discord ids in the example are placeholders — replace locally; never commit real snowflakes. Stills/video/code example allowlists are `shared/media-allow.example.json` (copy locally).
 
 !!! note "Identifier surfaces"
     `surface` is the connector channel (`discord`, `telegram`, `mcp`, `github`) or `apikey`;

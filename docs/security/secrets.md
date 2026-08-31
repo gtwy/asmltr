@@ -52,7 +52,7 @@ These files carry secrets or personal identifiers. They are **gitignored**; comm
 | `connectors/types/openai/keys.json` | `keys.example.json` | Bearer API keys → trust identities for the OpenAI-compatible connector. |
 | `core/src/trust/seed.json` | `seed.example.json` | Trust store seed (principals, identifiers, grants). |
 | `connectors/types/discord/channel-aliases.json` | `channel-aliases.example.json` | Real Discord channel ids ↔ aliases (e.g. `alerts`). |
-| `~/.asmltr/tool-policy.json` | `shared/tool-policy.example.json` | Per-principal stills/video/code allowlists (`photoAllow`, `videoAllow`, `codeAllow`). Live file is under the home dir, not the repo. |
+| `~/.asmltr/media-allow.json` | `shared/media-allow.example.json` | Per-principal stills/video/code allowlists (`photoAllow`, `videoAllow`, `codeAllow`). Live file is under the home dir, not the repo. |
 
 Local data stores (SQLite DBs under `*/data/`, `*.db`, JSONL event logs), the dashboard
 `dist/`, and per-install notes (`CLAUDE.local.md`) are also gitignored.

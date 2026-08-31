@@ -2,7 +2,7 @@
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
-const { loadOutboundStage } = require('../../shared/load-outbound-stage');
+const attachStage = require('../../shared/attach-stage');
 const { bearerEqual } = require('../../shared/bearer-equal');
 const { connectorAuthHeaders } = require('../../shared/connector-http-auth');
 /**
@@ -201,7 +201,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
     return { ok: false, status: 400, error: `type '${inst.type}' does not support outbound file attachments` };
   }
   if (filePath) {
-    const stage = loadOutboundStage();
+    const stage = attachStage;
     if (typeof stage.outboundFileAllowed === 'function' && !stage.outboundFileAllowed(filePath)) {
       return { ok: false, status: 403, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' };
     }

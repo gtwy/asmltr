@@ -251,7 +251,7 @@ cp .env.example .env                 # then edit: ASSISTANT_NAME, secrets, ports
 # 3. Seed the trust store (DEFAULT-DENY — nobody has access until seeded)
 cp core/src/trust/seed.example.json core/src/trust/seed.json   # add yourself as owner; grant trusted/send to posters
 node core/src/trust/seed.js
-mkdir -p ~/.asmltr && cp shared/tool-policy.example.json ~/.asmltr/tool-policy.json  # stills/video/code locally
+mkdir -p ~/.asmltr && cp shared/media-allow.example.json ~/.asmltr/media-allow.json  # stills/video/code locally
 
 # 4. Start the host services
 pm2 start core/ecosystem.config.js

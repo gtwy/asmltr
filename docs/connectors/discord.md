@@ -192,7 +192,7 @@ servers). Same-server posting uses the same verb:
 | Body | Prefixed `Posting on behalf of <@asker>` then two blank lines. No thought chips on the remote post. |
 | After a real post | Ask channel gets `Post complete.` — then `[[NO_REPLY]]`. |
 
-Recommended seed + allowlist (placeholders only): `core/src/trust/seed.example.json` (example `friend` principal) and `shared/tool-policy.example.json`.
+Recommended seed + allowlist (placeholders only): `core/src/trust/seed.example.json` (example `friend` principal) and `shared/media-allow.example.json`.
 
 ---
 

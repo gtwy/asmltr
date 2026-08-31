@@ -13,7 +13,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Changed
 - **Email signature image.** After `AI Assistant to …`, two blank lines, then a markdown image, then the Example Co pitch with no extra blank. HTML is 96×96, block, flush above the pitch. `cid:ivy-sig` is mailed inline (`signature_image` path); https images still render. javascript: image URLs are dropped. Inbound quote sanitizer still strips quoted `cid:` so we do not replay someone else's inline parts.
-- **Same-guild Discord post is `asmltr send`.** Confirm-first name lookup, on-behalf-of preface, and fuzzy channel match stay. Capability is trusted role or `resolve()` allow (`guild-post` / `send` / `*`). `asmltr guild-post` / MCP `asmltr_guild_post` remain aliases. Discord/Telegram `/out` and manager `/send` load a host overlay outbound-stage wrap when present (`ASMLTR_OUTBOUND_STAGE` or `~/.asmltr/ivy-local/overlay/outbound-stage.js`) and fall back to `shared/outbound-stage`.
+- **Same-guild Discord post is `asmltr send`.** Confirm-first name lookup, on-behalf-of preface, and fuzzy channel match stay. Capability is trusted role or `resolve()` allow (`guild-post` / `send` / `*`). `asmltr guild-post` / MCP `asmltr_guild_post` remain aliases. Discord/Telegram `/out` and manager `/send` use public attach-stage. Host path deny-list stays overlay `hostGate` on core `/v2/send`.
 - **Stop actually halts send/voice/stream/inject.** Those paths register a processing abort target. Starter may abort their turn (not owner-only). SDK `/v2/abort` can pass speaker/starter/owner so a host overlay can fail-closed.
 
 ### Removed
@@ -27,7 +27,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 - **Email signature pitch** (Ivy): extra blank before the name; name and `AI Assistant to …` on adjacent lines; two blanks; then `[Example Co](https://example.com) can build an AI assistant like this for your team.` HTML keeps consecutive blank source lines (`&nbsp;` paragraphs) so Gmail does not collapse `\n\n\n` to one gap.
 
 ### Added
-- **Example configs for gaia exceptions (no PII):** `shared/tool-policy.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.gaia.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_TOOL_POLICY_FILE` in `.env.example` / `env.gaia.example`.
+- **Example configs for gaia exceptions (no PII):** `shared/media-allow.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.gaia.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_MEDIA_ALLOW_FILE` in `.env.example` / `env.gaia.example`.
 - **`asmltr guild-post` name lookup** also indexes threads on regular text/announcement channels (not only forums) and media channels.
 - **`asmltr bounce`:** queue a core+manager+collector restart until the current turn ends (then a short delay so Discord/email can post the reply). Inline `systemctl`/`pm2` restarts of the asmltr stack from a live turn are rewritten to the same queue. `--now` is refused inside a turn.
 

@@ -36,7 +36,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
-const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { splitResponse } = require('../../../shared/discord-split');
 const abortAllow = require('./abort-allow');
@@ -138,15 +138,10 @@ const RELEVANT_TOPICS = ['consciousness','ai','artificial intelligence','machine
 
 async function start(ctx) {
   const cfg = ctx.config;
-  let hostPin = {};
-  try {
-    const ov = require('../../../shared/load-host-overlay').load('host-settings');
-    if (ov && typeof ov.loadSpec === 'function') hostPin = ov.loadSpec() || {};
-  } catch (_) {}
-  const piiGate = String(hostPin.pii_gate || cfg.pii_gate || 'off');
-  const wholeReplyDrop = hostPin.whole_reply_drop != null ? !!hostPin.whole_reply_drop : !!cfg.whole_reply_drop;
-  const attachmentsMode = String(hostPin.attachments || cfg.attachments || 'all_files');
-  const thoughtChips = String(hostPin.thought_chips || cfg.thought_chips || (cfg.stream_steps === false ? 'off' : (cfg.stream_steps ? 'smart' : 'off')));
+  const piiGate = String(cfg.pii_gate || 'off');
+  const wholeReplyDrop = !!cfg.whole_reply_drop;
+  const attachmentsMode = String(cfg.attachments || 'all_files');
+  const thoughtChips = String(cfg.thought_chips || (cfg.stream_steps === false ? 'off' : (cfg.stream_steps ? 'smart' : 'off')));
   // Bots are ignored unless their username matches the allowlist — OR engage-all-bots
   // mode is on (a runtime toggle for multi-agent group chats; see the mention commands).
   const allowedBotNames = (cfg.allowed_bot_names || []).map((s) => String(s).toLowerCase());
@@ -188,23 +183,6 @@ async function start(ctx) {
   let lastResponseTime = 0;
   const responseCount = new Map();
   const recentReplies = new Map(); // cid -> last few reply texts (dedup verbatim repeats)
-  // Access principal ids / names / mailboxes for public 💭 + reply drop. Runtime, not a git denylist.
-  let identityHints = [];
-  let identityHintKinds = new Map();
-  let identityHintsAt = 0;
-  async function loadIdentityHints() {
-    // Connector is I/O. Do not poll trust principals to re-derive policy.
-    // PII sanitizer only, and only when the host pin / setting asks for trust_store.
-    if (piiGate !== 'trust_store') return [];
-    if (Date.now() - identityHintsAt < 60 * 1000) return identityHints;
-    try {
-      const list = ctx.core.trustPrincipals ? await ctx.core.trustPrincipals() : [];
-      identityHints = identityHintsFrom(list || []);
-      identityHintKinds = identityHintKindMap(list || []);
-    } catch (e) { ctx.log('identity hints failed: ' + e.message); }
-    identityHintsAt = Date.now();
-    return identityHints;
-  }
   // persisted per-instance settings: per-channel enable/disable + engage-all-bots toggle.
   // channelStates holds EXPLICIT per-channel overrides (cid -> bool); channelsDefault decides
   // any channel without an override. default=true → "listen everywhere except disabled" (blocklist);
@@ -403,7 +381,7 @@ async function start(ctx) {
       case 'stop': case 'cancel': case 'abort': case 'halt': {
         // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
         // joined from this channel (#138). Public: anyone may stop a processing turn (humans always win).
-        // Overlay wrap of abort-allow + /v2/abort keeps Ivy starter-or-owner. Do not put stop in OWNER_ONLY_CMDS.
+        // Public anyone-can-stop. Overlay wrapAbortRoute on core /v2/abort keeps Ivy starter-or-owner. Do not put stop in OWNER_ONLY_CMDS.
         // Session survives; next message continues it.
         const slot = processing.get(cid);
         const gid = message.guild?.id;
@@ -646,8 +624,8 @@ ${referentPromptBlock()}`;
       let replyText = '';
       let leakDropped = false;
       let actions = [];
-      const hints = [...new Set([...speakerHintsFrom(message.author, message.member), ...(await loadIdentityHints())])];
-      const hintKinds = mergeSpeakerLastNames(identityHintKinds, message.author, message.member);
+      const hints = speakerHintsFrom(message.author, message.member);
+      const hintKinds = mergeSpeakerLastNames(new Map(), message.author, message.member);
       const blockHints = publicBlockHints(hints, hintKinds);
       if (streamSteps && addressed) {
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
@@ -1991,7 +1969,7 @@ ${referentPromptBlock()}`;
       const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
       if (kind === 'guild_resolve') {
         // Mute/disable is inbound only. Name lookup includes muted channels/threads.
-        const gp = require('../../../shared/guild-post');
+        const gp = require('../../../shared/discord-targets');
         const q = String(query || tg || '').trim();
         if (!source_guild) return res.status(400).json({ ok: false, error: 'source guild required' });
         if (!q) return res.status(400).json({ ok: false, error: 'query required' });
@@ -2007,7 +1985,7 @@ ${referentPromptBlock()}`;
       }
       if (kind === 'guild_post') {
         // Mute/disable is inbound only. Cross-post into a muted channel/thread is allowed.
-        const gp = require('../../../shared/guild-post');
+        const gp = require('../../../shared/discord-targets');
         if (gp.sameChannel(source_channel, channel.id) || gp.sameChannel(source_channel, resolveChannel(tg))) {
           return res.json({ ok: true, skipped: true, reason: 'same_channel' });
         }
@@ -2037,7 +2015,7 @@ ${referentPromptBlock()}`;
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
       if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
       if (isFile) {
-        const stage = require('../../../shared/load-outbound-stage').loadOutboundStage();
+        const stage = require('../../../shared/attach-stage');
         if (!stage.outboundFileAllowed(filePath)) {
           return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
         }
@@ -2132,10 +2110,6 @@ ${referentPromptBlock()}`;
       res.json(r);
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
-  try {
-    const stageOv = require('../../../shared/load-host-overlay').load('outbound-stage');
-    if (stageOv && typeof stageOv.wrapOutRoute === 'function') stageOv.wrapOutRoute(app);
-  } catch (_) {}
   const httpServer = app.listen(cfg.http_port || 3016, '127.0.0.1', () => ctx.log(`send-message API on 127.0.0.1:${cfg.http_port || 3016}`));
 
   await client.login(token);
