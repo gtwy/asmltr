@@ -8,6 +8,9 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ## [Unreleased]
 
+### Added
+- **Email `--new-thread`.** Blank new letter: no last-inbound quote, no `In-Reply-To`/`References`, no reply-all merge. `--no-reply-all` still only drops extra recipients and still quotes this thread. Sidebar (other customers / personal / internal SKUs) and customer mail after a tainted chain use `--new-thread` so Gmail does not staple that history. Clean human reply-all is unchanged. James 31 Aug 2026.
+
 ### Changed
 - **Email signature image.** After `AI Assistant to …`, two blank lines, then a markdown image, then the Example Co pitch with no extra blank. HTML is 96×96, block, flush above the pitch. `cid:ivy-sig` is mailed inline (`signature_image` path); https images still render. javascript: image URLs are dropped. Inbound quote sanitizer still strips quoted `cid:` so we do not replay someone else's inline parts.
 - **Same-guild Discord post is `asmltr send`.** Confirm-first name lookup, on-behalf-of preface, and fuzzy channel match stay. Capability is trusted role or `resolve()` allow (`guild-post` / `send` / `*`). `asmltr guild-post` / MCP `asmltr_guild_post` remain aliases. Discord/Telegram `/out` and manager `/send` load a host overlay outbound-stage wrap when present (`ASMLTR_OUTBOUND_STAGE` or `~/.asmltr/ivy-local/overlay/outbound-stage.js`) and fall back to `shared/outbound-stage`.

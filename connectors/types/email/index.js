@@ -829,6 +829,34 @@ function mergeReplyAll(payload, thread, selfAddr, dropList) {
   });
 }
 
+function isTruthyFlag(v) {
+  return v === true || v === 1 || v === '1' || String(v).toLowerCase() === 'true';
+}
+
+/** Build the SMTP payload for /out. `--new-thread` is a blank new email: no quote, no
+ * In-Reply-To/References, no reply-all merge. `--no-reply-all` only drops extra recipients;
+ * it still quotes this thread. James 31 Aug 2026: quote-on-send stays for clean human replies. */
+function buildOutPayload({
+  target, text, subject, caption, cc, inReplyTo, references, drop, reply_all, new_thread,
+  tc, selfAddr, fromName, attachments,
+}) {
+  const thread = tc || {};
+  const fresh = isTruthyFlag(new_thread);
+  const refsIn = references == null ? null : (Array.isArray(references) ? references : String(references).split(/\s+/).filter(Boolean));
+  let payload = {
+    to: target,
+    cc,
+    subject: subject || thread.subject || `Message from ${fromName}`,
+    text: text || caption || '',
+    inReplyTo: fresh ? undefined : (inReplyTo || thread.messageId || undefined),
+    references: fresh ? undefined : (refsIn || thread.references),
+    attachments,
+    quote: fresh ? null : quoteFromThread(thread),
+  };
+  if (!fresh && reply_all !== false) payload = mergeReplyAll(payload, thread, selfAddr, drop);
+  return payload;
+}
+
 /** Visible Cc of the operator when the letter is to someone else. No timer, no second SMTP. */
 function applyOwnerCc(payload, ownerAddr) {
   const owner = String(ownerAddr || '').trim().toLowerCase();
@@ -1076,7 +1104,8 @@ async function start(ctx) {
       `You are answering an EMAIL as ${fromName}. Your assistant text is NOT mailed — there is no auto-reply. ` +
       `To send a letter: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"]. ` +
       `On a chain, the connector reply-alls everyone already on To/Cc (minus you) unless you pass --drop <addr> or --no-reply-all. Check To and Cc before sending. Do not drop Tim/Joey/James/the customer unless asked. ` +
-      `Automated alert senders (noreply Microsoft/Barracuda, alerts@LogMeIn, and similar) are not people on the chain. Never include them on replies for those alerts. Real vendor employees on a support ticket stay. Staff outreach from an automated-alert turn is a blank new email (--no-reply-all): facts in your own words, no quote of the vendor message. ` +
+      '--no-reply-all only drops extra recipients; it still quotes this thread and still sets In-Reply-To. --new-thread is a blank new email: no quote, no In-Reply-To, no reply-all merge. Use --new-thread for Ivy↔James sidebar (other customers, personal notes, internal SKUs) and for any letter to a customer after that sidebar has been on this chain. Do not reply-all a tainted thread to a customer. Customer letter after sidebar: --new-thread --cc james@ with a clean subject (not Re:/Fwd: of the sidebar). Flow: memory/ops/email-threads.md. ' +
+      `Automated alert senders (noreply Microsoft/Barracuda, alerts@LogMeIn, and similar) are not people on the chain. Never include them on replies for those alerts. Real vendor employees on a support ticket stay. Staff outreach from an automated-alert turn is a blank new email (--new-thread --no-reply-all): facts in your own words, no quote of the vendor message. ` +
       `Then reply with exactly [[NO_REPLY]]. Do not type a name or signature block — "${fromName}" and the rest of the signature are appended on send. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
       (ccOnly
@@ -1305,20 +1334,14 @@ async function start(ctx) {
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references, drop, reply_all } = req.body || {};
+      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references, drop, reply_all, new_thread } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
       const tc = (ref && threads.get(ref)) || {};
-      const subj = subject || tc.subject || `Message from ${fromName}`;
       const attachments = kind === 'file' && filePath ? [{ path: filePath, filename: path.basename(filePath) }] : undefined;
-      const refsIn = references == null ? null : (Array.isArray(references) ? references : String(references).split(/\s+/).filter(Boolean));
-      let payload = {
-        to: target, cc, subject: subj, text: text || caption || '',
-        inReplyTo: inReplyTo || tc.messageId,
-        references: refsIn || tc.references,
-        attachments,
-        quote: quoteFromThread(tc),
-      };
-      if (reply_all !== false) payload = mergeReplyAll(payload, tc, selfAddr, drop);
+      let payload = buildOutPayload({
+        target, text, subject, caption, cc, inReplyTo, references, drop, reply_all, new_thread,
+        tc, selfAddr, fromName, attachments,
+      });
       // Fire-and-forget SMTP. prepare() adds owner Cc when To is someone else.
       res.json(queueOutboundMail(smtpSend, payload, ctx.log, (pl) => outboundGate.prepare(pl)));
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -1341,4 +1364,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };
