@@ -27,6 +27,8 @@ test('public product js does not require overlay modules or retired planes', () 
     'hostGate',
     'toolbelt-prompt',
     'loadIdentityHints',
+    'load-outbound-stage',
+    'sqlite-stmt-keep',
   ];
   for (const f of files) {
     const rel = path.relative(ROOT, f);
@@ -37,6 +39,12 @@ test('public product js does not require overlay modules or retired planes', () 
     if (/require\([^)]*ivy-local/.test(src)) hits.push(rel + ': require ivy-local');
     if (src.includes("shared/tool-policy'") || src.includes("require('../tool-policy')") || src.includes("require('./tool-policy')")) {
       hits.push(rel + ': require tool-policy');
+    }
+    if (src.includes("shared/guild-post'") || src.includes("require('../guild-post')") || src.includes("require('./guild-post')")) {
+      hits.push(rel + ': require guild-post');
+    }
+    if (src.includes("shared/outbound-stage'") || src.includes("require('../outbound-stage')") || src.includes("require('./outbound-stage')")) {
+      hits.push(rel + ': require outbound-stage');
     }
   }
   assert.deepEqual(hits, []);

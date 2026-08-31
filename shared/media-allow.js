@@ -8,10 +8,11 @@ const path = require('path');
 const os = require('os');
 
 function policyFile() {
-  const env = String(process.env.ASMLTR_MEDIA_ALLOW_FILE || process.env.ASMLTR_MEDIA_ALLOW_FILE || '').trim();
+  const env = String(process.env.ASMLTR_MEDIA_ALLOW_FILE || '').trim();
   if (env) return env;
   const home = path.join(os.homedir(), '.asmltr');
   const neu = path.join(home, 'media-allow.json');
+  // Host disk name may still be this; not a public capability plane.
   const old = path.join(home, 'tool-policy.json');
   try { if (fs.existsSync(neu)) return neu; } catch (_) {}
   return old;

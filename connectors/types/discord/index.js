@@ -2120,7 +2120,7 @@ ${referentPromptBlock()}`;
   };
 }
 
-/** Name lookup for guild-post: text + announcement + forum + media, plus their threads. */
+/** Name lookup for asmltr send (discord-targets): text + announcement + forum + media, plus their threads. */
 async function listGuildPostTargets(client, sourceGuild, gp) {
   const guild = await client.guilds.fetch(String(sourceGuild));
   await guild.channels.fetch();
