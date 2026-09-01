@@ -33,6 +33,7 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
+const { collectOutboundFiles, attachmentsFromPaths } = require('../../../shared/outbound-files');
 
 // How often the IMAP watcher proves it's genuinely alive (a NOOP round-trip). Below the manager's
 // default 120s stale threshold so a healthy watcher clears it with room to spare.
@@ -857,12 +858,44 @@ function buildOutPayload({
   return payload;
 }
 
-/** Visible Cc of the operator when the letter is to someone else. No timer, no second SMTP. */
-function applyOwnerCc(payload, ownerAddr) {
+function emailAddrDomain(addr) {
+  const a = String(addr || '').trim().toLowerCase();
+  const i = a.lastIndexOf('@');
+  if (i < 1 || i === a.length - 1) return '';
+  return a.slice(i + 1);
+}
+
+/** Same mailbox domain as the operator (staff). Self/assistant is not a third party. */
+function isStaffOrSelfAddr(addr, ownerAddr, selfAddr) {
+  const a = String(addr || '').trim().toLowerCase();
+  if (!a) return false;
   const owner = String(ownerAddr || '').trim().toLowerCase();
+  const self = String(selfAddr || '').trim().toLowerCase();
+  if (a === owner || (self && a === self)) return true;
+  const staff = emailAddrDomain(owner);
+  return !!(staff && emailAddrDomain(a) === staff);
+}
+
+function mailingOutsideStaff(toList, ccList, ownerAddr, selfAddr) {
+  const owner = String(ownerAddr || '').trim().toLowerCase();
+  const self = String(selfAddr || '').trim().toLowerCase();
+  const others = [...(toList || []), ...(ccList || [])].filter((a) => {
+    const x = String(a || '').toLowerCase();
+    return x && x !== owner && x !== self;
+  });
+  return others.some((a) => !isStaffOrSelfAddr(a, ownerAddr, selfAddr));
+}
+
+/** Visible Cc of the operator when the letter is to anyone outside the operator's domain.
+ * Staff on the operator's domain (and the assistant mailbox) do not trigger it.
+ * If the operator is already To/Cc they stay. `--no-owner-cc` is ignored — this is not optional. */
+function applyOwnerCc(payload, ownerAddr, opts) {
+  const owner = String(ownerAddr || '').trim().toLowerCase();
+  const o = opts || {};
+  const self = String(o.selfAddr || '').trim().toLowerCase();
   const to = parseAddrList(payload && payload.to);
   const cc = parseAddrList(payload && payload.cc).filter((a) => !to.includes(a));
-  if (owner && !to.includes(owner) && !cc.includes(owner) && to.some((a) => a !== owner)) {
+  if (owner && mailingOutsideStaff(to, cc, owner, self) && !to.includes(owner) && !cc.includes(owner)) {
     cc.push(owner);
   }
   if (!to.length) {
@@ -877,8 +910,8 @@ function applyOwnerCc(payload, ownerAddr) {
   };
 }
 
-function createOutboundGate({ ownerAddr } = {}) {
-  return { prepare: (payload) => applyOwnerCc(payload, ownerAddr) };
+function createOutboundGate({ ownerAddr, selfAddr } = {}) {
+  return { prepare: (payload, opts) => applyOwnerCc(payload, ownerAddr, Object.assign({ selfAddr }, opts || {})) };
 }
 
 /** Kick SMTP and return immediately. Errors are logged; the HTTP /send caller is already done.
@@ -943,7 +976,7 @@ async function start(ctx) {
   // so a recycle does not treat a thread participant as a stranger or drop reply-all.
   const threads = readThreads(ctx.instanceId);
   const selfAddr = String(address).toLowerCase();
-  const outboundGate = createOutboundGate({ ownerAddr: ownerForward });
+  const outboundGate = createOutboundGate({ ownerAddr: ownerForward, selfAddr });
 
   async function smtpSend({ to, cc, subject, text, inReplyTo, references, attachments, quote }) {
     const content = buildMailContent(text, signature, { subject, quote });
@@ -1114,7 +1147,7 @@ async function start(ctx) {
       `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at staff@example.com (the owner) says so. Do not add those staff to a thread they are not already on. ` +
       `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Google Contacts, are not strangers. ` +
       `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where and any body notes, and wait for the owner to confirm. First letter to others: do not say you cannot book until the owner confirms or that a workflow blocks you. If someone later sends a change, repeat the corrected details; a short still-waiting-on-owner is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or assistant/company closer in the letter — those go on the Google event only. If the owner does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to the owner: say there is a conflict and the owner should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Stay on this email thread — do not also ping the owner on Discord about the same invite. Do not tell anyone else they are free. Remote only if the owner says remote (blank location). Remote description never uses the assistant's "I": one team member attending → "{FirstName} will not be on-site"; more than one → "we will not be on-site". If the owner says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If the owner clearly says other staff will be going and they will not: the repeat-back says the owner is not attending; on create pass organizer_going=false (leave the owner's RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the people who are going, not the owner's number. People the owner names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on the owner on the first pass). Event details and exceptions only. Full flowchart: memory/ops/calendar-schedule.md. ` +
-      `When mailing a third party, the operator stays on the thread as visible Cc if they were already there, and is added if missing. Do not add other staff unless they were already on To/Cc. ` +
+      `When mailing anyone outside the operator's email domain, the mailbox Ccs the operator. Staff on that domain do not get the operator auto-Cced unless they already put the operator on the letter. Do not add other staff unless they were already on To/Cc. ` +
       `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
@@ -1334,16 +1367,27 @@ async function start(ctx) {
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc, inReplyTo, references, drop, reply_all, new_thread } = req.body || {};
+      const { kind = 'text', target, text, subject, ref, caption, cc, inReplyTo, references, drop, reply_all, new_thread } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
       const tc = (ref && threads.get(ref)) || {};
-      const attachments = kind === 'file' && filePath ? [{ path: filePath, filename: path.basename(filePath) }] : undefined;
+      let attachments;
+      const filePaths = collectOutboundFiles(req.body);
+      if (filePaths.length) {
+        try {
+          attachments = attachmentsFromPaths(filePaths);
+        } catch (e) {
+          const status = e && e.code === 'ATTACH_TOO_LARGE' ? 413 : 400;
+          return res.status(status).json({ ok: false, error: e.message });
+        }
+      } else if (kind === 'file') {
+        return res.status(400).json({ ok: false, error: 'file kind requires a path or files' });
+      }
       let payload = buildOutPayload({
         target, text, subject, caption, cc, inReplyTo, references, drop, reply_all, new_thread,
         tc, selfAddr, fromName, attachments,
       });
-      // Fire-and-forget SMTP. prepare() adds owner Cc when To is someone else.
-      res.json(queueOutboundMail(smtpSend, payload, ctx.log, (pl) => outboundGate.prepare(pl)));
+      // Fire-and-forget SMTP. prepare() adds owner Cc when To is someone else unless skipped.
+      res.json(queueOutboundMail(smtpSend, payload, ctx.log, (pl) => outboundGate.prepare(pl, { drop })));
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   // Mailbox browse (the manager's /read proxies here; op = list | read | search).
@@ -1364,4 +1408,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };

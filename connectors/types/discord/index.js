@@ -1966,7 +1966,8 @@ ${referentPromptBlock()}`;
   app.post('/out', requireConnectorToken, async (req, res) => {
     let outMarked = null;
     try {
-      const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
+      const { kind = 'text', target: tg, text, path: filePath, files, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
+      const filePaths = require('../../../shared/outbound-files').collectOutboundFiles({ path: filePath, files });
       if (kind === 'guild_resolve') {
         // Mute/disable is inbound only. Name lookup includes muted channels/threads.
         const gp = require('../../../shared/discord-targets');
@@ -2013,14 +2014,16 @@ ${referentPromptBlock()}`;
       if (!channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
       // any file kind (photo/file/attachment/document/image) → send as a Discord attachment
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
-      if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
+      if (isFile && !filePaths.length) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
       if (isFile) {
         const stage = require('../../../shared/attach-stage');
-        if (!stage.outboundFileAllowed(filePath)) {
-          return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
+        for (const p of filePaths) {
+          if (!stage.outboundFileAllowed(p)) {
+            return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
+          }
         }
       }
-      const m = isFile ? await channel.send({ content: caption || text || '', files: [filePath] }) : await channel.send(text);
+      const m = isFile ? await channel.send({ content: caption || text || '', files: filePaths }) : await channel.send(text);
       // Report the conversation_key this target maps to (matches an inbound from the same place), so a
       // core-mediated send can ASSIMILATE this message into that session's context (it was posted from
       // ANOTHER session; without this the destination session never learns it "said" it).

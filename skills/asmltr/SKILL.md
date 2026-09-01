@@ -26,13 +26,13 @@ This skill is your high-level map. Reach for it when a task means "get this OUT 
 
 ```bash
 asmltr send <channel> <target> "<text>"                 # discord/telegram/email/…
-asmltr send <channel> <target> --file <abs-path> [--caption "..."]   # attach a file
-asmltr send email <addr> "<body>" --subject "<subj>" [--file <path>] # email w/ subject + attachment
+asmltr send <channel> <target> --file <abs-path> [--file <path> ...] [--caption "..."]
+asmltr send email <addr> "<body>" --subject "<subj>" --file a.xlsx --file b.txt
 ```
 - **target** is channel-specific: a Discord channel id/alias, a Telegram chat (omit for default),
   an email address. `asmltr send/targets` (via the manager) lists live outbound connectors and,
   per connector, whether it supports **attachments** and is **readable**.
-- Only connectors that declare attachment support accept `--file` — others return a clean error.
+- Only connectors that declare attachment support accept `--file` — others return a clean error. Repeat `--file` for several attachments on **one** email/Discord message (≤25MB total).
 - To attach something a user sent you elsewhere, find it first with `asmltr uploads` and pass its
   stored path to `--file`.
 
@@ -58,7 +58,7 @@ asmltr notify "<text>" [--title "<t>"] [--force] [--silent]
 
 Email is a full channel — send *and* read:
 ```bash
-asmltr send email <addr> "<body>" --subject "<subj>" [--file <path>]
+asmltr send email <addr> "<body>" --subject "<subj>" [--file <path> ...]
 asmltr mail                        # inbox, newest first (● = unread)
 asmltr mail list -n 30 --unseen    # more / only unread
 asmltr mail read <uid> [--seen]    # full body; saves attachments to the upload area + prints paths

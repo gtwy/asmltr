@@ -3,6 +3,7 @@
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
 const attachStage = require('../../shared/attach-stage');
+const { collectOutboundFiles } = require('../../shared/outbound-files');
 const { bearerEqual } = require('../../shared/bearer-equal');
 const { connectorAuthHeaders } = require('../../shared/connector-http-auth');
 /**
@@ -186,25 +187,30 @@ const ATTACH_KINDS = ['file', 'photo', 'document'];
 const supportsAttachments = (meta) => !!(meta && meta.outbound && (meta.outbound.kinds || []).some((k) => ATTACH_KINDS.includes(k)));
 
 // --- unified outbound: route a message OUT through a connector instance --------
-// POST /send { channel|instance_id, target, kind?, text?, path?, caption?, subject?, cc?, ref?, title?, require_headphones?, force? }
-async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) {
+// POST /send { channel|instance_id, target, kind?, text?, path?, files?, caption?, subject?, cc?, ref?, title?, require_headphones?, force? }
+async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, files, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) {
   const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
     : null;
   if (!inst) return { ok: false, status: 404, error: 'no connector instance for that channel/instance_id' };
   const meta = TYPES[inst.type];
   if (!meta || !meta.outbound) return { ok: false, status: 400, error: `type '${inst.type}' has no outbound capability` };
+  const fileList = collectOutboundFiles({ path: filePath, files });
+  if (fileList.length) kind = ATTACH_KINDS.includes(kind) ? kind : 'file';
   // Outbound file-attachment capability: a connector must DECLARE it supports an attachment kind
   // (file/photo/document in meta.outbound.kinds) before we route a file to it — a clean, honest
   // "this channel can't attach files" instead of a confusing failure inside the connector.
   if (ATTACH_KINDS.includes(kind) && !supportsAttachments(meta)) {
     return { ok: false, status: 400, error: `type '${inst.type}' does not support outbound file attachments` };
   }
-  if (filePath) {
+  if (fileList.length) {
     const stage = attachStage;
-    if (typeof stage.outboundFileAllowed === 'function' && !stage.outboundFileAllowed(filePath)) {
-      return { ok: false, status: 403, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' };
+    for (const p of fileList) {
+      if (typeof stage.outboundFileAllowed === 'function' && !stage.outboundFileAllowed(p)) {
+        return { ok: false, status: 403, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' };
+      }
     }
+    filePath = fileList[0];
   }
   const port = instancePort(inst);
   if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` };
@@ -214,7 +220,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const bindHost = inst.config && inst.config.bind_host;
   const host = (bindHost && bindHost !== '0.0.0.0' && bindHost !== '::') ? bindHost : '127.0.0.1';
   try {
-    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) });
+    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, files: fileList.length ? fileList : undefined, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) });
     const j = await r.json().catch(() => ({}));
     // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
     // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.

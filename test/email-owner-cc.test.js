@@ -35,10 +35,10 @@ test('selfInTo / selfInCcOnly: spoken-to vs listen-on-the-chain', () => {
   assert.equal(selfInCcOnly(ccSelf, 'assistant@example.com'), true);
 });
 
-test('applyOwnerCc adds owner as Cc when To is someone else', () => {
-  const p = applyOwnerCc({ to: 'other@example.com', text: 'letter' }, 'owner@example.com');
+test('applyOwnerCc adds owner as Cc when mailing outside the owner domain', () => {
+  const p = applyOwnerCc({ to: 'customer@acme.test', text: 'letter' }, 'owner@example.com');
   assert.equal(p.skip, false);
-  assert.equal(p.payload.to, 'other@example.com');
+  assert.equal(p.payload.to, 'customer@acme.test');
   assert.equal(p.payload.cc, 'owner@example.com');
 });
 
@@ -46,6 +46,50 @@ test('applyOwnerCc does not Cc owner when they are already To', () => {
   const p = applyOwnerCc({ to: 'owner@example.com', text: 'letter' }, 'owner@example.com');
   assert.equal(p.payload.to, 'owner@example.com');
   assert.equal(p.payload.cc, undefined);
+});
+
+test('applyOwnerCc does not auto-Cc owner on staff-only mail', () => {
+  const p = applyOwnerCc(
+    { to: 'staff@example.com', text: 'letter' },
+    'owner@example.com',
+    { selfAddr: 'assistant@example.com' },
+  );
+  assert.equal(p.payload.to, 'staff@example.com');
+  assert.equal(p.payload.cc, undefined);
+});
+
+test('applyOwnerCc Ccs owner when staff and an outsider are both on the letter', () => {
+  const p = applyOwnerCc(
+    { to: 'staff@example.com', cc: 'customer@acme.test', text: 'letter' },
+    'owner@example.com',
+    { selfAddr: 'assistant@example.com' },
+  );
+  assert.equal(p.payload.cc, 'customer@acme.test, owner@example.com');
+});
+
+test('applyOwnerCc still Ccs owner on outsider mail even if noOwnerCc/drop say skip', () => {
+  const skipped = applyOwnerCc(
+    { to: 'customer@acme.test', text: 'letter' },
+    'owner@example.com',
+    { noOwnerCc: true, drop: 'owner@example.com' },
+  );
+  assert.equal(skipped.payload.cc, 'owner@example.com');
+});
+
+test('applyOwnerCc keeps explicit owner Cc on outsider mail', () => {
+  const p = applyOwnerCc(
+    { to: 'customer@acme.test', cc: 'owner@example.com', text: 'letter' },
+    'owner@example.com',
+  );
+  assert.equal(p.payload.cc, 'owner@example.com');
+});
+
+test('createOutboundGate prepare Ccs owner only for outside-domain mail', () => {
+  const g = createOutboundGate({ ownerAddr: 'owner@example.com', selfAddr: 'assistant@example.com' });
+  const outside = g.prepare({ to: 'customer@acme.test', text: 'letter' });
+  const staff = g.prepare({ to: 'staff@example.com', text: 'letter' });
+  assert.equal(outside.payload.cc, 'owner@example.com');
+  assert.equal(staff.payload.cc, undefined);
 });
 
 test('createOutboundGate prepare is owner-Cc only — same body still sends (no 30-min skip)', () => {
@@ -61,7 +105,7 @@ test('queueOutboundMail still returns before sendMail finishes', async () => {
   const g = createOutboundGate({ ownerAddr: 'owner@example.com' });
   let finished = false;
   const sendMail = () => new Promise((resolve) => setTimeout(() => { finished = true; resolve({}); }, 40));
-  const q = queueOutboundMail(sendMail, { to: 'other@example.com', text: 'letter' }, () => {}, (pl) => g.prepare(pl));
+  const q = queueOutboundMail(sendMail, { to: 'customer@acme.test', text: 'letter' }, () => {}, (pl) => g.prepare(pl));
   assert.equal(q.queued, true);
   assert.equal(finished, false);
   await new Promise((r) => setTimeout(r, 60));

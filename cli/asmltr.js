@@ -316,26 +316,31 @@ async function deliverSameGuildPost({ target, text, title, replyTo }) {
 }
 
 async function cmdSend(rest) {
-  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."]
-  let file = null, caption = null, subject = null, cc = null, force = false, drop = null, noReplyAll = false, newThread = false;
+  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--file <path> ...]
+  let files = [], caption = null, subject = null, cc = null, force = false, drop = null, noReplyAll = false, newThread = false;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
-    if (t === '--file') file = rest[++i];
+    if (t === '--file') {
+      const p = rest[++i];
+      if (p) files.push(p);
+    }
     else if (t === '--caption') caption = rest[++i];
     else if (t === '--subject') subject = rest[++i]; // email subject (ignored by channels without one)
     else if (t === '--cc') cc = rest[++i]; // email Cc (comma-separated ok)
     else if (t === '--drop') drop = rest[++i]; // email: omit these chain addrs from reply-all
     else if (t === '--no-reply-all') noReplyAll = true;
     else if (t === '--new-thread') newThread = true;
+    else if (t === '--no-owner-cc') { /* ignored: mailbox Ccs the operator when mailing outside their domain */ }
     else if (t === '--force') force = true;
     else words.push(t);
   }
+  const file = files[0] || null;
   const channel = words[0], target = words[1], text = words.slice(2).join(' ');
   if (!channel || !target || (!text && !file)) {
     throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
-      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"] [--drop "<addr>"] [--no-reply-all] [--new-thread] [--force]\n' +
-      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@example.com "the body" --subject "Hello" --cc "boss@example.com" --file /root/report.pdf');
+      '       asmltr send <channel> <target> --file <path> [--file <path> ...] [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"] [--drop "<addr>"] [--no-reply-all] [--new-thread] [--force]\n' +
+      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@example.com "the body" --subject "Hello" --cc "boss@example.com" --file /root/a.pdf --file /root/b.txt');
   }
   // Same-guild Discord post folds into send (confirm first, on-behalf-of, fuzzy name).
   if (String(channel).toLowerCase() === 'discord' && process.env.ASMLTR_ATTACH_GUILD && !file) {
@@ -343,7 +348,7 @@ async function cmdSend(rest) {
   }
   exitIfDenied('send');
   const body = file
-    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject, cc }
+    ? { channel, target, kind: 'file', path: file, files, caption: caption != null ? caption : (text || undefined), subject, cc }
     : { channel, target, kind: 'text', text, subject, cc };
   if (force) body.force = true;
   if (channel === 'email') {
@@ -367,7 +372,8 @@ async function cmdSend(rest) {
     if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
     r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   }
-  console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
+  const what = files.length > 1 ? `${files.length} files` : (file ? 'file ' + file : 'text');
+  console.log(r.ok ? A.grn(`✓ sent ${what} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
 
 async function cmdGuildPost(rest) {
@@ -843,7 +849,7 @@ function cmdHelp() {
   asmltr notify "<text>"               REACH the owner out-of-band (read-aloud → push → text ladder;
        [--title T] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
-       ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
+       ... --file <path> [--file <path> ...]  attach file(s); email/discord one message, ≤25MB total
        ... --new-thread                 email: blank new letter (no quote, no In-Reply-To)
   asmltr send discord <id-or-name> "…"  same Discord server (trusted role / resolve allow).
        guild-post is an alias. A name looks up (does not post) until they confirm.

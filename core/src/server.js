@@ -799,8 +799,16 @@ async function deliverOut({ instanceId, target, text, files, subject, ref }) {
   if (process.env.ASMLTR_MANAGER_TOKEN) headers.Authorization = 'Bearer ' + process.env.ASMLTR_MANAGER_TOKEN;
   const post = (body) => fetch(`${mgr}/send`, { method: 'POST', headers, body: JSON.stringify(body) });
   // subject/ref are email-threading hints; other connectors ignore them.
+  const list = (files || []).filter(Boolean);
+  if (list.length) {
+    const r = await post({
+      instance_id: instanceId, target, kind: 'file', path: list[0], files: list,
+      text, caption: text, subject, ref,
+    });
+    if (!r.ok) throw new Error(`send file ${r.status}`);
+    return;
+  }
   if (text && text.trim()) { const r = await post({ instance_id: instanceId, target, kind: 'text', text, subject, ref }); if (!r.ok) throw new Error(`send ${r.status}`); }
-  for (const p of files || []) { const r = await post({ instance_id: instanceId, target, kind: 'file', path: p, subject, ref }); if (!r.ok) throw new Error(`send file ${r.status}`); }
 }
 
 /** Run handle() under the concurrency slot + per-key lock. */
