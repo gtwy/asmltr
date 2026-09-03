@@ -454,9 +454,9 @@ async function handle(envelope, opts = {}) {
   }
 
   // 3) session resolution + run
-  // resume = stored engine UUID. Grok: resolveForTurn(..., 'grok') returns null so isNew every turn.
+  // resume = stored Grok/engine UUID (engine_session_id). grok.js turns that into `-r <uuid>`.
   // resolveForTurn CLEARS a stale UUID after idle:<minutes>, so isNew must be computed AFTER.
-  const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined, engineId);
+  const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined);
   const sessionRow = sessions.get(e.conversation_key);
   const cwd = sessionRow?.working_dir || undefined; // spawn/resume cwd (neutral home by default)
   const isNew = !resume;
@@ -548,7 +548,7 @@ async function handle(envelope, opts = {}) {
       user_key: resolved.user_key,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
-      resume: engineId === 'grok' ? null : resume,
+      resume,
       cwd,
       conversationKey: e.conversation_key,
       channel_context: e.channel_context || null,
@@ -660,7 +660,7 @@ async function handle(envelope, opts = {}) {
   }
   _flushStream(); // ship any redacted tail held back during streaming
 
-  if (result.engineSessionId) sessions.recordEngineId(e.conversation_key, result.engineSessionId, engineId);
+  if (result.engineSessionId) sessions.recordEngineId(e.conversation_key, result.engineSessionId);
   sessions.touch(e.conversation_key);
   // Mark the stable block as delivered for this engine (inject-once), but only on SUCCESS — a failed turn
   // leaves the marker stale so the next turn re-sends the full prompt. No-op on claude (canInjectOnce=false).
@@ -2082,15 +2082,13 @@ app.post('/v2/inject', (req, res) => {
       return;
     }
     record({ surface: row.channel, session_id: key, event_type: 'control', identity: actor, source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
-    const injectEngine = require('../../shared/engines').getDefault();
-    const { resume } = sessions.resolveForTurn(key, row.channel, sessions.idlePolicyFromEnv(), undefined, injectEngine);
+    const { resume } = sessions.resolveForTurn(key, row.channel, sessions.idlePolicyFromEnv());
     // Mid-task steer → frame the text so the model continues its current work with this guidance
     // rather than answering it in isolation. Idle session → deliver it as a normal message.
     const prompt = injectSteer.frameInjectPrompt(text, by, { wasRunning, interrupt });
     const ac = trackTurn(key, new AbortController());
     let result;
-    const injectEngineId = (require('../../shared/engines').getDefault && require('../../shared/engines').getDefault()) || 'grok';
-    const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume: injectEngineId === 'grok' ? null : resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
+    const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
         senderId: actor, owner: gated.plan.owner,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: actor, source: 'core' };
@@ -2114,7 +2112,7 @@ app.post('/v2/inject', (req, res) => {
         result = await runTurn({ ...injectOpts, resume: null });
       }
     } finally { untrackTurn(key, ac); }
-    if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId, injectEngine);
+    if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
     sessions.touch(key);
     const reply = redactSecrets((result.text || '').trim()).text;
     record({ surface: row.channel, session_id: key, event_type: 'outbound', identity: actor, source: 'core', payload: { text: truncate(reply, 500), injected: true } });
@@ -2230,6 +2228,10 @@ app.post('/v2/devices/auth', (req, res) => {
 if (require.main === module) {
   const server = app.listen(PORT, HOST, () => {
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
+    try {
+      const n = sessions.clearAllEngineResume();
+      console.log('core start: cleared engine_session_id+last_stable on ' + n + ' row(s)');
+    } catch (e) { console.log('core start resume wipe: ' + (e && e.message)); }
     console.log(`idle_policy=${sessions.idlePolicyFromEnv()} assistant=${process.env.ASSISTANT_NAME || 'the assistant'} engine=${require('../../shared/engines').getDefault()}`);
     console.log('substrate: configured reasoning engine (grok = subscription CLI; no XAI_API_KEY)');
     // Public product: temp GC is opt-in (ASMLTR_GC_TEMPS=on). Directories via

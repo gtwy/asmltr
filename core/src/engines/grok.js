@@ -13,16 +13,20 @@
  * don't destructure. Claude vision stays SDK image blocks on `images`.
  * No spawn watchdog and no CLI turn cap. Operator abort (abortController) only.
  *
- * SESSION UUID (Grok-specific — do not drop):
+ * RESUME UUID (Grok-specific — do not drop):
  *   Sessions are UUIDs (UUIDv7 when the CLI assigns one). `-s/--session-id` CREATES
- *   a new session; it does not resume. Ivy NEVER passes `-r/--resume`. `-c/--continue`
- *   is cwd-implicit and too loose for asmltr. Every harness turn passes `-s` (new
- *   session) so we have an addressable id even if JSON parse misses `.sessionId`.
- *   `--fork-session` / `--restore-code` / `grok sessions` /
+ *   a new session; it does not resume. `-r/--resume <uuid>` resumes. `-c/--continue`
+ *   is cwd-implicit and too loose for asmltr. On a fresh turn we pass `-s <uuid>` so
+ *   we have an addressable id even if JSON parse misses `.sessionId`. On resume we
+ *   pass `-r <uuid>` only. `--fork-session` / `--restore-code` / `grok sessions` /
  *   `grok export` are preserved as notes, not wired. See /workspace/grok-cli-features.md.
  *
- * historyReplaysSystemPrompt is TRUE (inject-once last_stable stays). ASMLTR_INJECT_ONCE=off
- * remains the kill-switch. Grok CLI resume (`-r`) is not used; each turn is `-s`.
+ * historyReplaysSystemPrompt is TRUE: live-verified 2026-08-17 that `-r <uuid>`
+ * replays the first-turn system block (probe: "What were you instructed to be?" →
+ * "A one-word ping fixture."). ASMLTR_INJECT_ONCE=off remains the kill-switch.
+ * Core start and allowed abort NULL engine_session_id + last_stable_* so the next
+ * turn is a fresh `-s` (Discord-only bounce must not resume an xAI thread across
+ * a core restart).
  */
 const { spawn, execFileSync } = require('child_process');
 const crypto = require('crypto');
@@ -377,9 +381,10 @@ function isUuid(s) {
   return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
-/** Resume hook: grok never resumes. `-r` is never emitted. */
-function resumeArgs(_resume) {
-  return [];
+/** Resume hook: -r for an existing UUID; -s when creating; never bare -c. */
+function resumeArgs(resume) {
+  if (resume && isUuid(resume)) return ['-r', resume];
+  return ['-s'];
 }
 
 function bin() {
@@ -583,9 +588,14 @@ function buildArgs(opts) {
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
   if (mdl) args.push('-m', mdl);
-  // Never `-r`. Ignore any resume UUID. Fresh `-s <uuid>` every turn when we have one.
-  const sid = (opts.sessionId && isUuid(opts.sessionId)) ? opts.sessionId : null;
-  if (sid) args.push('-s', sid);
+  if (opts.resume && isUuid(opts.resume)) {
+    args.push(...resumeArgs(opts.resume));
+  } else if (opts.sessionId && isUuid(opts.sessionId)) {
+    // Fresh session: pre-assign a UUID so we can resume later even if JSON omits sessionId.
+    args.push('-s', opts.sessionId);
+  } else {
+    args.push(...resumeArgs(null));
+  }
   args.visionPromptFile = visionPromptFile;
   return args;
 }
@@ -791,7 +801,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   // Do not provision MCP servers on a spoken turn.
   if (!_mcpSynced && !voiceTurn) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
-  const sessionId = crypto.randomUUID();
+  const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
   // Do not consume ~/.asmltr/next-effort on email/mcp/voice — those channels force their effort.
   const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel) || voiceTurn) ? null : takeNextEffort(conversationKey);
   const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, conversationKey, channel_context, voice };
@@ -839,7 +849,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const childEnv = launchEnv(Object.assign({}, process.env, extra));
   gcVisionPromptFilesOnce();
   const args = buildArgs({
-    prompt, systemPrompt, resume: null, cwd, model, sessionId, effortPrompt, channel,
+    prompt, systemPrompt, resume, cwd, model, sessionId, effortPrompt, channel,
     senderId, owner, bypass_moderation, user_key, sender,
     conversationKey, channel_context, voice,
     denyAll,
@@ -939,7 +949,7 @@ async function complete({ prompt, model, appendSystemPrompt = null, abortControl
   }
 }
 
-// See file header: grok CLI is never resumed (`-r` unused); inject-once still uses this flag.
+// See file header: flip to true after live-verifying `-r` replays the first-turn system block.
 const historyReplaysSystemPrompt = true;
 
 module.exports = {

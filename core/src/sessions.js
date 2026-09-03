@@ -7,14 +7,18 @@
  * per-server, Telegram per-user, MCP per-user, CLI, web chat — they are all
  * just different key formulas.
  *
- * ENGINE SESSION ID:
- *   For non-grok engines, engine_session_id is the resume handle passed as
- *   runTurn({ resume }). Grok never resumes the CLI: recordEngineId is a
- *   no-op when engine is grok, resolveForTurn returns resume null for grok,
- *   and grok.js never emits `-r`. Continuity is silo recall + last_stable
- *   inject on each fresh `-s` spawn. last_stable_* is still written so
- *   inject-once can work for history-retaining engines. Finite idle still
- *   clears UUID + last_stable_* for a true fresh start.
+ * RESUME UUID (Grok first-class):
+ *   For the grok engine, engine_session_id IS the Grok CLI session UUID
+ *   (UUIDv7 from `grok -s` / the streaming-json sessionId). The next turn
+ *   passes resume=that UUID → grok.js emits `-r <uuid>`. That is the real
+ *   continuity mechanism. Do not fake it by re-injecting the full system
+ *   prompt every turn: grok's `-r` already replays the first-turn system
+ *   block (historyReplaysSystemPrompt=true). When a finite idle expires we CLEAR the
+ *   UUID (and last_stable_*) so the next turn is a fresh grok session and
+ *   the full identity prompt is sent again. The infinite path never clears
+ *   the grok UUID during the process lifetime. ANY core start (server.js or
+ *   overlay core-entry) NULLs engine_session_id + last_stable_* on ALL rows
+ *   so a bounce cannot resume xAI threads; conversation rows stay.
  * IDLE POLICY:
  *   Stored as 'infinite' | 'idle:<minutes>' (integer minutes — see
  *   parseIdlePolicy / idlePolicyFromEnv). Default is infinite (jarethmt).
@@ -166,8 +170,7 @@ function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', wor
     row.idle_policy = idle_policy;
   }
   if (!row.engine_session_id) return { resume: null, key: conversation_key, expired: false };
-  // Grok CLI is never resumed; do not hand a UUID that would become `-r`.
-  if (engine === 'grok') return { resume: null, key: conversation_key, expired: false };
+  void engine;
 
   // idle:<minutes> → drop the engine UUID and start fresh; 'infinite' always resumes.
   const m = /^idle:(\d+)$/.exec(row.idle_policy || 'infinite');
@@ -183,10 +186,10 @@ function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', wor
   return { resume: row.engine_session_id, key: conversation_key, expired: false };
 }
 
-/** Persist the engine session id captured from the turn. No-op for grok (never CLI-resume). */
+/** Persist the engine session id (for grok: the CLI resume UUID) captured from the turn. */
 function recordEngineId(conversation_key, engine_session_id, engine = null) {
   if (!engine_session_id) return;
-  if (engine === 'grok') return;
+  void engine;
   _setEngineId.run(engine_session_id, nowMs(), conversation_key);
 }
 
@@ -204,6 +207,28 @@ function recordEngineId(conversation_key, engine_session_id, engine = null) {
  */
 function clearEngineId(conversation_key) {
   return _clearEngineId.run(nowMs(), conversation_key).changes > 0;
+}
+
+const _clearAllResume = db.prepare('UPDATE sessions SET engine_session_id = NULL, last_stable_hash = NULL, last_stable_engine = NULL');
+
+/**
+ * Bounce wipe: NULL resume fields on every row. Keep session ROWS and
+ * conversation_key bindings (working_dir, idle, outbound, turn_count).
+ */
+function clearAllEngineResume() {
+  return _clearAllResume.run().changes;
+}
+
+function _isCoreStartMain() {
+  const main = String(process.argv[1] || '').replace(/\\/g, '/');
+  return /(?:^|\/)(?:server|core-entry)\.js$/.test(main);
+}
+
+if (_isCoreStartMain()) {
+  try {
+    const n = clearAllEngineResume();
+    try { process.stderr.write('[sessions] core start: cleared engine resume on ' + n + ' row(s)\n'); } catch (_) {}
+  } catch (_) {}
 }
 
 /** Bump activity + turn count after a completed turn. */
@@ -298,4 +323,4 @@ function consumeNextEffort(conversation_key) {
   return ['low', 'medium', 'high', 'xhigh'].includes(v) ? v : null;
 }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, clearEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, parseIdlePolicy, idlePolicyFromEnv, DEFAULT_IDLE_MINUTES, DB_PATH, setNextEffort, consumeNextEffort };
+module.exports = { db, ensure, resolveForTurn, recordEngineId, clearEngineId, clearAllEngineResume, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, parseIdlePolicy, idlePolicyFromEnv, DEFAULT_IDLE_MINUTES, DB_PATH, setNextEffort, consumeNextEffort };

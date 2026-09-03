@@ -90,3 +90,18 @@ test('infinite idle keeps grok resume UUID even after a long gap', () => {
   sessions.remove(key);
 });
 
+test('clearAllEngineResume keeps session rows and NULLs resume fields', () => {
+  const key = 'cli:local:wipe-resume';
+  const uuid = '01234567-89ab-cdef-0123-456789abcdef';
+  sessions.resolveForTurn(key, 'cli', 'infinite');
+  sessions.recordEngineId(key, uuid);
+  sessions.recordStable(key, 'abc', 'grok');
+  const n = sessions.clearAllEngineResume();
+  assert.ok(n >= 1);
+  const row = sessions.get(key);
+  assert.ok(row, 'row must survive wipe');
+  assert.equal(row.engine_session_id, null);
+  assert.equal(row.last_stable_hash, null);
+  assert.equal(row.last_stable_engine, null);
+  sessions.remove(key);
+});
