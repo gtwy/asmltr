@@ -454,7 +454,7 @@ async function handle(envelope, opts = {}) {
   }
 
   // 3) session resolution + run
-  // resume = stored Grok/engine UUID (engine_session_id). grok.js turns that into `-r <uuid>`.
+  // resume = stored engine UUID (engine_session_id). Grok adapter ignores resume (always `-s`).
   // resolveForTurn CLEARS a stale UUID after idle:<minutes>, so isNew must be computed AFTER.
   const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined);
   const sessionRow = sessions.get(e.conversation_key);
@@ -548,7 +548,7 @@ async function handle(envelope, opts = {}) {
       user_key: resolved.user_key,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
-      resume,
+      resume: engineId === 'grok' ? null : resume,
       cwd,
       conversationKey: e.conversation_key,
       channel_context: e.channel_context || null,
@@ -2088,7 +2088,8 @@ app.post('/v2/inject', (req, res) => {
     const prompt = injectSteer.frameInjectPrompt(text, by, { wasRunning, interrupt });
     const ac = trackTurn(key, new AbortController());
     let result;
-    const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
+    const injectEngineId = (require('../../shared/engines').getDefault && require('../../shared/engines').getDefault()) || 'grok';
+    const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume: injectEngineId === 'grok' ? null : resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
         senderId: actor, owner: gated.plan.owner,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: actor, source: 'core' };

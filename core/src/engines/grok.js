@@ -13,17 +13,16 @@
  * don't destructure. Claude vision stays SDK image blocks on `images`.
  * No spawn watchdog and no CLI turn cap. Operator abort (abortController) only.
  *
- * RESUME UUID (Grok-specific — do not drop):
+ * SESSION UUID (Grok-specific — do not drop):
  *   Sessions are UUIDs (UUIDv7 when the CLI assigns one). `-s/--session-id` CREATES
- *   a new session; it does not resume. `-r/--resume <uuid>` resumes. `-c/--continue`
- *   is cwd-implicit and too loose for asmltr. On a fresh turn we pass `-s <uuid>` so
- *   we have an addressable id even if JSON parse misses `.sessionId`. On resume we
- *   pass `-r <uuid>` only. `--fork-session` / `--restore-code` / `grok sessions` /
+ *   a new session; it does not resume. Ivy NEVER passes `-r/--resume`. `-c/--continue`
+ *   is cwd-implicit and too loose for asmltr. Every harness turn passes `-s` (new
+ *   session) so we have an addressable id even if JSON parse misses `.sessionId`.
+ *   `--fork-session` / `--restore-code` / `grok sessions` /
  *   `grok export` are preserved as notes, not wired. See /workspace/grok-cli-features.md.
  *
- * historyReplaysSystemPrompt is TRUE: live-verified 2026-08-17 that `-r <uuid>`
- * replays the first-turn system block (probe: "What were you instructed to be?" →
- * "A one-word ping fixture."). ASMLTR_INJECT_ONCE=off remains the kill-switch.
+ * historyReplaysSystemPrompt is TRUE (inject-once last_stable stays). ASMLTR_INJECT_ONCE=off
+ * remains the kill-switch. Grok CLI resume (`-r`) is not used; each turn is `-s`.
  */
 const { spawn, execFileSync } = require('child_process');
 const crypto = require('crypto');
@@ -378,10 +377,9 @@ function isUuid(s) {
   return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
-/** Resume hook: -r for an existing UUID; never -s (create-only) and never bare -c. */
-function resumeArgs(resume) {
-  if (resume && isUuid(resume)) return ['-r', resume];
-  return [];
+/** New-session hook: always `-s`. Never `-r` (CLI resume) and never bare `-c`. */
+function resumeArgs(_resume) {
+  return ['-s'];
 }
 
 function bin() {
@@ -587,9 +585,12 @@ function buildArgs(opts) {
   if (mdl) args.push('-m', mdl);
   if (opts.resume && isUuid(opts.resume)) {
     args.push(...resumeArgs(opts.resume));
+    if (opts.sessionId && isUuid(opts.sessionId)) args.push(opts.sessionId);
   } else if (opts.sessionId && isUuid(opts.sessionId)) {
-    // Fresh session: pre-assign a UUID so we can resume later even if JSON omits sessionId.
+    // Fresh session: pre-assign a UUID even if JSON omits sessionId.
     args.push('-s', opts.sessionId);
+  } else {
+    args.push(...resumeArgs(null));
   }
   args.visionPromptFile = visionPromptFile;
   return args;
@@ -796,7 +797,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   // Do not provision MCP servers on a spoken turn.
   if (!_mcpSynced && !voiceTurn) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
-  const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
   // Do not consume ~/.asmltr/next-effort on email/mcp/voice — those channels force their effort.
   const nextEffort = (isEmailChannel(channel) || isMcpChannel(channel) || voiceTurn) ? null : takeNextEffort(conversationKey);
   const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, conversationKey, channel_context, voice };

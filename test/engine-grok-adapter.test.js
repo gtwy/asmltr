@@ -50,13 +50,15 @@ test('installLatest(grok) is a no-op without an npm package', () => {
   assert.equal(r.ok, false);
 });
 
-test('isUuid / resumeArgs: -r for a UUID, never -s or -c', () => {
+test('isUuid / resumeArgs: -s even for a UUID, never -r or -c', () => {
   const id = '01234567-89ab-cdef-0123-456789abcdef';
   assert.equal(grok.isUuid(id), true);
   assert.equal(grok.isUuid('not-a-uuid'), false);
-  assert.deepEqual(grok.resumeArgs(id), ['-r', id]);
-  assert.deepEqual(grok.resumeArgs(null), []);
-  assert.deepEqual(grok.resumeArgs('latest'), []);
+  assert.deepEqual(grok.resumeArgs(id), ['-s']);
+  assert.deepEqual(grok.resumeArgs(null), ['-s']);
+  assert.deepEqual(grok.resumeArgs('latest'), ['-s']);
+  assert.ok(!grok.resumeArgs(id).includes('-r'));
+  assert.ok(!grok.resumeArgs(id).includes('-c'));
 });
 
 test('buildArgs is headless --prompt-file, streaming-json, no CLI turn cap, no TUI', () => {
@@ -80,11 +82,15 @@ test('buildArgs is headless --prompt-file, streaming-json, no CLI turn cap, no T
   assert.ok(p.includes('<system-instructions>'));
 });
 
-test('buildArgs on resume uses -r and not -s', () => {
+test('buildArgs on resume uses -s and not -r', () => {
   const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-  const args = grok.buildArgs({ prompt: 'next', resume: id, sessionId: 'ffffffff-ffff-ffff-ffff-ffffffffffff' });
-  assert.deepEqual(args.slice(args.indexOf('-r'), args.indexOf('-r') + 2), ['-r', id]);
-  assert.ok(!args.includes('-s'));
+  const sid = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+  const args = grok.buildArgs({ prompt: 'next', resume: id, sessionId: sid });
+  assert.ok(args.includes('-s'));
+  assert.ok(!args.includes('-r'));
+  assert.equal(args[args.indexOf('-s') + 1], sid);
+  const f = args[args.indexOf('--prompt-file') + 1];
+  try { require('fs').unlinkSync(f); } catch (_) {}
 });
 
 test('complete() argv uses plain output', () => {
