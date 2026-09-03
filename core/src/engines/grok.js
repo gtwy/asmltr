@@ -377,9 +377,9 @@ function isUuid(s) {
   return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
-/** New-session hook: always `-s`. Never `-r` (CLI resume) and never bare `-c`. */
+/** Resume hook: grok never resumes. `-r` is never emitted. */
 function resumeArgs(_resume) {
-  return ['-s'];
+  return [];
 }
 
 function bin() {
@@ -583,15 +583,9 @@ function buildArgs(opts) {
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
   if (mdl) args.push('-m', mdl);
-  if (opts.resume && isUuid(opts.resume)) {
-    args.push(...resumeArgs(opts.resume));
-    if (opts.sessionId && isUuid(opts.sessionId)) args.push(opts.sessionId);
-  } else if (opts.sessionId && isUuid(opts.sessionId)) {
-    // Fresh session: pre-assign a UUID even if JSON omits sessionId.
-    args.push('-s', opts.sessionId);
-  } else {
-    args.push(...resumeArgs(null));
-  }
+  // Never `-r`. Ignore any resume UUID. Fresh `-s <uuid>` every turn when we have one.
+  const sid = (opts.sessionId && isUuid(opts.sessionId)) ? opts.sessionId : null;
+  if (sid) args.push('-s', sid);
   args.visionPromptFile = visionPromptFile;
   return args;
 }
@@ -845,7 +839,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const childEnv = launchEnv(Object.assign({}, process.env, extra));
   gcVisionPromptFilesOnce();
   const args = buildArgs({
-    prompt, systemPrompt, resume, cwd, model, sessionId, effortPrompt, channel,
+    prompt, systemPrompt, resume: null, cwd, model, sessionId, effortPrompt, channel,
     senderId, owner, bypass_moderation, user_key, sender,
     conversationKey, channel_context, voice,
     denyAll,
@@ -945,7 +939,7 @@ async function complete({ prompt, model, appendSystemPrompt = null, abortControl
   }
 }
 
-// See file header: flip to true after live-verifying `-r` replays the first-turn system block.
+// See file header: grok CLI is never resumed (`-r` unused); inject-once still uses this flag.
 const historyReplaysSystemPrompt = true;
 
 module.exports = {

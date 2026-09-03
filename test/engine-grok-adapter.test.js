@@ -50,15 +50,14 @@ test('installLatest(grok) is a no-op without an npm package', () => {
   assert.equal(r.ok, false);
 });
 
-test('isUuid / resumeArgs: -s even for a UUID, never -r or -c', () => {
+test('isUuid / resumeArgs: resume UUID is ignored; never -r', () => {
   const id = '01234567-89ab-cdef-0123-456789abcdef';
   assert.equal(grok.isUuid(id), true);
   assert.equal(grok.isUuid('not-a-uuid'), false);
-  assert.deepEqual(grok.resumeArgs(id), ['-s']);
-  assert.deepEqual(grok.resumeArgs(null), ['-s']);
-  assert.deepEqual(grok.resumeArgs('latest'), ['-s']);
+  assert.deepEqual(grok.resumeArgs(id), []);
+  assert.deepEqual(grok.resumeArgs(null), []);
+  assert.deepEqual(grok.resumeArgs('latest'), []);
   assert.ok(!grok.resumeArgs(id).includes('-r'));
-  assert.ok(!grok.resumeArgs(id).includes('-c'));
 });
 
 test('buildArgs is headless --prompt-file, streaming-json, no CLI turn cap, no TUI', () => {

@@ -7,17 +7,14 @@
  * per-server, Telegram per-user, MCP per-user, CLI, web chat — they are all
  * just different key formulas.
  *
- * RESUME UUID (Grok first-class):
- *   For the grok engine, engine_session_id IS the Grok CLI session UUID
- *   (UUIDv7 from `grok -s` / the streaming-json sessionId). The next turn
- *   passes resume=that UUID → grok.js emits `-r <uuid>`. That is the real
- *   continuity mechanism. Do not fake it by re-injecting the full system
- *   prompt every turn: grok's `-r` already replays the first-turn system
- *   block (historyReplaysSystemPrompt=true). When a finite idle expires we CLEAR the
- *   UUID (and last_stable_*) so the next turn is a fresh grok session and
- *   the full identity prompt is sent again. The infinite path never clears
- *   the grok UUID.
- *
+ * ENGINE SESSION ID:
+ *   For non-grok engines, engine_session_id is the resume handle passed as
+ *   runTurn({ resume }). Grok never resumes the CLI: recordEngineId is a
+ *   no-op when engine is grok, resolveForTurn returns resume null for grok,
+ *   and grok.js never emits `-r`. Continuity is silo recall + last_stable
+ *   inject on each fresh `-s` spawn. last_stable_* is still written so
+ *   inject-once can work for history-retaining engines. Finite idle still
+ *   clears UUID + last_stable_* for a true fresh start.
  * IDLE POLICY:
  *   Stored as 'infinite' | 'idle:<minutes>' (integer minutes — see
  *   parseIdlePolicy / idlePolicyFromEnv). Default is infinite (jarethmt).
@@ -160,7 +157,7 @@ function ensure(conversation_key, channel, idle_policy = 'infinite', working_dir
  *   resume = Grok/engine UUID to pass as runTurn({ resume }), or null for a fresh session.
  *   expired = true when idle:<minutes> elapsed and we CLEARED the stored UUID.
  */
-function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', working_dir = DEFAULT_CWD) {
+function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', working_dir = DEFAULT_CWD, engine = null) {
   const row = ensure(conversation_key, channel, idle_policy, working_dir);
   // Keep the stored policy in sync with what this turn asked for (env can change
   // without dropping the conversation_key).
@@ -169,6 +166,8 @@ function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', wor
     row.idle_policy = idle_policy;
   }
   if (!row.engine_session_id) return { resume: null, key: conversation_key, expired: false };
+  // Grok CLI is never resumed; do not hand a UUID that would become `-r`.
+  if (engine === 'grok') return { resume: null, key: conversation_key, expired: false };
 
   // idle:<minutes> → drop the engine UUID and start fresh; 'infinite' always resumes.
   const m = /^idle:(\d+)$/.exec(row.idle_policy || 'infinite');
@@ -184,9 +183,10 @@ function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', wor
   return { resume: row.engine_session_id, key: conversation_key, expired: false };
 }
 
-/** Persist the engine session id (for grok: the CLI resume UUID) captured from the turn. */
-function recordEngineId(conversation_key, engine_session_id) {
+/** Persist the engine session id captured from the turn. No-op for grok (never CLI-resume). */
+function recordEngineId(conversation_key, engine_session_id, engine = null) {
   if (!engine_session_id) return;
+  if (engine === 'grok') return;
   _setEngineId.run(engine_session_id, nowMs(), conversation_key);
 }
 

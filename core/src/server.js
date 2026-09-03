@@ -454,9 +454,9 @@ async function handle(envelope, opts = {}) {
   }
 
   // 3) session resolution + run
-  // resume = stored engine UUID (engine_session_id). Grok adapter ignores resume (always `-s`).
+  // resume = stored engine UUID. Grok: resolveForTurn(..., 'grok') returns null so isNew every turn.
   // resolveForTurn CLEARS a stale UUID after idle:<minutes>, so isNew must be computed AFTER.
-  const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined);
+  const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined, engineId);
   const sessionRow = sessions.get(e.conversation_key);
   const cwd = sessionRow?.working_dir || undefined; // spawn/resume cwd (neutral home by default)
   const isNew = !resume;
@@ -660,7 +660,7 @@ async function handle(envelope, opts = {}) {
   }
   _flushStream(); // ship any redacted tail held back during streaming
 
-  if (result.engineSessionId) sessions.recordEngineId(e.conversation_key, result.engineSessionId);
+  if (result.engineSessionId) sessions.recordEngineId(e.conversation_key, result.engineSessionId, engineId);
   sessions.touch(e.conversation_key);
   // Mark the stable block as delivered for this engine (inject-once), but only on SUCCESS — a failed turn
   // leaves the marker stale so the next turn re-sends the full prompt. No-op on claude (canInjectOnce=false).
@@ -2082,7 +2082,8 @@ app.post('/v2/inject', (req, res) => {
       return;
     }
     record({ surface: row.channel, session_id: key, event_type: 'control', identity: actor, source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
-    const { resume } = sessions.resolveForTurn(key, row.channel, sessions.idlePolicyFromEnv());
+    const injectEngine = require('../../shared/engines').getDefault();
+    const { resume } = sessions.resolveForTurn(key, row.channel, sessions.idlePolicyFromEnv(), undefined, injectEngine);
     // Mid-task steer → frame the text so the model continues its current work with this guidance
     // rather than answering it in isolation. Idle session → deliver it as a normal message.
     const prompt = injectSteer.frameInjectPrompt(text, by, { wasRunning, interrupt });
@@ -2113,7 +2114,7 @@ app.post('/v2/inject', (req, res) => {
         result = await runTurn({ ...injectOpts, resume: null });
       }
     } finally { untrackTurn(key, ac); }
-    if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
+    if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId, injectEngine);
     sessions.touch(key);
     const reply = redactSecrets((result.text || '').trim()).text;
     record({ surface: row.channel, session_id: key, event_type: 'outbound', identity: actor, source: 'core', payload: { text: truncate(reply, 500), injected: true } });
