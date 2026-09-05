@@ -9,6 +9,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Discord message edit.** `asmltr edit <discord-message-url> "…"` / MCP `asmltr_edit` replaces the body of a message this bot already posted. Link required (names never edit). Own messages only. Discord `/out` `kind: edit`. Same send grant. 4 Sep 2026.
 - **Multiple outbound attachments.** `asmltr send … --file a --file b` puts every file on **one** email (or Discord message). Total attachment bytes ≤ 25MB. Telegram still sends the first file. 1 Sep 2026.
 - **Email owner Cc is outside-domain only.** The mailbox Ccs the operator when any To/Cc is outside the operator's email domain. Staff on that domain (and the assistant mailbox) do not auto-Cc the operator unless the operator is already on the letter. `--no-owner-cc` is gone (stale flag is ignored). 1 Sep 2026.
 - **Email `--new-thread`.** Blank new letter: no last-inbound quote, no `In-Reply-To`/`References`, no reply-all merge. `--no-reply-all` still only drops extra recipients and still quotes this thread. Sidebar (other customers / personal / internal SKUs) and customer mail after a tainted chain use `--new-thread` so Gmail does not staple that history. Clean human reply-all is unchanged. 31 Aug 2026.

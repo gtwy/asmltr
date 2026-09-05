@@ -392,6 +392,38 @@ async function cmdGuildPost(rest) {
   return await deliverSameGuildPost({ target, text, title, replyTo });
 }
 
+async function cmdEdit(rest) {
+  // asmltr edit <discord-message-url> "<text>"
+  // asmltr edit discord <discord-message-url> "<text>"
+  exitIfDenied('send');
+  const words = rest.slice();
+  if (words[0] && String(words[0]).toLowerCase() === 'discord') words.shift();
+  const target = words[0], text = words.slice(1).join(' ');
+  const gp = require('../shared/discord-targets');
+  if (!target || !text) {
+    throw new Error('usage: asmltr edit <discord-message-url> "<text>"\n' +
+      '       asmltr edit discord <discord-message-url> "<text>"');
+  }
+  if (!gp.parseMessageLink(target) && !gp.looksLikeSnowflake(target)) {
+    throw new Error('need a discord message link (https://discord.com/channels/…/…/…)');
+  }
+  const body = {
+    channel: 'discord', target, kind: 'edit', text,
+    source_guild: process.env.ASMLTR_ATTACH_GUILD || undefined,
+    source_channel: process.env.ASMLTR_ATTACH_TARGET || undefined,
+  };
+  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => null);
+  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+  console.log(r && r.ok
+    ? A.grn(`✓ edited discord:${r.messageId || target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`)
+    : A.red('edit failed: ' + ((r && r.error) || JSON.stringify(r))));
+}
+
 async function deliverFile(channel, target, filePath, caption) {
   const body = { channel, target, kind: 'file', path: filePath, caption: caption || undefined };
   let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -853,6 +885,7 @@ function cmdHelp() {
        ... --new-thread                 email: blank new letter (no quote, no In-Reply-To)
   asmltr send discord <id-or-name> "…"  same Discord server (trusted role / resolve allow).
        guild-post is an alias. A name looks up (does not post) until they confirm.
+  asmltr edit <discord-message-url> "…"  replace the body of a message I already posted (link required).
   asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
        [--caption T]                   delete only after Discord confirms. retry / list / gc
        ... --subject "<subj>"           set the subject (email)
@@ -1151,6 +1184,7 @@ async function cmdVault(rest, f) {
       case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
       case 'guild-post': return await cmdGuildPost(rest);
+      case 'edit': return await cmdEdit(rest);
       case 'post': return await cmdPost(rest);
       case 'announce': return await cmdAnnounce(rest);
       case 'notify': return await cmdNotify(rest);

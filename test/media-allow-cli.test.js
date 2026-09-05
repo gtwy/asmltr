@@ -20,6 +20,12 @@ test('asmltr send refuses when send denied', () => {
   assert.match(String(r.stderr || r.stdout), /denied: send/);
 });
 
+test('asmltr edit refuses when send denied', () => {
+  const r = run(['edit', 'https://discord.com/channels/1/2/3', 'hi'], 'send');
+  assert.notEqual(r.status, 0);
+  assert.match(String(r.stderr || r.stdout), /denied: send/);
+});
+
 test('asmltr streams refuses when streams denied', () => {
   const r = run(['streams'], 'streams');
   assert.notEqual(r.status, 0);

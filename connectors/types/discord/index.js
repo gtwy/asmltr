@@ -1966,8 +1966,38 @@ ${referentPromptBlock()}`;
   app.post('/out', requireConnectorToken, async (req, res) => {
     let outMarked = null;
     try {
-      const { kind = 'text', target: tg, text, path: filePath, files, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
+      const { kind = 'text', target: tg, text, path: filePath, files, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query, message_id } = req.body || {};
       const filePaths = require('../../../shared/outbound-files').collectOutboundFiles({ path: filePath, files });
+      if (kind === 'edit') {
+        const gp = require('../../../shared/discord-targets');
+        const parsed = gp.parseMessageLink(tg);
+        const channelId = parsed ? parsed.channelId : resolveChannel(tg);
+        const messageId = (parsed && parsed.messageId) || String(message_id || reply_to || '').trim();
+        if (!gp.looksLikeSnowflake(channelId) || !gp.looksLikeSnowflake(messageId)) {
+          return res.status(400).json({ ok: false, error: 'discord message link or channel id + message_id required' });
+        }
+        const content = String(text || '').trim();
+        if (!content) return res.status(400).json({ ok: false, error: 'text required' });
+        if (content.length > 2000) {
+          return res.status(400).json({ ok: false, error: 'discord 2000 character limit (got ' + content.length + ')' });
+        }
+        const channel = await client.channels.fetch(channelId, { force: true });
+        if (!channel || !channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
+        if (source_guild) {
+          const same = gp.sameGuild(source_guild, gp.destGuildId(channel));
+          if (!same.ok) return res.status(403).json({ ok: false, error: same.error });
+        }
+        const msg = await channel.messages.fetch(messageId);
+        if (!msg) return res.status(404).json({ ok: false, error: 'message not found' });
+        if (!client.user || String(msg.author && msg.author.id) !== String(client.user.id)) {
+          return res.status(403).json({ ok: false, error: 'can only edit my own messages' });
+        }
+        const edited = await msg.edit({ content });
+        const conversation_key = channel.type === 1
+          ? `discord:${ctx.instanceId}:dm:${(channel.recipient && channel.recipient.id) || channelId}`
+          : `discord:${ctx.instanceId}:channel:${channel.id}`;
+        return res.json({ ok: true, edited: true, messageId: edited.id, conversation_key });
+      }
       if (kind === 'guild_resolve') {
         // Mute/disable is inbound only. Name lookup includes muted channels/threads.
         const gp = require('../../../shared/discord-targets');

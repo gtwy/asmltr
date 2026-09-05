@@ -75,6 +75,20 @@ function looksLikeSnowflake(s) {
   return /^\d{17,22}$/.test(String(s || '').trim());
 }
 
+/** discord.com / ptb / canary / discordapp message links → { guildId, channelId, messageId }. */
+function parseMessageLink(s) {
+  const t = String(s || '').trim();
+  const m = t.match(
+    /^https?:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/channels\/(@me|\d{17,22})\/(\d{17,22})\/(\d{17,22})(?:[/?#].*)?$/i,
+  );
+  if (!m) return null;
+  return {
+    guildId: m[1] === '@me' ? null : m[1],
+    channelId: m[2],
+    messageId: m[3],
+  };
+}
+
 function normName(s) {
   return String(s || '')
     .toLowerCase()
@@ -113,6 +127,6 @@ function rankTargets(query, rows) {
 module.exports = {
   prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId,
   isThreadChannel, isPostableGuildChannel, shouldFetchThreads,
-  looksLikeSnowflake, normName, matchScore, rankTargets,
+  looksLikeSnowflake, parseMessageLink, normName, matchScore, rankTargets,
 };
 

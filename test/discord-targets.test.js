@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/discord-targets');
+const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, parseMessageLink, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/discord-targets');
 const { policyFor } = require('../shared/media-allow');
 
 test('public preface prefixes when id present; overlay requires id', () => {
@@ -66,6 +66,19 @@ test('public guild: guildPost from Cast grants or owner (no Access 1-5, no V31 s
   assert.equal(sameChannel('ch1', 'ch2'), false);
 });
 
+test('parseMessageLink reads discord / ptb / canary / discordapp URLs', () => {
+  const a = parseMessageLink('https://discord.com/channels/314227091157811201/843657570165194802/1545503925333926010');
+  assert.equal(a.guildId, '314227091157811201');
+  assert.equal(a.channelId, '843657570165194802');
+  assert.equal(a.messageId, '1545503925333926010');
+  assert.equal(parseMessageLink('https://ptb.discord.com/channels/111111111111111111/222222222222222222/333333333333333333').messageId, '333333333333333333');
+  assert.equal(parseMessageLink('https://canary.discord.com/channels/111111111111111111/222222222222222222/333333333333333333').channelId, '222222222222222222');
+  assert.equal(parseMessageLink('https://discordapp.com/channels/@me/111111111111111111/222222222222222222').guildId, null);
+  assert.equal(parseMessageLink('https://discord.com/channels/314227091157811201/843657570165194802'), null);
+  assert.equal(parseMessageLink('delicacies'), null);
+  assert.equal(parseMessageLink('843657570165194802'), null);
+});
+
 test('names are not snowflakes; 666 steak matches a thread title', () => {
   assert.equal(looksLikeSnowflake('123456789012345678'), true);
   assert.equal(looksLikeSnowflake('666 degree steak thread'), false);
@@ -83,6 +96,9 @@ test('names are not snowflakes; 666 steak matches a thread title', () => {
 test('discord /out keeps send + fuzzy resolve; no parallel guild_post MCP tool', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   assert.match(src, /kind === 'guild_post'/);
+  assert.match(src, /kind === 'edit'/);
+  assert.match(src, /can only edit my own messages/);
+  assert.match(src, /parseMessageLink/);
   assert.match(src, /isForumChannel/);
   assert.match(src, /threads\.create/);
   assert.match(src, /messageReference/);
@@ -101,4 +117,6 @@ test('discord /out keeps send + fuzzy resolve; no parallel guild_post MCP tool',
   const belt = fs.readFileSync(path.join(__dirname, '../mcp/toolbelt-server.js'), 'utf8');
   assert.equal(belt.includes('asmltr_guild_post'), false);
   assert.match(belt, /asmltr_send/);
+  assert.match(belt, /asmltr_edit/);
+  assert.match(cli, /cmdEdit/);
 });

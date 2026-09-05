@@ -50,6 +50,14 @@ const TOOLS = [
       ...((Array.isArray(a.files) ? a.files : []).flatMap((p) => (p ? ['--file', p] : []))),
       ...(a.new_thread ? ['--new-thread'] : []),
       ...(a.no_reply_all ? ['--no-reply-all'] : [])] },
+  { name: 'asmltr_edit', deny: 'send', description: 'Replace the body of a Discord message I already posted. Requires a discord.com/channels/…/…/… message link (not a channel name). Only my own messages. Same send grant as asmltr_send. Host overlay may same-guild fence when this turn is in a server.',
+    inputSchema: { type: 'object', required: ['url', 'text'],
+      properties: {
+        url: { type: 'string', description: 'Discord message link (https://discord.com/channels/<guild>/<channel>/<message>)' },
+        text: { type: 'string', description: 'Full replacement body (≤2000 characters)' },
+      },
+      additionalProperties: false },
+    argv: (a) => ['edit', a.url, a.text] },
   { name: 'asmltr_post', deny: 'attach', description: 'Post a generated image/video to THIS channel without Bash. Same right as image/video gen — no extra grant. Only generator output or files already in attach-stage. Stages a safe name, posts, deletes after confirm. Missed delivery: retry=true.',
     inputSchema: { type: 'object', properties: {
       file: { type: 'string', description: 'absolute path of the file to post' },
