@@ -918,10 +918,11 @@ function cmdHelp() {
   asmltr version         installed + per-service versions; whether an update is available
   asmltr update          pull + install the latest & restart (deterministic; verifies, auto-rolls-back)
        [--dry-run] [--channel stable|edge] [--agent]
-  asmltr bounce          restart core+manager+collector AFTER this turn (never inline)
+  asmltr bounce          restart collector+manager+core AFTER this turn (never inline)
        [--delay SEC]     extra wait after the turn so the reply can post (default 20)
        [--now]           human terminal only — refused inside a live turn
        [--dry-run]       print the plan, do not queue
+       [--help]          print bounce usage; do not queue
   asmltr help
 
   collector: ${BASE}   core: ${CORE_BASE}   ${TOKEN ? '(token set)' : A.dim('(no token — dev mode)')}`);

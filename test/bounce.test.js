@@ -54,10 +54,13 @@ test('onTurnEnded with no key on the queue fires on the next turn end', () => {
 
 test('parseArgs: --now, --delay, --from-guard, --dry-run', () => {
   assert.deepEqual(bounce.parseArgs(['--now', '--delay', '8', '--from-guard']), {
-    delayMs: 8000, now: true, dryRun: false, fromGuard: true,
+    delayMs: 8000, now: true, dryRun: false, fromGuard: true, help: false, unknown: [],
   });
   assert.equal(bounce.parseArgs(['--delay=3']).delayMs, 3000);
   assert.equal(bounce.parseArgs(['-n']).dryRun, true);
+  assert.equal(bounce.parseArgs(['--help']).help, true);
+  assert.equal(bounce.parseArgs(['-h']).help, true);
+  assert.deepEqual(bounce.parseArgs(['--bogus']).unknown, ['--bogus']);
 });
 
 test('runCli dry-run inside a turn does not launch', async () => {
@@ -154,4 +157,136 @@ test('bounce-guard wrappers exist and intercept.js rewrites to asmltr bounce', (
   assert.match(src, /asmltr\.js/);
   assert.match(src, /--from-guard/);
   assert.match(src, /looksLikeAsmltrRestart/);
+});
+
+function fakeSupervisorBins() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-bounce-bins-'));
+  for (const name of ['systemctl', 'systemd-run', 'setsid', 'pm2']) {
+    const p = path.join(dir, name);
+    fs.writeFileSync(p, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(p, 0o755);
+  }
+  return dir;
+}
+
+function fakeSystemdHome() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-bounce-home-'));
+  const user = path.join(dir, '.config', 'systemd', 'user');
+  fs.mkdirSync(user, { recursive: true });
+  fs.writeFileSync(path.join(user, 'asmltr-core.service'), '');
+  fs.writeFileSync(path.join(user, 'asmltr-manager.service'), '');
+  fs.writeFileSync(path.join(user, 'asmltr-collector.service'), '');
+  return dir;
+}
+
+function mockSpawn() {
+  const calls = [];
+  bounce.setSpawnImpl((cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return { pid: 4242, unref() {} };
+  });
+  return calls;
+}
+
+test('systemd restartPlan lists collector then manager then core last', () => {
+  const plan = bounce.restartPlan({
+    env: { ASMLTR_SUPERVISOR: 'systemd' },
+    homedir: fakeSystemdHome(),
+  });
+  assert.equal(plan.supervisor, 'systemd');
+  assert.deepEqual(plan.services, ['asmltr-collector', 'asmltr-manager', 'asmltr-core']);
+  assert.deepEqual(plan.argv, [
+    '--user', 'restart',
+    'asmltr-collector.service',
+    'asmltr-manager.service',
+    'asmltr-core.service',
+  ]);
+});
+
+test('pm2 restartPlan lists core last', () => {
+  const plan = bounce.restartPlan({ env: { ASMLTR_SUPERVISOR: 'pm2' } });
+  assert.equal(plan.supervisor, 'pm2');
+  assert.equal(plan.services.at(-1), 'asmltr-core');
+  assert.equal(plan.argv.at(-1), 'asmltr-core');
+  assert.ok(plan.argv.indexOf('asmltr-insights-collector') < plan.argv.indexOf('asmltr-core'));
+  assert.ok(plan.argv.indexOf('asmltr-connector-manager') < plan.argv.indexOf('asmltr-core'));
+});
+
+test('launchDetached on systemd uses systemd-run --user --scope, not setsid', () => {
+  const calls = mockSpawn();
+  const r = bounce.launchDetached({
+    delayMs: 5000,
+    env: { ASMLTR_SUPERVISOR: 'systemd', PATH: fakeSupervisorBins() },
+    homedir: fakeSystemdHome(),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(path.basename(calls[0].cmd), 'systemd-run');
+  assert.ok(calls[0].args.includes('--user'));
+  assert.ok(calls[0].args.includes('--scope'));
+  assert.equal(calls[0].args.includes('setsid'), false);
+  assert.equal(calls[0].opts.detached, true);
+  assert.equal(calls[0].opts.stdio, 'ignore');
+  const dashC = calls[0].args.lastIndexOf('-c');
+  assert.ok(dashC >= 0);
+  const script = calls[0].args[dashC + 1];
+  assert.match(script, /sleep 5/);
+  const collectorAt = script.indexOf('asmltr-collector');
+  const managerAt = script.indexOf('asmltr-manager');
+  const coreAt = script.indexOf('asmltr-core');
+  assert.ok(collectorAt >= 0 && managerAt > collectorAt && coreAt > managerAt);
+});
+
+test('launchDetached on pm2 still uses setsid', () => {
+  const calls = mockSpawn();
+  const r = bounce.launchDetached({
+    delayMs: 8000,
+    env: { ASMLTR_SUPERVISOR: 'pm2', PATH: fakeSupervisorBins() },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(path.basename(calls[0].cmd), 'setsid');
+  const dashC = calls[0].args.lastIndexOf('-c');
+  const script = calls[0].args[dashC + 1];
+  assert.ok(script.indexOf('asmltr-core') > script.indexOf('asmltr-insights-collector'));
+});
+
+test('runCli --help and -h do not queue or launch', async () => {
+  bounce.setLaunchImpl(() => { throw new Error('must not launch on help'); });
+  for (const flag of ['--help', '-h']) {
+    const r = await bounce.runCli([flag], {
+      env: { ASMLTR_SUPERVISOR: 'pm2', PATH: '/bin' },
+      isTTY: true,
+    });
+    assert.equal(r.help, true, flag);
+    assert.equal(r.ok, true, flag);
+    assert.equal(r.queued, undefined, flag);
+    assert.equal(bounce.peekPending(), null, flag);
+  }
+});
+
+test('runCli --help inside a turn does not queue', async () => {
+  bounce.setLaunchImpl(() => { throw new Error('must not launch on help'); });
+  const r = await bounce.runCli(['--help'], {
+    env: {
+      ASMLTR_INSIDE_TURN: '1',
+      ASMLTR_TURN_KEY: 'discord:dm:1',
+      ASMLTR_SUPERVISOR: 'pm2',
+      PATH: '/bin',
+    },
+    isTTY: false,
+    skipCore: true,
+  });
+  assert.equal(r.help, true);
+  assert.equal(bounce.peekPending(), null);
+});
+
+test('runCli unknown flag does not launch', async () => {
+  bounce.setLaunchImpl(() => { throw new Error('must not launch on unknown'); });
+  const r = await bounce.runCli(['--bogus'], {
+    env: { ASMLTR_SUPERVISOR: 'pm2', PATH: '/bin' },
+    isTTY: false,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.queued, undefined);
 });

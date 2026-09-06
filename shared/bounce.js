@@ -9,6 +9,12 @@
  *
  * `asmltr bounce` is the front door. A turn-only PATH shim (scripts/bounce-guard)
  * rewrites `systemctl`/`pm2` restarts of the asmltr stack into that same queue.
+ *
+ * On systemd the delayed restart is launched in a new user scope
+ * (`systemd-run --user --scope`) so it is not in asmltr-core.service's cgroup.
+ * `setsid` + `detached` only start a new session; they do not leave the cgroup,
+ * and KillMode=control-group then kills the waiter when core stops. Restart
+ * order is collector → manager → core last (defense in depth).
  */
 const fs = require('fs');
 const os = require('os');
@@ -29,6 +35,7 @@ const SYSTEMD_COLLECTOR = ['asmltr-collector.service', 'asmltr-insights-collecto
 
 let pending = null; // { conversationKey, delayMs, queuedAt, from }
 let launchImpl = null; // tests inject
+let spawnImpl = null; // tests inject
 
 function guardDir() {
   return path.join(__dirname, '..', 'scripts', 'bounce-guard');
@@ -62,28 +69,35 @@ function parseArgs(argv) {
   let now = false;
   let dryRun = false;
   let fromGuard = false;
+  let help = false;
+  const unknown = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === '--now') now = true;
     else if (a === '--dry-run' || a === '-n') dryRun = true;
     else if (a === '--from-guard') fromGuard = true;
+    else if (a === '--help' || a === '-h') help = true;
     else if (a === '--delay' && rest[i + 1] != null) {
       delayMs = Math.max(0, Number(rest[++i]) * 1000);
       if (!Number.isFinite(delayMs)) delayMs = DEFAULT_DELAY_MS;
     } else if (a.startsWith('--delay=')) {
       delayMs = Math.max(0, Number(a.slice(8)) * 1000);
       if (!Number.isFinite(delayMs)) delayMs = DEFAULT_DELAY_MS;
+    } else {
+      unknown.push(a);
     }
   }
-  return { delayMs, now, dryRun, fromGuard };
+  return { delayMs, now, dryRun, fromGuard, help, unknown };
 }
 
 function resetForTest() {
   pending = null;
   launchImpl = null;
+  spawnImpl = null;
 }
 
 function setLaunchImpl(fn) { launchImpl = fn; }
+function setSpawnImpl(fn) { spawnImpl = fn; }
 
 function peekPending() { return pending ? { ...pending } : null; }
 
@@ -119,7 +133,9 @@ function resolveRealBin(name, env) {
   }
   const fallbacks = name === 'systemctl'
     ? ['/usr/bin/systemctl', '/bin/systemctl']
-    : ['/usr/bin/pm2', path.join(os.homedir(), '.local', 'bin', 'pm2')];
+    : name === 'systemd-run'
+      ? ['/usr/bin/systemd-run', '/bin/systemd-run']
+      : ['/usr/bin/pm2', path.join(os.homedir(), '.local', 'bin', 'pm2')];
   for (const c of fallbacks) {
     try { if (fs.existsSync(c)) return c; } catch (_) {}
   }
@@ -159,10 +175,26 @@ function detectSupervisor(opts = {}) {
   return 'pm2';
 }
 
+function restartRole(name) {
+  const n = String(name || '').replace(/\.service$/i, '');
+  if (/collector/i.test(n)) return 0;
+  if (/manager/i.test(n)) return 1;
+  if (/(?:^|-)core$/i.test(n)) return 2;
+  return 1;
+}
+
+/** Collector → manager → core last. Core last so a cgroup kill of core cannot abort the others. */
+function orderRestartServices(names) {
+  return (names || []).slice().sort((a, b) => {
+    const d = restartRole(a) - restartRole(b);
+    return d !== 0 ? d : String(a).localeCompare(String(b));
+  });
+}
+
 function restartPlan(opts = {}) {
   const supervisor = detectSupervisor(opts);
   if (supervisor === 'systemd') {
-    const names = systemdServiceNames(opts);
+    const names = orderRestartServices(systemdServiceNames(opts));
     return {
       supervisor,
       services: names,
@@ -170,12 +202,24 @@ function restartPlan(opts = {}) {
       bin: 'systemctl',
     };
   }
+  const services = orderRestartServices(ASMLTR_SERVICES.slice());
   return {
     supervisor: 'pm2',
-    services: ASMLTR_SERVICES.slice(),
-    argv: ['restart', ...ASMLTR_SERVICES],
+    services,
+    argv: ['restart', ...services],
     bin: 'pm2',
   };
+}
+
+function spawnDetached(cmd, args, spec) {
+  const spawnFn = spawnImpl || spawn;
+  const child = spawnFn(cmd, args, {
+    detached: true,
+    stdio: 'ignore',
+    env: spec.env || process.env,
+  });
+  if (child && typeof child.unref === 'function') child.unref();
+  return child;
 }
 
 function launchDetached(spec = {}) {
@@ -187,24 +231,35 @@ function launchDetached(spec = {}) {
   const delaySec = Math.max(0, Math.ceil(delayMs / 1000));
   const real = resolveRealBin(plan.bin, spec.env);
   if (!real) throw new Error(`cannot bounce: ${plan.bin} not found`);
-  // Detached so this process (often asmltr-core) can finish the turn and die later.
   // Absolute bin — never PATH — so the bounce-guard shim cannot intercept the real restart.
   const quoted = [real, ...plan.argv].map((s) => JSON.stringify(String(s))).join(' ');
   const script = delaySec > 0 ? `sleep ${delaySec}; exec ${quoted}` : `exec ${quoted}`;
-  const child = spawn('setsid', ['bash', '-c', script], {
-    detached: true,
-    stdio: 'ignore',
-    env: spec.env || process.env,
-  });
-  child.unref();
+
+  // systemd-run --user --scope moves the waiter into a transient user scope
+  // outside asmltr-core.service. setsid+detached do not leave the cgroup.
+  let child;
+  let escape = 'setsid';
+  const systemdRun = plan.supervisor === 'systemd'
+    ? resolveRealBin('systemd-run', spec.env)
+    : null;
+  if (systemdRun) {
+    child = spawnDetached(systemdRun, [
+      '--user', '--scope', '--collect', '--quiet', '--',
+      '/bin/bash', '-c', script,
+    ], spec);
+    escape = 'user-scope';
+  } else {
+    child = spawnDetached('setsid', ['bash', '-c', script], spec);
+  }
   return {
     ok: true,
     queued: true,
     afterTurn: !!spec.conversationKey,
     delayMs,
-    pid: child.pid || null,
+    pid: (child && child.pid) || null,
     supervisor: plan.supervisor,
     services: plan.services,
+    escape,
   };
 }
 
@@ -236,6 +291,23 @@ async function runCli(argv, opts = {}) {
   const env = opts.env || process.env;
   const inside = isInsideTurn(env);
   const delayMs = flags.delayMs;
+  if (flags.help) {
+    return {
+      ok: true,
+      help: true,
+      inside,
+      message: 'asmltr bounce [--dry-run|-n] [--delay SEC] [--now]\n'
+        + '  Restart collector, manager, then core last, after this turn.\n'
+        + '  --help / -h prints this and does not queue. --now is refused inside a live turn.',
+    };
+  }
+  if (flags.unknown && flags.unknown.length) {
+    return {
+      ok: false,
+      inside,
+      message: `unknown flag: ${flags.unknown[0]}. Try asmltr bounce --help`,
+    };
+  }
   const plan = describePlan({ ...opts, env, delayMs });
   if (flags.dryRun) {
     return { ok: true, dryRun: true, inside, ...plan, message: inside
@@ -298,12 +370,14 @@ module.exports = {
   parseArgs,
   resetForTest,
   setLaunchImpl,
+  setSpawnImpl,
   peekPending,
   queueAfterTurn,
   onTurnEnded,
   resolveRealBin,
   systemdServiceNames,
   detectSupervisor,
+  orderRestartServices,
   restartPlan,
   launchDetached,
   describePlan,
