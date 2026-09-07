@@ -38,6 +38,12 @@ test('asmltr silo overview refuses when silo denied', () => {
   assert.match(String(r.stderr || r.stdout), /denied: silo/);
 });
 
+test('asmltr discord-search refuses when discordSearch denied', () => {
+  const r = run(['discord-search', 'padron'], 'discordSearch');
+  assert.notEqual(r.status, 0);
+  assert.match(String(r.stderr || r.stdout), /denied: discordSearch/);
+});
+
 test('asmltr uploads refuses when uploads denied', () => {
   const r = run(['uploads'], 'uploads');
   assert.notEqual(r.status, 0);

@@ -745,6 +745,46 @@ async function cmdMail(rest) {
   }
   console.log(A.dim('\n  read: asmltr mail read <uid>   ·   search: asmltr mail search "<q>"'));
 }
+async function cmdDiscordSearch(rest) {
+  // asmltr discord-search "<query>" [--channel id] [--guild id] [--around-limit N] [--dm] [--around id] [--before id]
+  exitIfDenied('discordSearch');
+  let channelId = null, guildId = null, aroundLimit = null, dm = false, around = null, before = null;
+  const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--channel' || t === '--channel-id') channelId = rest[++i];
+    else if (t === '--guild' || t === '--guild-id') guildId = rest[++i];
+    else if (t === '--around-limit' || t === '--limit') aroundLimit = Number(rest[++i]);
+    else if (t === '--dm') dm = true;
+    else if (t === '--around') around = rest[++i];
+    else if (t === '--before') before = rest[++i];
+    else words.push(t);
+  }
+  const query = words.join(' ').trim();
+  if (!dm && !query) throw new Error('usage: asmltr discord-search "<query>" [--channel id] [--guild id] [--around-limit N]\n' +
+    '       asmltr discord-search "<query>" --dm --channel <dm-channel-id> [--around id] [--before id]');
+  const headers = { 'Content-Type': 'application/json' };
+  if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+  const body = {
+    channel: 'discord', op: 'search', query,
+    channel_id: channelId || undefined,
+    guild_id: guildId || undefined,
+    around_limit: Number.isFinite(aroundLimit) ? aroundLimit : undefined,
+    dm: dm || undefined,
+    around: around || undefined,
+    before: before || undefined,
+  };
+  const r = await fetch(MANAGER_BASE + '/read', { method: 'POST', headers, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  if (!r || !r.ok) {
+    if (r && r.index_not_ready) {
+      console.log(A.yel('Discord search index not ready — retry after ' + (r.retry_after || 1) + 's'));
+      return;
+    }
+    return console.log(A.red((r && r.error) || 'discord-search failed'));
+  }
+  console.log(r.text || A.dim('no matches'));
+}
 async function cmdDrafts(rest) {
   // asmltr drafts [list] | show <id> | send <id> | discard <id>
   const sub = rest[0];
@@ -903,6 +943,9 @@ function cmdHelp() {
        drafts show <id> · send <id> · discard <id>
   asmltr mail [list]                   browse the mailbox (-n N, --unseen)
        mail read <uid> [--seen] · mail search "<q>"
+  asmltr discord-search "<query>"      official Discord Ctrl+F (every guild the bot is in).
+       [--channel id] [--guild id]     optional filter; does not dump history. Around-hop ≤25.
+       [--around-limit N] [--dm]       owner-private only. DMs: --dm --channel <id> [--around|--before]
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -1199,6 +1242,7 @@ async function cmdVault(rest, f) {
       case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
+      case 'discord-search': return await cmdDiscordSearch(rest);
       case 'steer': return await cmdSteer(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);

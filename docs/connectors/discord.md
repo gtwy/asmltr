@@ -259,6 +259,31 @@ and the ElevenLabs key.
 
 ---
 
+## Discord search (`asmltr discord-search`)
+
+Owner-private turns only (owner DM, email, MCP). Denied on public guild bot turns.
+
+`asmltr discord-search "<query>"` (MCP `asmltr_discord_search`) calls official
+`GET /guilds/{guild.id}/messages/search` for **every guild the bot is in**. It does
+**not** download channel history. Each hit gets a second hop
+`GET /channels/{id}/messages?around=hit&limit=N` with **N ≤ 25**. The assistant's
+own posts are included — do not filter bot/self messages.
+
+DMs are not guild search: pass `--dm --channel <dm-channel-id>` for a capped
+around/before/latest window (never a full dump). Silo transcripts can cover older
+DM text the host stored.
+
+Needs **MESSAGE CONTENT** (already requested) and **READ MESSAGE HISTORY** (already
+in the invite permission integer `3525696`). If Discord's search index is not
+ready, the API returns **202** with `retry_after`; the wrapper retries a few times,
+then tells you to wait.
+
+Optional `--channel` is a search *filter* (still the search endpoint). Host INDEX /
+workflows name preferred house channels for food and cigars — those ids stay off
+this public tree.
+
+---
+
 ## Memory & outbound
 
 - **Memory** — hierarchical per-server/-channel history (last 200 msgs/channel + a 500-entry global

@@ -63,6 +63,7 @@ asmltr mail                        # inbox, newest first (● = unread)
 asmltr mail list -n 30 --unseen    # more / only unread
 asmltr mail read <uid> [--seen]    # full body; saves attachments to the upload area + prints paths
 asmltr mail search "<query>"       # from / subject / body
+asmltr discord-search "<query>"    # official Discord Ctrl+F (owner-private turns only)
 ```
 Inbound mail is handled automatically per the email connector's `approval_policy` (full-trust →
 auto-reply; others → a **draft** for approval). Any install-specific rules — the identity/signature
