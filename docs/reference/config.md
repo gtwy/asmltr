@@ -74,6 +74,7 @@ and runs open (dev mode).
 | `ASMLTR_SELF_AWARE` | on (set `off` to disable) | Inject the "asmltr toolbelt" awareness (cross-session `asmltr` CLI ops) into the system prompt |
 | `ASMLTR_CLAUDE_BIN` | auto-detected | Full path to the `claude` binary (used by `asmltr claude`) |
 | `ASMLTR_RAW_BODY_LIMIT` | `1024mb` | Ceiling for a raw (non-JSON) request body on the file routes. The base64-in-JSON shape stays bounded by the 10mb JSON parser instead, roughly 7.5 MiB of file |
+| `ASMLTR_DISCORD_GUILD_SCROLLBACK` | `30` | Last-N of a public Discord guild channel re-injected into the observe/catch-up preamble on a **fresh** engine session only. DMs unchanged. |
 
 `ASMLTR_SESSION_CWD` also decides which `CLAUDE.md` the claude engine picks up as harness memory, which loads under asmltr's own identity block; see [Identity precedence vs per-engine harness memory](#identity-precedence-vs-per-engine-harness-memory).
 

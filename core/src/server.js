@@ -48,6 +48,7 @@ const deviceStore = require('./devices/store'); // device registry — the machi
 const deviceEnroll = require('./devices/enroll'); // device credential issuance (vault-backed; replaces keys.json)
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
+const { composeUserCatchUp } = require('./observe-catchup'); // guild last-N on fresh public Discord resume only
 const channelAwareness = require('./channel-awareness'); // medium/runtime block (engine-aware; Claude Code stays Claude Code)
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
@@ -534,10 +535,17 @@ async function handle(envelope, opts = {}) {
       .filter((a) => a && a.type === 'image' && a.data && a.media_type)
       .map((a) => ({ media_type: a.media_type, data: a.data, path: a.path, name: a.name }));
     // User-turn preamble, in channel-chronology framing the model trusts: (1) messages this session
-    // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2)
-    // observed-but-not-replied activity from others. Both buffers are drained + cleared each turn.
+    // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2) on a
+    // FRESH public Discord guild session only, last-N of THIS channel, then (3) observed-but-not-replied
+    // activity from others. Observe/self-sent buffers are drained + cleared each turn. DMs skip (2).
     const userText = e.content.text;
-    const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
+    const catchUp = composeUserCatchUp({
+      selfSent: drainSelfSent(e.conversation_key),
+      observed: drainObserved(e.conversation_key),
+      guildScrollback: e.channel_scrollback,
+      isNew,
+      publicDiscord: e.channel === 'discord' && !!e.public,
+    });
     const turnOpts = {
       prompt: catchUp + userText,
       effortPrompt: userText,

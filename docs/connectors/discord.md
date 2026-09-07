@@ -287,8 +287,13 @@ this public tree.
 ## Memory & outbound
 
 - **Memory** — hierarchical per-server/-channel history (last 200 msgs/channel + a 500-entry global
-  timeline for cross-channel recall), persisted to `discord-<id>-memory.json`. Fed to the core as
-  context; the *session* itself lives in the core (per-channel `conversation_key`).
+  timeline for cross-channel recall), persisted to `discord-<id>-memory.json`. On a **fresh** guild
+  engine session (new session / resume after idle or core start), the connector re-injects last-N
+  of **this** channel into the observe/catch-up preamble (`ASMLTR_DISCORD_GUILD_SCROLLBACK`, default
+  **30**). Prefers `memory.json`; if that window is empty or stale, one
+  `channel.messages.fetch({limit:N})` (optional `before` is a single extra page, not a dump).
+  Not `asmltr_discord_search`. DMs still use PRIOR / conversation-first silo recall only.
+  The *session* itself lives in the core (per-channel `conversation_key`).
 - **Outbound** — declares `outbound` in `meta`, so the manager's `POST /send` can route messages out
   through it (used by admin alerts and any `/send` caller). Channel **aliases** map friendly names →
   channel ids via a gitignored `channel-aliases.json` (see `.example`).
