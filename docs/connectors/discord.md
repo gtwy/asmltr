@@ -269,6 +269,14 @@ Owner-private turns only (owner DM, email, MCP). Denied on public guild bot turn
 `GET /channels/{id}/messages?around=hit&limit=N` with **N ≤ 25**. The assistant's
 own posts are included — do not filter bot/self messages.
 
+Discord's index does not fold accents (`padron` and `padrón` are disjoint). The
+wrapper expands each query into a small variant set — the original, an NFD-stripped
+form, last-vowel acute (`padron` → `padrón`), last-n tilde (`anejo` → `añejo`), and
+a mixed Spanish recombine (`pilon anejo` → `pilón añejo`) — searches each variant,
+then merges and dedupes by message id (round-robin, still capped at 25 hits per
+guild so around-hops stay bounded). DMs fold both the query and message text
+locally in the capped window.
+
 DMs are not guild search: pass `--dm --channel <dm-channel-id>` for a capped
 around/before/latest window (never a full dump). Silo transcripts can cover older
 DM text the host stored.

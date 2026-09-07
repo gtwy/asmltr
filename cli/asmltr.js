@@ -945,7 +945,8 @@ function cmdHelp() {
        mail read <uid> [--seen] · mail search "<q>"
   asmltr discord-search "<query>"      official Discord Ctrl+F (every guild the bot is in).
        [--channel id] [--guild id]     optional filter; does not dump history. Around-hop ≤25.
-       [--around-limit N] [--dm]       owner-private only. DMs: --dm --channel <id> [--around|--before]
+       [--around-limit N] [--dm]       owner-private only. Accents folded (padron≈padrón).
+                                       DMs: --dm --channel <id> [--around|--before]
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes

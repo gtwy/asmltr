@@ -26,7 +26,7 @@ turns the assistant's cross-session `asmltr` commands into real, structured tool
 | `asmltr_send` | Deliver a message out through any connector (Discord, Telegram, email, …). |
 | `asmltr_announce` | Post a non-coercive note other sessions see on their next turn. |
 | `asmltr_uploads` | List recent files uploaded to the shared upload area. |
-| `asmltr_discord_search` | Official Discord Ctrl+F across every guild the bot is in. Hits + capped around-context. Owner-private turns only. |
+| `asmltr_discord_search` | Official Discord Ctrl+F across every guild the bot is in. Accents folded (padron≈padrón). Hits + capped around-context. Owner-private turns only. |
 
 Under the hood it's a tiny, zero-dependency stdio MCP server (`mcp/toolbelt-server.js`) that wraps the
 existing [`asmltr` CLI](cli.md) — so the CLI stays the single source of truth and the model sees clean,

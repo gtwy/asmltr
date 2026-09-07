@@ -6,6 +6,10 @@
  * Context: GET /channels/{id}/messages?around=hit&limit=N with N ≤ 25.
  * DMs: capped around/before on the DM channel id — never guild search, never a full dump.
  * Bot/self messages stay in the result (do not filter them out).
+ *
+ * Official guild search does not fold accents. We expand each query into a
+ * small variant set (NFD-stripped + common Spanish recombinations) and merge
+ * hits by message id so `padron` / `pilon anejo` still find accented posts.
  */
 const { looksLikeSnowflake } = require('./discord-targets');
 
@@ -13,6 +17,9 @@ const AROUND_LIMIT_MAX = 25;
 const SEARCH_LIMIT_MAX = 25;
 const DEFAULT_AROUND_LIMIT = 8;
 const DEFAULT_SEARCH_LIMIT = 5;
+const QUERY_VARIANT_MAX = 8;
+const ACUTE = { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú' };
+const TILDE_N = { n: 'ñ', N: 'Ñ' };
 const INDEX_NOT_READY_CODE = 110000;
 const INDEX_RETRY_FALLBACK_MS = 1000;
 const MAX_INDEX_RETRIES = 3;
@@ -30,6 +37,91 @@ function capAroundLimit(n) {
 
 function capSearchLimit(n) {
   return capLimit(n, SEARCH_LIMIT_MAX, DEFAULT_SEARCH_LIMIT);
+}
+
+function foldAccents(s) {
+  return String(s == null ? '' : s).normalize('NFD').replace(/\p{M}/gu, '').normalize('NFC');
+}
+
+function collapseWs(s) {
+  return String(s || '').trim().replace(/\s+/g, ' ');
+}
+
+function replaceLastMapped(word, map) {
+  const w = String(word || '');
+  for (let i = w.length - 1; i >= 0; i--) {
+    const next = map[w[i]];
+    if (next) return w.slice(0, i) + next + w.slice(i + 1);
+  }
+  return w;
+}
+
+function lastVowelAcute(word) {
+  return replaceLastMapped(word, ACUTE);
+}
+
+function lastNTilde(word) {
+  return replaceLastMapped(word, TILDE_N);
+}
+
+function spanishWordVariant(word) {
+  const folded = foldAccents(word);
+  if (/[aeiouAEIOU]n$/i.test(folded)) return lastVowelAcute(folded);
+  if (/n/i.test(folded)) return lastNTilde(folded);
+  return lastVowelAcute(folded);
+}
+
+function mapWords(query, fn) {
+  return String(query).split(/\s+/).filter(Boolean).map(fn).join(' ');
+}
+
+function expandQueryVariants(query) {
+  const orig = collapseWs(query);
+  if (!orig) return [];
+  const folded = foldAccents(orig);
+  const out = [];
+  const add = (s) => {
+    const v = collapseWs(s);
+    if (v && !out.includes(v)) out.push(v);
+  };
+  add(orig);
+  add(folded);
+  add(mapWords(folded, lastVowelAcute));
+  add(mapWords(folded, lastNTilde));
+  add(mapWords(folded, spanishWordVariant));
+  return out.slice(0, QUERY_VARIANT_MAX);
+}
+
+function hitMessageId(hit) {
+  if (!hit) return '';
+  if (hit.message && hit.message.id != null) return String(hit.message.id);
+  if (hit.id != null) return String(hit.id);
+  return '';
+}
+
+function mergeHitsByMessageId(groups, limit) {
+  const lists = Array.isArray(groups) ? groups.map((g) => (Array.isArray(g) ? g : [])) : [];
+  const cap = limit == null ? Infinity : Math.max(0, Number(limit) || 0);
+  const seen = new Set();
+  const out = [];
+  const idxs = lists.map(() => 0);
+  let progress = true;
+  while (progress && out.length < cap) {
+    progress = false;
+    for (let g = 0; g < lists.length; g++) {
+      while (idxs[g] < lists[g].length) {
+        const hit = lists[g][idxs[g]++];
+        const id = hitMessageId(hit);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out.push(hit);
+        progress = true;
+        break;
+      }
+      if (out.length >= cap) break;
+    }
+  }
+  return out;
 }
 
 function snowflakeOrThrow(id, label) {
@@ -158,24 +250,36 @@ async function searchGuilds({ request, guildIds, query, channelIds, aroundLimit,
   const ids = (guildIds || []).map(String).filter(looksLikeSnowflake);
   if (!ids.length) return { ok: false, error: 'no guilds' };
   const around = capAroundLimit(aroundLimit);
+  const variants = expandQueryVariants(q);
   const hits = [];
   let indexNotReady = false;
   let retryAfter = 0;
   for (const guildId of ids) {
-    const path = buildGuildSearchPath(guildId, { content: q, channelIds, limit: SEARCH_LIMIT_MAX });
-    const r = await requestWithIndexRetry(request, path, sleep);
-    if (r && r.indexNotReady) {
-      indexNotReady = true;
-      retryAfter = Math.max(retryAfter, retryAfterMs(r.body));
-      continue;
+    const groups = [];
+    for (const variant of variants) {
+      const path = buildGuildSearchPath(guildId, { content: variant, channelIds, limit: SEARCH_LIMIT_MAX });
+      const r = await requestWithIndexRetry(request, path, sleep);
+      if (r && r.indexNotReady) {
+        indexNotReady = true;
+        retryAfter = Math.max(retryAfter, retryAfterMs(r.body));
+        groups.push([]);
+        continue;
+      }
+      if (!r || r.status >= 300) {
+        groups.push([]);
+        continue;
+      }
+      const row = [];
+      for (const raw of flattenHits(r.body)) {
+        const message = normalizeMessage(raw);
+        if (!message) continue;
+        row.push({ guildId, message });
+      }
+      groups.push(row);
     }
-    if (!r || r.status >= 300) continue;
-    const found = flattenHits(r.body);
-    for (const raw of found) {
-      const message = normalizeMessage(raw);
-      if (!message) continue;
-      const channelId = message.channel_id || raw.channel_id;
-      const context = await fetchAround(request, channelId, message.id, around);
+    for (const hit of mergeHitsByMessageId(groups, SEARCH_LIMIT_MAX)) {
+      const message = hit.message;
+      const context = await fetchAround(request, message.channel_id, message.id, around);
       hits.push({ guildId, message, context: context.length ? context : [message] });
     }
   }
@@ -196,9 +300,9 @@ async function searchDm({ request, channelId, query, around, before, after, limi
     return { ok: false, error: (r && r.body && r.body.message) || ('http ' + (r && r.status)), messages: [] };
   }
   let messages = aroundMessages(r.body).map(normalizeMessage).filter(Boolean);
-  const q = String(query || '').trim().toLowerCase();
+  const q = foldAccents(String(query || '').trim()).toLowerCase();
   if (q) {
-    const matched = messages.filter((m) => String(m.content || '').toLowerCase().includes(q));
+    const matched = messages.filter((m) => foldAccents(m.content || '').toLowerCase().includes(q));
     if (matched.length) messages = matched;
   }
   return { ok: true, messages, total: messages.length };
@@ -295,6 +399,7 @@ module.exports = {
   SEARCH_LIMIT_MAX,
   DEFAULT_AROUND_LIMIT,
   DEFAULT_SEARCH_LIMIT,
+  QUERY_VARIANT_MAX,
   INDEX_NOT_READY_CODE,
   INDEX_RETRY_FALLBACK_MS,
   MAX_INDEX_RETRIES,
@@ -307,6 +412,9 @@ module.exports = {
   retryAfterMs,
   flattenHits,
   normalizeMessage,
+  foldAccents,
+  expandQueryVariants,
+  mergeHitsByMessageId,
   searchGuilds,
   searchDm,
   runSearch,
