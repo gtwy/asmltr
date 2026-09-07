@@ -38,3 +38,35 @@ Do **not** copy the DNS MX hostname. Google MX is `aspmx.l.google.com`; the AR t
 ```json
 { "authserv_ids": ["mx.google.com"] }
 ```
+
+## IMAP IDLE watchdog
+
+Inbound mail is still **IDLE-first**. The watcher does not fall back to minute polling.
+
+A half-open IMAP socket (IDLE died, no `close` event) used to look healthy: the process stayed up,
+the manager log ring rotated (`LOG_RING=200`), and new mail waited until a later reconnect
+caught up. The watchdog now:
+
+1. **Refresh IDLE** with ImapFlow `maxIdleTime` (default 10 minutes) so the session is ended
+   with DONE and restarted before a long-lived IDLE goes stale.
+2. **Probe** about every `ASMLTR_EMAIL_IMAP_PROBE_MS` (default 60s): send DONE / break IDLE,
+   then a time-boxed NOOP (default 35s). Skip the probe while `busy` (a `fetchNew` is in
+   progress) so the mailbox lock is not interrupted.
+3. **Backoff reconnect** after 3 consecutive probe/connect/close failures (10s → 20s → 40s …
+   capped at 5 minutes). A successful probe resets the streak. The UID cursor (`lastUid`) is
+   not reset on reconnect.
+4. **Journal** probe/fail/reconnect lines to `~/.asmltr/email-imap-<instance>.jsonl` (mode
+   `600`; override with `ASMLTR_EMAIL_IMAP_JOURNAL`). Reasons are address-stripped. The
+   in-memory manager ring is no longer the only record.
+5. **Rate:** `imap_probe_fails_hour` on `GET /health` and `health()`, and `fails_hour=` on
+   the journalled probe-fail line.
+
+| Env | Default | Role |
+| --- | --- | --- |
+| `ASMLTR_EMAIL_IMAP_PROBE_MS` | `60000` | Probe interval |
+| `ASMLTR_EMAIL_IMAP_PROBE_TIMEOUT_MS` | `35000` | DONE+NOOP deadline |
+| `ASMLTR_EMAIL_IMAP_MAX_IDLE_MS` | `600000` | ImapFlow IDLE refresh |
+| `ASMLTR_EMAIL_IMAP_RECONNECT_BASE_MS` | `10000` | First reconnect delay |
+| `ASMLTR_EMAIL_IMAP_RECONNECT_MAX_MS` | `300000` | Backoff cap |
+| `ASMLTR_EMAIL_IMAP_BACKOFF_AFTER` | `3` | Failures before delay doubles |
+| `ASMLTR_EMAIL_IMAP_JOURNAL` | `~/.asmltr/email-imap-<id>.jsonl` | Persistent flap log |
