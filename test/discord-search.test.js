@@ -217,6 +217,116 @@ test('searchDm never calls guild search and never paginates a full dump', async 
   assert.equal(out.messages.some((m) => m.author.bot && m.content.includes('needle')), true);
 });
 
+test('foldAccents strips NFD marks so padrón becomes padron', () => {
+  assert.equal(search.foldAccents('padrón'), 'padron');
+  assert.equal(search.foldAccents('pilón añejo'), 'pilon anejo');
+  assert.equal(search.foldAccents('CAFÉ'), 'CAFE');
+  assert.equal(search.foldAccents('padron'), 'padron');
+});
+
+test('expandQueryVariants includes folded and common Spanish recombinations', () => {
+  const padron = search.expandQueryVariants('padron');
+  assert.ok(padron.includes('padron'));
+  assert.ok(padron.includes('padrón'));
+  assert.equal(padron[0], 'padron');
+
+  const accented = search.expandQueryVariants('padrón');
+  assert.ok(accented.includes('padrón'));
+  assert.ok(accented.includes('padron'));
+
+  const pilon = search.expandQueryVariants('pilon anejo');
+  assert.ok(pilon.includes('pilon anejo'));
+  assert.ok(pilon.includes('pilón añejo'));
+
+  const mixed = search.expandQueryVariants('pilon añejo');
+  assert.ok(mixed.includes('pilon anejo'));
+  assert.ok(mixed.includes('pilón añejo'));
+  assert.ok(mixed.includes('pilon añejo'));
+
+  assert.deepEqual(search.expandQueryVariants('  pilon   anejo  '), search.expandQueryVariants('pilon anejo'));
+  assert.deepEqual(search.expandQueryVariants(''), []);
+  assert.deepEqual(search.expandQueryVariants('   '), []);
+});
+
+test('expandQueryVariants stays unique and bounded', () => {
+  const variants = search.expandQueryVariants('pilon anejo');
+  assert.equal(new Set(variants).size, variants.length);
+  assert.ok(variants.length >= 2);
+  assert.ok(variants.length <= 8);
+});
+
+test('mergeHitsByMessageId dedupes by id and round-robins groups', () => {
+  const hit = (id, pool) => ({ message: { id: String(id).padStart(18, '5'), pool } });
+  const a = [hit('10', 'plain'), hit('11', 'plain'), hit('12', 'plain')];
+  const b = [hit('10', 'accent'), hit('20', 'accent'), hit('21', 'accent')];
+  const merged = search.mergeHitsByMessageId([a, b]);
+  const ids = merged.map((h) => h.message.id);
+  assert.equal(ids.length, 5);
+  assert.equal(new Set(ids).size, 5);
+  assert.equal(merged[0].message.pool, 'plain');
+  assert.ok(merged.some((h) => h.message.pool === 'accent' && h.message.id === hit('20').message.id));
+
+  const manyA = Array.from({ length: 25 }, (_, i) => hit(String(100 + i), 'plain'));
+  const manyB = Array.from({ length: 25 }, (_, i) => hit(String(200 + i), 'accent'));
+  const capped = search.mergeHitsByMessageId([manyA, manyB], search.SEARCH_LIMIT_MAX);
+  assert.equal(capped.length, search.SEARCH_LIMIT_MAX);
+  assert.ok(capped.some((h) => h.message.pool === 'plain'));
+  assert.ok(capped.some((h) => h.message.pool === 'accent'));
+});
+
+test('searchGuilds searches folded and accented variants then dedupes by message id', async () => {
+  const seenContent = [];
+  const request = async (path) => {
+    if (path.includes('/messages/search')) {
+      const content = new URL('https://x' + path).searchParams.get('content');
+      seenContent.push(content);
+      if (content === 'padron') {
+        return { status: 200, body: { total_results: 1, messages: [[msg('10', { content: 'the padron box' })]] } };
+      }
+      if (content === 'padrón') {
+        return { status: 200, body: { total_results: 1, messages: [[msg('20', { content: 'the padrón box' })]] } };
+      }
+      return { status: 200, body: { total_results: 0, messages: [] } };
+    }
+    if (path.includes('/messages?around=')) return { status: 200, body: [] };
+    throw new Error('unexpected path ' + path);
+  };
+  const out = await search.searchGuilds({
+    request,
+    guildIds: ['111111111111111111'],
+    query: 'padron',
+    aroundLimit: 3,
+    sleep: async () => {},
+  });
+  assert.equal(out.ok, true);
+  assert.ok(seenContent.includes('padron'));
+  assert.ok(seenContent.includes('padrón'));
+  const ids = out.hits.map((h) => h.message.id).sort();
+  assert.deepEqual(ids, [msg('10').id, msg('20').id].sort());
+  assert.equal(out.total, 2);
+});
+
+test('searchDm folds accents so padron matches padrón in the capped window', async () => {
+  const request = async () => ({
+    status: 200,
+    body: [
+      msg('1', { content: 'old' }),
+      msg('2', { content: 'the padrón pairing' }),
+      msg('3', { content: 'newer' }),
+    ],
+  });
+  const out = await search.searchDm({
+    request,
+    channelId: '666666666666666666',
+    query: 'padron',
+    around: msg('2').id,
+    limit: 10,
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.messages.length, 1);
+  assert.match(out.messages[0].content, /padrón/);
+});
+
 test('formatHits keeps assistant posts in the printed context', () => {
   const text = search.formatHits([{
     guildId: '111111111111111111',
