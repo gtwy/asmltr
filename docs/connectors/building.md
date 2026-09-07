@@ -135,7 +135,8 @@ it** — so a silent stall becomes visible instead of a mystery. An instance tha
 
 **Reference implementations:** `telegram` (heartbeat when the poll cursor advances), `discord` (gateway
 `Ready` + inbound messages), `github` (each completed poll cycle + `AbortSignal.timeout` on every request),
-`email` (a periodic time-boxed IMAP NOOP that also forces a reconnect when the link is dead). Passive
+`email` (DONE then a time-boxed IMAP NOOP; skip while fetch is busy; `maxIdleTime` refreshes
+IDLE; backoff reconnect; flap lines go to a JSONL journal). Passive
 inbound HTTP servers (`mcp`, `openai`) have no silent poll loop and are intentionally exempt.
 
 ## Registering an instance

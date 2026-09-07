@@ -3,6 +3,19 @@ const { sendPolicyFromConfig } = require('./send-policy');
 const { parseAuthResults: parseAuthResultsAligned, alignsWithFrom } = require('./auth-align');
 const { persistAuthRejectLine } = require('./auth-reject-persist');
 const {
+  IMAP_PROBE_MS,
+  imapNoopProbe,
+  imapProbeTickDecision,
+  nextReconnectDelayMs,
+  createProbeFailWindow,
+  persistImapJournal,
+  buildImapJournalEntry,
+  formatImapJournalLog,
+  imapFlowWatchOptions,
+  baselineLastUid,
+  createImapFailureGate,
+} = require('./imap-watchdog');
+const {
   escapeHtml,
   stripDiscordChrome,
   markdownToHtml,
@@ -35,9 +48,6 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { collectOutboundFiles, attachmentsFromPaths } = require('../../../shared/outbound-files');
 
-// How often the IMAP watcher proves it's genuinely alive (a NOOP round-trip). Below the manager's
-// default 120s stale threshold so a healthy watcher clears it with room to spare.
-const IMAP_PROBE_MS = Number(process.env.ASMLTR_EMAIL_IMAP_PROBE_MS) || 60000;
 const SIG_IMAGE_CID = 'assistant-sig';
 
 function signatureImageAttachment(filePath) {
@@ -65,16 +75,6 @@ function withSignatureImage(attachments, filePath) {
   }
   list.push(inline);
   return list;
-}
-
-// Liveness probe: a NOOP that round-trips to the server, time-boxed. Resolves when the IMAP link is
-// genuinely alive; REJECTS when it's dead or stalled (incl. a half-open TCP that never emits 'close').
-// This is what catches the #34 "IMAP IDLE dropped without a close event → deaf but running" case.
-// Exported for tests.
-async function imapNoopProbe(imap, timeoutMs = 15000) {
-  const np = imap.noop();
-  if (np && typeof np.catch === 'function') np.catch(() => {}); // never let a late rejection go unhandled
-  await Promise.race([np, new Promise((_, rej) => setTimeout(() => rej(new Error('noop timeout')), timeoutMs))]);
 }
 
 // Connection-class IMAP errors: the handle is dead; close() so the close handler reconnects.
@@ -1192,9 +1192,30 @@ async function start(ctx) {
   const persistedUid = readLastUid(ctx.instanceId);
   let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false;
   let connecting = false, pendingExists = false, reconnectTimer = null;
+  let failStreak = 0;
+  const failGate = createImapFailureGate();
+  const probeFails = createProbeFailWindow();
+  function journalImap(event, extra) {
+    const entry = buildImapJournalEntry({
+      event,
+      reason: extra && extra.reason,
+      streak: failStreak,
+      delayMs: extra && extra.delayMs,
+      failsHour: probeFails.count(),
+    });
+    persistImapJournal(ctx.instanceId, entry);
+    ctx.log(formatImapJournalLog(entry));
+  }
+  function noteImapFailure() {
+    if (!failGate.note()) return probeFails.count();
+    failStreak++;
+    return probeFails.record();
+  }
   function scheduleReconnect() {
     if (stopped || connecting || reconnectTimer) return;
-    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectImap(); }, 10000);
+    const delay = nextReconnectDelayMs(failStreak);
+    journalImap('imap.reconnect', { reason: 'reconnect', delayMs: delay });
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectImap(); }, delay);
     if (reconnectTimer.unref) reconnectTimer.unref();
   }
   async function fetchNew() {
@@ -1205,6 +1226,7 @@ async function start(ctx) {
     let lock = null;
     try {
       lock = await imap.getMailboxLock(MAILBOX);
+      try { ctx.heartbeat(); } catch (_) {} // lock is real IMAP I/O; skip_busy must not fake this
       try {
         for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
           if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
@@ -1248,45 +1270,64 @@ async function start(ctx) {
     connecting = true;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     const prev = imap;
-    const client = new ImapFlow({ host: cfg.imap_host, port: cfg.imap_port || 993, secure: true, auth: { user: address, pass: password }, logger: false });
+    const client = new ImapFlow(imapFlowWatchOptions({
+      host: cfg.imap_host,
+      port: cfg.imap_port || 993,
+      auth: { user: address, pass: password },
+    }));
     imap = client;
+    failGate.reset();
     client.on('exists', () => fetchNew().catch((e) => ctx.log(`fetchNew: ${e.message}`)));
     client.on('error', (e) => ctx.log(`imap error: ${e.message}`));
     client.on('close', () => {
       if (imap !== client) return; // stale handle after a newer connect
-      if (!stopped) { ctx.log('imap closed — reconnecting in 10s'); scheduleReconnect(); }
+      if (stopped) return;
+      noteImapFailure();
+      scheduleReconnect();
     });
     if (prev && prev !== client) { try { prev.close(); } catch (_) {} }
     try {
       await client.connect();
       const mb = await client.mailboxOpen(MAILBOX);
-      if (lastUid < 0) lastUid = cfg.process_backlog ? 0 : ((mb.uidNext || 1) - 1); // baseline once, keep across reconnects
+      // baseline once; a reconnect keeps lastUid so mail during a blip is not skipped
+      lastUid = baselineLastUid(lastUid, cfg.process_backlog, mb && mb.uidNext);
       ctx.log(`watching ${address} · ${MAILBOX} · policy=${policy} · from uid>${lastUid}`);
       try { ctx.heartbeat(); } catch (_) {} // connected + mailbox open → the watcher's I/O path is alive
       await fetchNew().catch((e) => ctx.log(`initial fetch: ${e.message}`));
     } catch (e) {
-      ctx.log(`imap connect failed: ${e.message}`);
+      noteImapFailure();
+      journalImap('imap.connect_fail', { reason: e.message });
       try { if (imap === client) client.close(); } catch (_) {}
       if (imap === client) imap = null;
-      if (!stopped) scheduleReconnect();
     } finally { connecting = false; }
+    // schedule after connecting=false: close-during-connect cannot arm while connecting is true
+    if (!stopped && !(imap && imap.usable)) scheduleReconnect();
   }
   connectImap();
 
-  // Liveness watchdog: IDLE can silently die (a half-open connection that never emits 'close'), leaving
-  // the watcher deaf while the process stays up. A periodic NOOP proves the link end-to-end: success →
-  // heartbeat (the manager sees it healthy); failure/stall → force a reconnect (close() → the 'close'
-  // handler above reconnects). If the handle is already gone (!imap / !usable), do not no-op — schedule
-  // connectImap (connecting flag + 10s backoff so retries do not stack). This closes the email half of #34.
+  // Liveness watchdog: IDLE can silently die (half-open TCP, no 'close'). DONE then a time-boxed
+  // NOOP proves the link; skip while fetchNew holds busy so we do not fight the mailbox lock.
+  // Failure → journal + close → backoff reconnect. Dead handle → heal. IDLE stays the new-mail path.
   let probing = false;
   const probeTimer = setInterval(async () => {
-    if (stopped) return;
-    if (!imap || !imap.usable) { connectImap(); return; } // dead handle → heal; do not return as a no-op
-    if (probing) return;
+    const decision = imapProbeTickDecision({
+      stopped, busy, probing, usable: !!(imap && imap.usable),
+      reconnectPending: !!reconnectTimer,
+    });
+    if (decision.action === 'skip' || decision.action === 'skip_busy') return;
+    if (decision.action === 'heal') { connectImap(); return; }
     probing = true;
-    try { await imapNoopProbe(imap); ctx.heartbeat(); }
-    catch (e) { ctx.log(`imap probe failed (${e.message}) — forcing reconnect`); try { imap.close(); } catch (_) {} }
-    finally { probing = false; }
+    try {
+      await imapNoopProbe(imap);
+      if (failStreak > 0) journalImap('imap.probe_ok', { reason: 'alive' });
+      failStreak = 0;
+      ctx.heartbeat();
+    } catch (e) {
+      const failsHour = noteImapFailure();
+      journalImap('imap.probe_fail', { reason: e.message, delayMs: nextReconnectDelayMs(failStreak) });
+      ctx.log(`imap probe failed — forcing reconnect; fails_hour=${failsHour} streak=${failStreak}`);
+      try { imap.close(); } catch (_) {}
+    } finally { probing = false; }
   }, IMAP_PROBE_MS);
   if (probeTimer.unref) probeTimer.unref();
 
@@ -1364,7 +1405,11 @@ async function start(ctx) {
   const { requireConnectorToken } = require('../../../shared/connector-http-auth');
   const app = express();
   app.use(express.json({ limit: '25mb' }));
-  app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
+  app.get('/health', (req, res) => res.json({
+    status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable),
+    imap_probe_fails_hour: probeFails.count(),
+    imap_reconnect_streak: failStreak,
+  }));
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
       const { kind = 'text', target, text, subject, ref, caption, cc, inReplyTo, references, drop, reply_all, new_thread } = req.body || {};
@@ -1404,8 +1449,14 @@ async function start(ctx) {
 
   return {
     async stop() { stopped = true; clearInterval(probeTimer); if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } try { if (imap) await imap.logout(); } catch (_) {} try { if (readImap) await readImap.logout(); } catch (_) {} try { smtp.close(); } catch (_) {} await new Promise((r) => httpServer.close(() => r())); },
-    health() { return { address, mailbox: MAILBOX, policy, imap: !!(imap && imap.usable) }; },
+    health() {
+      return {
+        address, mailbox: MAILBOX, policy, imap: !!(imap && imap.usable),
+        imap_probe_fails_hour: probeFails.count(),
+        imap_reconnect_streak: failStreak,
+      };
+    },
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };

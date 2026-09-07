@@ -37,6 +37,7 @@ test('fetchNew treats connection-class errors as reconnect (close the handle)', 
     'socket hang up',
     'Connection closed',
     'noop timeout',
+    'idle-end timeout',
   ]) {
     assert.equal(isImapConnectionError(new Error(msg)), true, msg);
   }
