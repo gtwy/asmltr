@@ -30,6 +30,7 @@ test('public discord: Cast/allowlists only — not a V31 channel-deny plane', ()
   assert.equal(p.deny.code, true);
   assert.equal(p.deny.shell, true);
   assert.equal(p.deny.guildPost, true);
+  assert.equal(p.deny.discordSearch, true);
 });
 
 test('allowlisted guild still not a channel-deny; silo still on', () => {
@@ -52,6 +53,7 @@ test('discord DM + bypass_moderation denies nothing', () => {
   assert.deepEqual(p.deny, {
     shell: false, streams: false, send: false, silo: false, write: false,
     siloWrite: false, video: false, image: false, code: false, attach: false, uploads: false, guildPost: true,
+    discordSearch: false,
   });
 });
 
@@ -154,8 +156,8 @@ test('codeAllow may receive programs without bypass; still no video/image', () =
 
 test('denyToolsEnv lists denied kinds', () => {
   assert.equal(
-    denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true, video: true, image: true, code: true, attach: true, uploads: true, guildPost: true }),
-    'shell,streams,send,silo,write,siloWrite,video,image,code,attach,uploads,guildPost',
+    denyToolsEnv({ shell: true, streams: true, send: true, silo: true, write: true, siloWrite: true, video: true, image: true, code: true, attach: true, uploads: true, guildPost: true, discordSearch: true }),
+    'shell,streams,send,silo,write,siloWrite,video,image,code,attach,uploads,guildPost,discordSearch',
   );
   assert.equal(denyToolsEnv({ shell: true, streams: true, send: true, silo: false, write: true, siloWrite: true }), 'shell,streams,send,write,siloWrite');
 });
@@ -208,10 +210,10 @@ test('voice handleStream denies all tools; discord text is unchanged', () => {
   assert.equal(isDiscordVoice({ channel: 'discord', conversation_key: 'discord:gaia:channel:7' }), false);
   const owner = policyFor(voiceEnv, { bypass_moderation: true, user_key: 'owner' });
   assert.equal(owner.deny.all, true);
-  for (const k of ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost']) {
+  for (const k of ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost', 'discordSearch']) {
     assert.equal(owner.deny[k], true, k);
   }
-  assert.equal(denyToolsEnv(owner.deny), 'shell,streams,send,silo,write,siloWrite,video,image,code,attach,uploads,guildPost');
+  assert.equal(denyToolsEnv(owner.deny), 'shell,streams,send,silo,write,siloWrite,video,image,code,attach,uploads,guildPost,discordSearch');
 
   const text = policyFor({
     channel: 'discord', public: false,
@@ -221,5 +223,27 @@ test('voice handleStream denies all tools; discord text is unchanged', () => {
   assert.equal(text.deny.all, undefined);
   assert.equal(text.deny.shell, false);
   assert.equal(text.restricted, false);
+  assert.equal(text.deny.discordSearch, false);
+});
+
+test('discordSearch: owner-private only — public guild denied even for owner', () => {
+  const { discordSearchAuthorized } = require('../shared/media-allow');
+  const owner = { bypass_moderation: true, user_key: 'owner' };
+  const guest = { bypass_moderation: false, user_key: 'friend' };
+  const guild = {
+    channel: 'discord', public: true,
+    context: { scope_id: 'guild:other-guild' },
+    channel_context: { channelId: 'ch1' },
+  };
+  const dm = { channel: 'discord', public: false, context: { scope_id: 'dm:someone' } };
+  assert.equal(discordSearchAuthorized(guild, owner), false);
+  assert.equal(policyFor(guild, owner).deny.discordSearch, true);
+  assert.equal(discordSearchAuthorized(dm, owner), true);
+  assert.equal(policyFor(dm, owner).deny.discordSearch, false);
+  assert.equal(discordSearchAuthorized(dm, guest), false);
+  assert.equal(policyFor(dm, guest).deny.discordSearch, true);
+  assert.equal(policyFor({ channel: 'email', public: false }, owner).deny.discordSearch, false);
+  assert.equal(policyFor({ channel: 'mcp', public: false }, owner).deny.discordSearch, false);
+  assert.equal(policyFor({ channel: 'email', public: false }, guest).deny.discordSearch, true);
 });
 

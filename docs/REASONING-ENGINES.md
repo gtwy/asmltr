@@ -45,7 +45,7 @@ Each engine gets them at launch in its own shape:
 
 A built-in **`asmltr-toolbelt`** stdio server (`mcp/toolbelt-server.js`, zero-dep newline-JSON-RPC) is always
 included unless disabled — it exposes asmltr's own cross-session tools (`asmltr_sessions`, `asmltr_send`,
-`asmltr_announce`, `asmltr_uploads`) to **every** harness, so the toolbelt that used to be a Claude-only
+`asmltr_announce`, `asmltr_uploads`, `asmltr_discord_search`) to **every** harness, so the toolbelt that used to be a Claude-only
 system-prompt cheatsheet is now real, structured tools any engine can call. Manage from Settings → Engines →
 MCP tools, or `GET/POST /v2/mcp`, `DELETE /v2/mcp/:name`, `POST /v2/mcp/:name/toggle`.
 

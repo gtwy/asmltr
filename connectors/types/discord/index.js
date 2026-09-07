@@ -86,6 +86,7 @@ const meta = {
   // How the Access page presents identifiers for this surface (trust framework).
   identifierFormats: [{ surface: 'discord', label: 'Discord User ID', placeholder: '000000000000000000', pattern: '^\\d+$' }],
   outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. general)' } },
+  readable: { ops: ['search'] },
   // Per-unit monitoring on/off: the assistant sits in many Discord channels and decides when to
   // chime in; each can be individually muted via the connector's /channels endpoint (no restart).
   // The dashboard reads this to know a session is mutable (matching a channel_id in the roster).
@@ -2141,6 +2142,45 @@ ${referentPromptBlock()}`;
       }
       const r = await voiceTools.invokeLocal(tool, args, turn);
       res.json(r);
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+  // Official guild search + capped around-hop. Owner-private turns only (core deny.discordSearch).
+  app.post('/read', requireConnectorToken, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (b.op !== 'search') return res.status(400).json({ ok: false, error: `unknown read op '${b.op || ''}'` });
+      const ds = require('../../../shared/discord-search');
+      const query = String(b.query || b.content || '').trim();
+      const dm = b.dm === true || b.dm === 'true';
+      const channelId = String(b.channel_id || b.channelId || '').trim();
+      if (dm && !channelId) return res.status(400).json({ ok: false, error: 'DM search needs channel_id' });
+      if (!dm && !query) return res.status(400).json({ ok: false, error: 'query required' });
+      const request = ds.botRequest(token);
+      const guildIds = b.guild_id
+        ? [String(b.guild_id)]
+        : [...client.guilds.cache.keys()].map(String);
+      const r = await ds.runSearch({
+        request,
+        dm,
+        query,
+        channelId,
+        guildIds,
+        channelIds: (!dm && channelId) ? [channelId] : undefined,
+        around: b.around,
+        before: b.before,
+        aroundLimit: b.around_limit || b.limit,
+      });
+      if (!r || r.ok === false) {
+        const status = r && r.indexNotReady ? 202 : 400;
+        return res.status(status).json({
+          ok: false,
+          index_not_ready: !!(r && r.indexNotReady),
+          retry_after: r && r.retryAfter,
+          error: (r && r.error) || (r && r.indexNotReady ? 'index not ready' : 'search failed'),
+        });
+      }
+      const text = dm ? ds.formatDm(r) : ds.formatHits(r.hits);
+      return res.json({ ok: true, text, total: r.total, hits: r.hits, messages: r.messages });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   const httpServer = app.listen(cfg.http_port || 3016, '127.0.0.1', () => ctx.log(`send-message API on 127.0.0.1:${cfg.http_port || 3016}`));

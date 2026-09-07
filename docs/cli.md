@@ -52,7 +52,7 @@ asmltr update          pull + install the latest & restart (verifies; auto-rolls
     |---|---|---|
     | collector | `http://127.0.0.1:3017` | reads (`ls`, `brief`, `events`, `tail`, `watch`, `system`, `map`, `who`) + control (`kill`, `stop`, `diff`) |
     | core | `http://127.0.0.1:3023` | takeover (`attach`, `release`) + `announce` / `announcements` + `ask` / `chat` |
-    | connector manager | `http://127.0.0.1:3024` | `send` (outbound to any channel) |
+    | connector manager | `http://127.0.0.1:3024` | `send` (outbound) + `discord-search` / `mail` (`/read`) |
 
 ---
 

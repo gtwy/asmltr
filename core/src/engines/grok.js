@@ -102,7 +102,7 @@ function isOwnerFromEmail(opts) {
 //   Baseline is ASMLTR_GROK_EFFORT (this install: medium). envEffort() if unset still
 //   || 'high' so other installs keep the old default. xhigh is NOT the default.
 //   medium  normal conversation (Discord baseline)
-//   high    lookup/research, Corona (recipe/cigar/cooking), Rolodex/contacts,
+//   high    lookup/research, Corona board cards, Discord conversation search,
 //           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
 //           Not a coding session. Web channels are always this after one-shot.
 //   xhigh   git or a coding session, or a deep dive (implement, refactor,

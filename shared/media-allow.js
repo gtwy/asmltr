@@ -165,8 +165,23 @@ function emptyDeny() {
   return {
     shell: false, streams: false, send: false, silo: false,
     write: false, siloWrite: false, video: false, image: false, code: false, attach: false,
-    uploads: false, guildPost: false,
+    uploads: false, guildPost: false, discordSearch: false,
   };
+}
+
+/** Public Discord guild turn — including owner talking in a server. DMs are not this. */
+function isPublicDiscordGuild(envelope) {
+  if (!envelope || String(envelope.channel || '').toLowerCase() !== 'discord') return false;
+  if (envelope.public === true) return true;
+  const sid = envelope.context && envelope.context.scope_id;
+  return String(sid || '').startsWith('guild:');
+}
+
+/** Owner-private surfaces only (DM / email / MCP / local). Denied on public guild turns. */
+function discordSearchAuthorized(envelope, resolved) {
+  if (!ownerish(resolved)) return false;
+  if (isPublicDiscordGuild(envelope)) return false;
+  return true;
 }
 
 function policyFor(envelope, resolved, allow) {
@@ -185,6 +200,7 @@ function policyFor(envelope, resolved, allow) {
   }
   // Same-guild Discord post: Cast grant (trusted / send / guild-post / *). Overlay may still V31-deny send.
   if (!guildIdFrom(envelope) || !guildPostAuthorized(resolved)) deny.guildPost = true;
+  if (!discordSearchAuthorized(envelope, resolved)) deny.discordSearch = true;
   const restricted = isRestricted(envelope, resolved);
   if (!restricted) return { deny, restricted: false };
   deny.shell = true;
@@ -196,7 +212,7 @@ function policyFor(envelope, resolved, allow) {
 }
 
 function denyToolsEnv(deny) {
-  const keys = ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost'];
+  const keys = ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost', 'discordSearch'];
   if (deny && deny.all) return keys.join(',');
   return keys.filter((k) => deny && deny[k]).join(',');
 }
@@ -218,6 +234,7 @@ function parseDenyEnv(raw) {
     attach: all || set.has('attach'),
     uploads: all || set.has('uploads'),
     guildPost: all || set.has('guildPost'),
+    discordSearch: all || set.has('discordSearch'),
   };
 }
 
@@ -234,5 +251,5 @@ module.exports = {
   policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
   videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized, grantTokens,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
-  isDiscordVoice, denyAllFlags,
+  isDiscordVoice, denyAllFlags, discordSearchAuthorized, isPublicDiscordGuild,
 };

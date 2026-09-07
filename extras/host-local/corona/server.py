@@ -75,7 +75,12 @@ def corona_health() -> str:
 
 @mcp.tool()
 def corona_recipe(query: str | None = None, thread_id: str | None = None) -> str:
-    """Fetch a full recipe thread from Corona. Provide query or thread_id (one required)."""
+    """Fetch a polished recipe card / full written thread from Corona (board-card store).
+
+    Not a Discord conversation dig. For house food talk, use asmltr_discord_search
+    (prefer the host INDEX recipe-board / discussion channels first). Provide query
+    or thread_id (one required).
+    """
     params = _require_one({"q": query, "thread_id": thread_id}, "query or thread_id")
     if isinstance(params, str):
         return params
@@ -84,10 +89,10 @@ def corona_recipe(query: str | None = None, thread_id: str | None = None) -> str
 
 @mcp.tool()
 def corona_cigars(query: str | None = None, message_id: str | None = None) -> str:
-    """Search a configured Corona channel. Provide query or message_id (one required).
+    """Fetch a cigar board card from Corona if one exists. Not a Discord history search.
 
-    Writeup: lead with the channel (who, when, what they said),
-    then a section headed exactly Additional notes from the web. No /say.
+    Conversation digs (who said what in the house cigar channel / other guilds) use
+    asmltr_discord_search. Provide query or message_id (one required). No /say.
     """
     params = _require_one({"q": query, "message_id": message_id}, "query or message_id")
     if isinstance(params, str):
@@ -97,7 +102,11 @@ def corona_cigars(query: str | None = None, message_id: str | None = None) -> st
 
 @mcp.tool()
 def corona_cooking(query: str | None = None, message_id: str | None = None) -> str:
-    """Search Corona cooking notes. Provide query or message_id (one required)."""
+    """Fetch a cooking board card from Corona if one exists. Not a Discord conversation dig.
+
+    Food talk lives in asmltr_discord_search first. Provide query or message_id
+    (one required).
+    """
     params = _require_one({"q": query, "message_id": message_id}, "query or message_id")
     if isinstance(params, str):
         return params
