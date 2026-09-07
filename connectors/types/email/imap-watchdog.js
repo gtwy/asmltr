@@ -7,7 +7,6 @@
  * Probe/fail/reconnect lines are appended to a JSONL journal so a chronic flap
  * is visible after the in-memory manager ring (LOG_RING=200) rotates.
  */
-const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { persistAuthRejectLine } = require('./auth-reject-persist');
