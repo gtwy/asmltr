@@ -2,6 +2,8 @@
 """Stdio MCP: Corona localhost API.
 
 Read-only. No /say. Base URL from CORONA_URL (default http://127.0.0.1:12701).
+Ivy: food/cigar board tools removed — corona_recipe, corona_cigars, corona_cooking
+are denied/absent. Digs use asmltr_discord_search. corona_health remains.
 Eve: skip extras/host-local unless you want these extras.
 """
 
@@ -60,57 +62,10 @@ def _request(path: str, params: dict[str, str] | None = None) -> str:
         return body
 
 
-def _require_one(api_params: dict[str, str | None], required_label: str) -> dict[str, str] | str:
-    params = {key: value.strip() for key, value in api_params.items() if value and value.strip()}
-    if not params:
-        return f"Error: provide {required_label}"
-    return params
-
-
 @mcp.tool()
 def corona_health() -> str:
     """Check Corona on this host (GET /health). No arguments."""
     return _request("/health")
-
-
-@mcp.tool()
-def corona_recipe(query: str | None = None, thread_id: str | None = None) -> str:
-    """Fetch a polished recipe card / full written thread from Corona (board-card store).
-
-    Not a Discord conversation dig. For house food talk, use asmltr_discord_search
-    (prefer the host INDEX recipe-board / discussion channels first). Provide query
-    or thread_id (one required).
-    """
-    params = _require_one({"q": query, "thread_id": thread_id}, "query or thread_id")
-    if isinstance(params, str):
-        return params
-    return _request("/fetch", params)
-
-
-@mcp.tool()
-def corona_cigars(query: str | None = None, message_id: str | None = None) -> str:
-    """Fetch a cigar board card from Corona if one exists. Not a Discord history search.
-
-    Conversation digs (who said what in the house cigar channel / other guilds) use
-    asmltr_discord_search. Provide query or message_id (one required). No /say.
-    """
-    params = _require_one({"q": query, "message_id": message_id}, "query or message_id")
-    if isinstance(params, str):
-        return params
-    return _request("/cigars", params)
-
-
-@mcp.tool()
-def corona_cooking(query: str | None = None, message_id: str | None = None) -> str:
-    """Fetch a cooking board card from Corona if one exists. Not a Discord conversation dig.
-
-    Food talk lives in asmltr_discord_search first. Provide query or message_id
-    (one required).
-    """
-    params = _require_one({"q": query, "message_id": message_id}, "query or message_id")
-    if isinstance(params, str):
-        return params
-    return _request("/cooking", params)
 
 
 if __name__ == "__main__":

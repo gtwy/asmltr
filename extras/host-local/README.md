@@ -5,7 +5,7 @@ They do **not** fork `grok.js`. Secrets stay out of git. Eve: skip unless you wa
 
 | Server | Talks to | Tools |
 | --- | --- | --- |
-| `corona` | localhost API (`CORONA_URL`, default `http://127.0.0.1:12701`) | Board-card tools only: `corona_health`, `corona_recipe`, `corona_cigars`, `corona_cooking` (no `/say`). Discord conversation digs use `asmltr_discord_search`, not Corona. |
+| `corona` | localhost API (`CORONA_URL`, default `http://127.0.0.1:12701`) | `corona_health` only. `corona_recipe` / `corona_cigars` / `corona_cooking` removed/denied for Ivy. Discord digs use `asmltr_discord_search`. |
 | `onenote` | Graph, creds in `~/.asmltr/onenote/{token.json,.client.json}` mode 600 | `onenote_health`, `onenote_login`, notebooks/sections/pages/get/create/update |
 
 Contacts are **gworkspace** People API (`~/.asmltr/host-local/gworkspace/`), not Rolodex. Do not register a Rolodex MCP. Host JSON dumps under `~/.asmltr/rolodex-cache/` may sit on disk; the assistant does not read them.
