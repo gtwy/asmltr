@@ -13,6 +13,7 @@ const {
   formatImapJournalLog,
   imapFlowWatchOptions,
   baselineLastUid,
+  createImapFailureGate,
 } = require('./imap-watchdog');
 const {
   escapeHtml,
@@ -1191,7 +1192,8 @@ async function start(ctx) {
   const persistedUid = readLastUid(ctx.instanceId);
   let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false;
   let connecting = false, pendingExists = false, reconnectTimer = null;
-  let failStreak = 0, probeForcedClose = false;
+  let failStreak = 0;
+  const failGate = createImapFailureGate();
   const probeFails = createProbeFailWindow();
   function journalImap(event, extra) {
     const entry = buildImapJournalEntry({
@@ -1205,6 +1207,7 @@ async function start(ctx) {
     ctx.log(formatImapJournalLog(entry));
   }
   function noteImapFailure() {
+    if (!failGate.note()) return probeFails.count();
     failStreak++;
     return probeFails.record();
   }
@@ -1223,6 +1226,7 @@ async function start(ctx) {
     let lock = null;
     try {
       lock = await imap.getMailboxLock(MAILBOX);
+      try { ctx.heartbeat(); } catch (_) {} // lock is real IMAP I/O; skip_busy must not fake this
       try {
         for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
           if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
@@ -1272,13 +1276,13 @@ async function start(ctx) {
       auth: { user: address, pass: password },
     }));
     imap = client;
+    failGate.reset();
     client.on('exists', () => fetchNew().catch((e) => ctx.log(`fetchNew: ${e.message}`)));
     client.on('error', (e) => ctx.log(`imap error: ${e.message}`));
     client.on('close', () => {
       if (imap !== client) return; // stale handle after a newer connect
       if (stopped) return;
-      if (!probeForcedClose) noteImapFailure();
-      probeForcedClose = false;
+      noteImapFailure();
       scheduleReconnect();
     });
     if (prev && prev !== client) { try { prev.close(); } catch (_) {} }
@@ -1293,11 +1297,11 @@ async function start(ctx) {
     } catch (e) {
       noteImapFailure();
       journalImap('imap.connect_fail', { reason: e.message });
-      probeForcedClose = true; // close handler must not increment again
       try { if (imap === client) client.close(); } catch (_) {}
       if (imap === client) imap = null;
-      if (!stopped) scheduleReconnect();
     } finally { connecting = false; }
+    // schedule after connecting=false: close-during-connect cannot arm while connecting is true
+    if (!stopped && !(imap && imap.usable)) scheduleReconnect();
   }
   connectImap();
 
@@ -1308,9 +1312,9 @@ async function start(ctx) {
   const probeTimer = setInterval(async () => {
     const decision = imapProbeTickDecision({
       stopped, busy, probing, usable: !!(imap && imap.usable),
+      reconnectPending: !!reconnectTimer,
     });
-    if (decision.action === 'skip') return;
-    if (decision.action === 'skip_busy') { try { ctx.heartbeat(); } catch (_) {} return; }
+    if (decision.action === 'skip' || decision.action === 'skip_busy') return;
     if (decision.action === 'heal') { connectImap(); return; }
     probing = true;
     try {
@@ -1321,8 +1325,7 @@ async function start(ctx) {
     } catch (e) {
       const failsHour = noteImapFailure();
       journalImap('imap.probe_fail', { reason: e.message, delayMs: nextReconnectDelayMs(failStreak) });
-      ctx.log(`imap probe failed (${e.message}) — forcing reconnect; fails_hour=${failsHour} streak=${failStreak}`);
-      probeForcedClose = true;
+      ctx.log(`imap probe failed — forcing reconnect; fails_hour=${failsHour} streak=${failStreak}`);
       try { imap.close(); } catch (_) {}
     } finally { probing = false; }
   }, IMAP_PROBE_MS);

@@ -110,12 +110,34 @@ function nextReconnectDelayMs(failStreak, {
   return Math.min(maxMs, baseMs * (2 ** (n - backoffAfter)));
 }
 
-function imapProbeTickDecision({ stopped, busy, probing, usable } = {}) {
+function imapProbeTickDecision({ stopped, busy, probing, usable, reconnectPending } = {}) {
   if (stopped) return { action: 'skip' };
   if (busy) return { action: 'skip_busy' };
   if (probing) return { action: 'skip' };
+  if (reconnectPending) return { action: 'skip' };
   if (!usable) return { action: 'heal' };
   return { action: 'probe' };
+}
+
+function createImapFailureGate() {
+  let noted = false;
+  return {
+    reset() { noted = false; },
+    note() {
+      if (noted) return false;
+      noted = true;
+      return true;
+    },
+    get noted() { return noted; },
+  };
+}
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error(label)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function imapFlowWatchOptions({ host, port, auth, maxIdleTime } = {}) {
@@ -153,10 +175,7 @@ async function breakImapIdle(imap, timeoutMs = IMAP_PROBE_TIMEOUT_MS) {
   if (!ender) return 'deferred';
   const p = ender();
   if (!p || typeof p.then !== 'function') return 'done';
-  await Promise.race([
-    p.catch(() => {}),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('idle-end timeout')), timeoutMs)),
-  ]);
+  await withTimeout(p.catch(() => {}), timeoutMs, 'idle-end timeout');
   return 'done';
 }
 
@@ -167,10 +186,7 @@ async function imapNoopProbe(imap, timeoutMs = IMAP_PROBE_TIMEOUT_MS) {
   const remain = Math.max(1, ms - (Date.now() - started));
   const np = imap.noop();
   if (np && typeof np.catch === 'function') np.catch(() => {});
-  await Promise.race([
-    np,
-    new Promise((_, rej) => setTimeout(() => rej(new Error('noop timeout')), remain)),
-  ]);
+  await withTimeout(np, remain, 'noop timeout');
 }
 
 module.exports = {
@@ -200,4 +216,6 @@ module.exports = {
   baselineLastUid,
   breakImapIdle,
   imapNoopProbe,
+  createImapFailureGate,
+  withTimeout,
 };

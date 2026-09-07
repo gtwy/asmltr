@@ -24,6 +24,7 @@ const {
   imapJournalFile,
   imapFlowWatchOptions,
   baselineLastUid,
+  createImapFailureGate,
 } = require('../connectors/types/email/imap-watchdog.js');
 
 test('probe timeout default is 30–45s (half-open DONE+NOOP can exceed 15s)', () => {
@@ -35,12 +36,39 @@ test('maxIdleTime default refreshes IDLE on a minutes-scale (not polling)', () =
 });
 
 test('probe tick skips while busy (do not NOOP during fetchNew)', () => {
-  const idle = { stopped: false, busy: false, probing: false, usable: true };
+  const idle = { stopped: false, busy: false, probing: false, usable: true, reconnectPending: false };
   assert.equal(imapProbeTickDecision(idle).action, 'probe');
   assert.equal(imapProbeTickDecision({ ...idle, busy: true }).action, 'skip_busy');
   assert.equal(imapProbeTickDecision({ ...idle, probing: true }).action, 'skip');
   assert.equal(imapProbeTickDecision({ ...idle, stopped: true }).action, 'skip');
   assert.equal(imapProbeTickDecision({ ...idle, usable: false }).action, 'heal');
+});
+
+test('probe tick does not heal while a reconnect is already scheduled (keep backoff)', () => {
+  const dead = { stopped: false, busy: false, probing: false, usable: false, reconnectPending: true };
+  assert.equal(imapProbeTickDecision(dead).action, 'skip');
+  assert.equal(imapProbeTickDecision({ ...dead, reconnectPending: false }).action, 'heal');
+});
+
+test('failure gate notes once per connection generation', () => {
+  const gate = createImapFailureGate();
+  assert.equal(gate.note(), true);
+  assert.equal(gate.note(), false);
+  gate.reset();
+  assert.equal(gate.note(), true);
+});
+
+test('successful probe does not emit a late timeout rejection', async () => {
+  const leaked = [];
+  const on = (err) => leaked.push(err);
+  process.on('unhandledRejection', on);
+  try {
+    await imapNoopProbe({ idling: true, preCheck: async () => {}, noop: async () => ({}) }, 80);
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(leaked.length, 0, leaked.map((e) => e && e.message).join(','));
+  } finally {
+    process.off('unhandledRejection', on);
+  }
 });
 
 test('reconnect stays at base until N fails, then exponential backoff, then cap', () => {
