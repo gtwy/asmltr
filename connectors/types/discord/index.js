@@ -52,6 +52,7 @@ const voiceTools = require('./voice-tools');
 const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
 const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
+const guildScrollback = require('./guild-scrollback');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -250,9 +251,9 @@ async function start(ctx) {
     return memory.globalTimeline.filter(m => !(m.serverId === exSid && m.channelId === exCid) && kws.some(k => m.content.toLowerCase().includes(k))).slice(-10);
   }
   function getRelevantContext(message) {
-    // NOTE: per-channel conversation history now lives in the resumed core SDK session (plus the
-    // observe buffer for messages we didn't reply to) — we no longer re-feed the last-N here. This
-    // provides only what the SESSION doesn't have: cross-channel references + location/participants.
+    // NOTE: last-N of THIS guild channel is re-injected on a fresh resume via
+    // channel_scrollback → core observe/catch-up (guild-scrollback.js). This helper
+    // stays location/participants + cross-channel only (not a last-N feed, not search).
     const sid = message.guild?.id || 'DM', cid = message.channel.id;
     return {
       crossContext: crossContextForPrompt(),
@@ -613,7 +614,23 @@ ${referentPromptBlock()}`;
         channel_context: { channelId: cid, server: context.location.serverName, channel: context.location.channelName },
         context: { scope_id: sid ? `guild:${sid}` : `dm:${message.author.id}`, scope_name: context.location.serverName },
         system_prompt_extra: buildSystemExtra(message, context, forced),
+        channel_scrollback: '',
       };
+      if (guildScrollback.shouldAttachGuildScrollback(message)) {
+        try {
+          const rows = await guildScrollback.loadGuildScrollback({
+            memory,
+            guildId: sid,
+            channelId: cid,
+            excludeMessageId: message.id,
+            fetchMessages: async (limit, before) => {
+              const col = await message.channel.messages.fetch(guildScrollback.discordFetchOptions(limit, before));
+              return guildScrollback.fromDiscordCollection(col);
+            },
+          });
+          envelope.channel_scrollback = guildScrollback.formatGuildScrollback(rows);
+        } catch (e) { ctx.log('guild scrollback failed: ' + e.message); }
+      }
 
       // Directly-addressed messages can't be [[NO_REPLY]], so it's safe to stream intermediary
       // narration blocks to the thread LIVE. "Addressed" = @-mention, DM, forced, OR the message

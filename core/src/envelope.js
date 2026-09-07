@@ -75,6 +75,10 @@ function inbound(e) {
     // multi-agent channel stays current on messages addressed to OTHER agents (or ambient chatter)
     // while only ever replying when actually addressed. content.text still carries the message.
     observe_only: !!e.observe_only,
+    // Optional connector-supplied last-N of THIS public guild channel. Folded into the
+    // observe/catch-up preamble on a FRESH engine session only (core composeUserCatchUp).
+    // DMs leave this empty — PRIOR / silo recall stays the conversation-first path.
+    channel_scrollback: e.channel_scrollback != null ? String(e.channel_scrollback) : '',
     // Optional connector-supplied approval policy → the core's draft/approval gate. Held
     // replies are diverted to the draft store instead of returned. { policy, recipient, subject, attachments }.
     approval: e.approval && typeof e.approval === 'object'
