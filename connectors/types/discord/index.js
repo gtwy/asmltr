@@ -1935,7 +1935,10 @@ ${referentPromptBlock()}`;
     if (/^\s*(?:🗣️|🔊)/u.test(message.content || '')) return;
     saveMemory(message, message.author.username, message.content);
     if (await handleControlCommands(message)) return;
-    if (!channelEnabled(message.channel.id)) return; // channel disabled — fully ignore (mention-commands above still work)
+    // Owner DM is not a guild mute. Unlisted channels stay muted; James's DM must still reply.
+    const ownerDm = message.channel && (message.channel.type === 1 || message.channel.type === "DM") && dmUser && String(message.author.id) === String(dmUser);
+    if (!ownerDm && !channelEnabled(message.channel.id)) return; // channel disabled — fully ignore (mention-commands above still work)
+    if (ownerDm) ctx.log("owner DM inbound");
 
     // Decouple RECEIVE from REPLY (the OpenClaw model). Everything observable is INGESTED into the
     // core session for awareness (so we stay current on the whole channel); a message only triggers
