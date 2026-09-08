@@ -72,4 +72,6 @@ test('core handle routes Discord text through engineForEnvelope; STANDARD adapte
   assert.equal(fs.existsSync(path.join(__dirname, '../core/src/engines/claude.js')), true);
   const discord = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   assert.equal(/engine:\s*['"]claude['"]/.test(discord), false);
+  assert.match(discord, /classifyGuildInbound/);
+  assert.match(discord, /guild ACP never falls through to name\/topic autonomous heuristics/);
 });
