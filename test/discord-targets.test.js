@@ -48,18 +48,20 @@ test('forum parent vs thread', () => {
   assert.equal(destGuildId({ guild: { id: 'g2' } }), 'g2');
 });
 
-test('public guild: guildPost from Cast grants or owner (no Access 1-5, no V31 send-deny)', () => {
+test('public guild ACP: guildPost on for everyone; send only for card/mail roles (not Access 1-5)', () => {
   const env = {
     channel: 'discord', public: true,
     context: { scope_id: 'guild:g1' },
     channel_context: { channelId: 'ch1' },
   };
-  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0 }).deny.guildPost, true);
-  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.send, false);
-  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.guildPost, true);
-  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 6 }).deny.guildPost, true);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0 }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.send, true);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 3 }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 6 }).deny.guildPost, false);
   assert.equal(policyFor(env, { bypass_moderation: true, trust_tier: 0, user_key: 'owner' }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: true, trust_tier: 0, user_key: 'owner' }).deny.send, true);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, roles: ['trusted'] }).deny.guildPost, false);
+  assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, roles: ['trusted'] }).deny.send, false);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, permissions: ['guild-post'] }).deny.guildPost, false);
   assert.equal(policyFor(env, { bypass_moderation: false, trust_tier: 0, allow: ['send'] }).deny.guildPost, false);
   assert.equal(sameChannel('ch1', 'ch1'), true);

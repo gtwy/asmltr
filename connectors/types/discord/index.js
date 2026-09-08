@@ -53,6 +53,12 @@ const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./re
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
 const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 const guildScrollback = require('./guild-scrollback');
+const guildAcp = require('./guild-acp-session');
+const { createInboundQueue, formatQueuedPrompt } = require('./inbound-queue');
+const { joinVoiceAllowed, JOIN_VOICE_OFF_MSG } = require('./join-voice-gate');
+const { channelAcpPrompt, thoughtChipsEnabledForGuild } = require('./channel-acp-prompt');
+const { muteNewChannel, resolveChannelsDefault } = require('./new-channel-mute');
+const ownerHandoff = require('./owner-public-handoff');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -119,7 +125,7 @@ const meta = {
       stream_tools: { type: 'boolean', title: 'When true, post a sanitized tool title (-# 🔧 `Read`) on start instead of the human chip. Default off. Never args/paths/updates.', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
-      channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
+      channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable). New channels default muted.', default: false },
       pii_gate: { type: 'string', title: 'PII gate: off (default), classify_redact, or trust_store. Whole-reply drop is nuclear (whole_reply_drop).', enum: ['off', 'classify_redact', 'trust_store'], default: 'off' },
       whole_reply_drop: { type: 'boolean', title: 'Nuclear: drop the whole public reply on a PII hit. Default off. Prefer classify-then-redact.', default: false },
       attachments: { type: 'string', title: 'Inbound attachments: all_files (default) or media_only (image/video only).', enum: ['all_files', 'media_only'], default: 'all_files' },
@@ -181,6 +187,7 @@ async function start(ctx) {
   }
   const lateMedia = new Map(); // cid -> message (same-author upload during a turn; run after)
   const pendingReply = new Map(); // cid -> { timer, message, forced } — the reply-debounce quiet-window
+  const pendingAcpPrompt = new Map(); // cid -> queued-messages prompt for the next guild ACP turn
   let silenced = false;
   let lastResponseTime = 0;
   const responseCount = new Map();
@@ -193,14 +200,16 @@ async function start(ctx) {
   // fully ignored — no relay to core, no usage (mention-commands still work so you can re-enable).
   const settingsFile = path.join(dataDir, `discord-${ctx.instanceId}-settings.json`);
   const channelStates = new Map(); // channel_id -> boolean (explicit override)
-  let channelsDefault = cfg.channels_default !== false; // unlisted channels: enabled unless config says otherwise
+  let channelsDefault = resolveChannelsDefault(cfg.channels_default, undefined);
   let engageAllBots = false;
   let transcriptOffChannels = new Set();
+  const acpSessions = guildAcp.createGuildAcpSessions();
+  const inboundQ = createInboundQueue();
   try {
     const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     (s.mutedChannels || []).forEach((c) => channelStates.set(String(c), false)); // migrate legacy mutes
     if (s.channels && typeof s.channels === 'object') for (const [c, on] of Object.entries(s.channels)) channelStates.set(String(c), !!on);
-    if (typeof s.channelsDefault === 'boolean') channelsDefault = s.channelsDefault;
+    if (typeof s.channelsDefault === 'boolean') channelsDefault = resolveChannelsDefault(cfg.channels_default, s.channelsDefault);
     engageAllBots = !!s.engageAllBots;
     transcriptOffChannels = loadTranscriptOff(s.transcriptOffChannels);
   } catch (_) {}
@@ -381,10 +390,15 @@ async function start(ctx) {
       case 'leave-voice': case 'leave voice': case 'leave vc': case 'leave the voice':
         await doLeaveVoice(message); return true;
       case 'stop': case 'cancel': case 'abort': case 'halt': {
-        // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
-        // joined from this channel (#138). Public: anyone may stop a processing turn (humans always win).
-        // Public anyone-can-stop. Overlay wrapAbortRoute on core /v2/abort keeps host starter-or-owner. Do not put stop in OWNER_ONLY_CMDS.
-        // Session survives; next message continues it.
+        // Guild ACP: typing + @mention stop = hard kill (starter of that turn + owner).
+        // Awake/idle + @mention stop = gentle sleep (anyone) + 😴. Do not put stop in OWNER_ONLY_CMDS.
+        // Voice / unspecified still lets humans always win.
+        if (message.guild && acpSessions.isAwake(cid) && !processing.get(cid)) {
+          acpSessions.sleep(cid);
+          inboundQ.clear(cid);
+          await message.channel.send(guildAcp.SLEEP_EMOJI).catch(() => {});
+          return true;
+        }
         const slot = processing.get(cid);
         const gid = message.guild?.id;
         let voice; try { voice = require('./voice'); } catch (_) {}
@@ -395,7 +409,11 @@ async function start(ctx) {
         if (slot) {
           starterId = abortAllow.starterIdFromSlot(slot);
           owner = await isOwner(message);
-          if (!abortAllow.canAbortTurn({ isOwner: owner, authorId: message.author.id, starterId })) {
+          const acpHard = !!(message.guild && acpSessions.isAwake(cid));
+          if (!abortAllow.canAbortTurn({
+            mode: acpHard ? 'hard' : undefined,
+            isOwner: owner, authorId: message.author.id, starterId,
+          })) {
             await message.react('🙅').catch(() => {});
             await message.channel.send('Only the person who started this turn (or my owner) can stop it.').catch(() => {});
             return true;
@@ -435,7 +453,7 @@ async function start(ctx) {
         await message.channel.send('🔊 Voice unmuted — I\'ll respond when addressed again.'); return true;
       }
       case 'status':
-        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})\n**Transcript:** ${isTranscriptOff(transcriptOffChannels, cid) ? 'off in this channel (`scribe-on` to restore)' : 'on in this channel (`scribe-off` to hide)'}`); return true;
+        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active'}\n**ACP session:** ${message.guild && acpSessions.isAwake(cid) ? 'awake' : 'sleep'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})\n**Transcript:** ${isTranscriptOff(transcriptOffChannels, cid) ? 'off in this channel (`scribe-on` to restore)' : 'on in this channel (`scribe-off` to hide)'}`); return true;
       case 'help': case 'commands':
         await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`scribe-on\` / \`scribe-off\` (this channel) · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
       default:
@@ -542,14 +560,17 @@ ${referentPromptBlock()}`;
   async function handleMessage(message, forced) {
     const cid = message.channel.id;
     if (processing.get(cid)) {
-      // A turn is already running in this channel. If THIS message is addressed to us, queue it into the
-      // running turn as steering guidance (like typing in the Claude TUI mid-run) — don't drop it, and
-      // don't start a concurrent turn. The core folds it into the work in progress and continues; its
-      // reply comes back out to the channel via the stored outbound route. Non-addressed chatter is still
-      // ignored so idle channel noise can't derail the work. (`@handle stop` interrupts — handled earlier.)
-      // Same-author uploads during the turn are SAVED (so "look up" can find them) and run as their
-      // own turn after this one — not a look-ahead wait. Bystander attachments are not persisted
-      // into this conversation's uploads while the lock is held.
+      // Guild ACP: no barges — queue inbound in receive order and drain after this turn.
+      // DMs keep mid-turn steer + late-media. (`@mention stop` interrupts — handled earlier.)
+      if (message.guild) {
+        inboundQ.enqueue(cid, {
+          message,
+          forced: !!forced,
+          text: message.cleanContent || message.content || '',
+          author: message.author && message.author.username,
+        });
+        return;
+      }
       const slot = processing.get(cid);
       if (shouldQueueLateMedia(slot, message)) {
         try { await persistInboundMedia(message, convKeyFor(message)); }
@@ -584,6 +605,11 @@ ${referentPromptBlock()}`;
       // different channel and continuing to address that agent.
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
       let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
+      const queuedPrompt = pendingAcpPrompt.get(cid);
+      if (queuedPrompt) {
+        pendingAcpPrompt.delete(cid);
+        text = queuedPrompt;
+      }
       text = (await replyRef(message)) + text; // if this is a Discord reply, tell the model WHAT it answers (multi-agent threading)
       // Image/video only. Magic bytes win. Never persist or open exe/html/js/pdf/zip.
       // If this message has no still but replies to one, that still IS the referent — pull it in.
@@ -611,12 +637,29 @@ ${referentPromptBlock()}`;
         delivery: 'sync',
         capabilities: meta.capabilities,
         public: message.channel.type !== 1, // guild channel = public; DM (type 1) = private
-        channel_context: { channelId: cid, server: context.location.serverName, channel: context.location.channelName },
+        channel_context: {
+          channelId: cid,
+          server: context.location.serverName,
+          channel: context.location.channelName,
+          acpAwake: !!(sid && acpSessions.isAwake(cid)),
+        },
         context: { scope_id: sid ? `guild:${sid}` : `dm:${message.author.id}`, scope_name: context.location.serverName },
         system_prompt_extra: buildSystemExtra(message, context, forced),
         channel_scrollback: '',
       };
-      if (guildScrollback.shouldAttachGuildScrollback(message)) {
+      const caretLookup = sid && guildAcp.wantsCaretLookup(text);
+      if (sid) {
+        const ownerTurn = await isOwner(message);
+        envelope.system_prompt_extra = [
+          envelope.system_prompt_extra || '',
+          channelAcpPrompt({
+            awake: acpSessions.isAwake(cid),
+            caretLookup,
+            isOwner: ownerTurn,
+          }),
+        ].filter(Boolean).join('\n\n');
+      }
+      if (caretLookup || guildScrollback.shouldAttachGuildScrollback(message)) {
         try {
           const rows = await guildScrollback.loadGuildScrollback({
             memory,
@@ -645,7 +688,8 @@ ${referentPromptBlock()}`;
       const hints = speakerHintsFrom(message.author, message.member);
       const hintKinds = mergeSpeakerLastNames(new Map(), message.author, message.member);
       const blockHints = publicBlockHints(hints, hintKinds);
-      if (streamSteps && addressed) {
+      const guildChipsOff = !!(sid && !thoughtChipsEnabledForGuild());
+      if (streamSteps && addressed && !guildChipsOff) {
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
         // boundary closes — either a tool call starts (the common case: post immediately, no lag)
         // or a new narration block begins. The block still open at `done` is the final answer.
@@ -761,6 +805,8 @@ ${referentPromptBlock()}`;
       // Self-gated suppression: the model decided this message wasn't for it (multi-agent
       // channel), or there's nothing to say. Drop it — don't post to the channel.
       if (isSilence(replyText)) { ctx.log(`suppressed reply (not addressed to ${NAME})`); return; }
+      const handoff = sid && ownerHandoff.wantsHandoff(replyText);
+      if (handoff) replyText = ownerHandoff.stripHandoffSentinel(replyText) || ownerHandoff.refuseInChannelText();
       // Dedup: never re-post a message verbatim-identical to one of the last few we sent here.
       // Long resumed sessions (esp. AI-to-AI loops) can occasionally replay an earlier reply.
       const recents = recentReplies.get(cid) || [];
@@ -768,6 +814,21 @@ ${referentPromptBlock()}`;
       recents.push(replyText); if (recents.length > 6) recents.shift(); recentReplies.set(cid, recents);
       for (const chunk of splitResponse(replyText)) await message.channel.send(chunk);
       saveMemory(message, NAME, replyText);
+      if (sid) acpSessions.noteReply(cid);
+      if (handoff) {
+        try {
+          const ownerId = dmUser || String(message.author.id);
+          const he = ownerHandoff.handoffEnvelope({
+            instanceId: ctx.instanceId,
+            ownerId,
+            question: message.cleanContent || message.content || '',
+            contextText: replyText,
+            channelName: context.location.channelName,
+            requesterName: message.author && message.author.username,
+          });
+          ctx.core.handle(he).catch((e) => ctx.log('owner handoff failed: ' + e.message));
+        } catch (e) { ctx.log('owner handoff failed: ' + e.message); }
+      }
       lastResponseTime = Date.now();
       responseCount.set(cid, (responseCount.get(cid) || 0) + 1);
       setTimeout(() => responseCount.set(cid, Math.max(0, (responseCount.get(cid) || 0) - 1)), 3600000);
@@ -784,6 +845,24 @@ ${referentPromptBlock()}`;
         setImmediate(() => {
           handleMessage(queued, true).catch((e) => ctx.log('late media turn failed: ' + e.message));
         });
+        return;
+      }
+      if (message.guild) {
+        const waiting = inboundQ.drain(cid);
+        if (waiting.length) {
+          const last = waiting[waiting.length - 1];
+          if (last && last.message) {
+            if (waiting.length > 1) {
+              pendingAcpPrompt.set(cid, formatQueuedPrompt(waiting.map((w) => ({
+                text: w.text || (w.message.cleanContent || w.message.content || ''),
+                author: w.author || (w.message.author && w.message.author.username),
+              }))));
+            }
+            setImmediate(() => {
+              handleMessage(last.message, !!last.forced).catch((e) => ctx.log('queued acp turn failed: ' + e.message));
+            });
+          }
+        }
       }
     }
   }
@@ -866,6 +945,18 @@ ${referentPromptBlock()}`;
     if (client.ws && client.ws.status === Status.Ready) ctx.heartbeat();
   }, HEARTBEAT_INTERVAL_MS);
   hbTimer.unref();
+  const acpIdleTimer = setInterval(() => {
+    const t = Date.now();
+    for (const cid of acpSessions.map.keys()) {
+      if (!acpSessions.shouldAutoSleep(cid, t)) continue;
+      if (processing.get(cid)) continue;
+      acpSessions.sleep(cid);
+      inboundQ.clear(cid);
+      const ch = client.channels.cache.get(cid);
+      if (ch && typeof ch.send === 'function') ch.send(guildAcp.SLEEP_EMOJI).catch(() => {});
+    }
+  }, 30000);
+  acpIdleTimer.unref();
   // --- voice transcription helper: per-utterance WAV → OpenAI STT → text --------
   const voiceText = new Map(); // guildId -> text channel to post the live transcript
   async function sttTranscribe(wav) {
@@ -1819,6 +1910,10 @@ ${referentPromptBlock()}`;
   // Join the requester's voice channel + start listening. Triggered by the `join-voice`
   // command (@mention driven, in handleControlCommands).
   async function doJoinVoice(message) {
+    if (!joinVoiceAllowed()) {
+      if (message && message.channel) await message.channel.send(JOIN_VOICE_OFF_MSG).catch(() => {});
+      return;
+    }
     if (!message.guild) return;
     ctx.log(`[voice] join-voice requested by ${message.author && message.author.username} in #${message.channel && message.channel.name} — caller vc=${(message.member && message.member.voice && message.member.voice.channel && message.member.voice.channel.name) || 'NONE'}`);
     let voice;
@@ -1957,11 +2052,52 @@ ${referentPromptBlock()}`;
       const leadsOtherAgent = allowedBotNames.some((n) => new RegExp(`^\\s*@?${escaped(n)}\\b`).test(c));
       directedElsewhere = ((message.mentions.users.size > 0 && !mentionsMe) || leadsOtherAgent) && !addressesMe;
     }
-    if (botNotEngaged || voiceHandsOff || directedElsewhere) { observe(message); return; }
+    if (botNotEngaged || voiceHandsOff || directedElsewhere) {
+      if (message.guild && !acpSessions.isAwake(message.channel.id)) return; // SLEEP: not listening
+      observe(message); return;
+    }
+
+    if (message.guild) {
+      const decision = guildAcp.classifyGuildInbound({
+        isGuild: true,
+        muted: false,
+        mentionsBot: mentionsMe,
+        text: message.content || '',
+        processing: !!processing.get(message.channel.id),
+        awake: acpSessions.isAwake(message.channel.id),
+      });
+      if (decision.action === 'ignore' || decision.action === 'ignore-reping') return;
+      if (decision.action === 'queue') {
+        inboundQ.enqueue(message.channel.id, {
+          message,
+          forced: mentionsMe,
+          text: message.cleanContent || message.content || '',
+          author: message.author && message.author.username,
+        });
+        return;
+      }
+      if (decision.action === 'wake') {
+        acpSessions.wake(message.channel.id, message.author.id);
+        scheduleReply(message, true);
+        return;
+      }
+      if (decision.action === 'follow') {
+        acpSessions.noteInbound(message.channel.id);
+        scheduleReply(message, mentionsMe);
+        return;
+      }
+    }
 
     if (silenced) { if (mentionsMe) scheduleReply(message, true); else observe(message); return; }
     if (shouldRespondTo(message)) scheduleReply(message, false);
     else if (ingestUnaddressed) observe(message); // ambient chatter → ingest for awareness, don't reply
+  });
+
+  client.on('channelCreate', (channel) => {
+    try {
+      if (!channel || channel.type === 1) return;
+      if (muteNewChannel(channelStates, channel.id)) saveSettings();
+    } catch (_) {}
   });
 
   // --- /send-message endpoint (message-discord depends on this) ---
@@ -2147,6 +2283,9 @@ ${referentPromptBlock()}`;
       const args = (req.body && req.body.args) || {};
       const turn = Object.assign({ channel: 'discord' }, (req.body && req.body.turn) || {});
       if (!voiceTools.BY_NAME[tool]) return res.status(400).json({ ok: false, error: 'unknown tool: ' + tool });
+      if (tool === 'voice_join' && !joinVoiceAllowed()) {
+        return res.status(403).json({ ok: false, error: JOIN_VOICE_OFF_MSG });
+      }
       const mutating = /^(voice_join|voice_leave|voice_listen|voice_speak)$/.test(tool);
       if (mutating) {
         const fake = {
@@ -2161,7 +2300,7 @@ ${referentPromptBlock()}`;
       res.json(r);
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
-  // Official guild search + capped around-hop. Owner-private turns only (core deny.discordSearch).
+  // Official guild search + capped around-hop. Guild ACP: on for everyone (core deny.discordSearch).
   app.post('/read', requireConnectorToken, async (req, res) => {
     try {
       const b = req.body || {};

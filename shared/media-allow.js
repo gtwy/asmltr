@@ -177,17 +177,46 @@ function isPublicDiscordGuild(envelope) {
   return String(sid || '').startsWith('guild:');
 }
 
-/** Owner-private surfaces only (DM / email / MCP / local). Denied on public guild turns. */
+/** Card roles trusted / email / mail — not Access 1–5, not owner-bypass alone. */
+function peerMailAuthorized(resolved) {
+  const tokens = grantTokens(resolved);
+  return tokens.includes('trusted') || tokens.includes('email') || tokens.includes('mail');
+}
+
+/**
+ * Public guild ACP: discord search + photo dig is on for everyone.
+ * Owner-private surfaces (DM / email / MCP) stay owner-only.
+ */
 function discordSearchAuthorized(envelope, resolved) {
+  if (isPublicDiscordGuild(envelope)) return true;
   if (!ownerish(resolved)) return false;
-  if (isPublicDiscordGuild(envelope)) return false;
   return true;
 }
 
+function applyGuildAcpDeny(deny, resolved) {
+  deny.shell = true;
+  deny.streams = true;
+  deny.write = true;
+  deny.uploads = true;
+  deny.code = true;
+  deny.siloWrite = true;
+  deny.video = true;
+  deny.image = false;
+  deny.attach = false;
+  deny.guildPost = false;
+  deny.discordSearch = false;
+  deny.send = !peerMailAuthorized(resolved);
+  return deny;
+}
+
 function policyFor(envelope, resolved, allow) {
-  // Voice handleStream: hard deny every tool. Discord TEXT is unchanged.
+  // Voice handleStream: hard deny every tool.
   if (isDiscordVoice(envelope)) return { deny: denyAllFlags(), restricted: true };
   const deny = emptyDeny();
+  if (isPublicDiscordGuild(envelope)) {
+    applyGuildAcpDeny(deny, resolved);
+    return { deny, restricted: true, guildAcp: true };
+  }
   if (!videoAuthorized(envelope, resolved, allow)) deny.video = true;
   if (!imageAuthorized(envelope, resolved, allow)) {
     deny.image = true;
@@ -250,6 +279,7 @@ function exitIfDenied(kind) {
 module.exports = {
   policyFile, loadAllowlist, policyFor, isRestricted, siloAllowlisted,
   videoAuthorized, imageAuthorized, mediaAuthorized, codeAuthorized, guildPostAuthorized, grantTokens,
+  peerMailAuthorized, applyGuildAcpDeny,
   denyToolsEnv, parseDenyEnv, exitIfDenied, guildIdFrom, channelIdFrom,
   isDiscordVoice, denyAllFlags, discordSearchAuthorized, isPublicDiscordGuild,
 };

@@ -14,34 +14,38 @@ fs.writeFileSync(allowFile, JSON.stringify({
 }));
 process.env.ASMLTR_MEDIA_ALLOW_FILE = allowFile;
 
-test('public discord: Cast/allowlists only — not a V31 channel-deny plane', () => {
+test('public discord ACP: channel tools on; shell/send/write/uploads off even for guests', () => {
   const p = policyFor({
     channel: 'discord', public: true,
     context: { scope_id: 'guild:other-guild' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
-  assert.equal(p.restricted, false);
+  assert.equal(p.guildAcp, true);
   assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: false }), false);
-  assert.equal(p.deny.send, false);
-  assert.equal(p.deny.streams, false);
-  assert.equal(p.deny.uploads, false);
+  assert.equal(p.deny.send, true);
+  assert.equal(p.deny.streams, true);
+  assert.equal(p.deny.uploads, true);
+  assert.equal(p.deny.write, true);
   assert.equal(p.deny.silo, false);
   assert.equal(p.deny.video, true);
   assert.equal(p.deny.code, true);
   assert.equal(p.deny.shell, true);
-  assert.equal(p.deny.guildPost, true);
-  assert.equal(p.deny.discordSearch, true);
+  assert.equal(p.deny.guildPost, false);
+  assert.equal(p.deny.discordSearch, false);
+  assert.equal(p.deny.image, false);
+  assert.equal(p.deny.attach, false);
 });
 
-test('allowlisted guild still not a channel-deny; silo still on', () => {
+test('allowlisted guild ACP still denies send; silo read stays on', () => {
   const p = policyFor({
     channel: 'discord', public: true,
     context: { scope_id: 'guild:guild-allow-1' },
     channel_context: { channelId: 'ch1' },
   }, { bypass_moderation: false });
-  assert.equal(p.restricted, false);
+  assert.equal(p.guildAcp, true);
   assert.equal(p.deny.silo, false);
-  assert.equal(p.deny.send, false);
+  assert.equal(p.deny.send, true);
+  assert.equal(p.deny.discordSearch, false);
 });
 
 test('discord DM + bypass_moderation denies nothing', () => {
@@ -99,7 +103,7 @@ test('videoAllow principal may generate video without bypass', () => {
   assert.equal(p.deny.code, true);
 });
 
-test('videoAllow discord id may generate video', () => {
+test('videoAllow discord id does not unlock video on public guild ACP; image stays on', () => {
   const allow = {
     guilds: [], channels: [],
     videoPrincipals: [],
@@ -110,12 +114,12 @@ test('videoAllow discord id may generate video', () => {
     { bypass_moderation: false, user_key: 'friend-a' },
     allow,
   );
-  assert.equal(p.deny.video, false);
+  assert.equal(p.deny.video, true);
   assert.equal(p.deny.image, false);
-  assert.equal(p.restricted, false);
+  assert.equal(p.guildAcp, true);
 });
 
-test('photoAllow / imageAllow host lists are not a public stills gate', () => {
+test('photoAllow / imageAllow host lists are not a public stills gate; guild ACP stills are on for everyone', () => {
   const allow = {
     guilds: [], channels: [],
     videoPrincipals: [], videoDiscordIds: [],
@@ -126,10 +130,10 @@ test('photoAllow / imageAllow host lists are not a public stills gate', () => {
     { bypass_moderation: false, user_key: 'friend' },
     allow,
   );
-  assert.equal(p.deny.image, true);
-  assert.equal(p.deny.attach, true);
+  assert.equal(p.deny.image, false);
+  assert.equal(p.deny.attach, false);
   assert.equal(p.deny.video, true);
-  assert.equal(p.restricted, false);
+  assert.equal(p.guildAcp, true);
 });
 
 test('codeAllow may receive programs without bypass; still no video/image', () => {
@@ -179,7 +183,7 @@ function withEnv(vars, fn) {
   }
 }
 
-test('public default is not channel-deny: bypass + public stays unrestricted', () => {
+test('public guild ACP: owner gets the same channel tools as everyone (no shell/send)', () => {
   withEnv({ ASSISTANT_NAME: 'gaia', HOST_CHANNEL_POLICY: undefined }, () => {
     const p = policyFor({
       channel: 'discord', public: true,
@@ -187,9 +191,12 @@ test('public default is not channel-deny: bypass + public stays unrestricted', (
       channel_context: { channelId: 'ch1' },
     }, { bypass_moderation: true, user_key: 'owner' });
     assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), false);
-    assert.equal(p.restricted, false);
-    assert.equal(p.deny.send, false);
-    assert.equal(p.deny.shell, false);
+    assert.equal(p.guildAcp, true);
+    assert.equal(p.deny.send, true);
+    assert.equal(p.deny.shell, true);
+    assert.equal(p.deny.discordSearch, false);
+    assert.equal(p.deny.guildPost, false);
+    assert.equal(p.deny.image, false);
   });
   withEnv({ ASSISTANT_NAME: undefined, HOST_CHANNEL_POLICY: '1' }, () => {
     assert.equal(isRestricted({ channel: 'discord', public: true }, { bypass_moderation: true }), false);
@@ -226,18 +233,21 @@ test('voice handleStream denies all tools; discord text is unchanged', () => {
   assert.equal(text.deny.discordSearch, false);
 });
 
-test('discordSearch: owner-private only — public guild denied even for owner', () => {
-  const { discordSearchAuthorized } = require('../shared/media-allow');
+test('discordSearch: on for everyone in public guild ACP; owner-private elsewhere', () => {
+  const { discordSearchAuthorized, peerMailAuthorized } = require('../shared/media-allow');
   const owner = { bypass_moderation: true, user_key: 'owner' };
   const guest = { bypass_moderation: false, user_key: 'friend' };
+  const mailRole = { bypass_moderation: false, user_key: 'friend', roles: ['mail'] };
   const guild = {
     channel: 'discord', public: true,
     context: { scope_id: 'guild:other-guild' },
     channel_context: { channelId: 'ch1' },
   };
   const dm = { channel: 'discord', public: false, context: { scope_id: 'dm:someone' } };
-  assert.equal(discordSearchAuthorized(guild, owner), false);
-  assert.equal(policyFor(guild, owner).deny.discordSearch, true);
+  assert.equal(discordSearchAuthorized(guild, owner), true);
+  assert.equal(policyFor(guild, owner).deny.discordSearch, false);
+  assert.equal(discordSearchAuthorized(guild, guest), true);
+  assert.equal(policyFor(guild, guest).deny.discordSearch, false);
   assert.equal(discordSearchAuthorized(dm, owner), true);
   assert.equal(policyFor(dm, owner).deny.discordSearch, false);
   assert.equal(discordSearchAuthorized(dm, guest), false);
@@ -245,5 +255,9 @@ test('discordSearch: owner-private only — public guild denied even for owner',
   assert.equal(policyFor({ channel: 'email', public: false }, owner).deny.discordSearch, false);
   assert.equal(policyFor({ channel: 'mcp', public: false }, owner).deny.discordSearch, false);
   assert.equal(policyFor({ channel: 'email', public: false }, guest).deny.discordSearch, true);
+  assert.equal(peerMailAuthorized(mailRole), true);
+  assert.equal(peerMailAuthorized(owner), false);
+  assert.equal(policyFor(guild, mailRole).deny.send, false);
+  assert.equal(policyFor(guild, guest).deny.send, true);
 });
 

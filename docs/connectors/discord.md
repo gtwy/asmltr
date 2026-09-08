@@ -113,10 +113,13 @@ order explains all the behavior:
 7. **Directed at another agent** → if `ignore_other_mentions` (default on) and the message `@mentions`
    another user/bot **or leads with another agent's name** ("some-other-bot, …") and *not* the assistant → ignore.
    (Plain names aren't real Discord `@`-mentions, so both cases are checked.)
-8. **Silenced** → if `silence`d, only respond to a direct `@mention`.
-9. **Autonomous participation** (`shouldRespondTo`) → otherwise, respond if `@mentioned`, the message
-   uses its name (lead/trail/mid), asks a question involving it, matches a relevant topic, or it's
-   mid-thread. This is what lets it chime in on a passive name-drop.
+8. **Guild ACP session** → unmuted guild channels start **asleep**. A real Discord `@mention` ping
+   (not a bare name) wakes the session. While awake the connector reads the channel, queues inbound
+   messages in receive order (no barges), and lets the model decide whether to speak. A bare re-ping
+   does not spawn a new session. `@mention stop` while typing is a hard kill (starter or owner);
+   `@mention stop` while idle-awake is a gentle sleep (anyone). After 10 minutes with nothing worth
+   a reply the session sleeps and posts 😴. DMs are always ACP and skip this machine.
+9. **Silenced** → legacy mention-only toggle (DMs / leftover autonomous path).
 
 Two more guards apply when it *does* generate a reply:
 
@@ -135,11 +138,12 @@ role at once). Anything after the mention that isn't a recognized command is tre
 
 | Command | Effect | Who |
 |---|---|---|
-| `silence` / `speak` | mention-only mode ↔ autonomous | owner |
+| `silence` / `speak` | mention-only mode ↔ autonomous (legacy; guild ACP uses sleep/wake) | owner |
 | `mute` / `unmute` (aka `disable` / `enable`) | ignore **this channel** entirely ↔ resume (persisted) | owner |
 | `engage-all-bots` / `disengage-all-bots` | hear **all** bots ↔ only the `allowed_bot_names` list (persisted) | owner |
-| `join-voice` / `leave-voice` | join *your* voice channel + listen ↔ disconnect | owner |
-| `status` | show silenced / bot-mode / this-channel state | anyone |
+| `join-voice` / `leave-voice` | **join-voice is off** until rebuilt; leave-voice still disconnects | owner |
+| `stop` | typing + `@mention stop`: kill the in-flight turn (starter or owner). Awake/idle + `@mention stop`: gentle sleep (anyone) | see who |
+| `status` | show silenced / bot-mode / this-channel / ACP session state | anyone |
 | `help` | list commands | anyone |
 
 **Owner** = a principal with `bypass_moderation` (full trust) in *this bot's own trust store* —
@@ -149,15 +153,15 @@ run the state-changing commands. State (`mute`, `engage-all-bots`) persists in
 
 ## Channel enable/disable — control what it listens to
 
-By default the bot processes every text channel it can see in every server it's in. In a busy
-server that's wasteful: each surfaced message that passes the gauntlet becomes a core turn (usage).
-Two ways to scope it, both **per-channel and persisted**, both meaning *fully ignored — no relay to
-core, no usage* (owner `@mention` commands still work in a disabled channel so you can re-enable it):
+New Discord channels default **muted** until the owner unmutes them (`channelCreate` writes an
+explicit off). The persisted per-channel map is not rewritten. Two ways to scope listening, both
+**per-channel and persisted**, both meaning *fully ignored — no relay to core, no usage* (owner
+`@mention` commands still work in a disabled channel so you can re-enable it):
 
-- **Blocklist (default):** `channels_default: true` — listen everywhere, disable the noisy ones.
-- **Allowlist:** set `channels_default: false` in the instance config — ignore *every* channel except
-  the ones you explicitly enable. Best when the bot sits in a big server but only a couple of
-  channels matter.
+- **Allowlist (schema default):** `channels_default: false` — ignore every channel except ones you
+  enable. New channels stay muted until unmuted.
+- **Blocklist:** `channels_default: true` (or a persisted `channelsDefault: true`) — listen
+  everywhere except explicit mutes. Existing installs that already persisted that flag keep it.
 
 **From the TUI/GUI (no restart):** in `asmltr` press **`c`** for the channels view — every channel
 each connector can reach, grouped by instance, with its on/off state. `SPACE`/`ENTER` toggles the
@@ -212,11 +216,28 @@ Several agents can share a channel. Key knobs:
 
 ---
 
+## Guild ACP session
+
+Discord **text** ingress (DM + unmuted guild) always runs on the ACP engine (Grok). STANDARD
+(Claude SDK) stays in the tree for email, GitHub, schedules, and voice. Thought chips are off in
+guild channels. Effort in general channels is locked to **medium**. `^` anywhere in a wake or
+follow-up asks for scrollback / older photo lookup.
+
+Channel tools on for everyone: web, discord search + photo dig, reply, guild-post (tag the
+requester), image generate + attach, relay to the operator. Off for everyone in channel (including
+the operator): shell, streams, write, uploads, arbitrary email. Card roles `trusted` / `email` /
+`mail` may email on-file peers only. If the operator asks for something the room cannot do, the
+model refuses in-channel and hands the question to a private DM (`[[HANDOFF]]`).
+
+---
+
 ## Voice mode
 
-Optional; needs **ffmpeg** and an OpenAI key (STT) + optionally ElevenLabs (TTS).
+`join-voice` is **fully off** until rebuilt (not owner-only — off). Leave-voice and the voice
+implementation remain in the tree. Optional rebuild needs **ffmpeg** and an OpenAI key (STT) +
+optionally ElevenLabs (TTS). Set `ASMLTR_DISCORD_JOIN_VOICE=1` only when the rebuilt path is ready.
 
-1. **`@Bot join-voice`** (while you're in a voice channel) → it joins, chimes, and starts listening.
+1. **`@Bot join-voice`** (while you're in a voice channel) → refused until rebuilt.
 2. **Listening** — Discord gives a separate audio stream per speaker (free diarization). Each
    utterance is captured (silence-gated + energy-gated to skip noise), transcribed via OpenAI
    (`gpt-4o-transcribe`, language-locked, name-biased prompt), and posted as `🗣️ name: …`.
@@ -261,7 +282,7 @@ and the ElevenLabs key.
 
 ## Discord search (`asmltr discord-search`)
 
-Owner-private turns only (owner DM, email, MCP). Denied on public guild bot turns.
+On for everyone in public guild ACP turns. Owner-private on DM / email / MCP.
 
 `asmltr discord-search "<query>"` (MCP `asmltr_discord_search`) calls official
 `GET /guilds/{guild.id}/messages/search` for **every guild the bot is in**. It does
