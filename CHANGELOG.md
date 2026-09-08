@@ -9,6 +9,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Concurrency gate hook.** `setConcurrencyGate({ acquire, release })` lets a host overlay replace the flat `ASMLTR_CORE_CONCURRENCY` semaphore. `dispatch` passes the conversation key; a `SESSION_CAP` reject becomes a reply, not a 500. Default remains 6.
 - **Discord Ctrl+F.** `asmltr discord-search "<query>"` / MCP `asmltr_discord_search` uses official `GET /guilds/{guild.id}/messages/search` across every guild the bot is in (no history dump), then a capped `around` hop (≤25). Includes the assistant's own posts. Owner-private turns only (denied on public guild bot turns). DMs use a capped around/before/latest window. Index-not-ready (202 / `retry_after`) is retried then surfaced. Food/cigar conversation digs go here, not Corona (Corona extras stay board-card only). 7 Sep 2026.
 - **Discord message edit.** `asmltr edit <discord-message-url> "…"` / MCP `asmltr_edit` replaces the body of a message this bot already posted. Link required (names never edit). Own messages only. Discord `/out` `kind: edit`. Same send grant. 4 Sep 2026.
 - **Multiple outbound attachments.** `asmltr send … --file a --file b` puts every file on **one** email (or Discord message). Total attachment bytes ≤ 25MB. Telegram still sends the first file. 1 Sep 2026.

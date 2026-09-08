@@ -90,6 +90,11 @@ const { quietReplyFromResult } = require('../../shared/step-public'); // email/m
 const PORT = Number(process.env.ASMLTR_CORE_PORT || 3023);
 const HOST = '127.0.0.1';
 const MAX_CONCURRENT = Number(process.env.ASMLTR_CORE_CONCURRENCY || 6);
+/** Optional occupancy gate (host overlay). When set, acquire/release pass the conversation key. */
+let concurrencyGate = null;
+function setConcurrencyGate(gate) {
+  concurrencyGate = gate && typeof gate.acquire === 'function' ? gate : null;
+}
 
 // In-process bus so /events/stream can broadcast what we also persist via emitter.
 const bus = new EventEmitter();
@@ -107,11 +112,18 @@ let active = 0;
 const waiters = [];
 const keyChains = new Map();
 
-function acquireSlot() {
+function acquireSlot(key, envelope) {
+  if (concurrencyGate && typeof concurrencyGate.acquire === 'function') {
+    return Promise.resolve(concurrencyGate.acquire(key, envelope));
+  }
   if (active < MAX_CONCURRENT) { active++; return Promise.resolve(); }
   return new Promise((res) => waiters.push(res));
 }
-function releaseSlot() {
+function releaseSlot(key) {
+  if (concurrencyGate && typeof concurrencyGate.release === 'function') {
+    try { concurrencyGate.release(key); } catch (_) {}
+    return;
+  }
   active--;
   const next = waiters.shift();
   if (next) { active++; next(); }
@@ -827,13 +839,21 @@ function dispatch(envelope, opts) {
   // this turn is still in moderation must find a controller rather than a 404.
   const ac = trackTurn(key, new AbortController());
   return withKeyLock(key, async () => {
-    await acquireSlot();
+    try {
+      await acquireSlot(key, envelope);
+    } catch (e) {
+      if (e && e.code === 'SESSION_CAP') {
+        const text = String(e.message || 'busy');
+        return [{ type: 'reply', text }];
+      }
+      throw e;
+    }
     try {
       // Aborted while queued — never start it.
       if (ac.signal.aborted) return [];
       return await handle(envelope, { ...opts, abortController: ac });
     } finally {
-      releaseSlot();
+      releaseSlot(key);
       try { require('../../shared/bounce').onTurnEnded(key); } catch (_) {}
     }
   }).finally(() => untrackTurn(key, ac));
@@ -1918,7 +1938,7 @@ app.post('/v2/self-assessment', async (req, res) => {
   finally { _assessBusy = false; }
 });
 
-// Forget a session — delete its engine mapping so the NEXT inbound on this conversation_key starts
+// Forget a session �� delete its engine mapping so the NEXT inbound on this conversation_key starts
 // a FRESH session (new history), abort any in-flight turn, and drop its buffered observed context.
 // The dashboard "delete session" button calls this (the collector purges its own row + events).
 app.post('/v2/session/forget', (req, res) => {
@@ -2265,4 +2285,4 @@ if (require.main === module) {
   server.timeout = 0;
 }
 
-module.exports = { app, handle, dispatch, bus };
+module.exports = { app, handle, dispatch, bus, setConcurrencyGate };

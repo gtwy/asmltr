@@ -67,7 +67,7 @@ and runs open (dev mode).
 
 | Variable | Default | What |
 |---|---|---|
-| `ASMLTR_CORE_CONCURRENCY` | `6` | Max concurrent turns (global semaphore; turns on one `conversation_key` are also serialized) |
+| `ASMLTR_CORE_CONCURRENCY` | `6` | Max concurrent turns (global semaphore; turns on one `conversation_key` are also serialized). Host overlay may replace this with `setConcurrencyGate` (Ivy: 15 + class reserves). |
 | `ASMLTR_CORE_REQUEST_TIMEOUT_MS` | `0` (unlimited) | HTTP request timeout for `/v2/handle` (agent turns can run minutes) |
 | `ASMLTR_SESSION_CWD` | `os.homedir()` | Spawn/resume working dir for sessions (which `CLAUDE.md` hierarchy loads) |
 | `ASMLTR_MAX_THINKING_TOKENS` | `4000` | Max thinking tokens per turn (`0` disables; adaptive — trivial turns don't think) |
