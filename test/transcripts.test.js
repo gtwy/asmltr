@@ -111,6 +111,28 @@ test('recallForInject default omits global last-topics so other principals do no
   assert.ok(owner.includes('please reset our vpn'));
 });
 
+test('recallForInject keeps this-thread turns over last-topics when over budget', () => {
+  const key = 'discord:budget-turns';
+  const long = 'x'.repeat(3000);
+  for (let i = 0; i < 8; i++) {
+    transcripts.appendTurn({
+      conversationKey: key,
+      channel: 'discord',
+      userText: 'topic-' + i + ' ' + long,
+      assistantText: i === 7 ? 'newest-turn-marker ' + long : 'older-' + i + ' ' + long,
+      ts: Date.UTC(2026, 8, 7, 18, i, 0),
+    });
+  }
+  const block = transcripts.recallForInject({
+    conversationKey: key,
+    includeLastTopics: true,
+    maxChars: 5000,
+  });
+  assert.match(block, /newest-turn-marker/);
+  assert.match(block, /RECENT TURNS FROM THIS CONVERSATION/);
+  assert.equal(block.includes('topic-0 '), false);
+});
+
 test('recallForInject is empty when the silo has no transcript for that key', () => {
   const other = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-transcripts-empty-'));
   const prev = process.env.ASMLTR_SILOS_ROOT;

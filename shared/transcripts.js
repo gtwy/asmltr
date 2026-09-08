@@ -21,8 +21,9 @@ const LAST_TOPICS_KEEP = 20;
 const USER_CLIP = 16000;
 const ASSISTANT_CLIP = 32000;
 const TOPIC_CLIP = 160;
-const INJECT_TURNS = 6;
-const INJECT_CHARS = 8000;
+const INJECT_TURNS = 20;
+const INJECT_CHARS = 64000;
+const TOPICS_INJECT_CHARS = 2500;
 
 function clip(s, n) {
   s = String(s == null ? '' : s);
@@ -106,16 +107,40 @@ function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = 
   let transcript = '';
   try { transcript = fs.readFileSync(transcriptAbs(conversationKey || 'unknown'), 'utf8'); } catch (_) {}
   const chunks = transcript.split(/^## /m).filter(Boolean);
-  const recent = chunks.slice(-maxTurns).map((c) => '## ' + c).join('');
+  let recent = chunks.slice(-maxTurns).map((c) => '## ' + c).join('').trim();
+  let topicsBlock = '';
+  if (topics.trim()) {
+    let t = topics.trim();
+    if (t.length > TOPICS_INJECT_CHARS) t = '…\n' + t.slice(t.length - TOPICS_INJECT_CHARS);
+    topicsBlock = 'LAST TOPICS (newest first):\n' + t;
+  }
+  const turnsBlock = recent ? 'RECENT TURNS FROM THIS CONVERSATION:\n' + recent : '';
+  // This-thread turns win the budget. Clip from the start (keep newest).
+  // Last-topics stubs only ride along if they fit after turns.
   let body = '';
-  if (topics.trim()) body += 'LAST TOPICS (newest first):\n' + topics.trim() + '\n\n';
-  if (recent.trim()) body += 'RECENT TURNS FROM THIS CONVERSATION:\n' + recent.trim() + '\n';
-  body = body.trim();
-  if (body.length > maxChars) body = '…\n' + body.slice(body.length - maxChars);
-  return body;
+  const turnsHeader = 'RECENT TURNS FROM THIS CONVERSATION:\n';
+  if (turnsBlock.length >= maxChars) {
+    const tail = turnsBlock.startsWith(turnsHeader) ? turnsBlock.slice(turnsHeader.length) : turnsBlock;
+    const room = Math.max(0, maxChars - turnsHeader.length - 2);
+    body = turnsHeader + '…\n' + tail.slice(-room);
+  } else if (!topicsBlock) {
+    body = turnsBlock;
+  } else if (topicsBlock.length + (turnsBlock ? 2 : 0) + turnsBlock.length <= maxChars) {
+    body = [topicsBlock, turnsBlock].filter(Boolean).join('\n\n');
+  } else {
+    const room = maxChars - turnsBlock.length - 2;
+    if (turnsBlock && room > 200) {
+      const clipped = topicsBlock.length > room ? '…\n' + topicsBlock.slice(topicsBlock.length - room) : topicsBlock;
+      body = clipped + '\n\n' + turnsBlock;
+    } else {
+      body = turnsBlock || topicsBlock;
+    }
+  }
+  return body.trim();
 }
 
 module.exports = {
   appendTurn, formatTurn, safeKey, lastTopicsPath, transcriptAbs, recallForInject,
   LAST_TOPICS_REL, TRANSCRIPTS_REL, LAST_TOPICS_KEEP, INJECT_TURNS, INJECT_CHARS,
+  TOPICS_INJECT_CHARS,
 };
