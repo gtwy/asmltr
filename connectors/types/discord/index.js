@@ -2086,6 +2086,7 @@ ${referentPromptBlock()}`;
         scheduleReply(message, mentionsMe);
         return;
       }
+      return; // guild ACP never falls through to name/topic autonomous heuristics
     }
 
     if (silenced) { if (mentionsMe) scheduleReply(message, true); else observe(message); return; }
