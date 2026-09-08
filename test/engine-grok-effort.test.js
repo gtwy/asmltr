@@ -105,6 +105,32 @@ test('chooseEffort: medium chat, high lookup/Corona, xhigh code/git/deep-dive', 
   }
 });
 
+test('public guild ACP locks effort to medium; DMs keep the picker', () => {
+  process.env.ASMLTR_GROK_EFFORT = 'high';
+  try {
+    assert.equal(grok.chooseEffort({
+      prompt: 'please implement a helper',
+      cwd: gitCwd,
+      channel: 'discord',
+      conversationKey: 'discord:bot:channel:99',
+    }), 'medium');
+    assert.equal(grok.chooseEffort({
+      prompt: 'please implement a helper',
+      cwd: gitCwd,
+      channel: 'discord',
+      conversationKey: 'discord:bot:dm:111',
+    }), 'xhigh');
+    assert.equal(grok.isDiscordGuildTextTurn({
+      channel: 'discord', conversationKey: 'discord:bot:channel:1',
+    }), true);
+    assert.equal(grok.isDiscordGuildTextTurn({
+      channel: 'discord', conversationKey: 'discord:bot:dm:1',
+    }), false);
+  } finally {
+    delete process.env.ASMLTR_GROK_EFFORT;
+  }
+});
+
 test('visual kind words are not xhigh in the sync picker', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {

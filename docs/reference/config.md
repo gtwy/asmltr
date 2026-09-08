@@ -178,7 +178,7 @@ or read `connectors/types/<type>/index.js`. Highlights (defaults shown):
 
 | Type | Key config fields |
 |---|---|
-| `discord` | `bot_token_bws_key` (**required**), `http_port` (3016), `dm_allowed_user_id`, `channels_default`, `voice_id`, `elevenlabs_key_name`, autonomous-response limits |
+| `discord` | `bot_token_bws_key` (**required**), `http_port` (3016), `dm_allowed_user_id`, `channels_default` (default false — new channels muted), `voice_id`, `elevenlabs_key_name`, autonomous-response limits |
 | `telegram` | `bot_token_bws_key` (**required**), `allowed_chat_ids`, `http_port` (3008), `photo_dir` |
 | `mcp` | `port` (3018), `bind_host` (127.0.0.1), `base_url` |
 | `github` | `repos` + `pat_bws_key` (**required**), `mention` (`*<assistant-name>`), `poll_interval_ms`, `clone_repos`, `stream`, `dry_run` (default true) |

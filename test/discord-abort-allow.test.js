@@ -5,12 +5,17 @@ const fs = require('fs');
 const path = require('path');
 const { canAbortTurn, starterIdFromSlot } = require('../connectors/types/discord/abort-allow');
 
-test('public: anyone can abort a processing turn (humans always win)', () => {
-  assert.equal(canAbortTurn({ isOwner: true, authorId: 'owner', starterId: 'friend' }), true);
-  assert.equal(canAbortTurn({ isOwner: false, authorId: '111', starterId: '111' }), true);
+test('guild ACP hard-stop: starter of that turn or owner only', () => {
+  assert.equal(canAbortTurn({ mode: 'hard', isOwner: true, authorId: 'owner', starterId: 'friend' }), true);
+  assert.equal(canAbortTurn({ mode: 'hard', isOwner: false, authorId: '111', starterId: '111' }), true);
+  assert.equal(canAbortTurn({ mode: 'hard', isOwner: false, authorId: '333', starterId: '111' }), false);
+  assert.equal(canAbortTurn({ mode: 'hard', isOwner: false, authorId: 'steerer', starterId: '111' }), false);
+  assert.equal(canAbortTurn({ mode: 'hard', isOwner: false, authorId: '111', starterId: null }), false);
+});
+
+test('guild ACP gentle sleep: anyone; unspecified mode stays open for voice/legacy', () => {
+  assert.equal(canAbortTurn({ mode: 'gentle', isOwner: false, authorId: '333', starterId: '111' }), true);
   assert.equal(canAbortTurn({ isOwner: false, authorId: '333', starterId: '111' }), true);
-  assert.equal(canAbortTurn({ isOwner: false, authorId: 'steerer', starterId: '111' }), true);
-  assert.equal(canAbortTurn({ isOwner: false, authorId: '111', starterId: null }), true);
 });
 
 test('starterIdFromSlot still reads the processing slot', () => {

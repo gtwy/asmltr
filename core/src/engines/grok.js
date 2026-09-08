@@ -61,6 +61,17 @@ function isWebChannel(channel) {
     || c === 'eve-assistant-web' || c === 'eve-assistant-native';
 }
 
+/** Public guild text (ACP). DMs (`:dm:`) and voice are not this. */
+function isDiscordGuildTextTurn(opts) {
+  if (!opts || isDiscordVoice(opts)) return false;
+  const key = String(opts.conversationKey || opts.conversation_key || '');
+  if (key.includes(':channel:')) return true;
+  if (String(opts.channel || '').toLowerCase() !== 'discord') return false;
+  if (opts.public === true) return true;
+  const sid = opts.context && opts.context.scope_id;
+  return String(sid || '').startsWith('guild:');
+}
+
 /** Bare addr from `Name <addr@host>` or `addr@host`. Display-name-only → empty. */
 function parseEmailAddress(value) {
   const s = String(value || '').trim();
@@ -331,6 +342,8 @@ function classifyEffort(opts) {
   if (isMcpChannel(opts.channel)) return { effort: 'xhigh', reason: 'mcp' };
   // Voice turns stay low even if the utterance has lookup/code words.
   if (isDiscordVoice(opts)) return { effort: 'low', reason: 'discord-voice' };
+  // Public guild ACP: effort locked to medium (DMs keep the picker).
+  if (isDiscordGuildTextTurn(opts)) return { effort: 'medium', reason: 'discord-guild-acp' };
   const oneshotNext = normalizeEffort(opts.nextEffort);
   if (oneshotNext) return { effort: oneshotNext, reason: 'oneshot' };
   const oneshotExplicit = normalizeEffort(opts.effort);
@@ -962,7 +975,7 @@ module.exports = {
   isEmailChannel, isMcpChannel, isWebChannel,
   ownerFromEmail, parseEmailAddress, extractSenderEmail, isOwnerFromEmail,
   normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
-  classifyEffort, chooseEffort, effortForTurn, raiseForImageGen, isDiscordVoice,
+  classifyEffort, chooseEffort, effortForTurn, raiseForImageGen, isDiscordVoice, isDiscordGuildTextTurn,
   canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet, commitAndPushSamePost,
   takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
 };

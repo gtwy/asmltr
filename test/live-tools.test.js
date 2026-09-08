@@ -27,7 +27,8 @@ test('untrusted speaker → [] tools; owner gets function-type asmltr tools', ()
   assert.equal(tools.some((t) => t.type === 'x_search' || t.name === 'x_search'), false);
   assert.equal(tools.some((t) => t.type === 'mcp' || t.name === 'mcp'), false);
   assert.ok(tools.some((t) => t.name === 'asmltr_sessions'));
-  const listed = listTools(policyFor(env, owner).deny);
+  assert.equal(tools.some((t) => t.name === 'voice_join'), false);
+  const listed = listTools(policyFor(env, owner).deny).filter((t) => t.name !== 'voice_join');
   assert.deepEqual(asRealtimeFunctions(listed).map((t) => t.name).sort(), tools.map((t) => t.name).sort());
 });
 

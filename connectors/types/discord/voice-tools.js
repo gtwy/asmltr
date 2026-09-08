@@ -5,6 +5,7 @@
  * Phone stubs live here and always refuse. No VoiceConnection in host-local MCP.
  */
 const readline = require('readline');
+const { joinVoiceAllowed, JOIN_VOICE_OFF_MSG } = require('../../../shared/join-voice-gate');
 
 const PHONE_REFUSE = 'Twilio not configured.';
 const DISCORD_ONLY = 'Discord-only for now.';
@@ -172,6 +173,7 @@ function createRuntime(deps) {
   const getVoice = () => (typeof voice === 'function' ? voice() : voice);
 
   async function voice_join(_args, turn) {
+    if (!joinVoiceAllowed()) return fail(JOIN_VOICE_OFF_MSG);
     if (!isDiscordTurn(turn)) return fail(DISCORD_ONLY);
     const guildId = guildIdFromTurn(turn);
     if (!guildId) return fail(DISCORD_ONLY);

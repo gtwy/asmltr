@@ -1,4 +1,5 @@
 'use strict';
+process.env.ASMLTR_DISCORD_JOIN_VOICE = '1';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');

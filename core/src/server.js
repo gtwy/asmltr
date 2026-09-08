@@ -2,6 +2,8 @@
 'use strict';
 const { healthPayload } = require('./health-payload');
 const { policyFor, isDiscordVoice } = require('../../shared/media-allow');
+const { engineForEnvelope } = require('../../shared/discord-engine-route');
+const { shouldNotifyModBlock } = require('./mod-redflag');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
 /**
@@ -375,7 +377,7 @@ async function handle(envelope, opts = {}) {
   // speaking now, their authz, per-turn context). A history-retaining engine (codex — its resume replays
   // prior turns) gets the stable block injected ONCE, then only the volatile tail on resumes; claude still
   // gets the full prompt every turn (its append lands on a cached system channel). See the gating below.
-  const engineId = (opts && opts.engine) || require('../../shared/engines').getDefault();
+  const engineId = engineForEnvelope(e, opts) || (opts && opts.engine) || require('../../shared/engines').getDefault();
   const pIdentity = identity.fullIdentity();
   const pChannel = channelAwareness.buildChannelAwareness(e, resolved, { engineId });
   const pAuthz = trust.buildAuthzPrompt(resolved, e.channel);
@@ -440,7 +442,7 @@ async function handle(envelope, opts = {}) {
   }
 
   if (!mod.allowed) {
-    if (mod.riskLevel >= 7) await moderation.notifyBlock(resolved, e.content.text, mod, e.channel);
+    if (shouldNotifyModBlock(e, mod)) await moderation.notifyBlock(resolved, e.content.text, mod, e.channel);
     return [env.reply('This request has been flagged by the security system and was not processed.')];
   }
 

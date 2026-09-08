@@ -23,18 +23,29 @@ test('invite permission integer still includes READ_MESSAGE_HISTORY', () => {
   assert.equal(!!(perms & 65536), true); // READ_MESSAGE_HISTORY
 });
 
-test('public guild owner does not see asmltr_discord_search; owner DM does', () => {
+test('public guild ACP everyone sees asmltr_discord_search; guest DM does not', () => {
   const owner = { bypass_moderation: true, user_key: 'owner' };
+  const guest = { bypass_moderation: false, user_key: 'friend' };
   const guild = listTools(policyFor({
     channel: 'discord', public: true,
     context: { scope_id: 'guild:g1' },
+  }, guest).deny);
+  assert.equal(guild.some((t) => t.name === 'asmltr_discord_search'), true);
+  const ownerGuild = listTools(policyFor({
+    channel: 'discord', public: true,
+    context: { scope_id: 'guild:g1' },
   }, owner).deny);
-  assert.equal(guild.some((t) => t.name === 'asmltr_discord_search'), false);
+  assert.equal(ownerGuild.some((t) => t.name === 'asmltr_discord_search'), true);
   const dm = listTools(policyFor({
     channel: 'discord', public: false,
     context: { scope_id: 'dm:someone' },
   }, owner).deny);
   assert.equal(dm.some((t) => t.name === 'asmltr_discord_search'), true);
+  const guestDm = listTools(policyFor({
+    channel: 'discord', public: false,
+    context: { scope_id: 'dm:someone' },
+  }, guest).deny);
+  assert.equal(guestDm.some((t) => t.name === 'asmltr_discord_search'), false);
 });
 
 test('botRequest sends Bot token to the v10 API', async () => {
