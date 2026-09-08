@@ -119,7 +119,7 @@ const meta = {
       stream_tools: { type: 'boolean', title: 'When true, post a sanitized tool title (-# 🔧 `Read`) on start instead of the human chip. Default off. Never args/paths/updates.', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
-      channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
+      channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: false },
       pii_gate: { type: 'string', title: 'PII gate: off (default), classify_redact, or trust_store. Whole-reply drop is nuclear (whole_reply_drop).', enum: ['off', 'classify_redact', 'trust_store'], default: 'off' },
       whole_reply_drop: { type: 'boolean', title: 'Nuclear: drop the whole public reply on a PII hit. Default off. Prefer classify-then-redact.', default: false },
       attachments: { type: 'string', title: 'Inbound attachments: all_files (default) or media_only (image/video only).', enum: ['all_files', 'media_only'], default: 'all_files' },
@@ -193,7 +193,7 @@ async function start(ctx) {
   // fully ignored — no relay to core, no usage (mention-commands still work so you can re-enable).
   const settingsFile = path.join(dataDir, `discord-${ctx.instanceId}-settings.json`);
   const channelStates = new Map(); // channel_id -> boolean (explicit override)
-  let channelsDefault = cfg.channels_default !== false; // unlisted channels: enabled unless config says otherwise
+  let channelsDefault = cfg.channels_default === true; // Pack E: new/unlisted muted unless config explicitly true
   let engageAllBots = false;
   let transcriptOffChannels = new Set();
   try {

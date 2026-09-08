@@ -154,8 +154,8 @@ server that's wasteful: each surfaced message that passes the gauntlet becomes a
 Two ways to scope it, both **per-channel and persisted**, both meaning *fully ignored — no relay to
 core, no usage* (owner `@mention` commands still work in a disabled channel so you can re-enable it):
 
-- **Blocklist (default):** `channels_default: true` — listen everywhere, disable the noisy ones.
-- **Allowlist:** set `channels_default: false` in the instance config — ignore *every* channel except
+- **Allowlist (default):** `channels_default: false` — ignore every channel except ones you enable (new channels muted).
+- **Blocklist:** set `channels_default: true` in the instance config — listen everywhere except
   the ones you explicitly enable. Best when the bot sits in a big server but only a couple of
   channels matter.
 
