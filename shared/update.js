@@ -2,8 +2,9 @@
 /**
  * asmltr self-update awareness + trigger.
  *
- * Detection is read-only (git fetch + compare) and CHANNEL-aware: `edge` compares against origin/main,
- * `stable` against the newest release tag. The actual update is performed by the DETERMINISTIC updater
+ * Detection is read-only (git fetch + compare) and CHANNEL-aware: `edge` compares against
+ * origin/<current-or-configured branch> (never a hardcoded origin/main), `stable` against the
+ * newest release tag. The actual update is performed by the DETERMINISTIC updater
  * (scripts/update.js) — a scripted, verified pipeline, no LLM. The old agent update session
  * (scripts/run-update-session.js) is kept only as an escape hatch (`mode: 'agent'`) for when the
  * deterministic path can't cope with a truly bespoke install.
@@ -15,6 +16,7 @@ const { execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const execFileP = promisify(execFile);
 const version = require('./version');
+const { fetchOriginArgv, resolveEdgeTarget } = require('./update-ref');
 
 const REPO = path.join(__dirname, '..'); // shared/ lives at the repo root
 const AUTO_FLAG = process.env.ASMLTR_AUTOUPDATE_FILE || path.join(os.homedir(), '.asmltr', 'auto-update');
@@ -29,23 +31,36 @@ async function getUpdateStatus({ fetch = true, channel } = {}) {
   // status still reports managed in that case, so a caller never offers an in-place update.
   const managed = version.getManaged();
   try {
-    if (fetch) { try { await git('fetch', '--quiet', '--tags', 'origin', 'main'); } catch (_) {} }
-    const head = await git('rev-parse', 'HEAD');
+    const currentBranch = await git('rev-parse', '--abbrev-ref', 'HEAD').catch(() => '');
+    const pinBranch = process.env.ASMLTR_UPDATE_BRANCH || currentBranch;
+    const head = await git('rev-parse', 'HEAD').catch(() => '');
+    if (managed.managed) {
+      // Fork / externally-managed: do not fetch origin, do not report "N behind", never available.
+      return {
+        ok: true, channel, version: version.readVersion(), latest_version: null,
+        behind: 0, available: false, managed: true, manager: managed.manager,
+        head: String(head).slice(0, 7), remote: null, target: null, changelog: [],
+        checked_at: Date.now(),
+      };
+    }
+    if (fetch) { try { await git(...fetchOriginArgv(channel === 'stable' ? null : pinBranch)); } catch (_) {} }
     let target = head, targetName = 'HEAD', latestVersion = null;
     if (channel === 'stable') {
       const tag = (await git('tag', '-l', 'v*', '--sort=-version:refname').catch(() => '')).split('\n').filter(Boolean)[0] || null;
       if (tag) { target = await git('rev-parse', tag); targetName = tag; latestVersion = tag.replace(/^v/, ''); }
     } else {
-      try { target = await git('rev-parse', 'origin/main'); targetName = 'origin/main'; } catch (_) {}
+      try {
+        const edge = resolveEdgeTarget({ branch: pinBranch });
+        target = await git('rev-parse', edge.target);
+        targetName = edge.label;
+      } catch (_) {}
     }
     let behind = 0, changelog = [];
-    if (target !== head) {
+    if (target && target !== head) {
       behind = Number(await git('rev-list', '--count', `HEAD..${target}`)) || 0;
       if (behind) changelog = (await git('log', '--oneline', '--no-decorate', '-20', `HEAD..${target}`)).split('\n').filter(Boolean);
     }
-    // Managed installs surface how far behind they are (telemetry) but never report available:
-    // the platform owns updates, so nothing should offer an Update button or auto-trigger.
-    return { ok: true, channel, version: version.readVersion(), latest_version: latestVersion, behind, available: behind > 0 && !managed.managed, managed: managed.managed, manager: managed.manager, head: head.slice(0, 7), remote: String(target).slice(0, 7), target: targetName, changelog, checked_at: Date.now() };
+    return { ok: true, channel, version: version.readVersion(), latest_version: latestVersion, behind, available: behind > 0, managed: false, manager: null, head: String(head).slice(0, 7), remote: String(target).slice(0, 7), target: targetName, changelog, checked_at: Date.now() };
   } catch (e) {
     return { ok: false, channel, version: version.readVersion(), behind: 0, available: false, managed: managed.managed, manager: managed.manager, error: e.message, checked_at: Date.now() };
   }
@@ -54,6 +69,10 @@ async function getUpdateStatus({ fetch = true, channel } = {}) {
 /** Auto-update on/off — a file flag (survives restarts, checkable even if a DB is wedged). */
 function isAutoUpdate() { try { return fs.existsSync(AUTO_FLAG); } catch { return false; } }
 function setAutoUpdate(on) {
+  if (version.getManaged().managed) {
+    try { if (fs.existsSync(AUTO_FLAG)) fs.unlinkSync(AUTO_FLAG); } catch { /* ignore */ }
+    return false;
+  }
   try {
     fs.mkdirSync(path.dirname(AUTO_FLAG), { recursive: true });
     if (on) fs.writeFileSync(AUTO_FLAG, `enabled ${new Date().toISOString()}\n`);

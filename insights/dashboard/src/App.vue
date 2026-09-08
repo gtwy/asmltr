@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useCollectorStore } from '@/stores/collector'
-import { api, update as updateApi, identity, authApi, vaultApi } from '@/services/api'
+import { update as updateApi, identity, authApi, vaultApi } from '@/services/api'
 import { NAV_ROUTES } from '@/router'
 import WindowHost from '@/components/WindowHost.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
@@ -84,7 +84,9 @@ const updStarted = ref(false)
 let updTimer = null
 let vaultTimer = null
 async function loadUpd() {
-  try { upd.value = await api.updateStatus() } catch (_) {}
+  // Core status (live managed flag). Collector cache can lag a 15-min check and still claim
+  // "N behind" after ~/.asmltr/managed is set. fetch=0: do not git-fetch from the 90s GUI poll.
+  try { upd.value = await updateApi.status(false) } catch (_) {}
   try { auto.value = (await updateApi.getAuto()).auto } catch (_) {}
 }
 async function runUpdate() {
@@ -248,8 +250,8 @@ onUnmounted(() => {
         <pre v-if="updProgress.log && updProgress.log.length" class="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5 bg-black/30 p-2 font-mono text-[10.5px] leading-relaxed text-slate-400">{{ updProgress.log.slice(-6).join('\n') }}</pre>
       </div>
 
-      <!-- self-update banner -->
-      <div v-if="upd.available" class="glass mb-4 flex flex-wrap items-center gap-3 border border-violet-400/30 bg-violet-500/10 px-4 py-3">
+      <!-- self-update banner — never on a managed install (fork / package / image) -->
+      <div v-if="upd.available && !upd.managed" class="glass mb-4 flex flex-wrap items-center gap-3 border border-violet-400/30 bg-violet-500/10 px-4 py-3">
         <AppIcon glyph="⬆" class="text-lg text-violet-300" />
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold text-violet-200">A newer asmltr is available — {{ upd.behind }} new commit{{ upd.behind === 1 ? '' : 's' }}.</p>

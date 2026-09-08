@@ -1956,7 +1956,7 @@ app.post('/v2/session/forget', (req, res) => {
 app.get('/v2/update/status', async (req, res) => res.json(await selfUpdate.getUpdateStatus({ fetch: req.query.fetch !== '0', channel: req.query.channel })));
 app.get('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.isAutoUpdate() }));
 app.post('/v2/update/auto', (req, res) => res.json({ auto: selfUpdate.setAutoUpdate(!!(req.body && req.body.enabled)) }));
-// Release channel: stable (newest release tag) vs edge (origin/main).
+// Release channel: stable (newest release tag) vs edge (origin/<branch>).
 // Live progress of a running/last update — read from the status FILE the updater writes, so it
 // survives the mid-update service restart that drops the event stream. The GUI polls this; the TUI
 // reads the file directly. { state: idle|running|success|rolled-back|up-to-date|managed|failed, phase, log[], … }.

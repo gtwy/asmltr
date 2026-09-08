@@ -63,8 +63,9 @@ Signal it with **`ASMLTR_UPDATE_MANAGED=<manager>`** (e.g. `apt`, `docker`, `hos
 
 - `asmltr update` / `scripts/update.js` exit early with a distinct **code 6** and a clear line
   (`updates managed by <manager>; not updating in place`) — never the ambiguous "cannot update".
-- `GET /v2/update/status` reports `managed: true` + the manager (it still shows how far behind you are
-  for telemetry; the dashboard shows "managed by &lt;x&gt;" instead of an Update button).
+- `GET /v2/update/status` reports `managed: true` + the manager. It does **not** fetch origin or
+  report "N commits behind." The dashboard hides the global update banner and shows
+  "managed by &lt;x&gt;" in Settings → Updates instead of an Update button or auto-install toggle.
 - `POST /v2/update/run` refuses and returns `{ managed: true, manager }` rather than spawning a process
   that dies one line in.
 

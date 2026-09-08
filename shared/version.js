@@ -5,7 +5,7 @@
  * Version is the semver in the repo-root VERSION file (falls back to package.json). The running code
  * is additionally identified by its short git sha (proves a restart landed) and, when HEAD is exactly
  * on a release tag, that tag. The update channel decides what "latest" means: `stable` = the newest
- * release tag, `edge` = origin/main. Channel persists in ~/.asmltr/update-channel (env override wins).
+ * release tag, `edge` = origin/<current-or-configured branch>. Channel persists in ~/.asmltr/update-channel (env override wins).
  */
 const fs = require('fs');
 const path = require('path');
@@ -35,7 +35,7 @@ function getChannel() {
   const env = process.env.ASMLTR_UPDATE_CHANNEL;
   if (env && VALID_CHANNELS.includes(env)) return env;
   try { const c = fs.readFileSync(CHANNEL_FILE, 'utf8').trim(); if (VALID_CHANNELS.includes(c)) return c; } catch (_) {}
-  return 'edge'; // default: track origin/main (dev/self-hosted); downstream installs set 'stable'
+  return 'edge'; // default: track origin/<branch> (dev/self-hosted); downstream installs set 'stable'
 }
 function setChannel(c) {
   if (!VALID_CHANNELS.includes(c)) throw new Error(`invalid channel '${c}' (want stable|edge)`);

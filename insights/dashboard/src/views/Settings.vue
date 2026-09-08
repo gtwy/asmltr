@@ -738,6 +738,13 @@ onMounted(async () => {
           <h3 class="mb-1 text-sm font-semibold text-slate-200">Updates</h3>
           <p class="mb-4 text-[12px] text-slate-500">{{ section('updates').desc }}</p>
           <template v-if="upd">
+            <div v-if="upd.managed" class="rounded-lg border border-white/10 bg-black/20 p-3">
+              <div class="text-[11px] uppercase tracking-wide text-slate-500">Version</div>
+              <div class="font-mono text-sm text-slate-200">v{{ upd.version || '?' }} <span class="text-slate-500">({{ upd.head || '—' }})</span></div>
+              <p class="mt-2 text-sm text-slate-300">Managed by {{ upd.manager || 'host' }} — not updating in place.</p>
+              <p class="mt-1 text-[12px] text-slate-500">This install does not fetch or install asmltr updates. The Update button is off.</p>
+            </div>
+            <template v-else>
             <!-- release channel -->
             <div class="mb-3 flex items-center justify-between gap-3">
               <div>
@@ -780,6 +787,7 @@ onMounted(async () => {
                 <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" :class="updAuto ? 'left-[22px]' : 'left-0.5'"></span>
               </button>
             </label>
+            </template>
           </template>
           <p v-else class="py-3 text-center text-sm text-slate-500">loading…</p>
         </div>

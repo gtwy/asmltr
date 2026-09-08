@@ -157,17 +157,17 @@ function maybeActivity(e) {
   queueActivity(sid, recentActivity(sid));
 }
 
-// --- self-update awareness: periodically check origin/main; surface + optionally auto-run --------
+// --- self-update awareness: periodically check origin/<branch>; surface + optionally auto-run ----
 const selfUpdate = require('../../shared/update');
 const UPDATE_CHECK_MS = Math.max(60000, Number(process.env.ASMLTR_UPDATE_CHECK_MS || 15 * 60 * 1000));
 let _updateStatus = { available: false, behind: 0, checked_at: 0 };
 async function checkUpdates() {
   try {
     const s = await selfUpdate.getUpdateStatus();
-    const changed = s.available !== _updateStatus.available || s.behind !== _updateStatus.behind;
+    const changed = s.available !== _updateStatus.available || s.behind !== _updateStatus.behind || s.managed !== _updateStatus.managed;
     _updateStatus = { ...s, auto: selfUpdate.isAutoUpdate() };
     if (changed) io.emit('update-status', _updateStatus);
-    if (s.available && selfUpdate.isAutoUpdate()) {
+    if (s.available && !s.managed && selfUpdate.isAutoUpdate()) {
       console.log(`[update] auto-update enabled and ${s.behind} commit(s) behind — triggering update session`);
       try { await fetch(CORE_BASE + '/v2/update/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ by: 'auto-update' }) }); } catch (_) {}
     }

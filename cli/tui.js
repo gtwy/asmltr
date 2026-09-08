@@ -493,6 +493,11 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
     for (const sec of (MANIFEST.settings || [])) {
       items.push(`{bold}${sec.icon || ''} ${sec.label}{/bold}`); appRows.push({ kind: 'sep' });
       for (const f of (sec.fields || [])) {
+        if (sec.id === 'updates' && f.id === 'auto' && (appData[sec.id] || {}).managed) {
+          items.push(`  {gray-fg}auto-install off (managed by ${(appData[sec.id] || {}).manager || 'host'}){/}`);
+          appRows.push({ kind: 'sep' });
+          continue;
+        }
         const v = fieldVal(sec, f);
         if (f.type === 'toggle') {
           items.push(`  ${v ? '[{green-fg}x{/green-fg}]' : '[ ]'} ${f.label}`);
@@ -516,9 +521,13 @@ function run(BASE, CORE_BASE, TOKEN, A, MGR) {
           items.push(`  {gray-fg}SDK ${inst || '—'}${avail ? ` → ${latest} available{/gray-fg}  {yellow-fg}· u update` : ' ✓ up to date'}{/}`);
         } else if (st.kind === 'code') {
           const head = getPath(d, st.headGet), avail = getPath(d, st.availableGet), behind = getPath(d, st.behindGet);
-          items.push(`  {gray-fg}code ${head || '—'}${avail ? ` → ${behind} behind{/gray-fg}  {yellow-fg}· u update` : ' ✓ up to date'}{/}`);
+          if (getPath(d, 'managed')) {
+            items.push(`  {gray-fg}code ${head || '—'}{/}  {gray-fg}managed by ${getPath(d, 'manager') || 'host'} — not updating in place{/}`);
+          } else {
+            items.push(`  {gray-fg}code ${head || '—'}${avail ? ` → ${behind} behind{/gray-fg}  {yellow-fg}· u update` : ' ✓ up to date'}{/}`);
+          }
         }
-        appRows.push(getPath(d, st.availableGet) ? { kind: 'status', action: st.action } : { kind: 'sep' });
+        appRows.push((getPath(d, st.availableGet) && !getPath(d, 'managed')) ? { kind: 'status', action: st.action } : { kind: 'sep' });
       }
       items.push(''); appRows.push({ kind: 'sep' });
     }
