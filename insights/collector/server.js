@@ -473,7 +473,11 @@ async function reflect() {
     const r = await fetch(CORE_BASE + '/v2/self-assessment', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ digest: digest.text }),
     });
-    if (!r.ok) { console.warn('[reflect] core said', r.status); return; }
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      console.warn('[reflect] core said', r.status, String(t || '').slice(0, 200));
+      return;
+    }
     const j = await r.json();
     const a = j && j.assessment;
     if (!a) return;

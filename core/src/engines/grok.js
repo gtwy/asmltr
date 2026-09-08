@@ -384,7 +384,10 @@ function isUuid(s) {
 /** Resume hook: -r for an existing UUID; -s when creating; never bare -c. */
 function resumeArgs(resume) {
   if (resume && isUuid(resume)) return ['-r', resume];
-  return ['-s'];
+  // CLI requires a value for --session-id. Bare `-s` exits 2
+  // ("a value is required") — that 500'd /v2/self-assessment and
+  // emptied title/status labelers (James 8 Sep 2026).
+  return ['-s', crypto.randomUUID()];
 }
 
 function bin() {
@@ -933,7 +936,9 @@ async function complete({ prompt, model, appendSystemPrompt = null, abortControl
   try {
     const child = spawn(bin(), args, { env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
+    let err = '';
     child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stderr.on('data', (d) => { err += d.toString(); });
     const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
     if (abortController) abortController.signal.addEventListener('abort', kill);
     let timer = null;
@@ -943,7 +948,11 @@ async function complete({ prompt, model, appendSystemPrompt = null, abortControl
     } finally {
       if (timer) clearTimeout(timer);
     }
-    return out.trim();
+    const text = out.trim();
+    if (!text && err.trim()) {
+      throw new Error(err.replace(/\x1b\[[0-9;]*m/g, '').trim().split('\n')[0].slice(0, 240));
+    }
+    return text;
   } finally {
     if (promptFile) try { fs.unlinkSync(promptFile); } catch (_) {}
   }

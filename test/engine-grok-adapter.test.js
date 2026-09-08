@@ -56,8 +56,13 @@ test('isUuid / resumeArgs: -r for a UUID, -s when creating, never -c', () => {
   assert.equal(grok.isUuid('not-a-uuid'), false);
   assert.deepEqual(grok.resumeArgs(id), ['-r', id]);
   assert.ok(!grok.resumeArgs(id).includes('-s'));
-  assert.deepEqual(grok.resumeArgs(null), ['-s']);
-  assert.deepEqual(grok.resumeArgs('latest'), ['-s']);
+  const created = grok.resumeArgs(null);
+  assert.equal(created[0], '-s');
+  assert.equal(created.length, 2);
+  assert.ok(grok.isUuid(created[1]), 'fresh -s needs a session UUID (CLI requires a value)');
+  const latest = grok.resumeArgs('latest');
+  assert.equal(latest[0], '-s');
+  assert.ok(grok.isUuid(latest[1]));
   assert.ok(!grok.resumeArgs(id).includes('-c'));
 });
 
@@ -95,6 +100,9 @@ test('complete() argv uses plain output', () => {
   const args = grok.buildArgs({ prompt: 'title me', complete: true, model: 'grok-3' });
   assert.equal(args[args.indexOf('--output-format') + 1], 'plain');
   assert.equal(args[args.indexOf('-m') + 1], 'grok-3');
+  const s = args.indexOf('-s');
+  assert.ok(s >= 0);
+  assert.ok(grok.isUuid(args[s + 1]), 'complete() must pass -s <uuid>, not bare -s');
 });
 
 test('complete() honor effort low and image/video denies for classify', () => {
