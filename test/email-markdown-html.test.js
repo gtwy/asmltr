@@ -106,6 +106,29 @@ test('lists blockquotes code and hard breaks', () => {
   assert.match(h, /<pre[^>]*>[\s\S]*const x = 1;/);
 });
 
+test('numbered items with a body paragraph stay one list', () => {
+  const h = markdownToHtml(
+    '1. ivy.gtwy.net updater UI (todo #21)\n' +
+    'Strip the banner.\n\n' +
+    '2. Discord Pack B without string-glue (todo #22)\n' +
+    'Needles still match today.\n\n' +
+    'Taken off this pile: Namecheap.',
+  );
+  assert.equal((h.match(/<ol/g) || []).length, 1);
+  assert.doesNotMatch(h, /<ol[^>]*>[\s\S]*<ol/);
+  assert.match(h, /<li[^>]*>ivy\.gtwy\.net updater UI \(todo #21\)<br>Strip the banner\.<\/li>/);
+  assert.match(h, /<li[^>]*>Discord Pack B without string-glue \(todo #22\)<br>Needles still match today\.<\/li>/);
+  assert.match(h, /<p[^>]*>Taken off this pile: Namecheap\.<\/p>/);
+});
+
+test('bullet items with a body paragraph stay one list', () => {
+  const h = markdownToHtml('- apples\nkeep in the fridge\n\n- pears\nalso fruit\n\nAfter.');
+  assert.equal((h.match(/<ul/g) || []).length, 1);
+  assert.match(h, /<li[^>]*>apples<br>keep in the fridge<\/li>/);
+  assert.match(h, /<li[^>]*>pears<br>also fruit<\/li>/);
+  assert.match(h, /<p[^>]*>After\.<\/p>/);
+});
+
 test('-# *(paid link)* under a URL survives as small italic', () => {
   const src = 'https://example.com/dp/B0FAKE0000\n-# *(paid link)*';
   const h = emailHtmlFromMarkdown(src);

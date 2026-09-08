@@ -215,6 +215,53 @@ function formatLine(escapedLine, idx, subtextLines) {
   return html;
 }
 
+/**
+ * One <ul>/<ol>. Lazy continuation (title, then body lines that are not a new
+ * block) stays in the same <li>. A blank line then another marker continues the
+ * same list so Gmail does not restart at 1. A blank then a non-item ends the
+ * list; those blanks stay for the outer paragraph-gap handler.
+ */
+function consumeList(lines, start, subtextLines) {
+  const first = lines[start];
+  const ordered = /^\d+\. /.test(first);
+  const itemRe = ordered ? /^\d+\. / : /^[-*+] /;
+  const items = [];
+  let i = start;
+  let startAt = null;
+
+  while (i < lines.length && itemRe.test(lines[i])) {
+    const lineIdx = i;
+    const line = lines[i];
+    let rest;
+    if (ordered) {
+      const m = /^(\d+)\. /.exec(line);
+      if (startAt == null) startAt = Number(m[1]);
+      rest = line.replace(/^\d+\. /, '');
+    } else {
+      rest = line.replace(/^[-*+] /, '');
+    }
+    i += 1;
+    const bits = [formatLine(rest, lineIdx, subtextLines)];
+    while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i])) {
+      bits.push(formatLine(lines[i], i, subtextLines));
+      i += 1;
+    }
+    items.push(tag('li', STYLE.li, bits.join('<br>')));
+
+    const afterItem = i;
+    while (i < lines.length && lines[i].trim() === '') i += 1;
+    if (i < lines.length && itemRe.test(lines[i])) continue;
+    i = afterItem;
+    break;
+  }
+
+  if (ordered) {
+    const startAttr = startAt && startAt !== 1 ? ` start="${startAt}"` : '';
+    return { html: `<ol${startAttr} style="${STYLE.ol}">${items.join('')}</ol>`, i };
+  }
+  return { html: tag('ul', STYLE.ul, items.join('')), i };
+}
+
 /** Inner HTML fragment. Escapes first, then applies markdown. */
 function markdownToHtml(md, opts) {
   const subtextLines = (opts && opts.subtextLines) || new Set();
@@ -257,23 +304,10 @@ function markdownToHtml(md, opts) {
       continue;
     }
 
-    if (/^[-*+] /.test(line)) {
-      const items = [];
-      while (i < lines.length && /^[-*+] /.test(lines[i])) {
-        items.push(tag('li', STYLE.li, formatLine(lines[i].replace(/^[-*+] /, ''), i, subtextLines)));
-        i += 1;
-      }
-      out.push(tag('ul', STYLE.ul, items.join('')));
-      continue;
-    }
-
-    if (/^\d+\. /.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\d+\. /.test(lines[i])) {
-        items.push(tag('li', STYLE.li, formatLine(lines[i].replace(/^\d+\. /, ''), i, subtextLines)));
-        i += 1;
-      }
-      out.push(tag('ol', STYLE.ol, items.join('')));
+    if (/^[-*+] /.test(line) || /^\d+\. /.test(line)) {
+      const consumed = consumeList(lines, i, subtextLines);
+      out.push(consumed.html);
+      i = consumed.i;
       continue;
     }
 
