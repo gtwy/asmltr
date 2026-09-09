@@ -67,6 +67,25 @@ test('applyOwnerCc Ccs owner when staff and an outsider are both on the letter',
   assert.equal(p.payload.cc, 'customer@acme.test, owner@example.com');
 });
 
+test('applyOwnerCc skips owner when coveredBy staff is already on the letter', () => {
+  const p = applyOwnerCc(
+    { to: 'joey@example.com', cc: 'customer@acme.test', text: 'letter' },
+    'owner@example.com',
+    { selfAddr: 'assistant@example.com', coveredBy: 'joey@example.com' },
+  );
+  assert.equal(p.payload.to, 'joey@example.com');
+  assert.equal(p.payload.cc, 'customer@acme.test');
+});
+
+test('applyOwnerCc still Ccs owner on outsider mail when coveredBy is absent', () => {
+  const p = applyOwnerCc(
+    { to: 'customer@acme.test', text: 'letter' },
+    'owner@example.com',
+    { selfAddr: 'assistant@example.com', coveredBy: 'joey@example.com' },
+  );
+  assert.equal(p.payload.cc, 'owner@example.com');
+});
+
 test('applyOwnerCc still Ccs owner on outsider mail even if noOwnerCc/drop say skip', () => {
   const skipped = applyOwnerCc(
     { to: 'customer@acme.test', text: 'letter' },

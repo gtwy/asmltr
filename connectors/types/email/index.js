@@ -241,6 +241,11 @@ const meta = {
       signature_image: { type: 'string', title: 'Filesystem PNG mailed inline as cid:assistant-sig (blank = no CID attach)', default: '' },
       process_backlog: { type: 'boolean', title: 'On first connect, process existing unread mail (off = only react to NEW arrivals)', default: false },
       owner_forward_to: { type: 'string', title: 'Forward unknown senders here (blank = do not forward)', default: '' },
+      owner_cc_covered_by: {
+        type: 'string',
+        title: 'If any of these addresses are already To/Cc, do not auto-Cc the owner (comma-separated). Keep those people on the letter.',
+        default: '',
+      },
       authserv_id: {
         type: 'string',
         title: 'Pointer only — real allowlist is ~/.asmltr/email-authserv.json',
@@ -891,14 +896,17 @@ function mailingOutsideStaff(toList, ccList, ownerAddr, selfAddr) {
 
 /** Visible Cc of the operator when the letter is to anyone outside the operator's domain.
  * Staff on the operator's domain (and the assistant mailbox) do not trigger it.
- * If the operator is already To/Cc they stay. `--no-owner-cc` is ignored — this is not optional. */
+ * If the operator is already To/Cc they stay. `--no-owner-cc` is ignored — this is not optional.
+ * If anyone in coveredBy (e.g. Joey) is already To/Cc, skip auto-adding the owner; keep them on. */
 function applyOwnerCc(payload, ownerAddr, opts) {
   const owner = String(ownerAddr || '').trim().toLowerCase();
   const o = opts || {};
   const self = String(o.selfAddr || '').trim().toLowerCase();
   const to = parseAddrList(payload && payload.to);
   const cc = parseAddrList(payload && payload.cc).filter((a) => !to.includes(a));
-  if (owner && mailingOutsideStaff(to, cc, owner, self) && !to.includes(owner) && !cc.includes(owner)) {
+  const coveredBy = parseAddrList(o.coveredBy != null ? o.coveredBy : o.ownerCcCoveredBy);
+  const coveredOn = coveredBy.some((a) => to.includes(a) || cc.includes(a));
+  if (owner && mailingOutsideStaff(to, cc, owner, self) && !to.includes(owner) && !cc.includes(owner) && !coveredOn) {
     cc.push(owner);
   }
   if (!to.length) {
@@ -913,8 +921,14 @@ function applyOwnerCc(payload, ownerAddr, opts) {
   };
 }
 
-function createOutboundGate({ ownerAddr, selfAddr } = {}) {
-  return { prepare: (payload, opts) => applyOwnerCc(payload, ownerAddr, Object.assign({ selfAddr }, opts || {})) };
+function createOutboundGate({ ownerAddr, selfAddr, ownerCcCoveredBy } = {}) {
+  return {
+    prepare: (payload, opts) => applyOwnerCc(
+      payload,
+      ownerAddr,
+      Object.assign({ selfAddr, coveredBy: ownerCcCoveredBy }, opts || {}),
+    ),
+  };
 }
 
 /** Kick SMTP and return immediately. Errors are logged; the HTTP /send caller is already done.
@@ -980,7 +994,11 @@ async function start(ctx) {
   // so a recycle does not treat a thread participant as a stranger or drop reply-all.
   const threads = readThreads(ctx.instanceId);
   const selfAddr = String(address).toLowerCase();
-  const outboundGate = createOutboundGate({ ownerAddr: ownerForward, selfAddr });
+  const outboundGate = createOutboundGate({
+    ownerAddr: ownerForward,
+    selfAddr,
+    ownerCcCoveredBy: parseAddrList(cfg.owner_cc_covered_by),
+  });
 
   async function smtpSend({ to, cc, subject, text, inReplyTo, references, attachments, quote }) {
     const content = buildMailContent(text, signature, { subject, quote });
