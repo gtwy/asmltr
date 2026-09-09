@@ -4,7 +4,16 @@
  * never thinking, tool names, or tool I/O (same rule as email).
  */
 const { redactSecrets } = require('../../../shared/redact');
-const { quietReplyFromResult } = require('../../../shared/step-public');
+function quietReplyFromResult(result) {
+  try {
+    return require('../../../shared/step-public').quietReplyFromResult(result);
+  } catch (e) {
+    if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
+    const segs = ((result && result.segments) || [])
+      .map((x) => String(x || '').trim()).filter(Boolean);
+    return segs.length ? segs[segs.length - 1] : String((result && result.text) || '');
+  }
+}
 
 function workingPlaceholder(name) {
   return `🧠 **${name || 'Assistant'} is on it…**`;
