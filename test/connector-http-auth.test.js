@@ -1,6 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { readFileSync } = require('fs');
+const path = require('path');
 const { connectorAuthHeaders, requireConnectorToken } = require('../shared/connector-http-auth');
 
 const PREV = process.env.ASMLTR_MANAGER_TOKEN;
@@ -54,3 +56,17 @@ test('unset token fails closed', () => {
   });
 });
 
+test('discord and telegram /out use requireConnectorToken; manager send attaches headers', () => {
+  const discord = readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  const telegram = readFileSync(path.join(__dirname, '../connectors/types/telegram/index.js'), 'utf8');
+  const manager = readFileSync(path.join(__dirname, '../connectors/manager/server.js'), 'utf8');
+  assert.ok(discord.includes('requireConnectorToken'));
+  assert.ok(telegram.includes('requireConnectorToken'));
+  assert.match(discord, /app\.post\('\/out',\s*requireConnectorToken/);
+  assert.match(discord, /outboundFileAllowed/);
+  assert.match(telegram, /outboundFileAllowed/);
+  assert.match(discord, /app\.post\('\/send-message',\s*requireConnectorToken/);
+  assert.match(telegram, /app\.post\('\/out',\s*requireConnectorToken/);
+  assert.match(telegram, /app\.post\('\/send',\s*requireConnectorToken/);
+  assert.ok(manager.includes('connectorAuthHeaders'));
+});

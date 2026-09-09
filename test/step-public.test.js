@@ -122,6 +122,32 @@ test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 
   assert.ok(clamped.endsWith('…'));
 });
 
+test('Discord never renderSteps raw thought text', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
+  assert.equal(src.includes("renderStep('💭 '"), false);
+  assert.match(src, /discordThoughtLine/);
+  assert.match(src, /onThinking:/);
+  assert.match(src, /if \(quietImageGen \|\| maxThoughts <= 0\) return;/);
+  assert.match(src, /not xhigh: 💭 only, no tooling/);
+  assert.match(src, /no Working filler on medium\/high/);
+  assert.match(src, /let stopBeat = \(\) => \{\};/);
+  assert.match(src, /try \{ stopBeat\(\); \} catch/);
+  assert.equal(src.includes('looksLikeImageGen'), false);
+  assert.match(src, /GENERATING_LINE/);
+  assert.match(src, /isImageGenTool/);
+  assert.match(src, /quietImageGen/);
+  assert.match(src, /enterImageGenQuiet/);
+  assert.match(src, /meta && meta.imageGen/);
+  assert.match(src, /thoughtBudget\(effort, \{ imageGen: quietImageGen \}\)/);
+  assert.match(src, /pickPublicReply/);
+  assert.equal(src.includes('identityHintsFrom'), false);
+  assert.equal(src.includes('loadIdentityHints'), false);
+  assert.match(src, /speakerHintsFrom/);
+  assert.match(src, /publicBlockHints/);
+  assert.match(src, /mergeSpeakerLastNames/);
+  assert.match(src, /leakDropped/);
+});
+
 test('looksLikePromptRestatement does not treat vendor email as a prompt dump', () => {
   assert.equal(looksLikePromptRestatement('write owner@example.com a note'), false);
   assert.equal(looksLikePromptLeak('write owner@example.com a note'), true);
