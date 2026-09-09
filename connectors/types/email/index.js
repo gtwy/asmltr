@@ -47,6 +47,7 @@ const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { collectOutboundFiles, attachmentsFromPaths } = require('../../../shared/outbound-files');
+const { emailReplyGateDecision } = require('./reply-gate');
 
 const SIG_IMAGE_CID = 'assistant-sig';
 
@@ -492,8 +493,10 @@ function formatAuthJournal(entries) {
 }
 
 function defaultOpsAllowthroughPath() {
-  return process.env.ASMLTR_OPS_ALLOWTHROUGH
-    || path.join(os.homedir(), '.asmltr', 'silos', 'self', 'memory', 'ops', 'allowthrough.json');
+  if (process.env.ASMLTR_OPS_ALLOWTHROUGH) return process.env.ASMLTR_OPS_ALLOWTHROUGH;
+  const ivy = path.join(os.homedir(), '.asmltr', 'ivy-context', 'helpers', 'allowthrough.json');
+  try { fs.accessSync(ivy); return ivy; } catch (_) {}
+  return path.join(os.homedir(), '.asmltr', 'silos', 'self', 'memory', 'ops', 'allowthrough.json');
 }
 
 // Per-instance IMAP UID cursor. Survives worker restart so a hang-up does not skip the failed uid.
@@ -938,6 +941,7 @@ function queueOutboundMail(sendMail, payload, log, prepare) {
 
 async function start(ctx) {
   const cfg = ctx.config || {};
+  const outByRef = new Set();
   const PORT = cfg.http_port || 3026;
   const BIND = cfg.bind_host || '127.0.0.1';
   const MAILBOX = cfg.mailbox || 'INBOX';
@@ -1009,7 +1013,7 @@ async function start(ctx) {
     const fromName2 = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].name) || fromAddr;
     if (!fromAddr) return { handled: false };
     // Loop / automation guards — never answer ourselves or noreply/daemon senders,
-    // unless an ops matcher (Self silo memory/ops/allowthrough.json) says this
+    // unless an ops matcher (helpers/allowthrough.json) says this
     // alert is allowed through (e.g. Microsoft Entra sync noreply).
     if (fromAddr === selfAddr) return { handled: false };
     const subject = parsed.subject || '(no subject)';
@@ -1134,10 +1138,10 @@ async function start(ctx) {
     const sendPolicy = policy;
     const ccOnly = selfInCcOnly(parsed, selfAddr);
     let extra =
-      `You are answering an EMAIL as ${fromName}. Your assistant text is NOT mailed — there is no auto-reply. ` +
-      `To send a letter: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"]. ` +
+      `You are answering an EMAIL as ${fromName}. A letter-shaped reply is mailed on this thread (reply-all, quote, signature) unless you already asmltr send this turn, or the reply is only [[NO_REPLY]]. ` +
+      `To send with flags: asmltr send email <addr> "body" --subject "${replySubject.replace(/"/g, '')}" [--cc "addr"] [--no-reply-all] [--new-thread] [--file path]. Prefer asmltr send when you need --new-thread, --no-reply-all, attachments, or a different To. Otherwise write the letter as your reply (greeting first) and end with [[NO_REPLY]]. ` +
       `On a chain, the connector reply-alls everyone already on To/Cc (minus you) unless you pass --drop <addr> or --no-reply-all. Check To and Cc before sending. Do not drop the owner, staff, or the customer unless asked. ` +
-      '--no-reply-all only drops extra recipients; it still quotes this thread and still sets In-Reply-To. --new-thread is a blank new email: no quote, no In-Reply-To, no reply-all merge. Use --new-thread for gaia↔owner sidebar (other customers, personal notes, internal SKUs) and for any letter to a customer after that sidebar has been on this chain. Do not reply-all a tainted thread to a customer. Customer letter after sidebar: --new-thread --cc owner@example.com with a clean subject (not Re:/Fwd: of the sidebar). Flow: memory/ops/email-threads.md. ' +
+      '--no-reply-all only drops extra recipients; it still quotes this thread and still sets In-Reply-To. --new-thread is a blank new email: no quote, no In-Reply-To, no reply-all merge. Use --new-thread for gaia↔owner sidebar (other customers, personal notes, internal SKUs) and for any letter to a customer after that sidebar has been on this chain. Do not reply-all a tainted thread to a customer. Customer letter after sidebar: --new-thread --cc owner@example.com with a clean subject (not Re:/Fwd: of the sidebar). Flow: medium/email-threads.md. ' +
       `Automated alert senders (noreply Microsoft/Barracuda, alerts@LogMeIn, and similar) are not people on the chain. Never include them on replies for those alerts. Real vendor employees on a support ticket stay. Staff outreach from an automated-alert turn is a blank new email (--new-thread --no-reply-all): facts in your own words, no quote of the vendor message. ` +
       `Then reply with exactly [[NO_REPLY]]. Do not type a name or signature block — "${fromName}" and the rest of the signature are appended on send. NEVER sign as the operator/owner or impersonate a human. ` +
       `When a company name is used, write the full legal name from the Self silo — never a shortened nickname. ` +
@@ -1146,19 +1150,20 @@ async function start(ctx) {
         : `If you were spoken to or told to do something, asmltr send; otherwise [[NO_REPLY]]. Do not send when the context does not need you. `) +
       `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at staff@example.com (the owner) says so. Do not add those staff to a thread they are not already on. ` +
       `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Google Contacts, are not strangers. ` +
-      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, reply-all with the proposed title/when/who/where and any body notes, and wait for the owner to confirm. First letter to others: do not say you cannot book until the owner confirms or that a workflow blocks you. If someone later sends a change, repeat the corrected details; a short still-waiting-on-owner is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or assistant/company closer in the letter — those go on the Google event only. If the owner does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to the owner: say there is a conflict and the owner should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Stay on this email thread — do not also ping the owner on Discord about the same invite. Do not tell anyone else they are free. Remote only if the owner says remote (blank location). Remote description never uses the assistant's "I": one team member attending → "{FirstName} will not be on-site"; more than one → "we will not be on-site". If the owner says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If the owner clearly says other staff will be going and they will not: the repeat-back says the owner is not attending; on create pass organizer_going=false (leave the owner's RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the people who are going, not the owner's number. People the owner names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on the owner on the first pass). Event details and exceptions only. Full flowchart: memory/ops/calendar-schedule.md. ` +
+      `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, mail the proposed title/when/who/where and any body notes on this thread (asmltr send, or write that letter as your reply), and wait for the owner to confirm. First letter to others: do not say you cannot book until the owner confirms or that a workflow blocks you. If someone later sends a change, repeat the corrected details; a short still-waiting-on-owner is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or assistant/company closer in the letter — those go on the Google event only. If the owner does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to the owner: say there is a conflict and the owner should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Stay on this email thread — do not also ping the owner on Discord about the same invite. Do not tell anyone else they are free. Remote only if the owner says remote (blank location). Remote description never uses the assistant's "I": one team member attending → "{FirstName} will not be on-site"; more than one → "we will not be on-site". If the owner says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If the owner clearly says other staff will be going and they will not: the repeat-back says the owner is not attending; on create pass organizer_going=false (leave the owner's RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the people who are going, not the owner's number. People the owner names for the invite who are not already on From/To/Cc stay off the email thread — Google invite only (default). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on the owner on the first pass). Event details and exceptions only. Full flowchart: workflows/calendar.md. ` +
       `When mailing anyone outside the operator's email domain, the mailbox Ccs the operator. Staff on that domain do not get the operator auto-Cced unless they already put the operator on the letter. Do not add other staff unless they were already on To/Cc. ` +
-      `Ops desk: inbound company alerts live in the Self silo at memory/ops/README.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
+      `Ops desk: inbound company alerts live in workflows/ops-desk.md. If this mail matches an enabled workflow there, follow that flowchart (ticket + outreach). Do not invent a new alert type. ` +
       formatAuthSummary(auth);
     if (hit) {
       extra += ` This message matched ops matcher '${hit.id || 'unnamed'}'. Do the workflow work via tools. Do not reply to this automated sender — end with [[NO_REPLY]] after handling.`;
       if (hit.id === 'out-of-office') {
-        extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. example.com is always silent. Customer we already emailed on an open ticket: one notice to the operator only.';
+        extra += ' This is an out-of-office / automatic reply. Follow workflows/ops-desk/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. example.com is always silent. Customer we already emailed on an open ticket: one notice to the operator only.';
       }
     }
     extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags.';
     extra += ' Do not retype or restyle the signature; the connector appends it. Do not use Discord -# or 💭 in a letter (if you do, send-time unwraps it). Use markdown for emphasis; headings only when they help, not on a two-line note.';
     extra += ' ' + LETTER_ONLY_EXTRA;
+    outByRef.delete(convKey);
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,
@@ -1176,11 +1181,30 @@ async function start(ctx) {
       system_prompt_extra: extra,
     });
 
-    for (const a of actions || []) {
-      if (a.type === 'reply' && a.text && a.text.trim()) {
-        // No auto-reply. Session text is never SMTP'd. Letters go out only via /out (asmltr send).
-        ctx.log(`no auto-reply (${replySubject}); send via asmltr send if this turn needed a letter`);
-      }
+    const reply = (actions || []).find((a) => a && a.type === 'reply' && a.text);
+    const alreadyOut = outByRef.has(convKey);
+    outByRef.delete(convKey);
+    const decision = emailReplyGateDecision({
+      replyText: reply && reply.text,
+      alreadyOut,
+      ccOnly,
+      opsHit: hit,
+      sendPolicy,
+    });
+    if (decision.action === 'mail') {
+      const payload = buildOutPayload({
+        target: fromAddr,
+        text: decision.text,
+        subject: replySubject,
+        tc: threads.get(convKey) || {},
+        selfAddr,
+        fromName,
+        reply_all: true,
+      });
+      const queued = queueOutboundMail(smtpSend, payload, ctx.log, (pl) => outboundGate.prepare(pl));
+      ctx.log(`reply-gate mailed (${replySubject}) queued=${!!(queued && queued.queued)}`);
+    } else {
+      ctx.log(`reply-gate skip (${replySubject}): ${decision.reason}`);
     }
     return { handled: true };
   }
@@ -1414,6 +1438,7 @@ async function start(ctx) {
     try {
       const { kind = 'text', target, text, subject, ref, caption, cc, inReplyTo, references, drop, reply_all, new_thread } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
+      if (ref) outByRef.add(String(ref));
       const tc = (ref && threads.get(ref)) || {};
       let attachments;
       const filePaths = collectOutboundFiles(req.body);
@@ -1459,4 +1484,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };

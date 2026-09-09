@@ -9,6 +9,7 @@
  */
 
 const SENTINEL_RE = /^\[\[NO_REPLY\]\]$/i;
+const STRIP_RE = /\[\[NO_REPLY\]\]/gi;
 
 function isNoReplySentinel(text) {
   const t = String(text || '').trim();
@@ -23,4 +24,8 @@ function isNoReplySentinel(text) {
   return false;
 }
 
-module.exports = { isNoReplySentinel };
+function stripNoReplySentinel(text) {
+  return String(text || '').replace(STRIP_RE, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+module.exports = { isNoReplySentinel, stripNoReplySentinel };

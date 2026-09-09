@@ -26,3 +26,10 @@ test('empty is not the sentinel (empty-no-reply is a different path)', () => {
   assert.equal(isNoReplySentinel(null), false);
   assert.equal(isNoReplySentinel('hello'), false);
 });
+
+test('stripNoReplySentinel leaves a letter, empties token-only', () => {
+  const { stripNoReplySentinel } = require('../shared/silence');
+  assert.equal(stripNoReplySentinel('Hi\n\n[[NO_REPLY]]'), 'Hi');
+  assert.equal(stripNoReplySentinel('[[NO_REPLY]]'), '');
+  assert.equal(stripNoReplySentinel('plain letter'), 'plain letter');
+});
