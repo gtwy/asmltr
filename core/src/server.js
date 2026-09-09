@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 'use strict';
-const _sqliteKeep = require('./sqlite-stmt-keep');
 const { healthPayload } = require('./health-payload');
 const { policyFor, isDiscordVoice } = require('../../shared/media-allow');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
