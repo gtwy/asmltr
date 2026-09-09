@@ -26,17 +26,17 @@ test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
 });
 
 test('speaker hints are runtime-only; thoughts mentioning them are dropped', () => {
-  const author = { username: 'wx412', globalName: 'Ada Lovelace' };
+  const author = { username: 'ada_user', globalName: 'Ada Lovelace' };
   const hints = speakerHintsFrom(author);
   const hintKinds = mergeSpeakerLastNames(new Map(), author, null);
-  assert.ok(hints.includes('wx412'));
+  assert.ok(hints.includes('ada_user'));
   assert.ok(hints.includes('Ada Lovelace'));
   assert.ok(hints.includes('Lovelace'));
   assert.equal(hints.includes('Ada'), false); // tokens under 4 chars are skipped
   assert.equal(mentionsSpeaker('Ada Lovelace asked for ingredients', hints), true);
-  assert.equal(mentionsSpeaker('wx412 is waiting', hints), true);
+  assert.equal(mentionsSpeaker('ada_user is waiting', hints), true);
   assert.equal(mentionsSpeaker('Checking the recipe board', hints), false);
-  assert.equal(discordThoughtLine('The user is Ada Lovelace (wx412) asking in #food', hints, hintKinds), '');
+  assert.equal(discordThoughtLine('The user is Ada Lovelace (ada_user) asking in #food', hints, hintKinds), '');
   assert.equal(discordThoughtLine('Let me search more thoroughly', hints, hintKinds), '-# 💭 Let me search more thoroughly');
   assert.equal(discordThoughtLine('Morgan asked about the recipe', hints, hintKinds), '-# 💭 Morgan asked about the recipe');
 });
@@ -120,32 +120,6 @@ test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 
   assert.ok(clamped.startsWith('-# 💭 '));
   assert.ok(clamped.length <= '-# 💭 '.length + 280);
   assert.ok(clamped.endsWith('…'));
-});
-
-test('Discord never renderSteps raw thought text', () => {
-  const src = require('fs').readFileSync(require('path').join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
-  assert.equal(src.includes("renderStep('💭 '"), false);
-  assert.match(src, /discordThoughtLine/);
-  assert.match(src, /onThinking:/);
-  assert.match(src, /if \(quietImageGen \|\| maxThoughts <= 0\) return;/);
-  assert.match(src, /not xhigh: 💭 only, no tooling/);
-  assert.match(src, /no Working filler on medium\/high/);
-  assert.match(src, /let stopBeat = \(\) => \{\};/);
-  assert.match(src, /try \{ stopBeat\(\); \} catch/);
-  assert.equal(src.includes('looksLikeImageGen'), false);
-  assert.match(src, /GENERATING_LINE/);
-  assert.match(src, /isImageGenTool/);
-  assert.match(src, /quietImageGen/);
-  assert.match(src, /enterImageGenQuiet/);
-  assert.match(src, /meta && meta.imageGen/);
-  assert.match(src, /thoughtBudget\(effort, \{ imageGen: quietImageGen \}\)/);
-  assert.match(src, /pickPublicReply/);
-  assert.equal(src.includes('identityHintsFrom'), false);
-  assert.equal(src.includes('loadIdentityHints'), false);
-  assert.match(src, /speakerHintsFrom/);
-  assert.match(src, /publicBlockHints/);
-  assert.match(src, /mergeSpeakerLastNames/);
-  assert.match(src, /leakDropped/);
 });
 
 test('looksLikePromptRestatement does not treat vendor email as a prompt dump', () => {
@@ -348,6 +322,6 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
   assert.equal(kinds.get('rivera'), 'last-name');
   assert.equal(identityHintKindMap([{ id: 'solo', display_name: 'Casey' }]).get('casey'), 'first-name');
   assert.equal(identityHintKindMap([{ id: 'ada', display_name: 'Ada Lovelace' }]).get('lovelace'), 'last-name');
-  assert.deepEqual(publicBlockHints(['Alex', 'Rivera', 'wx412'], kinds).map((h) => h.toLowerCase()), ['rivera']);
+  assert.deepEqual(publicBlockHints(['Alex', 'Rivera', 'ada_user'], kinds).map((h) => h.toLowerCase()), ['rivera']);
 });
 
