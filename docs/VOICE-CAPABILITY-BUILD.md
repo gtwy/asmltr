@@ -49,7 +49,7 @@ tested, so the GUI stops showing it as "(planned)".
 - Add to `IMPLEMENTED` after a live test.
 
 ### 5. deepgram → ready
-- Vault the key as `deepgram_api_key` (currently BWS `[REDACTED-ORG]_deepgram_api_key` — DECIDE whether to reuse
+- Vault the key as `deepgram_api_key` (if a provider key is already vaulted elsewhere, DECIDE whether to reuse
   the client key or a separate one). Build a Deepgram STT adapter (file + streaming diarization). Add to IMPLEMENTED.
 
 ### 6. local-whisper → ready (or gate on detection)
@@ -72,7 +72,7 @@ tested, so the GUI stops showing it as "(planned)".
 The diarize adapter (`stt.transcribeDiarized` + `POST /v2/recordings/:id/diarize`) is built and VERIFIED
 correct — the request is well-formed. But the OpenAI project returns:
 `403 Project proj_… does not have access to model gpt-4o-transcribe-diarize`.
-**Action ([REDACTED]):** enable `gpt-4o-transcribe-diarize` for the project in the OpenAI dashboard
+**Action (operator):** enable `gpt-4o-transcribe-diarize` for the project in the OpenAI dashboard
 (Project → model access, and/or complete org verification). Then add `openai-transcribe-diarize` to the
 `IMPLEMENTED` set in `shared/speech/voice-engines.js` → it's instantly 'ready' and the recorder diarize
 path works (test: `POST /v2/recordings/<meeting-id>/diarize`). Same likely applies to `gpt-live-transcribe`.
