@@ -20,7 +20,7 @@ test('approve maps client_id to itself, not owner or unknown', () => {
 });
 
 test('approve leaves an existing mapped identity untouched', () => {
-  const existing = { userId: 'adjutant-mapped', username: 'Adjutant' };
+  const existing = { userId: 'peer-mapped', username: 'Peer' };
   const id = identityForApprove('already-mapped-client', existing, 'ShouldNotWin');
   assert.deepEqual(id, existing);
 });

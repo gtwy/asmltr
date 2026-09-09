@@ -1,7 +1,7 @@
 'use strict';
 /**
  * V16 M1: Approve authorizes that client_id as itself.
- * Do not map to owner, Adjutant, or a shared user:unknown session.
+ * Do not map to owner, a named peer, or a shared user:unknown session.
  */
 
 function isUnknownIdentity(id) {
@@ -23,7 +23,7 @@ function lookupClientIdentity(map, clientId) {
   return null;
 }
 
-/** Existing mapped identity wins (Adjutant untouched). Else userId = client_id. */
+/** Existing mapped identity wins (named peer untouched). Else userId = client_id. */
 function identityForApprove(clientId, existing, clientName) {
   const cid = String(clientId || '').trim();
   if (!cid) return null;
