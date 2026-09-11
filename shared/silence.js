@@ -28,4 +28,16 @@ function stripNoReplySentinel(text) {
   return String(text || '').replace(STRIP_RE, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-module.exports = { isNoReplySentinel, stripNoReplySentinel };
+/**
+ * Email reply-gate mails session text. Core's last-line [[NO_REPLY]] would otherwise
+ * drop a letter that the extra used to tell the model to tag. Bare token still silences.
+ * Other channels keep last-line as full silence (redirect / asmltr send).
+ */
+function emailKeepLetterDespiteSentinel(channel, text) {
+  if (String(channel || '') !== 'email') return null;
+  if (!isNoReplySentinel(text)) return null;
+  const letter = stripNoReplySentinel(text);
+  return letter || null;
+}
+
+module.exports = { isNoReplySentinel, stripNoReplySentinel, emailKeepLetterDespiteSentinel };

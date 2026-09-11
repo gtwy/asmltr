@@ -33,3 +33,12 @@ test('stripNoReplySentinel leaves a letter, empties token-only', () => {
   assert.equal(stripNoReplySentinel('[[NO_REPLY]]'), '');
   assert.equal(stripNoReplySentinel('plain letter'), 'plain letter');
 });
+
+test('email keeps a letter tagged with last-line sentinel; other channels do not', () => {
+  const { emailKeepLetterDespiteSentinel } = require('../shared/silence');
+  const letter = 'James,\n\nYes. Hot-swappable.\n\n[[NO_REPLY]]';
+  assert.equal(emailKeepLetterDespiteSentinel('email', letter), 'James,\n\nYes. Hot-swappable.');
+  assert.equal(emailKeepLetterDespiteSentinel('email', '[[NO_REPLY]]'), null);
+  assert.equal(emailKeepLetterDespiteSentinel('discord', letter), null);
+  assert.equal(emailKeepLetterDespiteSentinel('email', 'plain letter'), null);
+});

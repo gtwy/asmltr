@@ -68,7 +68,7 @@ const vault = require('../../shared/vault'); // TRUST vault (credential broker +
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
 const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path (ask/grok turns)
-const { isNoReplySentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
+const { isNoReplySentinel, emailKeepLetterDespiteSentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
 const { parseReact } = require('../../shared/react-token'); // Discord [[REACT:😂]] — strip before silence/post
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 let SELF_SILO_DIR = null;
@@ -727,10 +727,19 @@ async function handle(envelope, opts = {}) {
   // its answer to another channel via `asmltr send` and doesn't want to post here), emit no action
   // so EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
   // Mentioning the token in a real reply is not silence (substring match swallowed those).
+  // Email: a letter + last-line [[NO_REPLY]] is still a letter for the reply-gate (core must
+  // not swallow it). Bare [[NO_REPLY]] on email stays silence.
   if (isNoReplySentinel(result.text)) {
-    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
-      identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });
-    return reactAction ? [reactAction] : [];
+    const emailLetter = emailKeepLetterDespiteSentinel(e.channel, result.text);
+    if (emailLetter) {
+      result.text = emailLetter;
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+        identity: resolved.user_key, source: 'core', payload: { action: 'email-noreply-stripped' } });
+    } else {
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+        identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });
+      return reactAction ? [reactAction] : [];
+    }
   }
 
   // Fallback silence: the model decided this wasn't for it but prose-refused instead of emitting
