@@ -197,8 +197,34 @@ function quoteFromThread(tc) {
 // Multipart body for SMTP: text is markdown+signature; html is sanitized conversion.
 // Fail open: convert errors omit html so nodemailer sends text only.
 // Quote (Gmail bar) is spliced AFTER conversion when last inbound is on the thread.
+/** Drop a trailing name-only sign-off (e.g. "Ivy") so the connector signature is not doubled. */
+function stripTrailingSelfSignoff(text, fromName) {
+  const raw = String(text || '');
+  const name = String(fromName || '').trim();
+  if (!raw.trim() || !name) return raw;
+  const aliases = new Set();
+  const noEmoji = name.replace(/[\u{1F300}-\u{1FAFF}🔶🌿]/gu, '').replace(/\s+/g, ' ').trim();
+  aliases.add(name.toLowerCase());
+  if (noEmoji) aliases.add(noEmoji.toLowerCase());
+  const first = (noEmoji || name).split(/\s+/)[0];
+  if (first) aliases.add(first.toLowerCase());
+  const lines = raw.replace(/\s+$/g, '').split('\n');
+  while (lines.length) {
+    const last = lines[lines.length - 1].trim();
+    if (!last) { lines.pop(); continue; }
+    const norm = last.replace(/[\u{1F300}-\u{1FAFF}🔶🌿]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (aliases.has(norm) || aliases.has(last.toLowerCase())) {
+      lines.pop();
+      continue;
+    }
+    break;
+  }
+  return lines.join('\n').replace(/\s+$/g, '');
+}
+
 function buildMailContent(text, signature, opts) {
-  const plain = (text || '') + (signature || '');
+  const body = stripTrailingSelfSignoff(text, opts && opts.fromName);
+  const plain = (body || '') + (signature || '');
   const quote = opts && opts.quote;
   const wantQuote = quote
     && (String(quote.html || '').trim() || String(quote.text || '').trim());
@@ -1001,7 +1027,7 @@ async function start(ctx) {
   });
 
   async function smtpSend({ to, cc, subject, text, inReplyTo, references, attachments, quote }) {
-    const content = buildMailContent(text, signature, { subject, quote });
+    const content = buildMailContent(text, signature, { subject, quote, fromName });
     const info = await smtp.sendMail({
       from: `"${fromName}" <${address}>`, to,
       cc: cc || undefined,
@@ -1166,6 +1192,7 @@ async function start(ctx) {
       (ccOnly
         ? `You are only CC'd on this chain. Listen. Do not send unless you were spoken to or told to do something specifically. If not: [[NO_REPLY]] only. If spoken to and mailing on this thread with no flags: write the letter; do not append [[NO_REPLY]]. `
         : `If you were spoken to or told to do something and mailing on this thread with no flags: write the letter (no [[NO_REPLY]]). If you asmltr send, or the context does not need you: [[NO_REPLY]] only. `) +
+      `If you are the only To, or the only recipient besides the sender, the mail is for you even if they did not type your name. ` +
       `On a customer chain you may go back and forth: answer questions, send instructions, propose what we would do. Do not implement (DNS, registrar, other infra) and do not give away another customer or internal detail until someone at staff@example.com (the owner) says so. Do not add those staff to a thread they are not already on. ` +
       `If a message on the thread is not engaging you — different topic or person — do not reply; wait. People already on the thread, or in Google Contacts, are not strangers. ` +
       `If this mail is to set up a meeting or calendar invite: do not create the Google event yet. Infer details, look up the address if they named a business, mail the proposed title/when/who/where and any body notes on this thread (asmltr send, or write that letter as your reply), and wait for the owner to confirm. First letter to others: do not say you cannot book until the owner confirms or that a workflow blocks you. If someone later sends a change, repeat the corrected details; a short still-waiting-on-owner is OK as status, not a workflow lecture. Times to others: 12-hour am/pm (not 24-hour). Do not repeat the cell footer or assistant/company closer in the letter — those go on the Google event only. If the owner does not name the event, guess a title from guests and context and show it in the repeat-back. If no end time, default to one hour. If the date is a US federal holiday, Good Friday, or Easter, say so on the thread. If a busy overlap exists and the letter is not only to the owner: say there is a conflict and the owner should confirm it is OK to schedule. Do not name the overlapping event or paste reminder notes. Stay on this email thread — do not also ping the owner on Discord about the same invite. Do not tell anyone else they are free. Remote only if the owner says remote (blank location). Remote description never uses the assistant's "I": one team member attending → "{FirstName} will not be on-site"; more than one → "we will not be on-site". If the owner says house or office, use that address as location. Do not infer remote from home/office. Look up named people in Google Contacts (gworkspace), not Rolodex. If the owner clearly says other staff will be going and they will not: the repeat-back says the owner is not attending; on create pass organizer_going=false (leave the owner's RSVP unset — hollow, do not auto-Yes, do not mark Not going); keep the event busy so guests do not inherit free; cell footer on the Google event lists only the people who are going, not the owner's number. Google attendees: other people on To and Cc of THIS inbound message, plus anyone named in THIS message body. Do not mine the rest of the chain, quotes, or signatures for extra addresses. Copied on this inbound means on the invite — do not drop them because they are also the host/site. Do not invent people who were not on this To/Cc and not named here. First ivy@ letter: reply-all this inbound as addressed — do not add named-only people to that letter. After they confirm / book it: originator only (--no-reply-all); guests already get Google's invite. People named for the invite who are not on this inbound's To/Cc stay off the ivy@ letter — Google invite only (default). Do not recap standing policy in the letter (event is busy, RSVP unset, guests stay off the mail, waiting on the owner on the first pass). Event details and exceptions only. Full flowchart: workflows/calendar.md. ` +
@@ -1502,4 +1529,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, stripTrailingSelfSignoff, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };

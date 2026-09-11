@@ -62,6 +62,7 @@ test('connector extra uses ivy-context paths and no silo memory/ops', () => {
   assert.doesNotMatch(src, /write the letter as your reply \(greeting first\) and end with \[\[NO_REPLY\]\]/);
   assert.doesNotMatch(src, /Then reply with exactly \[\[NO_REPLY\]\]\./);
   assert.match(src, /Do not put \[\[NO_REPLY\]\] on a letter/);
+  assert.match(src, /If you are the only To/);
   assert.match(src, /emailReplyGateDecision/);
   assert.match(src, /reply-gate mailed/);
 });

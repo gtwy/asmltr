@@ -10,6 +10,7 @@ const {
   wrapEmailHtml,
   emailHtmlFromMarkdown,
   buildMailContent,
+  stripTrailingSelfSignoff,
   LETTER_ONLY_EXTRA,
 } = require('../connectors/types/email');
 
@@ -214,6 +215,17 @@ test('signature image sits after two blanks and immediately above the pitch', ()
   assert.match(
     h,
     /<img src="https:\/\/example.com\/sig.png"[^>]*><\/p>\n<p style="margin:0 0 12px;"><span style="font-size:12px;font-weight:bold;color:#555;"><a href="https:\/\/example.com"/,
+  );
+});
+
+test('stripTrailingSelfSignoff drops a name-only last line, not a sentence', () => {
+  const name = 'Ivy Hedera 🔶🌿';
+  assert.equal(stripTrailingSelfSignoff('Check the PCs today.\n\nIvy\n', name), 'Check the PCs today.');
+  assert.equal(stripTrailingSelfSignoff('Check the PCs today.\n\nIvy Hedera 🔶🌿', name), 'Check the PCs today.');
+  assert.equal(stripTrailingSelfSignoff('Thanks, Ivy', name), 'Thanks, Ivy');
+  assert.equal(
+    buildMailContent('Pause the patch.\n\nIvy\n', '\n\nIvy Hedera\nAI Assistant', { fromName: name }).text,
+    'Pause the patch.\n\nIvy Hedera\nAI Assistant',
   );
 });
 
