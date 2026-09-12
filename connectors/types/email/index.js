@@ -48,6 +48,7 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { collectOutboundFiles, attachmentsFromPaths } = require('../../../shared/outbound-files');
 const { emailReplyGateDecision } = require('./reply-gate');
+const { stripLeadingLetterPlan } = require('./letter-plan');
 
 const SIG_IMAGE_CID = 'assistant-sig';
 
@@ -223,7 +224,7 @@ function stripTrailingSelfSignoff(text, fromName) {
 }
 
 function buildMailContent(text, signature, opts) {
-  const body = stripTrailingSelfSignoff(text, opts && opts.fromName);
+  const body = stripTrailingSelfSignoff(stripLeadingLetterPlan(text), opts && opts.fromName);
   const plain = (body || '') + (signature || '');
   const quote = opts && opts.quote;
   const wantQuote = quote
@@ -1529,4 +1530,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, stripTrailingSelfSignoff, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, stripTrailingSelfSignoff, stripLeadingLetterPlan, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };

@@ -17,6 +17,15 @@ test('letter plus last-line sentinel is the letter', () => {
   assert.equal(letterBodyFromReply(body), 'Hi James,\n\nSightline 0.5 hrs on 9/8.');
 });
 
+test('gate drops a plan paragraph above Hi Name', () => {
+  const d = emailReplyGateDecision({
+    replyText: 'That gear panel is the iPhone Outlook app. I’ll send her the Safari path.\n\nHi Markay,\n\nUse Safari.',
+  });
+  assert.equal(d.action, 'mail');
+  assert.equal(d.text.startsWith('Hi Markay,'), true, d.text.slice(0, 80));
+  assert.equal(d.text.includes('I’ll send'), false);
+});
+
 test('gate mails a letter-shaped reply', () => {
   const d = emailReplyGateDecision({ replyText: 'Hi Jareth,\n\nMon 14 Sep 16:30–18:30.' });
   assert.equal(d.action, 'mail');

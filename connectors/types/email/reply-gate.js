@@ -5,9 +5,10 @@
  * Skip silence, already-sent, always_draft, and ops matchers (never write the vendor).
  */
 const { stripNoReplySentinel } = require('../../../shared/silence');
+const { stripLeadingLetterPlan } = require('./letter-plan');
 
 function letterBodyFromReply(text) {
-  return stripNoReplySentinel(text);
+  return stripLeadingLetterPlan(stripNoReplySentinel(text));
 }
 
 function emailReplyGateDecision(opts) {
