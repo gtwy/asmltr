@@ -4,7 +4,7 @@
  * body that never went through /out is mailed via buildOutPayload (same as asmltr send).
  * Skip silence, already-sent, always_draft, and ops matchers (never write the vendor).
  */
-const { stripNoReplySentinel } = require('../../../shared/silence');
+const { stripNoReplySentinel, looksLikeNonReply } = require('../../../shared/silence');
 const { stripLeadingLetterPlan } = require('./letter-plan');
 
 function letterBodyFromReply(text) {
@@ -17,6 +17,7 @@ function emailReplyGateDecision(opts) {
   if (o.alreadyOut) return { action: 'skip', reason: 'already-out' };
   const letter = letterBodyFromReply(o.replyText);
   if (!letter) return { action: 'skip', reason: 'no-letter' };
+  if (looksLikeNonReply(letter)) return { action: 'skip', reason: 'stay-quiet' };
   if (o.opsHit) return { action: 'skip', reason: 'ops-noreply' };
   return { action: 'mail', text: letter };
 }

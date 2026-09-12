@@ -32,6 +32,23 @@ test('gate mails a letter-shaped reply', () => {
   assert.match(d.text, /Jareth/);
 });
 
+test('gate skips stay-off prose (Markay 11 Sep)', () => {
+  const d = emailReplyGateDecision({
+    replyText: "James is talking to Markay, not to me — I'll stay off this reply.",
+  });
+  assert.equal(d.action, 'skip');
+  assert.equal(d.reason, 'stay-quiet');
+});
+
+test('stay-off above a greeting still mails the letter', () => {
+  const d = emailReplyGateDecision({
+    replyText: "James is talking to Markay, not to me — I'll stay off this reply.\n\nHi Markay,\n\nStay on the laptop.",
+  });
+  assert.equal(d.action, 'mail');
+  assert.equal(d.text.startsWith('Hi Markay,'), true, d.text.slice(0, 80));
+  assert.equal(d.text.includes('stay off'), false);
+});
+
 test('gate skips already-out, always_draft, ops, empty', () => {
   assert.equal(emailReplyGateDecision({
     replyText: 'Hi', alreadyOut: true,

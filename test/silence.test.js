@@ -42,3 +42,24 @@ test('email keeps a letter tagged with last-line sentinel; other channels do not
   assert.equal(emailKeepLetterDespiteSentinel('discord', letter), null);
   assert.equal(emailKeepLetterDespiteSentinel('email', 'plain letter'), null);
 });
+
+test('stay-off / not-for-me prose is silence; a greeted letter is not', () => {
+  const { looksLikeNonReply } = require('../shared/silence');
+  assert.equal(
+    looksLikeNonReply("James is talking to Markay, not to me — I'll stay off this reply."),
+    true,
+  );
+  assert.equal(looksLikeNonReply("That's addressed to Markay, not me."), true);
+  assert.equal(looksLikeNonReply("I'll stay off this reply."), true);
+  assert.equal(looksLikeNonReply('no reply needed'), true);
+  assert.equal(
+    looksLikeNonReply('Hi Markay,\n\nStay on the laptop for this part.'),
+    false,
+  );
+  assert.equal(
+    looksLikeNonReply("Hi Markay,\n\nSend that screenshot to James, not to me."),
+    false,
+  );
+  assert.equal(looksLikeNonReply("I'll send the invoice tomorrow."), false);
+  assert.equal(looksLikeNonReply(''), false);
+});

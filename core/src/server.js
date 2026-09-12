@@ -68,7 +68,7 @@ const vault = require('../../shared/vault'); // TRUST vault (credential broker +
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
 const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path (ask/grok turns)
-const { isNoReplySentinel, emailKeepLetterDespiteSentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
+const { isNoReplySentinel, emailKeepLetterDespiteSentinel, looksLikeNonReply } = require('../../shared/silence'); // [[NO_REPLY]] / stay-off prose
 const { parseReact } = require('../../shared/react-token'); // Discord [[REACT:😂]] — strip before silence/post
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 let SELF_SILO_DIR = null;
@@ -177,16 +177,7 @@ function truncate(v, n = 400) { try { const s = typeof v === 'string' ? v : JSON
 // mobile app) replay as history — keep it effectively full, not clipped to a telemetry-sized preview.
 const CONVO_TEXT_MAX = 100000;
 
-// A model that decides a message isn't for it should emit the bare [[NO_REPLY]] token — but it often
-// PROSE-refuses instead ("That's addressed to another agent, not me…"), which then gets POSTED as spam. This
-// catches that failure mode as a fallback silence: a SHORT reply whose whole content is meta-commentary
-// about not being the addressee / having nothing to add. Length-capped + adjacency-specific to avoid
-// suppressing a real reply that merely mentions who a message was addressed to. Channel-agnostic.
-function looksLikeNonReply(t) {
-  const s = (t || '').trim();
-  if (!s || s.length > 400) return false;
-  return /\b(?:not (?:addressed|meant|directed|intended)\s*(?:to|at|for)?\s*me\b|addressed to \w+[, ]+not me\b|(?:that(?:.s| is)?|this is|it.s) (?:addressed|meant|for|directed|intended) (?:to|for|at) \w+|nothing (?:here )?for me to (?:add|say|respond|do|answer|reply)|not my (?:turn|message|place|call|cue)|i.?ll (?:let|leave|defer to) \w+ (?:take|handle|answer|respond)|no (?:reply|response) (?:needed|required|from me))/i.test(s);
-}
+// looksLikeNonReply lives in shared/silence.js (core + email reply-gate).
 function toolResultText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((x) => (x && x.text) || (typeof x === 'string' ? x : '')).join(' ');
