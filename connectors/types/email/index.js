@@ -48,6 +48,7 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { collectOutboundFiles, attachmentsFromPaths } = require('../../../shared/outbound-files');
 const { emailReplyGateDecision } = require('./reply-gate');
+const { matchThreadMute, matchThreadMuteOutbound } = require('./thread-mute');
 const { stripLeadingLetterPlan } = require('./letter-plan');
 
 const SIG_IMAGE_CID = 'assistant-sig';
@@ -950,11 +951,17 @@ function applyOwnerCc(payload, ownerAddr, opts) {
 
 function createOutboundGate({ ownerAddr, selfAddr, ownerCcCoveredBy } = {}) {
   return {
-    prepare: (payload, opts) => applyOwnerCc(
-      payload,
-      ownerAddr,
-      Object.assign({ selfAddr, coveredBy: ownerCcCoveredBy }, opts || {}),
-    ),
+    prepare: (payload, opts) => {
+      const mute = matchThreadMuteOutbound(payload, { ownerAddr, selfAddr });
+      if (mute && mute.skipOutbound) {
+        return { skip: true, reason: 'thread-mute ' + mute.id };
+      }
+      return applyOwnerCc(
+        payload,
+        ownerAddr,
+        Object.assign({ selfAddr, coveredBy: ownerCcCoveredBy }, opts || {}),
+      );
+    },
   };
 }
 
@@ -1161,6 +1168,16 @@ async function start(ctx) {
 
     ctx.emit({ event_type: 'inbound', session_id: convKey, identity: fromAddr, payload: { text: `${subject} — ${body.slice(0, 160)}` } });
 
+    const muteHit = matchThreadMute({
+      fromAddr, subject, convKey,
+      ownerAddr: ownerForward || ownerFromEmail(),
+      selfAddr,
+    });
+    if (muteHit && muteHit.skipInbound) {
+      ctx.log(`thread-mute ${muteHit.id} skip inbound from=${fromAddr} subject=${subject}`);
+      return { handled: true };
+    }
+
     const resolved = await resolveSender(fromAddr, fromName2);
     const known = !!(resolved && !resolved.is_default && !resolved.revoked);
     const contactsKnown = contactsHasEmail(fromAddr);
@@ -1207,6 +1224,9 @@ async function start(ctx) {
       }
     }
     extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags.';
+    if (muteHit && muteHit.closed) {
+      extra += ` This email thread is closed (${muteHit.id}). Do not SMTP the customer on it. Reply [[NO_REPLY]] unless the owner lifts the mute.`;
+    }
     extra += ' Do not retype or restyle the signature; the connector appends it. Do not use Discord -# or 💭 in a letter (if you do, send-time unwraps it). Use markdown for emphasis; headings only when they help, not on a two-line note.';
     extra += ' ' + LETTER_ONLY_EXTRA;
     outByRef.delete(convKey);
@@ -1530,4 +1550,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, stripTrailingSelfSignoff, stripLeadingLetterPlan, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, stripTrailingSelfSignoff, stripLeadingLetterPlan, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, matchThreadMute, matchThreadMuteOutbound, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };
