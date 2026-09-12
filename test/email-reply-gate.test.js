@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { emailReplyGateDecision, letterBodyFromReply } = require('../connectors/types/email/reply-gate');
-const { stripNoReplySentinel } = require('../shared/silence');
+const { stripNoReplySentinel, isNoReplySentinel } = require('../shared/silence');
 
 test('letter-only sentinel strips to empty', () => {
   assert.equal(letterBodyFromReply('[[NO_REPLY]]'), '');
@@ -12,8 +12,10 @@ test('letter-only sentinel strips to empty', () => {
   assert.equal(stripNoReplySentinel('[[NO_REPLY]]'), '');
 });
 
-test('letter plus last-line sentinel is the letter', () => {
+test('letter plus last-line sentinel is silence, not a mailed letter', () => {
   const body = 'Hi James,\n\nSightline 0.5 hrs on 9/8.\n\n[[NO_REPLY]]';
+  assert.equal(isNoReplySentinel(body), true);
+  assert.equal(emailReplyGateDecision({ replyText: body }).reason, 'no-letter');
   assert.equal(letterBodyFromReply(body), 'Hi James,\n\nSightline 0.5 hrs on 9/8.');
 });
 
@@ -32,21 +34,12 @@ test('gate mails a letter-shaped reply', () => {
   assert.match(d.text, /Jareth/);
 });
 
-test('gate skips stay-off prose (Markay 11 Sep)', () => {
+test('stay-off tagged with last-line sentinel does not mail (Markay 11 Sep)', () => {
   const d = emailReplyGateDecision({
-    replyText: "James is talking to Markay, not to me — I'll stay off this reply.",
+    replyText: "James is talking to Markay, not to me — I'll stay off this reply.\n\n[[NO_REPLY]]",
   });
   assert.equal(d.action, 'skip');
-  assert.equal(d.reason, 'stay-quiet');
-});
-
-test('stay-off above a greeting still mails the letter', () => {
-  const d = emailReplyGateDecision({
-    replyText: "James is talking to Markay, not to me — I'll stay off this reply.\n\nHi Markay,\n\nStay on the laptop.",
-  });
-  assert.equal(d.action, 'mail');
-  assert.equal(d.text.startsWith('Hi Markay,'), true, d.text.slice(0, 80));
-  assert.equal(d.text.includes('stay off'), false);
+  assert.equal(d.reason, 'no-letter');
 });
 
 test('gate skips already-out, always_draft, ops, empty', () => {
@@ -67,13 +60,22 @@ test('gate skips already-out, always_draft, ops, empty', () => {
   }).reason, 'no-letter');
 });
 
-test('CC-only with a letter still mails (spoken to)', () => {
+test('CC-only letter without sentinel still mails (spoken to)', () => {
   const d = emailReplyGateDecision({
-    replyText: 'Tim, I restarted AD Sync.\n\n[[NO_REPLY]]',
+    replyText: 'Tim, I restarted AD Sync.',
     ccOnly: true,
   });
   assert.equal(d.action, 'mail');
   assert.match(d.text, /restarted AD Sync/);
+});
+
+test('CC-only with last-line sentinel stays silent', () => {
+  const d = emailReplyGateDecision({
+    replyText: 'Tim, I restarted AD Sync.\n\n[[NO_REPLY]]',
+    ccOnly: true,
+  });
+  assert.equal(d.action, 'skip');
+  assert.equal(d.reason, 'no-letter');
 });
 
 test('connector extra uses ivy-context paths and no silo memory/ops', () => {
