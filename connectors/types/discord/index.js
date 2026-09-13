@@ -66,17 +66,22 @@ function isSilence(text) {
   return s.length <= 40 && /^(no\s+(response|reply|comment)|n\/?a|silent)(\s+(requested|needed|required|necessary|expected|warranted|here|for me))?$/.test(s);
 }
 // Control commands that change the bot's behavior — restricted to the bot's owner.
+// James 13 Sep 2026: live surface is mute/unmute only, owner only. Rest parked below.
 const OWNER_ONLY_CMDS = new Set([
+  'mute',
+  'unmute',
+]);
+/* parked (not live):
   'silence', 'be quiet', 'quiet', 'shush', 'speak', 'unsilence', 'wake up', 'resume',
-  'mute', 'mute here', 'mute this channel', 'ignore this channel', 'disable', 'disable here',
-  'unmute', 'unmute here', 'listen here', 'unmute this channel', 'enable', 'enable here',
+  'mute here', 'mute this channel', 'ignore this channel', 'disable', 'disable here',
+  'unmute here', 'listen here', 'unmute this channel', 'enable', 'enable here',
   'engage-all-bots', 'engage all bots', 'engage all', 'disengage-all-bots', 'disengage all bots', 'disengage all',
   'drone-on', 'drone on', 'drone-off', 'drone off',
   'scribe-on', 'scribe on', 'scribe-off', 'scribe off',
   'join-voice', 'join voice', 'join vc', 'join the voice', 'leave-voice', 'leave voice', 'leave vc', 'leave the voice',
   'mute-voice', 'mute voice', 'voice-mute', 'unmute-voice', 'unmute voice', 'voice-unmute',
   'update-asmltr', 'update asmltr', 'self-update', 'update yourself',
-]);
+*/
 
 const meta = {
   type: 'discord',
@@ -326,10 +331,11 @@ async function start(ctx) {
     const cmd = message.content.replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
     const cid = message.channel.id;
     const me = client.user.username;
-    // State-changing commands are OWNER-ONLY (status/help stay open to anyone addressed).
+    // mute / unmute are OWNER-ONLY. Non-owner gets the lock line, nothing else applies.
     if (OWNER_ONLY_CMDS.has(cmd) && !(await isOwner(message))) {
       await message.channel.send('🔒 Only my owner can run that command.'); return true;
     }
+    /* parked (James 13 Sep 2026 — scribe / transcript commands not live)
     if (isTranscriptOffCmd(cmd)) {
       setTranscriptOff(transcriptOffChannels, cid, true);
       if (message.guild) {
@@ -356,14 +362,20 @@ async function start(ctx) {
       ctx.log('[voice] scribe-on cid=' + cid);
       await message.channel.send('📝 Live transcript **on** — I\'ll post 🗣️ lines as people speak.'); return true;
     }
+    */
     switch (cmd) {
+      case 'mute':
+        channelStates.set(cid, false); saveSettings(); await message.channel.send(`🔇 Disabled in this channel — I'll ignore everything here until \`@${me} unmute\`.`); return true;
+      case 'unmute':
+        channelStates.set(cid, true); saveSettings(); await message.channel.send('🔊 Enabled — listening in this channel again.'); return true;
+      /* parked (not live) — silence/speak, aliases, bots, voice, update, status/help
       case 'silence': case 'be quiet': case 'quiet': case 'shush':
         silenced = true; await message.channel.send(`🤐 Mention-only mode — I'll stay quiet unless @-mentioned. \`@${me} speak\` to restore.`); return true;
       case 'speak': case 'unsilence': case 'wake up': case 'resume':
         silenced = false; await message.channel.send('👋 Autonomous participation restored.'); return true;
-      case 'mute': case 'mute here': case 'mute this channel': case 'ignore this channel': case 'disable': case 'disable here':
+      case 'mute here': case 'mute this channel': case 'ignore this channel': case 'disable': case 'disable here':
         channelStates.set(cid, false); saveSettings(); await message.channel.send(`🔇 Disabled in this channel — I'll ignore everything here until \`@${me} unmute\`.`); return true;
-      case 'unmute': case 'unmute here': case 'listen here': case 'unmute this channel': case 'enable': case 'enable here':
+      case 'unmute here': case 'listen here': case 'unmute this channel': case 'enable': case 'enable here':
         channelStates.set(cid, true); saveSettings(); await message.channel.send('🔊 Enabled — listening in this channel again.'); return true;
       case 'engage-all-bots': case 'engage all bots': case 'engage all':
         engageAllBots = true; saveSettings(); await message.channel.send(`🤝 Engaging **all bots** — I'll now hear every bot in my channels, not just my allowlist. \`@${me} disengage-all-bots\` to revert.`); return true;
@@ -373,13 +385,30 @@ async function start(ctx) {
         voiceDrone = true; await message.channel.send('🎛 Ambient processing drone **on** for voice replies.'); return true;
       case 'drone-off': case 'drone off':
         voiceDrone = false; await message.channel.send('🎛 Ambient processing drone **off**.'); return true;
-      // transcript on/off handled above (per-channel persist via isTranscriptOffCmd / isTranscriptOnCmd)
       case 'join-voice': case 'join voice': case 'join vc': case 'join the voice':
         await doJoinVoice(message); return true;
       case 'update-asmltr': case 'update asmltr': case 'self-update': case 'update yourself':
         await doUpdateAsmltr(message); return true;
       case 'leave-voice': case 'leave voice': case 'leave vc': case 'leave the voice':
         await doLeaveVoice(message); return true;
+      case 'mute-voice': case 'mute voice': case 'voice-mute': {
+        const gid = message.guild?.id;
+        if (!gid) { await message.channel.send('That only applies in a server voice channel.'); return true; }
+        voiceMuted.add(gid);
+        let voice; try { voice = require('./voice'); } catch (_) {}
+        if (voice && voice.isConnected(gid)) await stopVoiceReply(gid, { chime: false });
+        await message.channel.send(`🔇 Voice muted — I'll keep transcribing but won't speak until \`@${me} unmute-voice\` (or say "${NAME}, unmute").`); return true;
+      }
+      case 'unmute-voice': case 'unmute voice': case 'voice-unmute': {
+        const gid = message.guild?.id;
+        if (gid) voiceMuted.delete(gid);
+        await message.channel.send('🔊 Voice unmuted — I\'ll respond when addressed again.'); return true;
+      }
+      case 'status':
+        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})\n**Transcript:** ${isTranscriptOff(transcriptOffChannels, cid) ? 'off in this channel (`scribe-on` to restore)' : 'on in this channel (`scribe-off` to hide)'}`); return true;
+      case 'help': case 'commands':
+        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`scribe-on\` / \`scribe-off\` (this channel) · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
+      */
       case 'stop': case 'cancel': case 'abort': case 'halt': {
         // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
         // joined from this channel (#138). Public: anyone may stop a processing turn (humans always win).
@@ -420,24 +449,6 @@ async function start(ctx) {
         await message.react(acted ? '🛑' : '🤷').catch(() => {});
         return true;
       }
-      case 'mute-voice': case 'mute voice': case 'voice-mute': {
-        // Persistent voice mute from TEXT (P2 parity): keep transcribing, never speak, until unmuted.
-        const gid = message.guild?.id;
-        if (!gid) { await message.channel.send('That only applies in a server voice channel.'); return true; }
-        voiceMuted.add(gid);
-        let voice; try { voice = require('./voice'); } catch (_) {}
-        if (voice && voice.isConnected(gid)) await stopVoiceReply(gid, { chime: false });
-        await message.channel.send(`🔇 Voice muted — I'll keep transcribing but won't speak until \`@${me} unmute-voice\` (or say "${NAME}, unmute").`); return true;
-      }
-      case 'unmute-voice': case 'unmute voice': case 'voice-unmute': {
-        const gid = message.guild?.id;
-        if (gid) voiceMuted.delete(gid);
-        await message.channel.send('🔊 Voice unmuted — I\'ll respond when addressed again.'); return true;
-      }
-      case 'status':
-        await message.channel.send(`**Status:** ${silenced ? 'silenced (mention-only)' : 'active (autonomous)'}\n**Bots:** ${engageAllBots ? 'engaging ALL bots' : (allowedBotNames.length ? 'allowlist — ' + allowedBotNames.join(', ') : 'ignoring all bots')}\n**This channel:** ${channelEnabled(cid) ? 'enabled' : 'disabled'} (default: ${channelsDefault ? 'enabled' : 'disabled'})\n**Transcript:** ${isTranscriptOff(transcriptOffChannels, cid) ? 'off in this channel (`scribe-on` to restore)' : 'on in this channel (`scribe-off` to hide)'}`); return true;
-      case 'help': case 'commands':
-        await message.channel.send(`**Commands** — \`@${me} <command>\`:\n\`silence\` / \`speak\` · \`disable\` / \`enable\` (aka \`mute\`/\`unmute\`, this channel) · \`engage-all-bots\` / \`disengage-all-bots\` · \`join-voice\` / \`leave-voice\` · \`mute-voice\` / \`unmute-voice\` (stay in-call but silent) · \`drone-on\` / \`drone-off\` · \`scribe-on\` / \`scribe-off\` (this channel) · \`update-asmltr\` · \`status\` · \`stop\` (interrupt what I'm doing)\n_Tip: @-mention me again **while I'm working** to steer the running turn — your message folds into what I'm already doing, like typing mid-task._`); return true;
       default:
         return false; // not a recognized command → treat as a normal message
     }

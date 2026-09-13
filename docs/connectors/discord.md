@@ -135,16 +135,14 @@ role at once). Anything after the mention that isn't a recognized command is tre
 
 | Command | Effect | Who |
 |---|---|---|
-| `silence` / `speak` | mention-only mode ↔ autonomous | owner |
-| `mute` / `unmute` (aka `disable` / `enable`) | ignore **this channel** entirely ↔ resume (persisted) | owner |
-| `engage-all-bots` / `disengage-all-bots` | hear **all** bots ↔ only the `allowed_bot_names` list (persisted) | owner |
-| `join-voice` / `leave-voice` | join *your* voice channel + listen ↔ disconnect | owner |
-| `status` | show silenced / bot-mode / this-channel state | anyone |
-| `help` | list commands | anyone |
+| `mute` / `unmute` | ignore **this channel** entirely ↔ resume (persisted). Exact words only; no `enable`/`disable`/`wake up` aliases | owner |
+| `stop` / `cancel` / `abort` / `halt` | interrupt the running turn in this channel | starter or owner (guild sleep still uses `@Ivy stop`) |
+
+Other former commands (`silence`/`speak`/`wake up`, voice join/leave, scribe, status, help, `engage-all-bots`) are parked in `handleControlCommands` — not live.
 
 **Owner** = a principal with `bypass_moderation` (full trust) in *this bot's own trust store* —
 resolved live via the core's `/trust/resolve`. So each agent knows its own owner; nobody else can
-run the state-changing commands. State (`mute`, `engage-all-bots`) persists in
+run mute/unmute. State (`mute`) persists in
 `connectors/manager/data/discord-<id>-settings.json`.
 
 ## Channel enable/disable — control what it listens to

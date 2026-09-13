@@ -43,10 +43,12 @@ test('ALL voice turns skip gpt-5-nano / moderation; barge-in stays; no ElevenLab
   assert.equal(/new WebSocket|wss:\/\/api\.elevenlabs/i.test(grok), false);
 });
 
-test('join-voice / voice_join stay owner-only', () => {
+test('join-voice text command is parked; voice_join HTTP stays owner-only', () => {
   assert.match(discord, /OWNER_ONLY_CMDS/);
-  const ownerBlock = discord.slice(discord.indexOf('const OWNER_ONLY_CMDS'), discord.indexOf('const meta'));
-  assert.match(ownerBlock, /join-voice/);
+  const live = discord.match(/const OWNER_ONLY_CMDS = new Set\(\[([\s\S]*?)\]\)/);
+  assert.ok(live);
+  assert.match(live[1], /'mute'/);
+  assert.doesNotMatch(live[1], /join-voice/);
   assert.match(discord, /if \(OWNER_ONLY_CMDS\.has\(cmd\) && !\(await isOwner\(message\)\)\)/);
   const voiceAt = discord.indexOf("app.post('/voice'");
   assert.ok(voiceAt >= 0);

@@ -116,10 +116,12 @@ test('session.update still ara / 48k / interrupt_response false with function to
   assert.equal(u.session.tools[0].name, 'asmltr_map');
 });
 
-test('join-voice still owner-only; no process.env.XAI_API_KEY on live path', () => {
+test('join-voice text command is parked; no process.env.XAI_API_KEY on live path', () => {
   const idx = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
-  const ownerBlock = idx.slice(idx.indexOf('const OWNER_ONLY_CMDS'), idx.indexOf('const meta'));
-  assert.match(ownerBlock, /join-voice/);
+  const live = idx.match(/const OWNER_ONLY_CMDS = new Set\(\[([\s\S]*?)\]\)/);
+  assert.ok(live);
+  assert.match(live[1], /'mute'/);
+  assert.doesNotMatch(live[1], /join-voice/);
   assert.doesNotMatch(idx, /process\.env\.XAI_API_KEY/);
   const grok = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
   assert.doesNotMatch(grok, /=\s*process\.env\.XAI_API_KEY/);

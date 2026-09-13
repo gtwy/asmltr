@@ -41,10 +41,13 @@ test('only scribe-off / scribe-on (and spaced forms) are aliases; old transcribe
   assert.equal(isTranscriptOnCmd('unmute'), false);
 });
 
-test('OWNER_ONLY_CMDS lists only scribe-off / scribe-on; old names are gone', () => {
-  for (const a of ['scribe-off', 'scribe off', 'scribe-on', 'scribe on']) {
-    assert.ok(ownerBlock.includes(`'${a}'`), a);
-  }
+test('OWNER_ONLY_CMDS live set is mute / unmute; scribe names are parked not live', () => {
+  const live = src.match(/const OWNER_ONLY_CMDS = new Set\(\[([\s\S]*?)\]\)/);
+  assert.ok(live);
+  assert.match(live[1], /'mute'/);
+  assert.match(live[1], /'unmute'/);
+  assert.doesNotMatch(live[1], /scribe-off/);
+  assert.doesNotMatch(live[1], /scribe-on/);
   for (const dead of [
     'transcribe-off', 'transcribe off', 'transcript-off', 'transcript off',
     'transcribe-on', 'transcribe on', 'transcript-on', 'transcript on',

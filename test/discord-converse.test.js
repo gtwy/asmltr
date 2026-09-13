@@ -50,10 +50,13 @@ test('voice.js converse listen path skips Flux and plays PCM 48k native', () => 
   assert.match(src, /allowPcm/);
 });
 
-test('join-voice stays owner-only; session.tools never native web_search/x_search/mcp', () => {
+test('join-voice text command is parked; mute/unmute owner-only; session.tools never native web_search/x_search/mcp', () => {
   const index = fs.readFileSync(path.join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
-  const ownerBlock = index.slice(index.indexOf('const OWNER_ONLY_CMDS'), index.indexOf('const meta'));
-  assert.match(ownerBlock, /'join-voice'/);
+  const live = index.match(/const OWNER_ONLY_CMDS = new Set\(\[([\s\S]*?)\]\)/);
+  assert.ok(live);
+  assert.match(live[1], /'mute'/);
+  assert.match(live[1], /'unmute'/);
+  assert.doesNotMatch(live[1], /join-voice/);
   const grok = fs.readFileSync(path.join(__dirname, '../shared/speech/converse-grok.js'), 'utf8');
   assert.match(grok, /asRealtimeFunctions/);
   assert.equal(/type:\s*'web_search'/.test(grok), false);
