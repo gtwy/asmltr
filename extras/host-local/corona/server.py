@@ -68,5 +68,12 @@ def corona_health() -> str:
     return _request("/health")
 
 
+@mcp.tool()
+def corona_status(q: str = "") -> str:
+    """Open provider outages from Corona's cache (GET /status). Optional search q."""
+    params = {"q": q} if (q or "").strip() else None
+    return _request("/status", params)
+
+
 if __name__ == "__main__":
     mcp.run()
