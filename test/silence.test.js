@@ -37,5 +37,5 @@ test('stripNoReplySentinel leaves a letter, empties token-only', () => {
 test('last-line sentinel is silence on every channel including email', () => {
   assert.equal(isNoReplySentinel('James,\n\nYes. Hot-swappable.\n\n[[NO_REPLY]]'), true);
   assert.equal(isNoReplySentinel("I'll stay off this reply.\n\n[[NO_REPLY]]"), true);
-  assert.equal(isNoReplySentinel('Hi Markay,\n\nStay on the laptop.'), false);
+  assert.equal(isNoReplySentinel('Hi Pat,\n\nStay on the laptop.'), false);
 });

@@ -7,14 +7,14 @@ const { buildMailContent } = require('../connectors/types/email');
 
 const MARKAY_PLAN = 'That gear panel is the iPhone Outlook app — it never shows the full settings. I’ll send her the Safari path and a direct rules link so she can skip hunting for the missing line.';
 const MARKAY_LETTER = [
-  'Hi Markay,',
+  'Hi Pat,',
   '',
   'You are in the right place for the iPhone app — and that is why the line is missing.',
 ].join('\n');
 
-test('Hi Name after a plan is the mailed body (Markay)', () => {
+test('Hi Name after a plan is the mailed body (customer)', () => {
   const out = stripLeadingLetterPlan(MARKAY_PLAN + '\n\n' + MARKAY_LETTER);
-  assert.equal(out.startsWith('Hi Markay,'), true, out.slice(0, 80));
+  assert.equal(out.startsWith('Hi Pat,'), true, out.slice(0, 80));
   assert.equal(out.includes('I’ll send'), false);
   assert.equal(out.includes('gear panel'), false);
   assert.ok(out.includes('right place'));
@@ -62,10 +62,10 @@ test('letter that already starts at the greeting stays', () => {
 test('reply-gate and buildMailContent both strip the plan', () => {
   const glued = MARKAY_PLAN + '\n\n' + MARKAY_LETTER + '\n\n[[NO_REPLY]]';
   const fromGate = letterBodyFromReply(glued);
-  assert.equal(fromGate.startsWith('Hi Markay,'), true, fromGate.slice(0, 80));
+  assert.equal(fromGate.startsWith('Hi Pat,'), true, fromGate.slice(0, 80));
   assert.equal(fromGate.includes('[[NO_REPLY]]'), false);
   const mailed = buildMailContent(MARKAY_PLAN + '\n\n' + MARKAY_LETTER, '\n\n—\nGaia');
-  assert.equal(mailed.text.startsWith('Hi Markay,'), true, mailed.text.slice(0, 80));
+  assert.equal(mailed.text.startsWith('Hi Pat,'), true, mailed.text.slice(0, 80));
   assert.equal(mailed.text.includes('gear panel'), false);
   assert.match(mailed.text, /—\nGaia/);
   assert.ok(mailed.html);

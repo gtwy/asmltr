@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Drop grok plan/thought glued above the letter (Battery Backups 24 Aug,
- * Markay Outlook 11 Sep). Prompt-only LETTER_ONLY_EXTRA missed again.
+ * customer Outlook 11 Sep). Prompt-only LETTER_ONLY_EXTRA missed again.
  *
  * Do not cut on a bare "James," / "Amazon," line (that is why 2deacfd
  * was replaced, then 5ec4406 reverted the I'll-send heuristic). Cut only:

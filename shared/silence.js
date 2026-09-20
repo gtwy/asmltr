@@ -8,7 +8,7 @@
  * match swallowed those.
  *
  * Email is the same contract. 5962778 stripped a last-line sentinel and still
- * returned the body so the reply-gate mailed it (Markay 11 Sep stay-off).
+ * returned the body so the reply-gate mailed it (customer stay-off, 11 Sep).
  * Extra: write the letter with no sentinel; [[NO_REPLY]] means stay quiet.
  */
 

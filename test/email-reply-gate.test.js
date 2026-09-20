@@ -21,10 +21,10 @@ test('letter plus last-line sentinel is silence, not a mailed letter', () => {
 
 test('gate drops a plan paragraph above Hi Name', () => {
   const d = emailReplyGateDecision({
-    replyText: 'That gear panel is the iPhone Outlook app. I’ll send her the Safari path.\n\nHi Markay,\n\nUse Safari.',
+    replyText: 'That gear panel is the iPhone Outlook app. I’ll send her the Safari path.\n\nHi Pat,\n\nUse Safari.',
   });
   assert.equal(d.action, 'mail');
-  assert.equal(d.text.startsWith('Hi Markay,'), true, d.text.slice(0, 80));
+  assert.equal(d.text.startsWith('Hi Pat,'), true, d.text.slice(0, 80));
   assert.equal(d.text.includes('I’ll send'), false);
 });
 
@@ -34,9 +34,9 @@ test('gate mails a letter-shaped reply', () => {
   assert.match(d.text, /Jareth/);
 });
 
-test('stay-off tagged with last-line sentinel does not mail (Markay 11 Sep)', () => {
+test('stay-off tagged with last-line sentinel does not mail (customer, 11 Sep)', () => {
   const d = emailReplyGateDecision({
-    replyText: "James is talking to Markay, not to me — I'll stay off this reply.\n\n[[NO_REPLY]]",
+    replyText: "Owner is talking to the customer, not to me — I'll stay off this reply.\n\n[[NO_REPLY]]",
   });
   assert.equal(d.action, 'skip');
   assert.equal(d.reason, 'no-letter');
