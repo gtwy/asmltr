@@ -109,7 +109,7 @@ test('lists blockquotes code and hard breaks', () => {
 
 test('numbered items with a body paragraph stay one list', () => {
   const h = markdownToHtml(
-    '1. ivy.gtwy.net updater UI (todo #21)\n' +
+    '1. updater.example.com UI (todo #21)\n' +
     'Strip the banner.\n\n' +
     '2. Discord Pack B without string-glue (todo #22)\n' +
     'Needles still match today.\n\n' +
@@ -117,7 +117,7 @@ test('numbered items with a body paragraph stay one list', () => {
   );
   assert.equal((h.match(/<ol/g) || []).length, 1);
   assert.doesNotMatch(h, /<ol[^>]*>[\s\S]*<ol/);
-  assert.match(h, /<li[^>]*>ivy\.gtwy\.net updater UI \(todo #21\)<br>Strip the banner\.<\/li>/);
+  assert.match(h, /<li[^>]*>updater\.example\.com UI \(todo #21\)<br>Strip the banner\.<\/li>/);
   assert.match(h, /<li[^>]*>Discord Pack B without string-glue \(todo #22\)<br>Needles still match today\.<\/li>/);
   assert.match(h, /<p[^>]*>Taken off this pile: Namecheap\.<\/p>/);
 });

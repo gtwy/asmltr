@@ -1,7 +1,7 @@
 'use strict';
 /**
- * James closed the thread. Prompt-only [[NO_REPLY]] and collector kill
- * still mailed (Markay Outlook, 11–12 Sep 2026). This file is re-read on
+ * Owner closed the thread. Prompt-only [[NO_REPLY]] and collector kill
+ * still mailed (customer Outlook thread, Sep 2026). This file is re-read on
  * every inbound and every outbound prepare — no bounce to pick up a new row
  * once this module is loaded.
  *

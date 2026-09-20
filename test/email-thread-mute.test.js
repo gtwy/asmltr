@@ -13,16 +13,16 @@ const {
 } = require('../connectors/types/email/thread-mute');
 const { createOutboundGate } = require('../connectors/types/email/index.js');
 
-const OWNER = 'james@techdirect.io';
-const SELF = 'ivy@gtwy.net';
-const CUST = 'mharlan@brs.bz';
-const CONV = 'email:cee16628-6e88-4ff5-b7db-e65d8fe9d978:thread:ff1d7dd0e3ebe0dc';
+const OWNER = 'owner@staff.example';
+const SELF = 'assistant@bot.example';
+const CUST = 'customer@client.example';
+const CONV = 'email:00000000-0000-4000-8000-000000000001:thread:aabbccddeeff0011';
 
 const MARKAY = {
-  id: 'markay-outlook-rules',
+  id: 'sample-outlook-rules',
   addrs: [CUST],
   subjects: ['Checking your Outlook inbox rules'],
-  thread_ids: ['ff1d7dd0e3ebe0dc'],
+  thread_ids: ['aabbccddeeff0011'],
 };
 
 test('canonSubject strips Re:/Fwd:', () => {
@@ -31,7 +31,7 @@ test('canonSubject strips Re:/Fwd:', () => {
 });
 
 test('threadIdFromKey reads the hash suffix', () => {
-  assert.equal(threadIdFromKey(CONV), 'ff1d7dd0e3ebe0dc');
+  assert.equal(threadIdFromKey(CONV), 'aabbccddeeff0011');
 });
 
 test('customer inbound on a closed subject skips the turn', () => {
@@ -72,7 +72,7 @@ test('same customer, different subject, is not skipped when subjects are set', (
 
 test('addrs-only mutes every subject from that person', () => {
   const h = matchThreadMute({
-    mutes: [{ id: 'all-markay', addrs: [CUST] }],
+    mutes: [{ id: 'all-customer', addrs: [CUST] }],
     fromAddr: CUST,
     subject: 'Anything',
     ownerAddr: OWNER,
@@ -83,7 +83,7 @@ test('addrs-only mutes every subject from that person', () => {
 
 test('thread_id match skips even if subject drifted', () => {
   const h = matchThreadMute({
-    mutes: [{ id: 'tid', thread_ids: ['ff1d7dd0e3ebe0dc'], addrs: [CUST] }],
+    mutes: [{ id: 'tid', thread_ids: ['aabbccddeeff0011'], addrs: [CUST] }],
     fromAddr: CUST,
     subject: 'Photo of screen',
     convKey: CONV,
@@ -130,7 +130,7 @@ test('loadThreadMutes reads ivy-context shape', () => {
   fs.writeFileSync(f, JSON.stringify({ mutes: [MARKAY] }));
   const list = loadThreadMutes(f);
   assert.equal(list.length, 1);
-  assert.equal(list[0].id, 'markay-outlook-rules');
+  assert.equal(list[0].id, 'sample-outlook-rules');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -146,7 +146,7 @@ test('createOutboundGate prepare skips SMTP to a muted customer', () => {
       to: CUST,
       cc: OWNER,
       subject: 'Re: Checking your Outlook inbox rules',
-      text: 'Hi Markay,\n\nNope.',
+      text: 'Hi there,\n\nNope.',
     });
     assert.equal(skipped.skip, true);
     assert.match(skipped.reason, /thread-mute/);
