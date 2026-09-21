@@ -95,10 +95,7 @@ function mentionsSpeaker(text, hints) {
 const KIND_RANK = { email: 4, 'last-name': 3, 'first-name': 2, identity: 1 };
 /** Public Discord blocks last names and emails only. First names / handles / principal ids post. */
 const PUBLIC_BLOCK_KINDS = new Set(['email', 'last-name']);
-const KIND_LABEL = {
-  email: 'no email',
-  'last-name': 'no last name',
-};
+const PRIVACY_BLOCK_LINE = "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.";
 
 function nameParts(raw) {
   return String(raw || '').trim().split(/[\s._-]+/).filter((p) => p.length >= 4 && !/^\d+$/.test(p));
@@ -246,11 +243,9 @@ function privacyHitKind(text, hints, hintKinds) {
   return best;
 }
 
-/** Public notice. Never includes the matched token. Last name or email only. */
-function privacyBlockLine(text, hints, hintKinds) {
-  const kind = privacyHitKind(text, hints, hintKinds);
-  const reason = KIND_LABEL[kind] || 'no last name';
-  return 'response blocked due to privacy rules: ' + reason;
+/** Public notice for a last name or an email. Never includes the matched token. */
+function privacyBlockLine() {
+  return PRIVACY_BLOCK_LINE;
 }
 
 /**

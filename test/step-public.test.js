@@ -199,7 +199,7 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     leakDropped: true,
     publicSurface: true,
     ...opts,
-  }), 'response blocked due to privacy rules: no email');
+  }), "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.");
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Sent to ada@example.com',
@@ -214,7 +214,7 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     publicSurface: true,
     hints: identityHintsFrom([{ id: 'owner', display_name: 'Alex Rivera' }]),
     hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Alex Rivera' }]),
-  }), 'response blocked due to privacy rules: no last name');
+  }), "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.");
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Use vendor@example.com for the catalog.',
@@ -260,7 +260,7 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     publicSurface: true,
     hints: identityHintsFrom([{ id: 'owner', display_name: 'Alex Rivera' }]),
     hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Alex Rivera' }]),
-  }), 'response blocked due to privacy rules: no last name');
+  }), "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.");
   const grayOwner = {
     hints: identityHintsFrom([{ id: 'owner', display_name: 'Alex Gray' }]),
     hintKinds: identityHintKindMap([{ id: 'owner', display_name: 'Alex Gray' }]),
@@ -303,7 +303,7 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     leakDropped: false,
     publicSurface: true,
     ...blackCard,
-  }), 'response blocked due to privacy rules: no last name');
+  }), "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.");
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Check the Lovelace kernel docs.',
@@ -317,7 +317,7 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     leakDropped: false,
     publicSurface: true,
     ...opts,
-  }), 'response blocked due to privacy rules: no last name');
+  }), "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.");
   const parkStaff = {
     hints: identityHintsFrom([{ id: 'staff', display_name: 'Riley Park' }]),
     hintKinds: identityHintKindMap([{ id: 'staff', display_name: 'Riley Park' }]),
@@ -335,14 +335,14 @@ test('pickPublicReply: public leak posts a reason, never the raw reply; DMs stil
     leakDropped: false,
     publicSurface: true,
     ...parkStaff,
-  }), 'response blocked due to privacy rules: no last name');
+  }), "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.");
   assert.equal(pickPublicReply({
     pending: '',
     replyText: 'Is Park the correct spelling?',
     leakDropped: false,
     publicSurface: true,
     ...parkStaff,
-  }), 'response blocked due to privacy rules: no last name');
+  }), "I can't complete that here. The answer would include a last name or other personal information. If that seems wrong, ask the question a different way and I'll try again.");
   const kinds = identityHintKindMap([{ id: 'owner', display_name: 'Alex Rivera' }]);
   assert.equal(kinds.get('alex'), 'first-name');
   assert.equal(kinds.get('rivera'), 'last-name');
