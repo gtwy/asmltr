@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId, looksLikeSnowflake, parseMessageLink, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/discord-targets');
+const { prefaceOnBehalf, sameGuild, sameChannel, forumTitle, forumAppliedTag, isForumChannel, destGuildId, looksLikeSnowflake, parseMessageLink, matchScore, rankTargets, normName, isThreadChannel, isPostableGuildChannel, shouldFetchThreads } = require('../shared/discord-targets');
 const { policyFor } = require('../shared/media-allow');
 
 test('public preface prefixes when id present; overlay requires id', () => {
@@ -43,6 +43,11 @@ test('forum parent vs thread', () => {
   assert.equal(shouldFetchThreads({ type: 15 }), true);
   assert.equal(shouldFetchThreads({ type: 11, isThread: () => true }), false);
   assert.equal(forumTitle('Steak 666', 'body'), 'Steak 666');
+  const sauce = forumAppliedTag({ availableTags: [{ id: 't1', name: 'Sauce' }, { id: 't2', name: 'Beef' }] }, 'sauce');
+  assert.equal(sauce.ok, true);
+  assert.equal(sauce.id, 't1');
+  assert.equal(forumAppliedTag({ availableTags: [] }, '').ok, true);
+  assert.equal(forumAppliedTag({ availableTags: [{ id: 't2', name: 'Beef' }] }, 'sauce').ok, false);
   assert.equal(forumTitle('', 'First line\nrest').length <= 100, true);
   assert.equal(destGuildId({ guildId: 'g1' }), 'g1');
   assert.equal(destGuildId({ guild: { id: 'g2' } }), 'g2');

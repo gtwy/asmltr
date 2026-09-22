@@ -248,7 +248,7 @@ async function cmdRelease(key) {
   console.log(A.grn('released — channel resumes'));
 }
 
-async function deliverSameGuildPost({ target, text, title, replyTo }) {
+async function deliverSameGuildPost({ target, text, title, replyTo, file, tag }) {
   exitIfDenied('guildPost');
   const gp = require('../shared/discord-targets');
   const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
@@ -287,6 +287,7 @@ async function deliverSameGuildPost({ target, text, title, replyTo }) {
     channel: 'discord', target, kind: 'guild_post', text,
     source_guild, on_behalf_of, source_channel: here || undefined,
     title: title || undefined, reply_to: replyTo || undefined,
+    path: file || undefined, tag: tag || undefined,
     from_session: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || undefined,
   };
   let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -312,7 +313,7 @@ async function deliverSameGuildPost({ target, text, title, replyTo }) {
       body: JSON.stringify(ack),
     }).catch(() => null);
   }
-  console.log('Posted. Reply [[NO_REPLY]] now — do not repeat the body.');
+  console.log('Posted.' + (r.threadId ? ' thread ' + r.threadId : (r.messageId ? ' message ' + r.messageId : '')) + ' Reply [[NO_REPLY]] now — do not repeat the body.');
 }
 
 async function cmdSend(rest) {
@@ -377,19 +378,21 @@ async function cmdSend(rest) {
 }
 
 async function cmdGuildPost(rest) {
-  let title = null, replyTo = null;
+  let title = null, replyTo = null, file = null, tag = null;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const tok = rest[i];
     if (tok === '--title') title = rest[++i];
     else if (tok === '--reply-to') replyTo = rest[++i];
+    else if (tok === '--file') file = rest[++i];
+    else if (tok === '--tag') tag = rest[++i];
     else words.push(tok);
   }
   const target = words[0], text = words.slice(1).join(' ');
   if (!target) {
-    throw new Error('usage: asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>] (alias of asmltr send discord …)');
+    throw new Error('usage: asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--tag "name"] [--file <path>] [--reply-to <messageId>] (alias of asmltr send discord …)');
   }
-  return await deliverSameGuildPost({ target, text, title, replyTo });
+  return await deliverSameGuildPost({ target, text, title, replyTo, file, tag });
 }
 
 async function cmdEdit(rest) {

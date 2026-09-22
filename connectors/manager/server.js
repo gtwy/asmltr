@@ -188,7 +188,7 @@ const supportsAttachments = (meta) => !!(meta && meta.outbound && (meta.outbound
 
 // --- unified outbound: route a message OUT through a connector instance --------
 // POST /send { channel|instance_id, target, kind?, text?, path?, files?, caption?, subject?, cc?, ref?, title?, require_headphones?, force? }
-async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, files, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) {
+async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, files, caption, subject, cc, ref, title, tag, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) {
   const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
     : null;
@@ -196,7 +196,8 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const meta = TYPES[inst.type];
   if (!meta || !meta.outbound) return { ok: false, status: 400, error: `type '${inst.type}' has no outbound capability` };
   const fileList = collectOutboundFiles({ path: filePath, files });
-  if (fileList.length) kind = ATTACH_KINDS.includes(kind) ? kind : 'file';
+  // Forum posts are guild_post even with a starter image. Do not rewrite those to kind file.
+  if (fileList.length && kind !== 'guild_post') kind = ATTACH_KINDS.includes(kind) ? kind : 'file';
   // Outbound file-attachment capability: a connector must DECLARE it supports an attachment kind
   // (file/photo/document in meta.outbound.kinds) before we route a file to it — a clean, honest
   // "this channel can't attach files" instead of a confusing failure inside the connector.
@@ -220,7 +221,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const bindHost = inst.config && inst.config.bind_host;
   const host = (bindHost && bindHost !== '0.0.0.0' && bindHost !== '::') ? bindHost : '127.0.0.1';
   try {
-    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, files: fileList.length ? fileList : undefined, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) });
+    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, files: fileList.length ? fileList : undefined, caption, subject, cc, ref, title, tag, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) });
     const j = await r.json().catch(() => ({}));
     // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
     // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.

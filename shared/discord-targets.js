@@ -37,6 +37,19 @@ function forumTitle(title, body) {
   return s || 'post';
 }
 
+/** Match a forum tag by name. No name → no tag. Missing name → error with the names that exist. */
+function forumAppliedTag(channel, tagName) {
+  const want = String(tagName || '').trim().toLowerCase();
+  if (!want) return { ok: true, id: null };
+  const tags = (channel && channel.availableTags) || [];
+  const tag = tags.find((t) => String(t.name || '').toLowerCase() === want);
+  if (!tag) {
+    const names = tags.map((t) => t.name).filter(Boolean).join(', ') || '(none)';
+    return { ok: false, error: 'forum tag not found: ' + tagName + ' (have: ' + names + ')' };
+  }
+  return { ok: true, id: tag.id };
+}
+
 function isThreadChannel(ch) {
   if (!ch) return false;
   if (typeof ch.isThread === 'function') return !!ch.isThread();
@@ -125,7 +138,7 @@ function rankTargets(query, rows) {
 }
 
 module.exports = {
-  prefaceOnBehalf, sameGuild, sameChannel, forumTitle, isForumChannel, destGuildId,
+  prefaceOnBehalf, sameGuild, sameChannel, forumTitle, forumAppliedTag, isForumChannel, destGuildId,
   isThreadChannel, isPostableGuildChannel, shouldFetchThreads,
   looksLikeSnowflake, parseMessageLink, normName, matchScore, rankTargets,
 };

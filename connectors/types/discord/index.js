@@ -2057,10 +2057,24 @@ ${referentPromptBlock()}`;
         const pref = gp.prefaceOnBehalf(on_behalf_of, text);
         if (!pref.ok) return res.status(400).json({ ok: false, error: pref.error });
         if (gp.isForumChannel(channel)) {
-          const thread = await channel.threads.create({
+          const message = { content: pref.text };
+          if (filePaths.length) {
+            const stage = require('../../../shared/attach-stage');
+            for (const p of filePaths) {
+              if (!stage.outboundFileAllowed(p)) {
+                return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
+              }
+            }
+            message.files = filePaths;
+          }
+          const tagged = gp.forumAppliedTag(channel, req.body && req.body.tag);
+          if (!tagged.ok) return res.status(400).json({ ok: false, error: tagged.error });
+          const createOpts = {
             name: gp.forumTitle(title, pref.body || String(text || '')),
-            message: { content: pref.text },
-          });
+            message,
+          };
+          if (tagged.id) createOpts.appliedTags = [tagged.id];
+          const thread = await channel.threads.create(createOpts);
           return res.json({ ok: true, messageId: thread.id, threadId: thread.id,
             conversation_key: `discord:${ctx.instanceId}:channel:${thread.id}` });
         }
