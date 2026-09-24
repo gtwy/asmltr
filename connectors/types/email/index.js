@@ -1318,7 +1318,13 @@ async function start(ctx) {
       lock = await imap.getMailboxLock(MAILBOX);
       try { ctx.heartbeat(); } catch (_) {} // lock is real IMAP I/O; skip_busy must not fake this
       try {
-        for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
+        // Closed window, not N:*. An open range can sit unfinished until the
+        // 5-minute socket timeout, so only the first UID is handled and the
+        // rest wait a whole reconnect. 25 is enough for a burst; the extra
+        // pass below continues while uidNext is still ahead.
+        const startUid = lastUid + 1;
+        const endUid = startUid + 24;
+        for await (const msg of imap.fetch({ uid: `${startUid}:${endUid}` }, { source: true, uid: true })) {
           if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
           try {
             const result = await processMessage(await simpleParser(msg.source));

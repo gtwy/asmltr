@@ -192,6 +192,7 @@ test('watch options set ImapFlow maxIdleTime (IDLE refresh, not poll replace)', 
     maxIdleTime: 600000,
   });
   assert.equal(opts.maxIdleTime, 600000);
+  assert.equal(opts.socketTimeout, 29 * 60 * 1000);
   assert.equal(opts.secure, true);
   assert.equal(opts.logger, false);
   assert.equal(opts.host, 'imap.example.com');

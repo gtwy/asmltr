@@ -142,12 +142,18 @@ function withTimeout(promise, ms, label) {
 
 function imapFlowWatchOptions({ host, port, auth, maxIdleTime } = {}) {
   const idle = maxIdleTime != null ? Number(maxIdleTime) : IMAP_MAX_IDLE_MS;
+  // ImapFlow's own default socketTimeout is 5 minutes. A quiet Gmail IDLE
+  // hits that, the socket dies, and the watcher only eats one UID per
+  // reconnect. 29 minutes matches Gmail's IDLE refresh. The NOOP probe is
+  // the keepalive inside that window. Do not pass 0: ImapFlow treats it as
+  // "use the 5 minute default".
   return {
     host,
     port: port || 993,
     secure: true,
     auth,
     logger: false,
+    socketTimeout: 29 * 60 * 1000,
     maxIdleTime: Number.isFinite(idle) && idle > 0 ? idle : DEFAULT_IMAP_MAX_IDLE_MS,
   };
 }
