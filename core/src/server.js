@@ -69,6 +69,7 @@ const vault = require('../../shared/vault'); // TRUST vault (credential broker +
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
 const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path (ask/grok turns)
+const conversationScope = require('../../shared/conversation-scope'); // multi-user room vs owner-private 1:1 (context gating)
 const { isNoReplySentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
 const { parseReact } = require('../../shared/react-token'); // Discord [[REACT:😂]] — strip before silence/post
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
@@ -420,7 +421,8 @@ async function handle(envelope, opts = {}) {
   // Cross-session announcements: drain any this session hasn't seen into its context (with
   // timestamps) — awareness from other sessions on this machine, delivered on this next turn.
   try {
-    const anns = sessions.drainAnnouncements(e.conversation_key, e.channel, resolved.user_key);
+    const anns = sessions.drainAnnouncements(e.conversation_key, e.channel, resolved.user_key,
+      { room: conversationScope.isMultiUserRoom(conversationScope.envelopeScope(e)) });
     if (anns.length) {
       const fmt = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
       const lines = anns.map((a) => `• [${fmt(a.created_at)}${a.priority === 'urgent' ? ' · URGENT' : ''}${a.from_session ? ' · from ' + a.from_session : ''}] ${a.text}`);
@@ -486,15 +488,20 @@ async function handle(envelope, opts = {}) {
   try { canInjectOnce = canInjectOnce && !!require('./engines').resolve(engineId).historyReplaysSystemPrompt; } catch (_) { canInjectOnce = false; }
   const reuseStable = promptParts.shouldReuseStable({ canInjectOnce, isNew, row: sessionRow, engineId, stableHash });
   let effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
+  // What an engine uses if it has to open a NEW session on this turn anyway (see freshSessionHandoff).
+  let freshSessionPrompt = systemPrompt;
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
     // Fresh engine session (first turn or idle expiry): inject durable silo memory. Write-only is a fail.
-    // Global last-topics is owner-only (cross-channel continuity for the operator). Other
-    // principals get this conversation_key's transcript only — never Discord/email mix-in.
+    // Global last-topics is the owner's cross-channel continuity: owner trust AND a private 1:1
+    // conversation only (never a guild/group room, email thread, GitHub issue or MCP caller, even when
+    // the owner is the speaker). Everyone else gets this conversation_key's transcript only.
     const recalled = transcripts.recallForInject({
       conversationKey: e.conversation_key,
-      includeLastTopics: !!resolved.bypass_moderation,
+      includeLastTopics: conversationScope.ownerTopicsAllowed({
+        ownerTrust: !!resolved.bypass_moderation, ...conversationScope.envelopeScope(e),
+      }),
     });
     if (recalled) {
       effectiveSystemPrompt += '\n\nPRIOR CONVERSATION (from Self silo; this is a FRESH engine session after idle or first turn). Use this as your memory of earlier chat. Do NOT grep events-*.jsonl for prior conversation.\n\n' + recalled;
@@ -504,7 +511,7 @@ async function handle(envelope, opts = {}) {
   }
   try {
     const posted = require('../../shared/media-log').recall(e.conversation_key);
-    if (posted) effectiveSystemPrompt += '\n\n' + posted;
+    if (posted) { effectiveSystemPrompt += '\n\n' + posted; freshSessionPrompt += '\n\n' + posted; }
   } catch (_) {}
 
   // Remember where an out-of-band operator inject should reply (via the manager's /send):
@@ -568,6 +575,7 @@ async function handle(envelope, opts = {}) {
       owner: !!(resolved.bypass_moderation || resolved.user_key === 'owner'),
       user_key: resolved.user_key,
       systemPrompt: effectiveSystemPrompt,
+      ...promptParts.freshSessionHandoff({ reuseStable, fullPrompt: freshSessionPrompt }),
       engine: engineId,
       resume,
       cwd,
@@ -664,7 +672,7 @@ async function handle(envelope, opts = {}) {
         payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
       // A fresh session has never received the stable block, so send the FULL prompt regardless of
       // what inject-once decided for the resumed one.
-      result = await runTurn({ ...turnOpts, resume: null, systemPrompt });
+      result = await runTurn({ ...turnOpts, resume: null, systemPrompt, stableReused: false, fullSystemPrompt: undefined });
     }
   } catch (err) {
     // If the operator stopped or steered this turn (Stop button / a steer with interrupt),

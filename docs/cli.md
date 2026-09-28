@@ -233,7 +233,7 @@ asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]
 
 | Flag | Meaning |
 |---|---|
-| `--to <target>` | who sees it — `*` (all, default), a session id, `surface:discord`, or `identity:someuser` |
+| `--to <target>` | who sees it — `*` (every private session, default), a session id, `surface:discord`, or `identity:someuser`. `*` skips multi-user rooms (public posts, Discord guild channels, group chats); address a room by its session id or surface |
 | `--urgent` | mark it urgent |
 | `--ttl <sec>` | expire after N seconds |
 

@@ -47,4 +47,16 @@ function shouldReuseStable({ canInjectOnce, isNew, row, engineId, stableHash }) 
     && row.last_stable_engine === engineId && row.last_stable_hash === stableHash);
 }
 
-module.exports = { composeSystemPrompts, shouldReuseStable };
+/**
+ * Turn fields for an engine that can open a NEW session while core believes it is resuming one (a
+ * stdio child respawned after a crash or an effort change has no replayed history). When core sent
+ * only the volatile tail, it also hands over the full prompt so that engine can start the new session
+ * with identity, channel awareness, toolbelt and upload instructions. Empty when the full prompt was
+ * already sent.
+ */
+function freshSessionHandoff({ reuseStable, fullPrompt }) {
+  if (!reuseStable) return {};
+  return { stableReused: true, fullSystemPrompt: String(fullPrompt || '') };
+}
+
+module.exports = { composeSystemPrompts, shouldReuseStable, freshSessionHandoff };

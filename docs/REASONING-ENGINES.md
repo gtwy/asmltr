@@ -305,6 +305,12 @@ trust change, vault lock/unlock, silo-path change); the volatile tail is sent **
   so nothing accumulates and nothing can be skipped. Cross-turn continuity is a separate follow-up (#59);
   once it retains history it inherits inject-once for free.
 - Kill-switch: `ASMLTR_INJECT_ONCE=off` reverts to full-every-turn without a redeploy.
+- **Fresh session under a resumed key.** A host that runs the engine through a long-lived stdio child
+  (e.g. a grok ACP overlay) can open a **new** engine session on a turn core treats as a resume: the child
+  was respawned after a crash, idle kill or effort change, so there is no replayed stable block. When core
+  sends only the volatile tail it also passes `stableReused: true` and `fullSystemPrompt` (the full prompt
+  plus the same per-turn media recall) on the turn options (`prompt-parts.freshSessionHandoff`). An engine
+  or overlay that starts a new session must build it from `fullSystemPrompt`; one that resumes ignores it.
 - **Still open (#53):** route the block through a *native system channel* on codex/gemini (codex
   `-c`/instructions, gemini `GEMINI_SYSTEM_MD`) instead of the user-channel preamble, for stronger
   injection resistance under full autonomy. `composePrompt` stays the documented fallback where no native

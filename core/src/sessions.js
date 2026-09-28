@@ -252,7 +252,9 @@ function addAnnouncement({ text, target = '*', priority = 'normal', from_session
 }
 
 function _targetMatches(target, ctx) {
-  if (!target || target === '*') return true;
+  // A broadcast (`*`) carries owner-private session work, so it never lands in a multi-user room
+  // (public post, guild channel, group chat). Address a room explicitly (its key or surface:<channel>).
+  if (!target || target === '*') return !ctx.room;
   if (target === ctx.conversation_key) return true;
   const m = /^(surface|identity):(.+)$/.exec(target);
   if (m) return (m[1] === 'surface' && m[2] === ctx.channel) || (m[1] === 'identity' && m[2] === ctx.identity);
@@ -263,14 +265,15 @@ function _targetMatches(target, ctx) {
  * Drain the announcements this session hasn't seen yet (id > its cursor), that target it,
  * are unexpired, and aren't its own. Advances the cursor past ALL current announcements so
  * each is evaluated once. Returns the due list (with timestamps) to prepend to the turn.
+ * `opts.room` (a multi-user room, see shared/conversation-scope) skips `*` broadcasts.
  */
-function drainAnnouncements(conversation_key, channel, identity) {
+function drainAnnouncements(conversation_key, channel, identity, opts = {}) {
   const row = _get.get(conversation_key);
   const cursor = (row && row.last_announce_id) || 0;
   const now = nowMs();
   const live = _liveAnnounce.all({ now });
   const due = live.filter((a) => a.id > cursor && a.from_session !== conversation_key
-    && _targetMatches(a.target, { conversation_key, channel, identity })).slice(-15); // cap to avoid a flood on a fresh session
+    && _targetMatches(a.target, { conversation_key, channel, identity, room: !!(opts && opts.room) })).slice(-15); // cap to avoid a flood on a fresh session
   const maxId = _maxAnnounceId.get().m;
   if (maxId > cursor) _setCursor.run(maxId, conversation_key);
   return due;

@@ -71,7 +71,9 @@ Whatever the shape, a reverse proxy in front needs a `client_max_body_size` at l
 
 Announcements are a cross-session mailbox: a note is delivered into a target session's context
 at the start of its next turn (`target` = `*`, a `conversation_key`, `surface:<channel>`, or
-`identity:<key>`).
+`identity:<key>`). A `*` broadcast is not delivered into multi-user rooms (public posts, Discord guild
+channels, group chats; see `shared/conversation-scope.js`), because announcements carry session work
+other people in the room should not see. Target a room explicitly by its key or surface.
 
 ### Session takeover & steer
 
