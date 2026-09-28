@@ -53,6 +53,7 @@ const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./re
 const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
 const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 const guildScrollback = require('./guild-scrollback');
+const coreTimeout = require('./core-timeout'); // per-surface core idle timeout (owner DM none, guild 30 min)
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -648,6 +649,8 @@ ${referentPromptBlock()}`;
       // leads/trails with the assistant's NAME (addressesName) — the common "<name>, do X" case that was
       // previously falling back to the non-streaming path and dumping everything at the end. Passive
       // multi-agent listening (name absent) still uses the non-streaming path.
+      // Core idle timeout for this turn: owner DM none, guild 30 min (see ./core-timeout).
+      const coreOpts = coreTimeout.coreOptsForMessage(message, dmUser);
       const addressed = forced || message.channel.type === 1 || message.mentions.has(client.user)
         || addressesName(message.cleanContent || message.content || '');
       let replyText = '';
@@ -740,7 +743,7 @@ ${referentPromptBlock()}`;
             if (!lastChip) postChip(WORKING_LINE);
             else if (!beatTimer) armBeat();
           },
-        });
+        }, coreOpts);
         stopBeat();
         await chain; // all step messages posted before the final answer
         const reply = actions.find(a => a.type === 'reply');
@@ -753,7 +756,7 @@ ${referentPromptBlock()}`;
           hintKinds,
         });
       } else {
-        actions = await ctx.core.handle(envelope);
+        actions = await ctx.core.handle(envelope, coreOpts);
         const reply = actions.find(a => a.type === 'reply');
         replyText = pickPublicReply({
           pending: '',
@@ -1382,7 +1385,7 @@ ${referentPromptBlock()}`;
         system_prompt_extra: VOICE_GUIDANCE,
         context: { scope_id: `guild:${guildId}` },
         channel_context: { voice: true, speaker: name, guildId: String(guildId) },
-      }, (delta) => { buf += delta; full += delta; flush(false); });
+      }, (delta) => { buf += delta; full += delta; flush(false); }, coreTimeout.coreRequestOpts({ guild: true }));
       flush(true);
       await chain; // wait until every sentence has finished speaking
       voice.stopDrone(guildId);

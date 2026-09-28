@@ -255,6 +255,24 @@ Discoverable live at `GET /types` on the manager. Fields:
 Secrets consumed at runtime (via the secret provider): the bot token, `openai_api_key` (voice STT),
 and the ElevenLabs key.
 
+### Core request idle timeout
+
+The connector SDK destroys a core request whose socket goes silent for too long, so a dropped core
+cannot hold a channel's lock forever. The Discord connector sets that timer per surface:
+
+| Surface | Idle timeout | Dead core still caught by |
+|---|---|---|
+| Owner DM (`dm_allowed_user_id`, DM channel) | none | connection close / reset from the core; TCP keepalive on the socket |
+| Guild text channel, guild voice | 30 min (`ASMLTR_DISCORD_GUILD_CORE_TIMEOUT_MS`, `0` = none) | the timer, plus close / reset |
+| Anything else (observe-only relays) | SDK default, 15 min (`ASMLTR_CORE_TIMEOUT_MS`) | the timer, plus close / reset |
+
+Streaming turns (`/v2/stream`) get a `: keepalive` comment every 60 s from the core
+(`ASMLTR_SSE_KEEPALIVE_MS`), which resets the timer. So a guild streaming turn can run past 30
+minutes; the timer fires only when the core has written nothing at all for 30 minutes. The
+non-streaming path (`/v2/handle`, unaddressed guild messages) sends nothing until the turn ends, so
+there the 30 minutes is the turn's limit. In the owner DM a core that is alive but hung is not timed
+out; stop it with `stop` or a bounce.
+
 ---
 
 ## Discord search (`asmltr discord-search`)

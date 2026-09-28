@@ -37,6 +37,10 @@ const { buildEvent } = require('../../shared/events');
  * keeps running — the GitHub 5-min freeze / MCP long-research cutoff (2026-06-24).
  * http.request imposes no response timeout, so long turns complete.
  */
+// TCP keepalive initial delay on core sockets. Cheap dead-peer detection that is not an idle
+// timeout: the kernel probes a silent connection and errors it if the far end is gone.
+const TCP_KEEPALIVE_MS = 30 * 1000;
+
 function makeCoreClient(coreUrl) {
   const u = new URL(coreUrl);
   const lib = u.protocol === 'https:' ? https : http;
@@ -45,7 +49,21 @@ function makeCoreClient(coreUrl) {
   // the assistant on that channel. Generous, and reset by any socket activity, so long streaming
   // turns (which emit data) are unaffected; a genuinely silent turn beyond this is treated as dead.
   const REQ_TIMEOUT = Number(process.env.ASMLTR_CORE_TIMEOUT_MS || 15 * 60 * 1000);
-  const guard = (req) => { req.setTimeout(REQ_TIMEOUT, () => req.destroy(new Error('core request timed out (connection dropped?)'))); };
+  // Per-call override for handle()/handleStream(): opts.idleTimeoutMs. Omitted = REQ_TIMEOUT;
+  // 0 = no idle timeout at all (a connector's owner DM: a turn may be silent for as long as it
+  // likes). Either way the socket gets TCP keepalive, and watchClose + req 'error' still reject
+  // the moment the core closes or resets the connection, so a core that DIES is still caught
+  // with no idle timer. Only a core that is alive but hung is left waiting.
+  const idleMsFor = (opts) => {
+    const v = opts && opts.idleTimeoutMs;
+    if (v == null || v === '') return REQ_TIMEOUT;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : REQ_TIMEOUT;
+  };
+  const guard = (req, idleMs = REQ_TIMEOUT) => {
+    req.on('socket', (s) => { try { s.setKeepAlive(true, TCP_KEEPALIVE_MS); } catch (_) {} });
+    if (idleMs > 0) req.setTimeout(idleMs, () => req.destroy(new Error('core request timed out (connection dropped?)')));
+  };
   // Premature close: the core dies AFTER response headers are sent (the common case — it restarts
   // mid-turn). Node then emits ONLY 'aborted'/'error' on the RESPONSE: `req.on('error')` never fires,
   // 'end' never fires, and nothing throws — so without this the promise never settles at all. The
@@ -55,9 +73,14 @@ function makeCoreClient(coreUrl) {
   const watchClose = (res, fail) => {
     res.on('aborted', () => fail(new Error('core closed the connection mid-response (core restarted?)')));
     res.on('error', (e) => fail(e));
+    // Also for runtimes that stop emitting 'aborted' (deprecated): a response that closes before
+    // it completed is the same dropped core. After a clean 'end' this is a no-op.
+    res.on('close', () => { if (!res.complete) fail(new Error('core closed the connection mid-response (core restarted?)')); });
   };
   return {
-    handle(envelope) {
+    // opts.idleTimeoutMs: see idleMsFor (omitted = ASMLTR_CORE_TIMEOUT_MS, 0 = none).
+    handle(envelope, opts) {
+      const idleMs = idleMsFor(opts);
       return new Promise((resolve, reject) => {
         const payload = JSON.stringify(envelope);
         const req = lib.request({
@@ -79,7 +102,7 @@ function makeCoreClient(coreUrl) {
           });
         });
         req.on('error', reject);
-        guard(req);
+        guard(req, idleMs);
         req.write(payload);
         req.end();
       });
@@ -88,8 +111,10 @@ function makeCoreClient(coreUrl) {
     // `handlers` is either a function (treated as onDelta — token stream) or an object:
     //   { onDelta(text), onSegment(text), onTool(name), onThinking(text) }
     // Token consumers (voice/openai) use onDelta; step consumers (Discord) use onSegment/onTool.
-    handleStream(envelope, handlers) {
+    // opts.idleTimeoutMs: see idleMsFor (omitted = ASMLTR_CORE_TIMEOUT_MS, 0 = none).
+    handleStream(envelope, handlers, opts) {
       const h = typeof handlers === 'function' ? { onDelta: handlers } : (handlers || {});
+      const idleMs = idleMsFor(opts);
       return new Promise((resolve, reject) => {
         const payload = JSON.stringify(envelope);
         const req = lib.request({
@@ -126,7 +151,7 @@ function makeCoreClient(coreUrl) {
           res.on('end', () => { if (!settled) resolve([]); });
         });
         req.on('error', reject);
-        guard(req);
+        guard(req, idleMs);
         req.write(payload);
         req.end();
       });

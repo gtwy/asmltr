@@ -74,6 +74,9 @@ and runs open (dev mode).
 | `ASMLTR_SELF_AWARE` | on (set `off` to disable) | Inject the "asmltr toolbelt" awareness (cross-session `asmltr` CLI ops) into the system prompt |
 | `ASMLTR_CLAUDE_BIN` | auto-detected | Full path to the `claude` binary (used by `asmltr claude`) |
 | `ASMLTR_RAW_BODY_LIMIT` | `1024mb` | Ceiling for a raw (non-JSON) request body on the file routes. The base64-in-JSON shape stays bounded by the 10mb JSON parser instead, roughly 7.5 MiB of file |
+| `ASMLTR_CORE_TIMEOUT_MS` | `900000` (15 min) | Connector SDK idle-socket timeout on a core request: a request with no bytes for this long is destroyed as a dropped core. A connector can override it per call (`opts.idleTimeoutMs`, `0` = none); the SDK still rejects when the core closes or resets the connection, and core sockets use TCP keepalive. |
+| `ASMLTR_SSE_KEEPALIVE_MS` | `60000` | Core writes a `: keepalive` SSE comment this often during a `/v2/stream` turn so a silent turn keeps resetting the connector's idle timer. `0` disables. |
+| `ASMLTR_DISCORD_GUILD_CORE_TIMEOUT_MS` | `1800000` (30 min) | Discord guild turns (text and voice): core idle timeout. `0` = none. The owner DM (`dm_allowed_user_id`) has no idle timeout. |
 | `ASMLTR_DISCORD_GUILD_SCROLLBACK` | `30` | Last-N of a public Discord guild channel re-injected into the observe/catch-up preamble on a **fresh** engine session only. DMs unchanged. |
 
 `ASMLTR_SESSION_CWD` also decides which `CLAUDE.md` the claude engine picks up as harness memory, which loads under asmltr's own identity block; see [Identity precedence vs per-engine harness memory](#identity-precedence-vs-per-engine-harness-memory).
