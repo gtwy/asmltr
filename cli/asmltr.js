@@ -564,9 +564,12 @@ async function cmdWho(rest) {
 }
 async function cmdAnnounce(rest) {
   exitIfDenied('announce');
-  // asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]
+  // asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>] [--scope work|guild | --guild]
   // Parse flags out of the args so the remaining words are the announcement text.
-  const opts = { target: '*', priority: 'normal', from: ACTOR, ttl: null };
+  // Two broadcast systems: work (owner DM, email, owner MCP) and guild (rooms only). Inside an engine
+  // turn the posting conversation key rides along, and core picks the scope from it: a room posts to
+  // guild, anything else posts to work. --scope only matters with no turn key (an operator terminal).
+  const opts = { target: '*', priority: 'normal', from: ACTOR, ttl: null, scope: null };
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
@@ -574,15 +577,20 @@ async function cmdAnnounce(rest) {
     else if (t === '--to') opts.target = rest[++i];
     else if (t === '--from') opts.from = rest[++i];
     else if (t === '--ttl') opts.ttl = Number(rest[++i]);
+    else if (t === '--scope') opts.scope = rest[++i];
+    else if (t === '--guild') opts.scope = 'guild';
+    else if (t === '--work') opts.scope = 'work';
     else words.push(t);
   }
   const text = words.join(' ');
-  if (!text) throw new Error('usage: asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]\n' +
-    '  target: * (all) · a session id · surface:discord · identity:<name>');
-  const body = { text, target: opts.target, priority: opts.priority, from: opts.from, ttl: opts.ttl };
+  if (!text) throw new Error('usage: asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>] [--scope work|guild]\n' +
+    '  target: * (all in scope) · a session id · surface:discord · identity:<name>\n' +
+    '  scope:  work (owner DM, email, owner MCP) · guild (rooms only); from inside a turn it follows the posting conversation');
+  const fromKey = process.env.ASMLTR_ATTACH_CONVERSATION_KEY || process.env.ASMLTR_TURN_KEY || null;
+  const body = { text, target: opts.target, priority: opts.priority, from: opts.from, ttl: opts.ttl, scope: opts.scope || undefined, from_key: fromKey || undefined };
   const r = await fetch(CORE_BASE + '/v2/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
-  console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target}  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
+  console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target} [${r.scope || 'work'}]  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
 }
 // asmltr notify "<text>" [--title T] [--silent] [--file <path>]  — proactive read-aloud /
 // delivery ladder (Part A). Any session/schedule calls this to REACH the user (android read-aloud → push
@@ -820,14 +828,16 @@ async function cmdDrafts(rest) {
   }
   console.log(A.dim('\n  approve: asmltr drafts send <id>   ·   drop: asmltr drafts discard <id>   ·   full: drafts show <id>'));
 }
-async function cmdAnnouncements() {
-  const r = await fetch(CORE_BASE + '/v2/announcements').then((x) => x.json()).catch((e) => ({ announcements: [], error: e.message }));
+async function cmdAnnouncements(rest = []) {
+  const i = rest.indexOf('--scope');
+  const scope = i >= 0 ? rest[i + 1] : (rest.includes('--guild') ? 'guild' : (rest.includes('--work') ? 'work' : ''));
+  const r = await fetch(CORE_BASE + '/v2/announcements' + (scope ? '?scope=' + encodeURIComponent(scope) : '')).then((x) => x.json()).catch((e) => ({ announcements: [], error: e.message }));
   const list = r.announcements || [];
   if (!list.length) return console.log(A.dim('no live announcements'));
   for (const a of list) {
     const ts = new Date(a.created_at).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
     const exp = a.expires_at ? A.dim(` (expires ${new Date(a.expires_at).toISOString().replace('T', ' ').slice(11, 16)})`) : '';
-    console.log(`${A.dim('#' + a.id)} ${A.dim(ts)}  ${a.priority === 'urgent' ? A.red('[URGENT]') : ''} → ${a.target}${exp}\n   ${a.text}`);
+    console.log(`${A.dim('#' + a.id)} ${A.dim(ts)}  ${A.dim('[' + (a.scope || 'work') + ']')} ${a.priority === 'urgent' ? A.red('[URGENT]') : ''} → ${a.target}${exp}\n   ${a.text}`);
   }
 }
 async function cmdKill(id, f) {
@@ -934,10 +944,13 @@ function cmdHelp() {
        ... --subject "<subj>"           set the subject (email)
        ... --cc "<addr>"                Cc (email; comma-separated ok)
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
-                                       delivered into other sessions' context on their next turn
+                                       delivered into other sessions' context on their next turn.
+                                       Two scopes: work (owner DM, email, owner MCP) and guild
+                                       (rooms only); a turn posts to its own scope (--scope/--guild
+                                       only matter from a plain terminal)
   asmltr steer <key> "<guidance>"      push guidance into another session's LIVE turn (COERCIVE;
        [--from L] [--interrupt]         needs ASMLTR_MESH_STEER=on). Advisory alternative: announce
-  asmltr announcements                 list live announcements (with timestamps)
+  asmltr announcements [--scope S]     list live announcements (with timestamps and scope)
   asmltr uploads [search]              files users sent on ANY channel (--channel --since 2h|1d --sender --limit)
        uploads get <id>                print the stored path of one upload
   asmltr gc-temps                      drop attach-stage / gen-ref / vis-prompt leftovers older than 1 day
@@ -1236,7 +1249,7 @@ async function cmdVault(rest, f) {
       case 'post': return await cmdPost(rest);
       case 'announce': return await cmdAnnounce(rest);
       case 'notify': return await cmdNotify(rest);
-      case 'announcements': return await cmdAnnouncements();
+      case 'announcements': return await cmdAnnouncements(rest);
       case 'uploads': return await cmdUploads(rest);
       case 'gc-temps': {
         const g = require('../shared/gc-temps').run();

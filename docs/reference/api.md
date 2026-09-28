@@ -66,14 +66,17 @@ Whatever the shape, a reverse proxy in front needs a `client_max_body_size` at l
 | Method & path | Body | Returns |
 |---|---|---|
 | `POST /v2/title` | `{ text }` | `{ ok, title }` — cheap no-tools title (429 if one is already running) |
-| `POST /v2/announce` | `{ text, target?, priority?, from?, ttl? }` | `{ ok, id, created_at, target }` — queue a cross-session awareness note |
-| `GET /v2/announcements` | — | `{ announcements }` — currently-live announcements |
+| `POST /v2/announce` | `{ text, target?, priority?, from?, ttl?, scope?, from_key? }` | `{ ok, id, created_at, target, scope }`: queue a cross-session awareness note (400 when the scope is not allowed for `from_key`) |
+| `GET /v2/announcements` | `?scope=work\|guild` | `{ announcements }`: currently-live announcements (each carries `scope`, `origin_key`) |
 
 Announcements are a cross-session mailbox: a note is delivered into a target session's context
 at the start of its next turn (`target` = `*`, a `conversation_key`, `surface:<channel>`, or
-`identity:<key>`). A `*` broadcast is not delivered into multi-user rooms (public posts, Discord guild
-channels, group chats; see `shared/conversation-scope.js`), because announcements carry session work
-other people in the room should not see. Target a room explicitly by its key or surface.
+`identity:<key>`). There are two separate scopes (`shared/conversation-scope.js`):
+
+- `work` is read by the owner's 1:1 chats, email threads, and MCP callers that are the owner or are listed in `ASMLTR_WORK_BROADCAST_PRINCIPALS` (default `owner`).
+- `guild` is read by multi-user rooms only (public posts, Discord guild channels, group chats).
+
+Every other session (other people's DMs, other MCP users, GitHub, schedule) reads neither. A session drains only its own scope, so a targeted work note never lands in a room either. `from_key` is the posting conversation: a room origin always writes `guild`, and a non-room origin always writes `work`. With no `from_key`, `scope` picks (default `work`). Rows from before the split migrate as `work`.
 
 ### Session takeover & steer
 

@@ -81,6 +81,13 @@ db.exec(`
     expires_at   INTEGER                      -- optional TTL (ms); null = never
   );
 `);
+// Two broadcast systems (shared/conversation-scope): 'work' (owner DM, email, owner MCP) and 'guild'
+// (multi-user rooms). Rows written before the split were work broadcasts, so the default keeps them work-only.
+{
+  const annCols = db.prepare('PRAGMA table_info(announcements)').all().map((c) => c.name);
+  if (!annCols.includes('scope')) db.exec("ALTER TABLE announcements ADD COLUMN scope TEXT NOT NULL DEFAULT 'work'");
+  if (!annCols.includes('origin_key')) db.exec('ALTER TABLE announcements ADD COLUMN origin_key TEXT');
+}
 
 const _get = db.prepare('SELECT * FROM sessions WHERE conversation_key = ?');
 const _insert = db.prepare(`
@@ -106,7 +113,7 @@ const _remove = db.prepare('DELETE FROM sessions WHERE conversation_key = ?');
 // Forget a session entirely: the next inbound on this key gets a FRESH engine session (new history).
 function remove(conversation_key) { return _remove.run(conversation_key).changes > 0; }
 
-const _insAnnounce = db.prepare('INSERT INTO announcements (target, text, priority, from_session, created_at, expires_at) VALUES (@target, @text, @priority, @from_session, @created_at, @expires_at)');
+const _insAnnounce = db.prepare('INSERT INTO announcements (target, text, priority, from_session, created_at, expires_at, scope, origin_key) VALUES (@target, @text, @priority, @from_session, @created_at, @expires_at, @scope, @origin_key)');
 const _liveAnnounce = db.prepare('SELECT * FROM announcements WHERE (expires_at IS NULL OR expires_at > @now) ORDER BY id ASC');
 const _maxAnnounceId = db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM announcements');
 const _setCursor = db.prepare('UPDATE sessions SET last_announce_id = ? WHERE conversation_key = ?');
@@ -243,18 +250,21 @@ function setClaim(conversation_key, claim_state, claimed_by = null) {
 
 function get(conversation_key) { return _get.get(conversation_key); }
 
-/** Post an announcement to the cross-session mailbox. Returns { id, created_at }. */
-function addAnnouncement({ text, target = '*', priority = 'normal', from_session = null, ttlSec = null }) {
+/**
+ * Post an announcement to the cross-session mailbox. `scope` is 'work' (default) or 'guild'; the
+ * caller resolves it (shared/conversation-scope.resolveAnnounceScope). Returns { id, created_at, scope }.
+ */
+function addAnnouncement({ text, target = '*', priority = 'normal', from_session = null, ttlSec = null, scope = 'work', origin_key = null }) {
   const created_at = nowMs();
   const expires_at = ttlSec ? created_at + ttlSec * 1000 : null;
-  const info = _insAnnounce.run({ target, text, priority: priority === 'urgent' ? 'urgent' : 'normal', from_session, created_at, expires_at });
-  return { id: info.lastInsertRowid, created_at };
+  const sc = scope === 'guild' ? 'guild' : 'work';
+  const info = _insAnnounce.run({ target, text, priority: priority === 'urgent' ? 'urgent' : 'normal', from_session, created_at, expires_at, scope: sc, origin_key: origin_key || null });
+  return { id: info.lastInsertRowid, created_at, scope: sc };
 }
 
+// Target matching happens inside one scope only (the scope gate is in drainAnnouncements).
 function _targetMatches(target, ctx) {
-  // A broadcast (`*`) carries owner-private session work, so it never lands in a multi-user room
-  // (public post, guild channel, group chat). Address a room explicitly (its key or surface:<channel>).
-  if (!target || target === '*') return !ctx.room;
+  if (!target || target === '*') return true;
   if (target === ctx.conversation_key) return true;
   const m = /^(surface|identity):(.+)$/.exec(target);
   if (m) return (m[1] === 'surface' && m[2] === ctx.channel) || (m[1] === 'identity' && m[2] === ctx.identity);
@@ -265,22 +275,31 @@ function _targetMatches(target, ctx) {
  * Drain the announcements this session hasn't seen yet (id > its cursor), that target it,
  * are unexpired, and aren't its own. Advances the cursor past ALL current announcements so
  * each is evaluated once. Returns the due list (with timestamps) to prepend to the turn.
- * `opts.room` (a multi-user room, see shared/conversation-scope) skips `*` broadcasts.
+ * `opts.audience` ('work' | 'guild' | null, from shared/conversation-scope.broadcastAudience) picks
+ * the ONE scope this session may read; null reads nothing. Legacy `opts.room` without an audience
+ * maps a room to 'guild' and anything else to 'work'.
  */
 function drainAnnouncements(conversation_key, channel, identity, opts = {}) {
+  const o = opts || {};
+  const audience = Object.prototype.hasOwnProperty.call(o, 'audience') ? o.audience : (o.room ? 'guild' : 'work');
   const row = _get.get(conversation_key);
   const cursor = (row && row.last_announce_id) || 0;
   const now = nowMs();
-  const live = _liveAnnounce.all({ now });
-  const due = live.filter((a) => a.id > cursor && a.from_session !== conversation_key
-    && _targetMatches(a.target, { conversation_key, channel, identity, room: !!(opts && opts.room) })).slice(-15); // cap to avoid a flood on a fresh session
+  const live = audience ? _liveAnnounce.all({ now }) : [];
+  const due = live.filter((a) => a.id > cursor && (a.scope || 'work') === audience
+    && a.from_session !== conversation_key && a.origin_key !== conversation_key
+    && _targetMatches(a.target, { conversation_key, channel, identity })).slice(-15); // cap to avoid a flood on a fresh session
   const maxId = _maxAnnounceId.get().m;
   if (maxId > cursor) _setCursor.run(maxId, conversation_key);
   return due;
 }
 
-/** List currently-live announcements (for `asmltr announcements` / dashboards). */
-function listAnnouncements() { return _liveAnnounce.all({ now: nowMs() }); }
+/** List currently-live announcements (for `asmltr announcements` / dashboards); optional scope filter. */
+function listAnnouncements(opts = {}) {
+  const all = _liveAnnounce.all({ now: nowMs() });
+  const sc = opts && opts.scope;
+  return sc ? all.filter((a) => (a.scope || 'work') === sc) : all;
+}
 
 /** Remember where to send an out-of-band reply (operator inject) for this session. */
 function setOutboundRoute(conversation_key, instance_id, target) {

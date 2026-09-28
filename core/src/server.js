@@ -420,14 +420,23 @@ async function handle(envelope, opts = {}) {
 
   // Cross-session announcements: drain any this session hasn't seen into its context (with
   // timestamps) — awareness from other sessions on this machine, delivered on this next turn.
+  // Two separate systems: work sessions (owner DM, email, owner MCP) read only work announcements,
+  // multi-user rooms read only guild announcements, everyone else reads none.
   try {
-    const anns = sessions.drainAnnouncements(e.conversation_key, e.channel, resolved.user_key,
-      { room: conversationScope.isMultiUserRoom(conversationScope.envelopeScope(e)) });
+    const audience = conversationScope.broadcastAudience({
+      ownerTrust: !!resolved.bypass_moderation, userKey: resolved.user_key, ...conversationScope.envelopeScope(e),
+    });
+    const anns = sessions.drainAnnouncements(e.conversation_key, e.channel, resolved.user_key, { audience });
     if (anns.length) {
       const fmt = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-      const lines = anns.map((a) => `• [${fmt(a.created_at)}${a.priority === 'urgent' ? ' · URGENT' : ''}${a.from_session ? ' · from ' + a.from_session : ''}] ${a.text}`);
-      pAnnounce = `📢 ANNOUNCEMENTS from other sessions on this machine (awareness only — act on them just if relevant to what you're doing):\n${lines.join('\n')}`;
-      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control', identity: resolved.user_key, source: 'core', payload: { action: 'announcements-received', count: anns.length } });
+      const lines = anns.map((a) => {
+        const from = a.origin_key || a.from_session;
+        return `• [${fmt(a.created_at)}${a.priority === 'urgent' ? ' · URGENT' : ''}${from ? ' · from ' + from : ''}] ${a.text}`;
+      });
+      pAnnounce = audience === 'guild'
+        ? `📢 ANNOUNCEMENTS from other guild channels (guild-only; shared between rooms, never from private or work sessions — awareness only, act on them just if relevant here):\n${lines.join('\n')}`
+        : `📢 ANNOUNCEMENTS from other sessions on this machine (awareness only — act on them just if relevant to what you're doing):\n${lines.join('\n')}`;
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control', identity: resolved.user_key, source: 'core', payload: { action: 'announcements-received', count: anns.length, scope: audience } });
     }
   } catch (_) {}
 
@@ -2004,16 +2013,24 @@ app.post('/v2/update/run', (req, res) => {
 });
 
 // Cross-session announcement mailbox: post an awareness note delivered into other sessions'
-// context on their next turn. { text, target?, priority?, from?, ttl? (seconds) }
+// context on their next turn. { text, target?, priority?, from?, ttl? (seconds), scope? ('work'|'guild'),
+// from_key? (the posting conversation key) }. A room origin always lands in guild; a non-room origin
+// always lands in work (see shared/conversation-scope.resolveAnnounceScope).
 app.post('/v2/announce', (req, res) => {
-  const { text, target, priority, from, ttl } = req.body || {};
+  const { text, target, priority, from, ttl, scope, from_key } = req.body || {};
   if (!text) return res.status(400).json({ error: 'need text' });
-  const r = sessions.addAnnouncement({ text: String(text), target: target || '*', priority, from_session: from || null, ttlSec: ttl ? Number(ttl) : null });
+  const sc = conversationScope.resolveAnnounceScope({ requested: scope, originKey: from_key || null });
+  if (sc.error) return res.status(400).json({ error: sc.error });
+  const r = sessions.addAnnouncement({ text: String(text), target: target || '*', priority, from_session: from || null,
+    ttlSec: ttl ? Number(ttl) : null, scope: sc.scope, origin_key: from_key || null });
   record({ surface: 'core', session_id: null, event_type: 'control', identity: from || 'operator', source: 'core',
-    payload: { action: 'announce', id: r.id, target: target || '*', priority: priority || 'normal', text: truncate(text, 200) } });
-  res.json({ ok: true, id: r.id, created_at: r.created_at, target: target || '*' });
+    payload: { action: 'announce', id: r.id, target: target || '*', scope: r.scope, priority: priority || 'normal', text: truncate(text, 200) } });
+  res.json({ ok: true, id: r.id, created_at: r.created_at, target: target || '*', scope: r.scope });
 });
-app.get('/v2/announcements', (req, res) => res.json({ announcements: sessions.listAnnouncements() }));
+app.get('/v2/announcements', (req, res) => {
+  const scope = req.query && req.query.scope ? String(req.query.scope) : '';
+  res.json({ announcements: sessions.listAnnouncements(scope ? { scope } : {}) });
+});
 
 // Cross-channel SEND with ASSIMILATION. An agent working in ANY session posts a message into another
 // channel, AND the destination session folds it into its own context as its OWN prior output — so it

@@ -24,7 +24,7 @@ asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
 asmltr send discord <id-or-name> "<text>"  same Discord server (trusted role / resolve allow)
 asmltr guild-post <id-or-name> "<text>"  alias of same-guild send
 asmltr announce "<text>" [--to T]    post a cross-session announcement
-asmltr announcements                 list live announcements
+asmltr announcements                 list live announcements (--scope work|guild)
 asmltr attach <key>    claim a channel session + resume it in tmux
 asmltr release <key>   end a takeover; channel resumes
 asmltr kill <id>       SIGTERM an ephemeral session's pid
@@ -158,11 +158,11 @@ else is in it.
 ### `asmltr announcements`
 
 ```bash
-asmltr announcements
+asmltr announcements [--scope work|guild]
 ```
 
 Lists live cross-session announcements (see [`announce`](#asmltr-announce) below)
-with their id, timestamp, target, urgency, and expiry.
+with their id, timestamp, scope, target, urgency, and expiry.
 
 ---
 
@@ -228,16 +228,24 @@ asmltr announce "incident: API down" --urgent --ttl 3600
 Usage:
 
 ```
-asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]
+asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>] [--scope work|guild]
 ```
+
+There are **two separate announcement systems**, and nothing crosses between them:
+
+- **work**: the owner's private work surfaces. That means the owner's 1:1 chats, email threads, and MCP callers that are the owner or are listed in `ASMLTR_WORK_BROADCAST_PRINCIPALS` (a comma list of trust principal ids, default `owner`). Multi-user rooms, other people's DMs, other MCP users, GitHub and schedule turns never read work announcements.
+- **guild**: multi-user rooms only (Discord guild channels, group chats, public posts). A note posted from one room reaches the other rooms, so something said in one channel can be picked up in another. Guild notes never reach work surfaces.
+
+Inside an engine turn the CLI sends the posting conversation key (`ASMLTR_ATTACH_CONVERSATION_KEY` / `ASMLTR_TURN_KEY`). Core then picks the scope from it: a room posts to guild, and anything else posts to work. Asking a room for `--scope work`, or a private session for `--scope guild`, is refused. `--scope` only chooses when there is no turn key, for example an operator at a terminal (default `work`).
 
 | Flag | Meaning |
 |---|---|
-| `--to <target>` | who sees it — `*` (every private session, default), a session id, `surface:discord`, or `identity:someuser`. `*` skips multi-user rooms (public posts, Discord guild channels, group chats); address a room by its session id or surface |
+| `--to <target>` | who sees it inside the scope: `*` (everyone in the scope, default), a session id, `surface:discord`, or `identity:someuser` |
+| `--scope <s>` / `--guild` / `--work` | scope when posting from a plain terminal (see above) |
 | `--urgent` | mark it urgent |
 | `--ttl <sec>` | expire after N seconds |
 
-Returns the announcement id, resolved target, and creation time. List live ones with
+Returns the announcement id, scope, resolved target, and creation time. List live ones with
 [`asmltr announcements`](#asmltr-announcements).
 
 ---
@@ -379,6 +387,7 @@ standard single-host layout.
 |---|---|---|
 | `ASMLTR_COLLECTOR_BASE` | `http://127.0.0.1:3017` | collector base URL (reads + control) |
 | `ASMLTR_CORE_BASE` | `http://127.0.0.1:3023` | core base URL (`attach`/`release`, `announce`) |
+| `ASMLTR_WORK_BROADCAST_PRINCIPALS` | `owner` | (core) trust principal ids whose MCP sessions read work announcements |
 | `ASMLTR_MANAGER_BASE` | `http://127.0.0.1:3024` | connector manager base URL (`send`) |
 | `ASMLTR_INSIGHTS_TOKEN` | — | bearer for collector reads + socket auth |
 | `ASMLTR_INSIGHTS_CONTROL_TOKEN` | — | bearer for privileged control (`kill`, `stop`, `diff`) |

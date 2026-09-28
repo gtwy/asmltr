@@ -70,9 +70,9 @@ const TOOLS = [
       if (!a.file) return ['post'];
       return ['post', '--file', a.file, ...(a.caption ? ['--caption', a.caption] : [])];
     } },
-  { name: 'asmltr_announce', deny: 'send', description: `Post a non-coercive announcement other ${NAME} sessions see on their next turn (they decide what to do with it).`,
+  { name: 'asmltr_announce', deny: 'send', description: `Post a non-coercive announcement other ${NAME} sessions see on their next turn (they decide what to do with it). Two separate systems: from a guild/group room it reaches only other rooms (guild scope); from a private or work session it reaches only the owner's work sessions (work scope). Nothing crosses between them.`,
     inputSchema: { type: 'object', required: ['text'],
-      properties: { text: { type: 'string' }, to: { type: 'string', description: 'optional target scope' }, urgent: { type: 'boolean' } },
+      properties: { text: { type: 'string' }, to: { type: 'string', description: 'optional target inside the scope: * (default), a session key, surface:<channel>, identity:<key>' }, urgent: { type: 'boolean' } },
       additionalProperties: false },
     argv: (a) => ['announce', a.text, ...(a.to ? ['--to', a.to] : []), ...(a.urgent ? ['--urgent'] : [])] },
   { name: 'asmltr_uploads', deny: 'uploads', description: 'List recent files uploaded to the shared upload area across channels (newest first); optional search. Owner/private turns only — not public Discord.',
