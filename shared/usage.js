@@ -93,4 +93,18 @@ function estimateAudioSeconds(bytes, mime = '') {
   return b > 0 ? b / bps : 0;
 }
 
-module.exports = { auxUsage, estimateAudioSeconds };
+/**
+ * Model to record (and price) on a turn's token-usage event: the model the engine reports it
+ * ACTUALLY ran (`result.model` — for grok, the session's current_model_id, the streaming-json
+ * `end` modelUsage, or the ACP session/new model), else the configured model. `fallback` is true
+ * when the reported model was unavailable, so the row can be marked.
+ * @returns {{ model: string|null, fallback: boolean }}
+ */
+function turnUsageModel(result, configured) {
+  const reported = result && result.model != null ? String(result.model).trim() : '';
+  if (reported) return { model: reported, fallback: false };
+  const c = configured != null ? String(configured).trim() : '';
+  return { model: c || null, fallback: true };
+}
+
+module.exports = { auxUsage, estimateAudioSeconds, turnUsageModel };

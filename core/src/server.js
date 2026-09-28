@@ -704,9 +704,12 @@ async function handle(envelope, opts = {}) {
   // don't (gemini/codex), price the tokens from shared/pricing. `billed` = whether this engine bills a metered
   // API key (subscription → not billed); billed_cost_usd is the equivalent value only when it's actually billed.
   const enginesReg = require('../../shared/engines');
-  let authMode = 'subscription'; let usedModel = getLastModel();
+  // Model: what the engine reports it ACTUALLY ran (result.model — grok session current_model_id /
+  // ACP session/new model), else the configured one (flagged model_fallback). Pricing follows it.
+  let authMode = 'subscription'; let configuredModel = getLastModel();
   try { authMode = (enginesReg.authInfo(engineId) || {}).mode || 'subscription'; } catch (_) {}
-  try { usedModel = usedModel || enginesReg.modelFor(engineId); } catch (_) {}
+  try { configuredModel = configuredModel || enginesReg.modelFor(engineId); } catch (_) {}
+  const { model: usedModel, fallback: modelFallback } = require('../../shared/usage').turnUsageModel(result, configuredModel);
   let costUsd = usage.cost_usd || 0;
   if (!costUsd && (usage.tokens_in || usage.tokens_out)) {
     try { costUsd = require('../../shared/pricing').tokenCostUsd(usedModel, usage.tokens_in, usage.tokens_out); } catch (_) {}
@@ -716,6 +719,7 @@ async function handle(envelope, opts = {}) {
     identity: usageIdentity, source: 'core',
     tokens_in: usage.tokens_in, tokens_out: usage.tokens_out, cost_usd: costUsd, billed_cost_usd: billed ? costUsd : 0,
     payload: { tools: result.tools.length, isError: result.isError, engine: engineId, model: usedModel || undefined,
+      model_fallback: (modelFallback && usedModel) ? true : undefined,
       auth_mode: authMode, billed, estimated: noReal || undefined,
       principal: resolved.user_key !== usageIdentity ? resolved.user_key : undefined } });
 

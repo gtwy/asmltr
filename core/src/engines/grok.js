@@ -37,6 +37,7 @@ const engines = require('../../../shared/engines');
 const { isDiscordVoice } = require('../../../shared/media-allow');
 const { composePrompt } = require('../../../shared/prompt-compose');
 const gcTemps = require('../../../shared/gc-temps');
+const grokSession = require('../../../shared/grok-session');
 const { buildImageGenClassifyPrompt, parseImageGenVerdict, hasStillThisTurn, pictureIntentClassifyText, shouldClassifyPictureIntent } = require('../../../shared/image-gen-ask');
 
 const id = 'grok';
@@ -748,6 +749,9 @@ function applyEvent(ev, state) {
     return { kind: 'error', error: String(msg), closedThinking: closeThinking(state) };
   }
   if (t === 'end') {
+    // The final event names the model that actually ran (modelUsage key) — usage log + pricing.
+    const m = grokSession.modelFromEnd(ev);
+    if (m) state.model = m;
     return { kind: 'end', closedThinking: closeThinking(state) };
   }
   if (t === 'usage' || t === 'plan' || t === 'available_commands') {
@@ -794,6 +798,7 @@ function newState(sessionId) {
     isError: false,
     engineSessionId: sessionId || null,
     thinking: '',
+    model: null,
   };
 }
 
@@ -913,13 +918,17 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     const segs = (state.segments || []).slice();
     if (state.text && state.text.trim()) segs.push(state.text.trim());
     const answer = segs.length ? segs[segs.length - 1] : '';
+    const engineSessionId = state.engineSessionId || sessionId;
     return {
       text: answer,
       segments: segs,
-      engineSessionId: state.engineSessionId || sessionId,
+      engineSessionId,
       tools: state.tools,
       usage: state.usage,
       isError: state.isError,
+      // Model that actually ran: session summary.json current_model_id, else the streaming-json
+      // `end` modelUsage, else null (core records the configured model and flags model_fallback).
+      model: grokSession.sessionModelId(engineSessionId, cwd || process.cwd()) || state.model || null,
     };
   } finally {
     if (visionFile) try { fs.unlinkSync(visionFile); } catch (_) {}

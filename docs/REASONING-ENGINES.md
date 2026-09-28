@@ -21,15 +21,18 @@
 `core/src/runner.js` is a thin dispatcher; each engine implements the same contract in `core/src/engines/`:
 
 ```
-runTurn(opts) → { text, segments, engineSessionId, tools, usage, isError }
+runTurn(opts) → { text, segments, engineSessionId, tools, usage, isError, model? }
 complete({prompt, model}) → string      // cheap one-shot for the title/status/self-assessment labelers
 ```
+
+`model` (optional) is the model that actually ran; the core usage event records and prices it, else the
+configured model (`model_fallback: true`). See [Usage](usage.md#which-model-a-turn-is-recorded-under).
 
 - **claude.js** — the LOCAL Agent SDK (`query()`), lazily required so it never loads at boot.
 - **codex.js** — headless `codex exec --json`; native resume via the assigned `thread_id`; `OPENAI_API_KEY`
   injected from the vault (api_key mode).
 - **gemini.js** — headless `gemini -p -o stream-json --skip-trust`; `GEMINI_API_KEY` from the vault.
-- **grok.js** — headless `grok -p --output-format streaming-json`; subscription via `~/.grok/auth.json` (never `XAI_API_KEY`); resume UUID hook (`-s` create / `-r` resume).
+- **grok.js** — headless `grok -p --output-format streaming-json`; subscription via `~/.grok/auth.json` (never `XAI_API_KEY`); resume UUID hook (`-s` create / `-r` resume); `result.model` from the session's `summary.json` `current_model_id` (else the `end` event's `modelUsage`).
 - **self-hosted** — Codex is the OpenAI-compatible vehicle: set a **custom endpoint** (Settings → Engines →
   Codex → Custom endpoint, or `POST /v2/engines/codex/base-url`) and its turns route to that base URL via a
   codex custom provider (`-c model_providers.asmltr_custom.base_url=… wire_api=responses`). The endpoint must

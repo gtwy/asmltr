@@ -43,6 +43,23 @@ log zero tokens for a real turn, asmltr estimates from text length (~4 chars/tok
 `estimated`. The input estimate is a floor (it counts the user's text, not the full system prompt/history),
 so treat estimated rows as a lower bound.
 
+### Which model a turn is recorded under
+
+A turn's `token-usage` payload `model` is the model that **actually ran**, and the equivalent value is
+priced from it. The engine reports it on the turn result (`result.model`):
+
+- **Grok, headless** (`grok --prompt-file … --output-format streaming-json`, `-p`): the grok session's
+  `summary.json` `current_model_id` (under `~/.grok/sessions/<cwd>/<session id>/`, or `$GROK_HOME`), else
+  the final streaming-json `end` event's `modelUsage` key (the CLI's `grok-4.6-build` is recorded as
+  `grok-4.6`).
+- **Grok ACP children** (a host overlay running `grok agent … stdio`): the same `summary.json`, else the model
+  the ACP `session/new` / `session/set_config_option` result reported (`configOptions` `model`,
+  `models.currentModelId`, `currentModelId`, `modelId`).
+
+`-m` is only a request: a grok ACP session can come up on xAI's server-side default instead. When the engine
+reports no model, the row falls back to the configured (or last-known) model and carries
+`model_fallback: true`.
+
 ## Metered spend breakdown
 
 The **Metered spend · by feature & provider** panel breaks the Billed total down into the side-surfaces

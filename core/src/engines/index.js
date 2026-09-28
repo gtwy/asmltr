@@ -5,7 +5,9 @@
  * Codex-only install therefore never loads the Claude SDK.
  *
  * Every engine implements the same contract:
- *   runTurn(opts) → { text, segments, engineSessionId, tools, usage, isError }
+ *   runTurn(opts) → { text, segments, engineSessionId, tools, usage, isError, model? }
+ *     model: the model id that actually ran, when the engine can tell (grok: session current_model_id /
+ *     streaming-json end modelUsage). Core's token-usage event records and prices it; absent → configured.
  *   complete({prompt, model}) → string        (cheap one-shot for the title/status/assessment labelers)
  *   cheapModel : string                       (default model for the labelers)
  *   getLastModel() → string|null
