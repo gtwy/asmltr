@@ -45,7 +45,7 @@ async function runPrompt(job, handle) {
     sender: { raw_id: SCHEDULER_VALUE, raw_username: 'Scheduler' },
     content: { text: job.prompt },
     delivery: 'async',
-    channel_context: { schedule_id: job.id, schedule_name: job.name },
+    channel_context: { schedule_id: job.id, schedule_name: job.name, schedule_scope: schedules.scheduleScope(job) },
   };
   const actions = await handle(envelope, { engine: job.engine || undefined });
   const text = (actions || []).filter((a) => a && (a.type === 'reply' || a.type === 'status') && a.text)
@@ -63,7 +63,8 @@ function runShell(job) {
     const timeoutMs = (job.timeout_s || 300) * 1000;
     const child = spawn('/bin/sh', ['-c', cmd], {
       cwd: job.cwd || process.env.HOME || process.cwd(),
-      env: process.env,
+      // A shell job has no engine turn; this key lets `asmltr announce` inside it post in the job's scope.
+      env: { ...process.env, ASMLTR_ANNOUNCE_FROM_KEY: `schedule:${job.id}` },
     });
     let out = '';
     const cap = (d) => { out += d.toString(); if (out.length > 200000) out = out.slice(-200000); };

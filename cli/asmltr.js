@@ -586,7 +586,7 @@ async function cmdAnnounce(rest) {
   if (!text) throw new Error('usage: asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>] [--scope work|guild]\n' +
     '  target: * (all in scope) · a session id · surface:discord · identity:<name>\n' +
     '  scope:  work (owner DM, email, owner MCP) · guild (rooms only); from inside a turn it follows the posting conversation');
-  const fromKey = process.env.ASMLTR_ATTACH_CONVERSATION_KEY || process.env.ASMLTR_TURN_KEY || null;
+  const fromKey = process.env.ASMLTR_ATTACH_CONVERSATION_KEY || process.env.ASMLTR_TURN_KEY || process.env.ASMLTR_ANNOUNCE_FROM_KEY || null;
   const body = { text, target: opts.target, priority: opts.priority, from: opts.from, ttl: opts.ttl, scope: opts.scope || undefined, from_key: fromKey || undefined };
   const r = await fetch(CORE_BASE + '/v2/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then((x) => x.json()).catch((e) => ({ error: e.message }));

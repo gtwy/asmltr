@@ -425,6 +425,7 @@ async function handle(envelope, opts = {}) {
   try {
     const audience = conversationScope.broadcastAudience({
       ownerTrust: !!resolved.bypass_moderation, userKey: resolved.user_key, ...conversationScope.envelopeScope(e),
+      scheduleScope: envelopeScheduleScope(e),
     });
     const anns = sessions.drainAnnouncements(e.conversation_key, e.channel, resolved.user_key, { audience });
     if (anns.length) {
@@ -509,7 +510,7 @@ async function handle(envelope, opts = {}) {
     const recalled = transcripts.recallForInject({
       conversationKey: e.conversation_key,
       includeLastTopics: conversationScope.ownerTopicsAllowed({
-        ownerTrust: !!resolved.bypass_moderation, ...conversationScope.envelopeScope(e),
+        ownerTrust: !!resolved.bypass_moderation, ...conversationScope.envelopeScope(e), scheduleScope: envelopeScheduleScope(e),
       }),
     });
     if (recalled) {
@@ -1216,8 +1217,13 @@ try { backup.startScheduler({ log: (m) => console.log('[backup] ' + m) }); } cat
 // ── Schedules — "cron with a GUI": prompt jobs (managed turns, no session leak) + shell jobs. ─────────
 // This replaces the retired `claude -p` wake-up crontab. See shared/schedules.js + core/src/scheduler.js.
 const schedules = require('../../shared/schedules');
+/** Broadcast scope of the scheduled job behind a schedule turn ('work' | 'guild' | null); undefined otherwise. */
+function envelopeScheduleScope(e) {
+  if (!e || e.channel !== 'schedule') return undefined;
+  try { return schedules.scopeForKey(e.conversation_key, e.channel_context && e.channel_context.schedule_id); } catch (_) { return null; }
+}
 const scheduler = require('./scheduler');
-app.get('/v2/schedules', scheduleApi, (req, res) => res.json({ jobs: schedules.list() }));
+app.get('/v2/schedules', scheduleApi, (req, res) => res.json({ jobs: schedules.list().map((j) => ({ ...j, broadcast_scope: schedules.scheduleScope(j) })) }));
 app.get('/v2/schedules/:id', scheduleApi, (req, res) => { const j = schedules.get(req.params.id); return j ? res.json(j) : res.status(404).json({ error: 'no such schedule' }); });
 app.post('/v2/schedules', scheduleApi, (req, res) => { try { res.status(201).json(schedules.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.patch('/v2/schedules/:id', scheduleApi, (req, res) => { try { res.json(schedules.update(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -2019,7 +2025,9 @@ app.post('/v2/update/run', (req, res) => {
 app.post('/v2/announce', (req, res) => {
   const { text, target, priority, from, ttl, scope, from_key } = req.body || {};
   if (!text) return res.status(400).json({ error: 'need text' });
-  const sc = conversationScope.resolveAnnounceScope({ requested: scope, originKey: from_key || null });
+  const scopeArgs = { requested: scope, originKey: from_key || null };
+  if (from_key && /^schedule:/i.test(String(from_key))) scopeArgs.originScope = schedules.scopeForKey(String(from_key));
+  const sc = conversationScope.resolveAnnounceScope(scopeArgs);
   if (sc.error) return res.status(400).json({ error: sc.error });
   const r = sessions.addAnnouncement({ text: String(text), target: target || '*', priority, from_session: from || null,
     ttlSec: ttl ? Number(ttl) : null, scope: sc.scope, origin_key: from_key || null });

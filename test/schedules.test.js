@@ -10,7 +10,11 @@ const TMP = path.join(os.tmpdir(), `asmltr-sched-test-${process.pid}.json`);
 process.env.ASMLTR_SCHEDULES_FILE = TMP;
 const sch = require('../shared/schedules');
 
-test.after(() => { try { fs.unlinkSync(TMP); } catch (_) {} });
+test.after(() => {
+  for (const f of [TMP, path.join(os.tmpdir(), `asmltr-sched-core-${process.pid}.db`), path.join(os.tmpdir(), `asmltr-sched-trust-${process.pid}.db`)]) {
+    try { fs.unlinkSync(f); } catch (_) {}
+  }
+});
 
 test('friendly schedule specs compile to standard cron', () => {
   assert.equal(sch.toCron({ time: '08:00', weekdays: [1, 2, 3, 4, 5] }), '0 8 * * 1,2,3,4,5');
@@ -100,4 +104,26 @@ test('V37: runtime key falls back to schedule:<id> if a stolen key is already st
   assert.equal(sch.promptConversationKey({ id: 'sch_1', session: 'new' }), 'schedule:sch_1');
   assert.equal(sch.promptConversationKey({ id: 'sch_1', session: 'schedule:sch_1' }), 'schedule:sch_1');
   assert.equal(sch.promptConversationKey({ id: 'sch_1', session: 'discord:x' }), 'schedule:sch_1');
+});
+
+test('broadcast scope fields: create/update keep scope + target; prompt turns carry the scope; shell jobs get an announce key', async () => {
+  const j = sch.create({ name: 'room post', type: 'prompt', prompt: 'post it', schedule: { cron: '0 7 * * *' }, target: 'discord:inst-1:channel:77' });
+  assert.equal(j.target, 'discord:inst-1:channel:77');
+  assert.equal(sch.scheduleScope(j), 'guild');
+  const u = sch.update(j.id, { scope: 'none' });
+  assert.equal(u.scope, 'none');
+  assert.equal(sch.scheduleScope(u), null);
+  const c = sch.update(j.id, { scope: '' });
+  assert.equal(c.scope, undefined, 'empty scope clears back to derived');
+  assert.equal(sch.scopeForKey('schedule:' + j.id), 'guild');
+  // Keep the scheduler's sessions + trust stores off the real data dir.
+  if (!process.env.ASMLTR_CORE_DB) process.env.ASMLTR_CORE_DB = path.join(os.tmpdir(), `asmltr-sched-core-${process.pid}.db`);
+  if (!process.env.ASMLTR_TRUST_DB) process.env.ASMLTR_TRUST_DB = path.join(os.tmpdir(), `asmltr-sched-trust-${process.pid}.db`);
+  const scheduler = require('../core/src/scheduler');
+  let env;
+  await scheduler.runPrompt(c, async (e) => { env = e; return [{ type: 'reply', text: 'ok' }]; });
+  assert.equal(env.channel_context.schedule_scope, 'guild');
+  const out = await scheduler.runShell({ id: 'sch_x', command: 'printf %s "$ASMLTR_ANNOUNCE_FROM_KEY"', timeout_s: 5 });
+  assert.match(out.output, /^schedule:sch_x/);
+  sch.remove(j.id);
 });

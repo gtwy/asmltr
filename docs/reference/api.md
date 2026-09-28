@@ -73,10 +73,10 @@ Announcements are a cross-session mailbox: a note is delivered into a target ses
 at the start of its next turn (`target` = `*`, a `conversation_key`, `surface:<channel>`, or
 `identity:<key>`). There are two separate scopes (`shared/conversation-scope.js`):
 
-- `work` is read by the owner's 1:1 chats, email threads, and MCP callers that are the owner or are listed in `ASMLTR_WORK_BROADCAST_PRINCIPALS` (default `owner`).
-- `guild` is read by multi-user rooms only (public posts, Discord guild channels, group chats).
+- `work` is read by the owner's 1:1 chats, email threads, GitHub, MCP callers that are the owner or are listed in `ASMLTR_WORK_BROADCAST_PRINCIPALS` (default `owner`), and work-scoped scheduled jobs.
+- `guild` is read by multi-user rooms (public posts, Discord guild channels, group chats) and guild-scoped scheduled jobs.
 
-Every other session (other people's DMs, other MCP users, GitHub, schedule) reads neither. A session drains only its own scope, so a targeted work note never lands in a room either. `from_key` is the posting conversation: a room origin always writes `guild`, and a non-room origin always writes `work`. With no `from_key`, `scope` picks (default `work`). Rows from before the split migrate as `work`.
+GitHub reads `work`. A schedule turn reads the scope of its job (`shared/schedules.scheduleScope`: explicit `scope`, then delivery `target`, then a host resolver). A job with no scope reads neither and gets a 400 on announce (`from_key` `schedule:<id>`). Every other session (other people's DMs, other MCP users) reads neither. Schedule jobs accept `scope` (`work` | `guild` | `none`) and `target`, and `GET /v2/schedules` returns each job's `broadcast_scope`. A session drains only its own scope, so a targeted work note never lands in a room either. `from_key` is the posting conversation: a room origin always writes `guild`, and a non-room origin always writes `work`. With no `from_key`, `scope` picks (default `work`). Rows from before the split migrate as `work`.
 
 ### Session takeover & steer
 

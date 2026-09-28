@@ -233,8 +233,10 @@ asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>] [--scope w
 
 There are **two separate announcement systems**, and nothing crosses between them:
 
-- **work**: the owner's private work surfaces. That means the owner's 1:1 chats, email threads, and MCP callers that are the owner or are listed in `ASMLTR_WORK_BROADCAST_PRINCIPALS` (a comma list of trust principal ids, default `owner`). Multi-user rooms, other people's DMs, other MCP users, GitHub and schedule turns never read work announcements.
-- **guild**: multi-user rooms only (Discord guild channels, group chats, public posts). A note posted from one room reaches the other rooms, so something said in one channel can be picked up in another. Guild notes never reach work surfaces.
+- **work**: the owner's work surfaces. That means the owner's 1:1 chats, email threads, GitHub, MCP callers that are the owner or are listed in `ASMLTR_WORK_BROADCAST_PRINCIPALS` (a comma list of trust principal ids, default `owner`), and scheduled jobs whose scope is work. Multi-user rooms, other people's DMs, other MCP users and guild scheduled jobs never read work announcements.
+- **guild**: multi-user rooms (Discord guild channels, group chats, public posts) and scheduled jobs whose scope is guild. A note posted from one room reaches the other rooms, so something said in one channel can be picked up in another. Guild notes never reach work surfaces.
+
+A scheduled job's scope is its explicit `scope` (`work` | `guild` | `none`). Without one, it comes from the job's delivery `target` (a room is guild, email is work), then from a host resolver. A job that still has no scope reads neither kind and cannot announce. Shell jobs announce as `schedule:<id>` (`ASMLTR_ANNOUNCE_FROM_KEY`).
 
 Inside an engine turn the CLI sends the posting conversation key (`ASMLTR_ATTACH_CONVERSATION_KEY` / `ASMLTR_TURN_KEY`). Core then picks the scope from it: a room posts to guild, and anything else posts to work. Asking a room for `--scope work`, or a private session for `--scope guild`, is refused. `--scope` only chooses when there is no turn key, for example an operator at a terminal (default `work`).
 

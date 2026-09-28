@@ -107,7 +107,7 @@ test('broadcastAudience: owner DM, email, owner/listed MCP are work; rooms are g
   assert.equal(broadcastAudience({ ownerTrust: false, userKey: 'helper-bot', channel: 'mcp', conversationKey: 'mcp:i:user:helper-bot', env }), 'work');
   assert.equal(broadcastAudience({ ownerTrust: true, userKey: 'owner', channel: 'mcp', conversationKey: 'mcp:i:user:owner', env }), 'work');
   assert.equal(broadcastAudience({ ownerTrust: false, userKey: 'other-client', channel: 'mcp', conversationKey: 'mcp:i:user:other', env }), null, 'non-owner MCP');
-  assert.equal(broadcastAudience({ ownerTrust: true, channel: 'github', conversationKey: 'github:i:issue:1', env }), null);
+  assert.equal(broadcastAudience({ ownerTrust: true, channel: 'github', conversationKey: 'github:i:issue:1', env }), 'work', 'GitHub reads work');
   assert.equal(broadcastAudience({ ownerTrust: true, channel: 'schedule', conversationKey: 'schedule:i:job:1', env }), null);
   assert.equal(broadcastAudience({ ownerTrust: false, userKey: 'helper-bot', channel: 'mcp', conversationKey: 'mcp:i:user:x', env: {} }), null, 'default list is owner only');
 });
@@ -151,4 +151,103 @@ test('freshSessionHandoff: full prompt handed over only when core sent the volat
   assert.deepEqual(freshSessionHandoff({ reuseStable: false, fullPrompt: 'FULL' }), {});
   assert.deepEqual(freshSessionHandoff({ reuseStable: true, fullPrompt: '## IDENTITY\nYou are X.' }),
     { stableReused: true, fullSystemPrompt: '## IDENTITY\nYou are X.' });
+});
+
+// ── scheduled jobs and GitHub in the two broadcast systems ──
+const schedules = require('../shared/schedules');
+
+function withSchedules(jobs, fn) {
+  const f = path.join(tmp, 'schedules-' + Math.random().toString(36).slice(2) + '.json');
+  fs.writeFileSync(f, JSON.stringify({ version: 1, jobs }));
+  const prev = process.env.ASMLTR_SCHEDULES_FILE;
+  process.env.ASMLTR_SCHEDULES_FILE = f;
+  try { return fn(); } finally {
+    if (prev === undefined) delete process.env.ASMLTR_SCHEDULES_FILE; else process.env.ASMLTR_SCHEDULES_FILE = prev;
+    schedules.setScopeResolver(null);
+  }
+}
+
+test('GitHub reads work (even though the connector marks it public) and posts only as work', () => {
+  assert.equal(broadcastAudience({ ownerTrust: false, channel: 'github', conversationKey: 'github:inst-1:issue:42', public: true }), 'work');
+  assert.deepEqual(resolveAnnounceScope({ originKey: 'github:inst-1:issue:42' }), { scope: 'work' });
+  assert.ok(resolveAnnounceScope({ originKey: 'github:inst-1:issue:42', requested: 'guild' }).error);
+  const key = 'github:inst-1:issue:43';
+  sessions.addAnnouncement({ text: 'gh work note', target: '*', from_session: 'cli:local' });
+  sessions.addAnnouncement({ text: 'gh guild note', target: '*', scope: 'guild', origin_key: 'discord:inst-1:channel:1201' });
+  const aud = broadcastAudience({ channel: 'github', conversationKey: key, public: true });
+  const got = sessions.drainAnnouncements(key, 'github', 'someone', { audience: aud }).map((a) => a.text);
+  assert.ok(got.includes('gh work note'));
+  assert.ok(!got.includes('gh guild note'));
+});
+
+test('scheduleScope: explicit scope, then target, then host resolver, else none', () => {
+  assert.equal(schedules.scheduleScope({ id: 'a', scope: 'guild' }), 'guild');
+  assert.equal(schedules.scheduleScope({ id: 'a', scope: 'work', target: 'discord:i:channel:1' }), 'work', 'explicit wins');
+  assert.equal(schedules.scheduleScope({ id: 'a', scope: 'none', target: 'email:i:thread:1' }), null);
+  assert.equal(schedules.scheduleScope({ id: 'a', target: 'discord:i:channel:1' }), 'guild', 'room target → guild');
+  assert.equal(schedules.scheduleScope({ id: 'a', target: 'email' }), 'work', 'email target → work');
+  assert.equal(schedules.scheduleScope({ id: 'a', prompt: 'do a thing' }), null, 'ambiguous → none');
+  schedules.setScopeResolver((j) => (j.prompt.includes('room') ? 'guild' : j.prompt.includes('mail') ? 'work' : undefined));
+  try {
+    assert.equal(schedules.scheduleScope({ id: 'a', prompt: 'post in the room' }), 'guild');
+    assert.equal(schedules.scheduleScope({ id: 'a', prompt: 'mail the owner' }), 'work');
+    assert.equal(schedules.scheduleScope({ id: 'a', prompt: 'hmm' }), null);
+    assert.equal(schedules.scheduleScope({ id: 'a', prompt: 'post in the room', target: 'email' }), 'work', 'target beats resolver');
+  } finally { schedules.setScopeResolver(null); }
+  schedules.setScopeResolver(() => { throw new Error('boom'); });
+  assert.equal(schedules.scheduleScope({ id: 'a', prompt: 'x' }), null, 'a failing resolver means none');
+  schedules.setScopeResolver(null);
+  assert.throws(() => schedules.create({ name: 'x', type: 'prompt', prompt: 'p', schedule: { cron: '0 7 * * *' }, scope: 'everyone' }), /scope must be/);
+});
+
+test('scheduled jobs: work job reads work, guild job reads guild only, ambiguous job reads neither', () => {
+  const jobs = [
+    { id: 'sch_work', name: 'brief', type: 'prompt', prompt: 'mail the brief', target: 'email' },
+    { id: 'sch_guild', name: 'room-post', type: 'prompt', prompt: 'post it', target: 'discord:inst-5:channel:5001' },
+    { id: 'sch_amb', name: 'mystery', type: 'prompt', prompt: 'do the thing' },
+  ];
+  withSchedules(jobs, () => {
+    sessions.addAnnouncement({ text: 'sched work note', target: '*', from_session: 'cli:local' });
+    sessions.addAnnouncement({ text: 'sched guild note', target: '*', scope: 'guild', origin_key: 'discord:inst-5:channel:5002' });
+    const drain = (id) => {
+      const key = 'schedule:' + id;
+      const sc = schedules.scopeForKey(key, id);
+      const aud = broadcastAudience({ ownerTrust: true, userKey: 'scheduler', channel: 'schedule', conversationKey: key, scheduleScope: sc });
+      return { aud, texts: sessions.drainAnnouncements(key, 'schedule', 'scheduler', { audience: aud }).map((a) => a.text) };
+    };
+    const w = drain('sch_work');
+    assert.equal(w.aud, 'work');
+    assert.ok(w.texts.includes('sched work note'));
+    assert.ok(!w.texts.includes('sched guild note'));
+    const g = drain('sch_guild');
+    assert.equal(g.aud, 'guild');
+    assert.ok(g.texts.includes('sched guild note'));
+    assert.ok(!g.texts.includes('sched work note'), 'work never reaches a guild scheduled job');
+    const a = drain('sch_amb');
+    assert.equal(a.aud, null);
+    assert.deepEqual(a.texts, []);
+    assert.equal(broadcastAudience({ ownerTrust: true, channel: 'schedule', conversationKey: 'schedule:gone', scheduleScope: schedules.scopeForKey('schedule:gone') }), null, 'unknown job → none');
+    // owner topics: only a work scheduled job
+    assert.equal(ownerTopicsAllowed({ ownerTrust: true, channel: 'schedule', conversationKey: 'schedule:sch_work', scheduleScope: 'work' }), true);
+    assert.equal(ownerTopicsAllowed({ ownerTrust: true, channel: 'schedule', conversationKey: 'schedule:sch_guild', scheduleScope: 'guild' }), false);
+    assert.equal(ownerTopicsAllowed({ ownerTrust: true, channel: 'schedule', conversationKey: 'schedule:sch_amb', scheduleScope: null }), false);
+  });
+});
+
+test('scheduled jobs post only in their own scope; ambiguous jobs cannot post', () => {
+  const jobs = [
+    { id: 'sch_w2', name: 'w', type: 'prompt', prompt: 'p', scope: 'work' },
+    { id: 'sch_g2', name: 'g', type: 'prompt', prompt: 'p', scope: 'guild' },
+    { id: 'sch_a2', name: 'a', type: 'shell', command: 'true' },
+  ];
+  withSchedules(jobs, () => {
+    const r = (key, requested) => resolveAnnounceScope({ requested, originKey: key, originScope: schedules.scopeForKey(key) });
+    assert.deepEqual(r('schedule:sch_w2'), { scope: 'work' });
+    assert.ok(r('schedule:sch_w2', 'guild').error, 'work job cannot post guild');
+    assert.deepEqual(r('schedule:sch_g2'), { scope: 'guild' });
+    assert.ok(r('schedule:sch_g2', 'work').error, 'guild job cannot post work');
+    assert.ok(r('schedule:sch_a2').error, 'ambiguous job cannot post');
+    assert.ok(r('schedule:sch_a2', 'work').error);
+    assert.ok(resolveAnnounceScope({ originKey: 'schedule:sch_g2' }).error, 'no originScope passed → refused');
+  });
 });

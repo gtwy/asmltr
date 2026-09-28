@@ -173,6 +173,18 @@ function sanitize(job, existing) {
     if (job.engine != null) j.engine = job.engine || null;   // null/'' = default engine
     if (job.session != null) j.session = normalizePromptSession(job.session);
   }
+  // Broadcast scope (shared/conversation-scope): explicit 'work' | 'guild' | 'none'; '' clears it so the
+  // scope is derived again (target, then the host resolver). `target` is the delivery target (a
+  // conversation key, or a channel like email) used for that derivation.
+  if (job.scope !== undefined) {
+    const sc = job.scope == null ? '' : String(job.scope).trim().toLowerCase();
+    if (sc && !SCHEDULE_SCOPES.has(sc)) throw new Error('scope must be work|guild|none');
+    if (sc) j.scope = sc; else delete j.scope;
+  }
+  if (job.target !== undefined) {
+    const t = job.target == null ? '' : String(job.target).trim().slice(0, 300);
+    if (t) j.target = t; else delete j.target;
+  }
   if (job.type === 'shell' || j.type === 'shell') {
     if (job.command != null) j.command = String(job.command);
     if (job.script_path != null) j.script_path = String(job.script_path);
@@ -188,6 +200,52 @@ function validateComplete(j) {
   if (!j.cron) throw new Error('schedule required');
   if (j.type === 'prompt' && !j.prompt) throw new Error('prompt jobs need a prompt');
   if (j.type === 'shell' && !j.command && !j.script_path) throw new Error('shell jobs need a command or script_path');
+}
+
+// ── broadcast scope ──────────────────────────────────────────────────────────
+// A scheduled job reads and posts announcements of exactly one scope, or none. Order:
+//   1. explicit job.scope ('work' | 'guild' | 'none');
+//   2. job.target: a multi-user room → guild, an email target → work;
+//   3. a host resolver (setScopeResolver) that can read what the job delivers to;
+//   4. otherwise none (ambiguous jobs read and post nothing).
+
+const SCHEDULE_SCOPES = new Set(['work', 'guild', 'none']);
+let _scopeResolver = null;
+
+/** Host hook: fn(job) → 'work' | 'guild' | 'none' | null (none) | undefined (no opinion). */
+function setScopeResolver(fn) { _scopeResolver = typeof fn === 'function' ? fn : null; }
+
+function scopeFromTarget(target) {
+  const t = String(target || '').trim();
+  if (!t) return undefined;
+  if (require('./conversation-scope').isMultiUserRoom({ conversationKey: t })) return 'guild';
+  if (/^email(:|$)/i.test(t)) return 'work';
+  return undefined;
+}
+
+/** 'work' | 'guild' | null for one job. */
+function scheduleScope(job) {
+  if (!job) return null;
+  const explicit = job.scope ? String(job.scope).toLowerCase() : '';
+  if (SCHEDULE_SCOPES.has(explicit)) return explicit === 'none' ? null : explicit;
+  const fromTarget = scopeFromTarget(job.target);
+  if (fromTarget !== undefined) return fromTarget;
+  if (_scopeResolver) {
+    try {
+      const r = _scopeResolver(job);
+      if (r === 'work' || r === 'guild') return r;
+      if (r === null || r === 'none') return null;
+    } catch (_) { return null; }
+  }
+  return null;
+}
+
+/** Scope of the job behind a schedule conversation key (or schedule id). Unknown job → null. */
+function scopeForKey(key, scheduleId) {
+  const jobs = readAll();
+  let job = scheduleId ? jobs.find((j) => j.id === scheduleId) : null;
+  if (!job && key) job = jobs.find((j) => promptConversationKey(j) === key || `schedule:${j.id}` === key);
+  return job ? scheduleScope(job) : null;
 }
 
 function list() { return readAll(); }
@@ -258,4 +316,5 @@ module.exports = {
   file, list, get, create, update, remove, dueJobs, markRan,
   toCron, validateCron, parseCron, matches, nextRun, describe,
   normalizePromptSession, promptConversationKey,
+  SCHEDULE_SCOPES, setScopeResolver, scheduleScope, scopeForKey,
 };
