@@ -52,6 +52,7 @@ const { composeUserCatchUp } = require('./observe-catchup'); // guild last-N on 
 const channelAwareness = require('./channel-awareness'); // medium/runtime block (engine-aware; Claude Code stays Claude Code)
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
+const { startSseKeepalive } = require('../../shared/sse-keepalive'); // SSE comment keepalive for silent turns
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
 const voice = require('../../shared/speech/voice'); // voice UX: chime + ambient drone + optional spoken ack
 const tts = require('../../shared/speech/tts'); // TTS config (voice/model), persisted + GUI/TUI-settable
@@ -1335,6 +1336,8 @@ app.post('/v2/stream', async (req, res) => {
   normalizeWebSender(req);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   const frame = (obj) => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (_) {} };
+  // Comment frames keep a long silent turn under the SDK idle-socket timeout.
+  const stopKeepalive = startSseKeepalive(res);
   try {
     const actions = await dispatch(req.body, {
       onText: (text) => { if (text) frame({ type: 'delta', text }); },            // token stream (voice/openai)
@@ -1345,8 +1348,10 @@ app.post('/v2/stream', async (req, res) => {
       onEffort: (effort, meta) => { if (effort) frame({ type: 'effort', effort, imageGen: !!(meta && meta.imageGen) }); },
       onSubagent: (s) => { if (s && s.id) frame({ type: 'subagent', id: s.id, name: s.name, status: s.status, summary: s.summary }); }, // sub-agent (Task) start/stop
     });
+    stopKeepalive();
     frame({ type: 'done', actions });
   } catch (err) {
+    stopKeepalive();
     console.error('[core] /v2/stream error:', err.message);
     frame({ type: 'error', error: err.message });
   }
