@@ -87,6 +87,21 @@ function isImapConnectionError(err) {
   return /connection not available|not connected|socket|closed|timeout/.test(msg);
 }
 
+/**
+ * One closed UID window, fully drained before anything else touches the connection. Returns
+ * [{ uid, source }] for uids above lastUid, in uid order. No IMAP command may run while the
+ * FETCH iterator is open (imapflow queues it behind the FETCH, which deadlocks the loop).
+ */
+async function drainFetchBatch(imap, startUid, endUid, lastUid) {
+  const out = [];
+  for await (const msg of imap.fetch({ uid: `${startUid}:${endUid}` }, { source: true, uid: true })) {
+    if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
+    out.push({ uid: msg.uid, source: msg.source });
+  }
+  out.sort((a, b) => a.uid - b.uid);
+  return out;
+}
+
 // True when the mailbox tip is ahead of lastUid (UIDs we have not fetched yet).
 function moreUidsWaiting(mailbox, lastUid) {
   if (!mailbox) return false;
@@ -1324,8 +1339,13 @@ async function start(ctx) {
         // pass below continues while uidNext is still ahead.
         const startUid = lastUid + 1;
         const endUid = startUid + 24;
-        for await (const msg of imap.fetch({ uid: `${startUid}:${endUid}` }, { source: true, uid: true })) {
-          if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
+        // Drain the FETCH first, then process. imapflow queues every command behind the running
+        // FETCH, so messageFlagsAdd inside the fetch loop waited on a FETCH that waited on the loop:
+        // the watcher sat busy until the 29-minute socket timeout, lastUid was not persisted, and
+        // EXISTS for the next mail only set pendingExists (2026-09-28: "book it" reply not fetched).
+        const batch = await drainFetchBatch(imap, startUid, endUid, lastUid);
+        for (const msg of batch) {
+          if (msg.uid <= lastUid) continue;
           try {
             const result = await processMessage(await simpleParser(msg.source));
             // Gmail/IMAP unread is \Seen, not our UID cursor. Mark mail we actually handled
@@ -1556,4 +1576,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { LETTER_ONLY_EXTRA, meta, start, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, stripTrailingSelfSignoff, stripLeadingLetterPlan, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, matchThreadMute, matchThreadMuteOutbound, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };
+module.exports = { LETTER_ONLY_EXTRA, meta, start, drainFetchBatch, queueOutboundMail, createOutboundGate, applyOwnerCc, emailAddrDomain, isStaffOrSelfAddr, mailingOutsideStaff, mergeReplyAll, buildOutPayload, parseAddrList, addrsFromField, selfInTo, selfInCcOnly, selfIsRecipient, headerHasThread, senderOnPriorThread, shouldOwnerForwardUnknown, emailsFromContactsDoc, contactsHasEmail, parseContactsHasStdout, threadsFile, readThreads, persistThreads, imapNoopProbe, imapProbeTickDecision, nextReconnectDelayMs, baselineLastUid, imapFlowWatchOptions, isImapConnectionError, moreUidsWaiting, shouldExtraFetchPass, buildMailContent, stripTrailingSelfSignoff, stripLeadingLetterPlan, formatQuoteAttr, quoteTextBlock, quoteHtmlBlock, quoteFromThread, sanitizeQuoteHtml, escapeHtml, stripDiscordChrome, markdownToHtml, wrapEmailHtml, emailHtmlFromMarkdown, isAutomatedSender, isAutoReply, matchOpsAllowThrough, collectOriginalAddrs, loadMatchers, domainMatches, lastUidFile, readLastUid, persistLastUid, matchThreadMute, matchThreadMuteOutbound, parseAuthResults, parseAuthservId, loadAuthservAllowlist, listAuthenticationResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject, authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine, persistLogOnlyAlert, logOnlyDir, SIG_IMAGE_CID, signatureImageAttachment, withSignatureImage, emailReplyGateDecision, letterBodyFromReply: require('./reply-gate').letterBodyFromReply, defaultOpsAllowthroughPath };
