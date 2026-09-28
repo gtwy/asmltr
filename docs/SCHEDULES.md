@@ -23,6 +23,9 @@ GUI," and it's what powers the morning brief again + becomes the scheduler for *
   the assistant to *do* something, e.g. use `asmltr notify` to deliver a morning brief.
 - **type: "shell"** → `{ command | script_path, cwd?, timeout_s? }`. Runs on the host as the asmltr user
   (same power as the crontab it replaces). Output captured → `last_output` for the GUI.
+  `command` is a shell line and goes to `/bin/sh -c` byte-for-byte (write it exactly as you would type it).
+  `script_path` is a path: it is single-quoted (`shQuote`) before `sh` runs it, so spaces, `$`, backticks
+  and quotes in the path are literal. The file must be executable (shebang or plain sh).
 
 ## Scheduler engine
 A tick in the core (setInterval ~30s; no new dep) evaluates due jobs against `next_run`; on fire it

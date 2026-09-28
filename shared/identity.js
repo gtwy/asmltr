@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
+const { shQuote } = require('./shell-quote');
 
 // The name is editable (GUI-set file → ASSISTANT_NAME env → default), so it can change without a
 // code/.env edit. The core reads it live; connector-level uses (Discord wake word, the provisioned
@@ -125,7 +126,7 @@ function contextBlocks(cwd) {
   const env = { ...process.env, ASMLTR_CWD: cwd || process.cwd() };
   const run = (cmdOrPath, asFile) => {
     try {
-      const t = execSync(asFile ? `"${cmdOrPath}"` : cmdOrPath, { env, timeout: 20000, maxBuffer: 1 << 20, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      const t = execSync(asFile ? shQuote(cmdOrPath) : cmdOrPath, { env, timeout: 20000, maxBuffer: 1 << 20, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
       if (t) out.push(t);
     } catch (_) { /* a context source that fails must never block the session */ }
   };

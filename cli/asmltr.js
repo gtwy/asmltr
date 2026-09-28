@@ -220,7 +220,7 @@ async function cmdAttach(key, f) {
     if (permMode === 'bypassPermissions') env.IS_SANDBOX = '1';
     delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
     const permFlag = permMode !== 'default' ? `--permission-mode ${permMode} ` : '';
-    const r = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', claim.working_dir, `claude ${permFlag}--resume ${claim.engine_session_id}`], { env });
+    const r = spawnSync('tmux', ['new-session', '-d', '-s', name, '-c', claim.working_dir, `claude ${permFlag}--resume ${require('../shared/shell-quote').shQuote(claim.engine_session_id)}`], { env });
     if (r.status !== 0) { await coreApi('/v2/release', 'POST', { conversation_key: key }); throw new Error('tmux new-session failed: ' + (r.stderr || '')); }
     console.log(A.dim(`tmux session '${name}' created (claude --resume)`));
   }

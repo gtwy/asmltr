@@ -14,11 +14,12 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const identity = require('./identity');
+const { shQuote } = require('./shell-quote');
 
 const MARKER = '# asmltr-alias'; // identifies a shim we wrote, so re-provisioning is safe/idempotent
 
 function which(name) {
-  try { return execFileSync('sh', ['-c', `command -v ${name} 2>/dev/null`], { encoding: 'utf8' }).trim() || null; }
+  try { return execFileSync('sh', ['-c', `command -v ${shQuote(name)} 2>/dev/null`], { encoding: 'utf8' }).trim() || null; }
   catch (_) { return null; }
 }
 function isOurs(file) { try { return fs.readFileSync(file, 'utf8').includes(MARKER); } catch (_) { return false; } }

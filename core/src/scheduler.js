@@ -9,6 +9,7 @@
  */
 const { spawn } = require('child_process');
 const schedules = require('../../shared/schedules');
+const { shQuote } = require('../../shared/shell-quote');
 const sessions = require('./sessions');
 const trust = require('./trust/store');
 
@@ -55,7 +56,9 @@ async function runPrompt(job, handle) {
 /** Run one shell job. Resolves to { status, output } — never rejects (errors become status:'error'). */
 function runShell(job) {
   return new Promise((resolve) => {
-    const cmd = job.command || (job.script_path ? `"${job.script_path}"` : '');
+    // `command` is a shell line and goes to sh untouched. `script_path` is a PATH: single-quote it so
+    // a `$`, backtick, `"`, `\` or space in the path is not expanded or split ("…" was not safe).
+    const cmd = job.command || (job.script_path ? shQuote(job.script_path) : '');
     if (!cmd) return resolve({ status: 'error', output: 'no command or script_path' });
     const timeoutMs = (job.timeout_s || 300) * 1000;
     const child = spawn('/bin/sh', ['-c', cmd], {

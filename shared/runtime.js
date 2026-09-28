@@ -14,6 +14,7 @@ const path = require('path');
 const os = require('os');
 const { execFile, spawn } = require('child_process');
 const { promisify } = require('util');
+const { shQuote } = require('./shell-quote');
 const execFileP = promisify(execFile);
 
 const REPO = path.join(__dirname, '..');
@@ -84,8 +85,8 @@ async function latestSdkVersion({ fetch = true } = {}) {
 /** Update the SDK to latest + restart every asmltr service, detached so it survives the restart. */
 function updateSdk() {
   const log = path.join(stateDir(), 'sdk-update.log');
-  const script = `echo "[$(date)] updating ${SDK_PKG}"; cd ${CORE_DIR} && npm install ${SDK_PKG}@latest --legacy-peer-deps && pm2 restart ${ASMLTR_SERVICES.join(' ')}; echo "[$(date)] done"`;
-  const child = spawn('setsid', ['bash', '-c', `sleep 1; { ${script}; } >> ${log} 2>&1`], { detached: true, stdio: 'ignore' });
+  const script = `echo "[$(date)] updating ${SDK_PKG}"; cd ${shQuote(CORE_DIR)} && npm install ${SDK_PKG}@latest --legacy-peer-deps && pm2 restart ${ASMLTR_SERVICES.join(' ')}; echo "[$(date)] done"`;
+  const child = spawn('setsid', ['bash', '-c', `sleep 1; { ${script}; } >> ${shQuote(log)} 2>&1`], { detached: true, stdio: 'ignore' });
   child.unref();
   return { started: true, pid: child.pid || null, log };
 }
