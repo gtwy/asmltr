@@ -46,10 +46,10 @@ function envelopeScope(e) {
  * Two separate announcement (broadcast) systems. Each announcement carries a `scope`; a session
  * only ever drains announcements of its own audience, so nothing crosses between them.
  *
- *   work  — the owner's work surfaces: the owner's 1:1 chats, email threads, GitHub, MCP callers that
+ *   work  — the owner's work surfaces: the owner's 1:1 chats, email threads, MCP callers that
  *           are the owner or a listed work principal (ASMLTR_WORK_BROADCAST_PRINCIPALS, comma list of
  *           trust principal ids; default "owner"), and scheduled jobs whose scope is work. Never a room,
- *           never someone else's DM, never other MCP users, never a guild scheduled job.
+ *           never someone else's DM, never other MCP users, never GitHub, never a guild scheduled job.
  *   guild — multi-user rooms (guild channels, group chats, public posts) and scheduled jobs whose scope
  *           is guild. Something said in one room can be picked up in another room. Guild
  *           announcements never reach work surfaces, and work announcements never reach rooms.
@@ -73,8 +73,8 @@ function broadcastAudience({ ownerTrust, userKey, channel, conversationKey, publ
   const ch = String(channel || '').toLowerCase();
   // Schedule turns come only from core's own scheduler; the job's scope decides, nothing else.
   if (ch === 'schedule') return asScope(scheduleScope);
-  // GitHub is the owner's work surface (the connector marks it public; it still reads work).
-  if (ch === 'github') return 'work';
+  // GitHub (public to repo members) reads neither scope.
+  if (ch === 'github') return null;
   if (isMultiUserRoom({ conversationKey, public: isPublic, scopeId })) return 'guild';
   if (ch === 'email') return 'work';
   const listed = !!userKey && workBroadcastPrincipals(env).has(String(userKey));
@@ -93,6 +93,8 @@ function resolveAnnounceScope(args = {}) {
   const { requested, originKey } = args;
   const req = requested == null || requested === '' ? '' : String(requested).toLowerCase();
   if (req && !BROADCAST_SCOPES.includes(req)) return { error: `scope must be one of ${BROADCAST_SCOPES.join(', ')}` };
+  // GitHub posts neither scope.
+  if (originKey && /^github:/i.test(String(originKey))) return { error: 'GitHub sessions may not announce' };
   if (originKey && /^schedule:/i.test(String(originKey))) {
     const own = asScope(args.originScope);
     if (!own) return { error: 'this scheduled job has no broadcast scope (set scope or target on the job)' };

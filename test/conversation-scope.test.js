@@ -107,7 +107,7 @@ test('broadcastAudience: owner DM, email, owner/listed MCP are work; rooms are g
   assert.equal(broadcastAudience({ ownerTrust: false, userKey: 'helper-bot', channel: 'mcp', conversationKey: 'mcp:i:user:helper-bot', env }), 'work');
   assert.equal(broadcastAudience({ ownerTrust: true, userKey: 'owner', channel: 'mcp', conversationKey: 'mcp:i:user:owner', env }), 'work');
   assert.equal(broadcastAudience({ ownerTrust: false, userKey: 'other-client', channel: 'mcp', conversationKey: 'mcp:i:user:other', env }), null, 'non-owner MCP');
-  assert.equal(broadcastAudience({ ownerTrust: true, channel: 'github', conversationKey: 'github:i:issue:1', env }), 'work', 'GitHub reads work');
+  assert.equal(broadcastAudience({ ownerTrust: true, channel: 'github', conversationKey: 'github:i:issue:1', env }), null, 'GitHub reads neither');
   assert.equal(broadcastAudience({ ownerTrust: true, channel: 'schedule', conversationKey: 'schedule:i:job:1', env }), null);
   assert.equal(broadcastAudience({ ownerTrust: false, userKey: 'helper-bot', channel: 'mcp', conversationKey: 'mcp:i:user:x', env: {} }), null, 'default list is owner only');
 });
@@ -167,17 +167,18 @@ function withSchedules(jobs, fn) {
   }
 }
 
-test('GitHub reads work (even though the connector marks it public) and posts only as work', () => {
-  assert.equal(broadcastAudience({ ownerTrust: false, channel: 'github', conversationKey: 'github:inst-1:issue:42', public: true }), 'work');
-  assert.deepEqual(resolveAnnounceScope({ originKey: 'github:inst-1:issue:42' }), { scope: 'work' });
+test('GitHub reads neither scope and cannot post either', () => {
+  assert.equal(broadcastAudience({ ownerTrust: false, channel: 'github', conversationKey: 'github:inst-1:issue:42', public: true }), null);
+  assert.equal(broadcastAudience({ ownerTrust: true, channel: 'github', conversationKey: 'github:inst-1:repo:o/r:issue:7' }), null, 'not even an owner turn');
+  assert.ok(resolveAnnounceScope({ originKey: 'github:inst-1:issue:42' }).error);
+  assert.ok(resolveAnnounceScope({ originKey: 'github:inst-1:issue:42', requested: 'work' }).error);
   assert.ok(resolveAnnounceScope({ originKey: 'github:inst-1:issue:42', requested: 'guild' }).error);
   const key = 'github:inst-1:issue:43';
   sessions.addAnnouncement({ text: 'gh work note', target: '*', from_session: 'cli:local' });
   sessions.addAnnouncement({ text: 'gh guild note', target: '*', scope: 'guild', origin_key: 'discord:inst-1:channel:1201' });
   const aud = broadcastAudience({ channel: 'github', conversationKey: key, public: true });
   const got = sessions.drainAnnouncements(key, 'github', 'someone', { audience: aud }).map((a) => a.text);
-  assert.ok(got.includes('gh work note'));
-  assert.ok(!got.includes('gh guild note'));
+  assert.deepEqual(got, [], 'no work or guild note reaches GitHub');
 });
 
 test('scheduleScope: explicit scope, then target, then host resolver, else none', () => {
