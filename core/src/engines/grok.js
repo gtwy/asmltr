@@ -40,7 +40,7 @@ const gcTemps = require('../../../shared/gc-temps');
 const { buildImageGenClassifyPrompt, parseImageGenVerdict, hasStillThisTurn, pictureIntentClassifyText, shouldClassifyPictureIntent } = require('../../../shared/image-gen-ask');
 
 const id = 'grok';
-const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
+const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.7';
 
 /** Exact From address for owner-from helpers. Empty = unset. Never hardcode a real address. */
 function ownerFromEmail() {

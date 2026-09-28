@@ -26,6 +26,14 @@ test('grok is a known subscription-only engine with no npm package', () => {
   assert.equal(info.apiKeyEnv, null);
 });
 
+test('grok default model is grok-4.7; 4.6 and 4.5 stay selectable', () => {
+  const e = engines.ENGINES.grok;
+  assert.equal(e.defaultModel, 'grok-4.7');
+  const ids = e.models.map((m) => m.id);
+  assert.deepEqual(ids, ['grok-4.7', 'grok-4.6', 'grok-4.5']);
+  if (!process.env.ASMLTR_GROK_TITLE_MODEL) assert.equal(grok.cheapModel, 'grok-4.7');
+});
+
 test('list() exposes pkg:null and installHint so the GUI can hide npm Install', () => {
   const row = engines.list().find((x) => x.id === 'grok');
   assert.ok(row);

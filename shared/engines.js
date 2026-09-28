@@ -38,7 +38,7 @@ const ENGINES = {
     supportsBaseUrl: true, baseUrlHint: 'e.g. http://localhost:8000/v1 (OpenAI Responses-API compatible: vLLM, LiteLLM, a gateway)' },
   grok: { id: 'grok', label: 'Grok', bin: 'grok', binEnv: 'ASMLTR_GROK_BIN', pkg: null,
     binPaths: ['/usr/local/bin/grok', '/usr/bin/grok', '~/.grok/bin/grok', '~/.local/bin/grok'],
-    defaultModel: 'grok-4.6', models: [{ id: 'grok-4.6', label: 'Grok 4.6' }, { id: 'grok-4.5', label: 'Grok 4.5' }],
+    defaultModel: 'grok-4.7', models: [{ id: 'grok-4.7', label: 'Grok 4.7' }, { id: 'grok-4.6', label: 'Grok 4.6' }, { id: 'grok-4.5', label: 'Grok 4.5' }],
     installHint: 'curl https://x.ai/cli/install.sh',
     auth: { modes: ['subscription'], apiKeyEnv: null, loginCmd: 'grok login --device-auth', note: 'Uses your xAI / SuperGrok / X Premium+ subscription via the local Grok CLI login (`~/.grok/auth.json`). API-key billing (XAI_API_KEY) is intentionally unsupported here — it would bypass the subscription and switch to metered billing.' } },
 };

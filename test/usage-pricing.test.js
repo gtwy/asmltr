@@ -17,6 +17,11 @@ test('tokenCostUsd longest-prefix matches model families and date suffixes', () 
   assert.equal(pricing.tokenCostUsd('gpt-4o', 1_000_000, 0), 2.5);
 });
 
+test('tokenCostUsd prices grok-4.7 at xAI list $2 in / $6 out per 1M', () => {
+  assert.equal(pricing.tokenCostUsd('grok-4.7', 1_000_000, 0), 2);
+  assert.equal(pricing.tokenCostUsd('grok-4.7', 0, 1_000_000), 6);
+});
+
 test('tokenCostUsd returns 0 for an unknown model (never throws)', () => {
   assert.equal(pricing.tokenCostUsd('totally-made-up-model', 1000, 1000), 0);
 });
