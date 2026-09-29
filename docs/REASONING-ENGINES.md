@@ -33,6 +33,11 @@ configured model (`model_fallback: true`). See [Usage](usage.md#which-model-a-tu
   injected from the vault (api_key mode).
 - **gemini.js** — headless `gemini -p -o stream-json --skip-trust`; `GEMINI_API_KEY` from the vault.
 - **grok.js** — headless `grok -p --output-format streaming-json`; subscription via `~/.grok/auth.json` (never `XAI_API_KEY`); resume UUID hook (`-s` create / `-r` resume); `result.model` from the session's `summary.json` `current_model_id` (else the `end` event's `modelUsage`).
+  Every grok launch runs the plain built-in **`grok-build` agent profile** (documented `--agent <NAME>`), not the
+  CLI default `grok-build-plan`. That is a profile name, not the `-m` model (grok also has a model id `grok-build`).
+  Set `engines.json` → `engines.grok.agent_profile` (or env `ASMLTR_GROK_AGENT_PROFILE`) to change it; `""` or
+  `"default"` passes no `--agent`. `shared/engines.agentProfileFor('grok')` is the one resolver; an ACP host overlay
+  can send the same name as `session/new` `_meta.agentProfile`.
 - **self-hosted** — Codex is the OpenAI-compatible vehicle: set a **custom endpoint** (Settings → Engines →
   Codex → Custom endpoint, or `POST /v2/engines/codex/base-url`) and its turns route to that base URL via a
   codex custom provider (`-c model_providers.asmltr_custom.base_url=… wire_api=responses`). The endpoint must
@@ -77,6 +82,9 @@ asmltr grok   [args…]     # (Grok Build CLI)
 
 Each launches that harness inside a multiplexer, tracked in the dashboard (Live) and attachable — exactly
 like the original `asmltr claude`.
+
+`asmltr grok` adds `--agent <agentProfileFor('grok')>` unless you pass `--agent`, `--agent-profile`, `--plan`,
+`--no-plan` or `--ask-user` yourself (or put one in `launch_args`).
 
 - **Default engine.** Settings → **Engines** lists every known harness (installed? version? default?) and lets
   you pick the **default** — which is what the `<agent-name>` terminal command points at (so the

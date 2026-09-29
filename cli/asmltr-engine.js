@@ -33,7 +33,12 @@ function upsert(entry) {
 }
 
 // Per-engine launch profile — how to make it autonomous + how (if at all) to inject the identity prompt.
-function profile(id, cwd) {
+// Caller already chose a profile / plan mode on the command line or in launch_args → do not add --agent
+// (grok rejects a repeated --agent, and --plan / --no-plan pick their own profile).
+const PROFILE_FLAGS = ['--agent', '--agent-profile', '--plan', '--no-plan', '--ask-user'];
+const choosesProfile = (argv) => (argv || []).some((a) => PROFILE_FLAGS.includes(String(a).split('=')[0]));
+
+function profile(id, cwd, userArgs) {
   const cfg = engines.config(id);
   const extra = Array.isArray(cfg.launch_args) ? cfg.launch_args : [];
   if (id === 'claude') {
@@ -54,7 +59,10 @@ function profile(id, cwd) {
   const model = engines.modelFor(id);
   if (id === 'gemini') return { surface: 'gemini-cli', envPrefix: '', args: ['--yolo', ...(model ? ['-m', model] : []), ...extra], tailer: null };
   if (id === 'codex') return { surface: 'codex-cli', envPrefix: '', args: [...(model ? ['-m', model] : []), ...extra], tailer: null };
-  if (id === 'grok') return { surface: 'grok-cli', envPrefix: '', args: ['--always-approve', ...(model ? ['-m', model] : []), ...extra], tailer: null };
+  if (id === 'grok') {
+    const agent = choosesProfile(extra) || choosesProfile(userArgs) ? null : engines.agentProfileFor('grok');
+    return { surface: 'grok-cli', envPrefix: '', args: ['--always-approve', ...(agent ? ['--agent', agent] : []), ...(model ? ['-m', model] : []), ...extra], tailer: null };
+  }
   return { surface: id + '-cli', envPrefix: '', args: extra, tailer: null };
 }
 
@@ -81,7 +89,7 @@ async function main() {
   const cwd = process.cwd();
   const launchTs = Date.now();
   const name = `asmltr-cli-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const p = profile(id, cwd);
+  const p = profile(id, cwd, args);
 
   // Lingers on non-zero exit so a broken launch is visible on attach instead of a vanished pane.
   const guard = p.envPrefix + '"$0" "$@"; ec=$?; if [ $ec -ne 0 ]; then echo; echo "[asmltr] ' + id + ' exited with code $ec (see above); this pane closes in 30s"; sleep 30; fi';
@@ -113,4 +121,6 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error('asmltr:', e.message); process.exit(1); });
+if (require.main === module) main().catch((e) => { console.error('asmltr:', e.message); process.exit(1); });
+
+module.exports = { profile, choosesProfile };

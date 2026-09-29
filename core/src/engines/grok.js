@@ -548,6 +548,10 @@ function buildArgs(opts) {
   }
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
+  // Agent profile (documented `--agent <NAME>`): plain built-in grok-build, not the CLI default
+  // grok-build-plan. A profile name, not the -m model. opts.agentProfile overrides ('' / null = none).
+  const agentProfile = opts.agentProfile !== undefined ? opts.agentProfile : engines.agentProfileFor('grok');
+  if (agentProfile) args.push('--agent', String(agentProfile));
   const disallowed = [];
   // Core flag: denyAll (policyFor deny.all / voice envelope) empties tools BEFORE spawn.
   const denyAll = !!opts.denyAll || isDiscordVoice(opts);

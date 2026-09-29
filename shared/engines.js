@@ -40,6 +40,9 @@ const ENGINES = {
     binPaths: ['/usr/local/bin/grok', '/usr/bin/grok', '~/.grok/bin/grok', '~/.local/bin/grok'],
     defaultModel: 'grok-4.7', models: [{ id: 'grok-4.7', label: 'Grok 4.7' }, { id: 'grok-4.6', label: 'Grok 4.6' }, { id: 'grok-4.5', label: 'Grok 4.5' }],
     installHint: 'curl https://x.ai/cli/install.sh',
+    // Agent profile (not a model id: 'grok-build' is also a grok model name). The CLI's own default is
+    // grok-build-plan; asmltr runs the plain built-in grok-build profile. See agentProfileFor().
+    defaultAgentProfile: 'grok-build',
     auth: { modes: ['subscription'], apiKeyEnv: null, loginCmd: 'grok login --device-auth', note: 'Uses your xAI / SuperGrok / X Premium+ subscription via the local Grok CLI login (`~/.grok/auth.json`). API-key billing (XAI_API_KEY) is intentionally unsupported here — it would bypass the subscription and switch to metered billing.' } },
 };
 
@@ -101,6 +104,21 @@ function list() {
 
 /** The effective model for an engine: configured → engine default → null. */
 function modelFor(id) { const e = ENGINES[id]; if (!e) return null; return config(id).model || e.defaultModel || null; }
+
+/**
+ * The agent profile an engine session runs under, for engines that have one (grok: `--agent <name>` on
+ * headless / interactive launches, `_meta.agentProfile` on ACP session/new). This is a profile name, not a
+ * model id. Order: env ASMLTR_<ID>_AGENT_PROFILE → engines.json `agent_profile` → engine default.
+ * '' or 'default' → null (pass nothing; the CLI picks its own default). Engines without profiles → null.
+ */
+function agentProfileFor(id) {
+  const e = ENGINES[id]; if (!e || !e.defaultAgentProfile) return null;
+  let v = process.env['ASMLTR_' + String(id).toUpperCase() + '_AGENT_PROFILE'];
+  if (v == null) { const c = config(id).agent_profile; if (c != null) v = c; }
+  if (v == null) v = e.defaultAgentProfile;
+  v = String(v).trim();
+  return (!v || v === 'default') ? null : v;
+}
 
 // Custom (self-hosted / alternate-provider) OpenAI-compatible endpoint for a base_url-capable engine.
 function baseUrlFor(id) { const e = ENGINES[id]; return (e && e.supportsBaseUrl) ? (config(id).base_url || '') : ''; }
@@ -177,4 +195,4 @@ async function envForLaunch(id) {
   const v = await apiKeyValue(id); return v ? { [a.apiKeyEnv]: v } : {};
 }
 
-module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, baseUrlFor, setBaseUrl, authInfo, setAuthMode, setApiKey, clearApiKey, apiKeyValue, envForLaunch, isAutoUpdate, setAutoUpdate, installLatest, autoUpdateAll, list };
+module.exports = { ENGINES, resolveBin, installed, version, cleanVersion, latestVersion, updateAvailable, known, getDefault, setDefault, config, setConfig, modelFor, agentProfileFor, baseUrlFor, setBaseUrl, authInfo, setAuthMode, setApiKey, clearApiKey, apiKeyValue, envForLaunch, isAutoUpdate, setAutoUpdate, installLatest, autoUpdateAll, list };
